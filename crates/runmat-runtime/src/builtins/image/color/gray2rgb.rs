@@ -14,8 +14,7 @@ use runmat_value::{LogicalArray, NumericDType, Value};
 use crate::builtins::image::color::common;
 use crate::context::host_presentation::{select_exact_host_sink, ExactHostSink, HostSinkReceipt};
 use crate::context::preparation::{
-    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -72,7 +71,7 @@ async fn gray2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     gray: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(gray2rgb_error(&GRAY2RGB_ERROR_TOO_MANY_INPUTS));
     }
@@ -162,10 +161,7 @@ async fn gray2rgb_builtin(
         )
         .await
     };
-    match runtime.as_ref() {
-        Some(runtime) => execute_admitted(runtime, request, execute).await,
-        None => execute_current_request(request, execute).await,
-    }
+    execute_request(runtime.as_ref(), request, execute).await
 }
 
 fn admit_gray(value: &Value) -> BuiltinResult<bool> {
@@ -195,7 +191,7 @@ fn admit_gray(value: &Value) -> BuiltinResult<bool> {
 async fn gray2rgb_execute(
     gray: Value,
     selected: Option<SelectedGrayHostSink>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let gathered = if matches!(gray, Value::GpuTensor(_)) {
         common::gather_value(NAME, &gray)
             .await
@@ -222,7 +218,9 @@ async fn gray2rgb_execute(
             };
         selected.receipt.finish(published);
     }
-    result
+    let output = result?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| gray2rgb_map_error(err.into_runtime_error(), &GRAY2RGB_ERROR_INTERNAL))
 }
 
 fn gray_numeric_dtype(handle: &runmat_accelerate_api::GpuTensorHandle) -> NumericDType {
@@ -279,6 +277,18 @@ fn gray2rgb_numeric(gathered: Value) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Terminal numerical test projection; these color outputs have no
+    // GC-managed children and do not escape into asynchronous work.
+    async fn gray2rgb_builtin(
+        runtime: Option<crate::context::RuntimeContext>,
+        gray: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        super::gray2rgb_builtin(runtime, gray, rest)
+            .await
+            .map(|owned| owned.with_owned(|value| value))
+    }
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, NumericDType, Tensor};
 

@@ -5,6 +5,8 @@ mod shape;
 mod preparation;
 mod route;
 
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCatalogEntry, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, LogicalReductionKind,
@@ -48,19 +50,28 @@ impl LogicalReductionConfig {
 }
 
 pub(super) async fn execute(
+    runtime: Option<&RuntimeContext>,
     config: &'static LogicalReductionConfig,
     value: Value,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(arguments.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(config.error(config.too_many_outputs, "only one output is defined"));
     }
     let (spec, nan_mode) = arguments::parse(config, &arguments).await?;
     match value {
         Value::Tensor(tensor) => {
-            preparation::execute(config, tensor, arguments.len() + 1, spec, nan_mode).await
+            preparation::execute(runtime, config, tensor, arguments.len() + 1, spec, nan_mode).await
         }
-        Value::GpuTensor(handle) => gpu::reduce(config, handle, spec, nan_mode).await,
-        value => host::reduce(config, value, spec, nan_mode).await,
+        Value::GpuTensor(handle) => {
+            let reduced = gpu::reduce(config, handle, spec, nan_mode).await?;
+            RootedValue::new(reduced).map_err(|cause| cause.into_runtime_error())
+        }
+        value => {
+            let reduced = host::reduce(config, value, spec, nan_mode).await?;
+            RootedValue::new(reduced).map_err(|cause| cause.into_runtime_error())
+        }
     }
 }

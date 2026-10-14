@@ -199,7 +199,7 @@ fn public_integer_key_storages() -> Vec<(IntegerStorage, &'static str)> {
 
 fn property_text(map: Value, name: &str) -> String {
     let value = containers_map_subsref(map, ".".to_string(), Value::from(name)).unwrap();
-    let Value::CharArray(chars) = value else {
+    let Value::CharArray(chars) = value.value() else {
         panic!("expected char property");
     };
     chars.data.iter().collect()
@@ -347,7 +347,9 @@ fn subsasgn_explicit_integer_value_types_cover_all_eight_classes() {
         )
         .unwrap();
         assert_eq!(
-            containers_map_subsref(updated, "()".to_string(), payload).unwrap(),
+            updated
+                .with_owned(|map| containers_map_subsref(map, "()".to_string(), payload))
+                .unwrap(),
             Value::Int(expected)
         );
     }
@@ -369,9 +371,10 @@ fn any_preserves_nonscalar_integer_arrays_and_declared_types_reject_them() {
         let any_map =
             containers_map_subsasgn(any_map, "()".to_string(), payload.clone(), array.clone())
                 .unwrap();
-        let Value::Tensor(stored) =
-            containers_map_subsref(any_map, "()".to_string(), payload.clone()).unwrap()
-        else {
+        let stored = any_map
+            .with_owned(|map| containers_map_subsref(map, "()".to_string(), payload.clone()))
+            .unwrap();
+        let Value::Tensor(stored) = stored.value() else {
             panic!("expected exact integer tensor");
         };
         assert_eq!(stored.integer_storage(), Some(&expected));

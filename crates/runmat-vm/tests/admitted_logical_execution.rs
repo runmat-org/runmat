@@ -125,14 +125,16 @@ fn context(
 fn execute(
     bytecode: &runmat_vm::Bytecode,
     context: RuntimeContext,
-) -> Result<Vec<Value>, Box<RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<RuntimeError>> {
     runmat_vm::reset_thread_state_for_tests();
     let mut variables = vec![];
     let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
         runmat_vm::interpret_with_vars_in_context(bytecode, &mut variables, None, context),
     )
     .map_err(Box::new)?;
-    Ok(completion.values)
+    completion
+        .with_owned(|completion| runmat_runtime::execution::RootedValues::new(completion.values))
+        .map_err(|error| Box::new(error.into_runtime_error()))
 }
 
 fn output<'a>(bytecode: &runmat_vm::Bytecode, values: &'a [Value]) -> &'a Value {
@@ -145,7 +147,7 @@ fn output<'a>(bytecode: &runmat_vm::Bytecode, values: &'a [Value]) -> &'a Value 
 }
 
 fn retire_output_after_frame(
-    values: Vec<Value>,
+    values: runmat_runtime::execution::RootedValues,
     resident: Option<runmat_accelerate_api::GpuTensorHandle>,
 ) {
     drop(values);

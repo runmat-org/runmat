@@ -108,7 +108,7 @@ fn public_unary_dispatch_preserves_rank_zero_and_rank_one_real_geometry() {
             )],
         ))
         .expect("rank-zero real unary input");
-        let Value::Num(scalar) = scalar else {
+        let Value::Num(scalar) = scalar.value() else {
             panic!("{name}: expected scalar output")
         };
         assert!((scalar - scalar_expected).abs() < 1.0e-12, "{name}");
@@ -120,7 +120,7 @@ fn public_unary_dispatch_preserves_rank_zero_and_rank_one_real_geometry() {
             )],
         ))
         .expect("rank-one real unary input");
-        let Value::Tensor(vector) = vector else {
+        let Value::Tensor(vector) = vector.value() else {
             panic!("{name}: expected rank-one tensor output")
         };
         assert_eq!(vector.shape(), &[2], "{name}");

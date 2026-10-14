@@ -22,6 +22,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::round")]
@@ -112,9 +114,16 @@ impl RoundStrategy {
 #[runtime_builtin(
     name = "round",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::rounding::round"
+    builtin_path = "crate::builtins::math::rounding::round",
+    context = true
 )]
-async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn round_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|error| error.into_runtime_error())?;
     super::unary::reject_excess_outputs(BUILTIN_NAME, &ROUND_ERROR_TOO_MANY_OUTPUTS)?;
     if rest
         .first()
@@ -134,9 +143,12 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     if strategy == RoundStrategy::Integer {
-        return super::preparation::unary(&runmat_builtins::ROUND_CATALOG_ENTRY, value, |value| {
-            round_value(value, strategy)
-        })
+        return super::preparation::unary(
+            runtime.as_ref(),
+            &runmat_builtins::ROUND_CATALOG_ENTRY,
+            value,
+            |value| round_value(value, strategy),
+        )
         .await;
     }
     let (digits, significant) = strategy.provider_digits().expect("parsed digit strategy");
@@ -145,16 +157,16 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         runmat_accelerate_api::RoundDigitsMode::Decimals
     };
-    super::preparation::digits(value, digits, mode, rest.len(), |value| {
+    super::preparation::digits(runtime.as_ref(), value, digits, mode, rest.len(), |value| {
         round_value(value, strategy)
     })
     .await
 }
 
-async fn round_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
+async fn round_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<RootedValue> {
     match value {
-        Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
-        value => round_host_value(value, strategy),
+        Value::GpuTensor(handle) => super::unary::root_output(round_gpu(handle, strategy).await?),
+        value => super::unary::root_output(round_host_value(value, strategy)?),
     }
 }
 
@@ -497,7 +509,7 @@ pub(crate) mod tests {
     }
 
     fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::round_builtin(value, rest))
+        block_on(super::round_builtin(None, value, rest)).map(|owned| owned.value().clone())
     }
 
     fn assert_error_contains(err: &crate::RuntimeError, needle: &str) {

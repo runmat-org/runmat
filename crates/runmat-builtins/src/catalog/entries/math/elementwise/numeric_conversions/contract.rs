@@ -97,6 +97,7 @@ macro_rules! define_integer_conversion_contract {
         const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "math/elementwise",

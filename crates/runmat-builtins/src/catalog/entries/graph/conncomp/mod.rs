@@ -8,6 +8,7 @@ pub use contract::CONNCOMP_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&CONNCOMP_CATALOG_ENTRY];
 
 pub const CONNCOMP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "conncomp" },
     category: "graph",

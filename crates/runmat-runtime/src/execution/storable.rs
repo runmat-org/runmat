@@ -28,13 +28,16 @@ mod tests {
             Some("RunMat:TransientSequenceNotStorable")
         );
 
-        let closure = Value::Closure(runmat_value::Closure {
-            function_name: "synthetic_callback".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::OutputList(Vec::new())],
-        });
+        let closure = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "synthetic_callback".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: vec![Value::OutputList(Vec::new())],
+            },
+        ));
         assert_eq!(
             validate_storable_value(&closure).unwrap_err().identifier(),
             Some("RunMat:TransientSequenceNotStorable")

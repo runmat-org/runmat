@@ -39,6 +39,21 @@ impl Bytecode {
         contracts: &[RegionContract],
         compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
+        self.install_regions_for_product(contracts, compiled_functions, compiled_functions)
+    }
+
+    /// The assembly may contain a synthetic script owner whose numeric ID
+    /// collides with an inherited callable. Only `registered_bodies` may have
+    /// function metadata changed by this product's region compilation.
+    pub fn install_regions_for_product(
+        &mut self,
+        contracts: &[RegionContract],
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
+    ) -> Result<(), String> {
+        if !registered_bodies.is_subset(compiled_functions) {
+            return Err("region body owners exceed compiled assembly".into());
+        }
         let mut contracts = contracts.iter().collect::<Vec<_>>();
         contracts.sort_by_key(|contract| contract.id);
         if contracts.windows(2).any(|pair| pair[0].id == pair[1].id) {
@@ -68,10 +83,10 @@ impl Bytecode {
                 .as_ref()
                 .and_then(|layout| layout.functions.get(&function))
                 .map(|layout| &layout.resume_points);
-            let registry_points = self
-                .function_registry
-                .functions
-                .get(&function)
+            let registry_points = registered_bodies
+                .contains(&function)
+                .then(|| self.function_registry.functions.get(&function))
+                .flatten()
                 .map(|function| &function.resume_points);
             let Some(points) = layout_points
                 .filter(|points| contains_region_boundaries(contract, points))
@@ -86,7 +101,7 @@ impl Bytecode {
         }
 
         self.regions = mapped.iter().map(|(_, region)| region.clone()).collect();
-        for function in compiled_functions {
+        for function in registered_bodies {
             if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
                 bytecode.regions.clear();
             }
@@ -95,6 +110,9 @@ impl Bytecode {
             }
         }
         for (function, region) in mapped {
+            if !registered_bodies.contains(&function) {
+                continue;
+            }
             if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
                 bytecode.regions.push(region.clone());
             }

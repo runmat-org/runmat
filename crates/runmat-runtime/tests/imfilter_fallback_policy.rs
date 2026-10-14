@@ -188,14 +188,14 @@ fn typed_unsupported_preserves_supported_explicit_resident_fallback() {
         &[Value::GpuTensor(input.clone()), host_kernel()],
     ))
     .unwrap();
-    let Value::GpuTensor(output) = output else {
+    let Value::GpuTensor(output) = &*output else {
         panic!("explicit residency must be retained")
     };
     assert!(!output.shares_allocation_with(&input));
     assert_eq!(output.shape(), &[2, 2]);
-    assert_eq!(handle_precision(&output), Some(ProviderPrecision::F64));
+    assert_eq!(handle_precision(output), Some(ProviderPrecision::F64));
     assert_eq!(
-        futures::executor::block_on(provider.inner.download(&output))
+        futures::executor::block_on(provider.inner.download(output))
             .unwrap()
             .data,
         [1., 2., 3., 4.]
@@ -216,7 +216,7 @@ fn typed_upload_unsupported_can_fallback_before_kernel_execution() {
         &[Value::GpuTensor(input.clone()), host_kernel()],
     ))
     .unwrap();
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = &*result else {
         panic!("automatic placement permits host result")
     };
     assert_eq!(result.materialize_f64(), [1., 2., 3., 4.]);

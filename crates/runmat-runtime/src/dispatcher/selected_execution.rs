@@ -31,7 +31,10 @@ impl SelectedImplementation {
             Self::Legacy(implementation) => {
                 let future = implementation(args);
                 Box::pin(async move {
-                    crate::call::arguments::adapt_legacy_builtin_result(future.await?)
+                    let sequence =
+                        crate::call::arguments::adapt_legacy_builtin_result(future.await?)?;
+                    crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
                 })
             }
         }
@@ -45,7 +48,7 @@ pub(super) async fn execute(
     requested_outputs: Option<usize>,
     observation: Option<&direct_call_observation::CallObservation>,
     authority: Option<direct_call_observation::RegistrationAuthority>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let sink = match (observation, implementation, authority) {
         (Some(observation), SelectedImplementation::Canonical(binding), Some(authority)) => {
             observation.sink(binding, authority, requested_outputs)
@@ -90,8 +93,10 @@ mod tests {
     fn fixture(invocation: RuntimeBuiltinInvocation<'_>) -> crate::builtin::RuntimeBuiltinFuture {
         let requested_outputs = invocation.requested_outputs;
         Box::pin(async move {
-            ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
-                .map_err(crate::sequence::sequence_error_to_runtime)
+            let sequence = ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
+                .map_err(crate::sequence::sequence_error_to_runtime)?;
+            crate::execution::RootedValueSequence::new(sequence)
+                .map_err(|error| error.into_runtime_error())
         })
     }
 
@@ -110,8 +115,10 @@ mod tests {
                 variant: "alternate",
             });
         Box::pin(async move {
-            ValueSequence::single(Value::Num(if exact { 1.0 } else { 0.0 }))
-                .map_err(crate::sequence::sequence_error_to_runtime)
+            let sequence = ValueSequence::single(Value::Num(if exact { 1.0 } else { 0.0 }))
+                .map_err(crate::sequence::sequence_error_to_runtime)?;
+            crate::execution::RootedValueSequence::new(sequence)
+                .map_err(|error| error.into_runtime_error())
         })
     }
 

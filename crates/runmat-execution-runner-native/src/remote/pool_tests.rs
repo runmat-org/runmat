@@ -29,7 +29,7 @@ use runmat_execution_runner::{
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 
-use super::{run_remote_worker_quic, QuicRemoteWorkerChannel};
+use super::{run_remote_worker_quic, run_remote_worker_quic_ready_v1, QuicRemoteWorkerChannel};
 use super::{
     RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteSpmdGangProgram,
     RemoteWorkerChannel,
@@ -139,7 +139,12 @@ impl RemoteWorkerChannel for ExecutingWorker {
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
-        let assignment = attempt.program.assignment.clone().ok_or_else(|| {
+        let super::RemoteAttemptProgram::Direct(program) = attempt.program else {
+            return Err(crate::NativeExecutionError::Protocol(
+                "direct pool fixture received a graph attempt".into(),
+            ));
+        };
+        let assignment = program.assignment.clone().ok_or_else(|| {
             crate::NativeExecutionError::Protocol(
                 "remote execution request is missing scheduler placement".into(),
             )
@@ -153,7 +158,7 @@ impl RemoteWorkerChannel for ExecutingWorker {
                 .enable_all()
                 .build()
                 .expect("isolated worker runtime")
-                .block_on(crate::execute_host_program_request(attempt.program))
+                .block_on(crate::execute_host_program_request(*program))
         })
         .await
         .map_err(|error| {
@@ -850,6 +855,72 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
 }
 
 #[tokio::test]
+async fn pinned_quic_ready_v1_upgrades_only_the_opted_in_worker() {
+    let CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let certificate_der = cert.der().to_vec();
+    let listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![certificate_der.clone()],
+        signing_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let authority = listener.local_addr().unwrap();
+    let worker = WorkerSpec {
+        id: WorkerId::derive(&[b"quic-ready-worker"]),
+        pool_id: PoolId::derive(&[b"quic-ready-pool"]),
+        resources: inventory(1_000),
+        host: host_inventory(),
+    };
+    let run_key =
+        runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([29; 32]).unwrap();
+    let server = run_remote_worker_quic_ready_v1(
+        listener,
+        "run-quic-ready",
+        worker.clone(),
+        23,
+        [31; 16],
+        run_key.clone(),
+        FrameLimits::default(),
+    );
+    let client = async {
+        let channel = QuicRemoteWorkerChannel::connect(
+            super::RemoteWorkerChannelConfig {
+                run_identity: "run-quic-ready".into(),
+                node_identity: "node-quic-ready".into(),
+                worker,
+                driver_fence: 23,
+                session_id: [31; 16],
+                run_key,
+                limits: FrameLimits::default(),
+            },
+            &PinnedQuicEndpoint {
+                authority,
+                server_name: "runmat.execution".into(),
+                certificate_der,
+            },
+        )
+        .await
+        .unwrap();
+        let capabilities = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(capabilities) = channel.verified_software_capabilities() {
+                    break capabilities;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(capabilities.contains(&Capability::GraphSelectedValuesV11));
+        channel.drain().await.unwrap();
+    };
+    let (server, ()) = tokio::join!(server, client);
+    server.unwrap();
+}
+
+#[tokio::test]
 async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -915,15 +986,21 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([5; 32]).unwrap();
-    let server = run_remote_worker_quic(
-        listener,
-        "run-quic-worker",
-        worker.clone(),
-        9,
-        [7; 16],
-        run_key.clone(),
-        FrameLimits::default(),
-    );
+    let server_worker = worker.clone();
+    let server_key = run_key.clone();
+    let server = async move {
+        run_remote_worker_quic(
+            listener,
+            "run-quic-worker",
+            server_worker,
+            9,
+            [7; 16],
+            server_key,
+            FrameLimits::default(),
+        )
+        .await
+        .expect("exact-bundle QUIC worker service");
+    };
     let client = async {
         let channel = QuicRemoteWorkerChannel::connect(
             super::RemoteWorkerChannelConfig {
@@ -981,7 +1058,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         let report = channel
             .execute(RemoteAttempt {
                 scheduling,
-                program,
+                program: super::RemoteAttemptProgram::Direct(Box::new(program)),
             })
             .await
             .unwrap();
@@ -990,10 +1067,10 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
             "unexpected remote attempt report: {report:?}"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(channel.verified_software_capabilities().is_none());
         channel.drain().await.unwrap();
     };
-    let (server, ()) = tokio::join!(server, client);
-    server.unwrap();
+    let ((), ()) = tokio::join!(server, client);
 }
 
 #[tokio::test]
@@ -1446,11 +1523,12 @@ end
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
             runmat_core::ExecutableSource::new(
-                "remote-parfor",
+                project.graph.root.to_string(),
                 "src/parallel_region.m",
                 source_text,
             ),
@@ -1481,6 +1559,7 @@ end
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let source_map = runmat_execution::ExecutableSourceMapV2::decode(
@@ -1606,10 +1685,15 @@ async fn compile_spmd_region_bundle(
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("remote-spmd", "src/remote_spmd.m", source_text),
+            runmat_core::ExecutableSource::new(
+                project.graph.root.to_string(),
+                "src/remote_spmd.m",
+                source_text,
+            ),
             Some(revision.clone()),
         )
         .await
@@ -1645,6 +1729,7 @@ async fn compile_spmd_region_bundle(
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let source_map = runmat_execution::ExecutableSourceMapV2::decode(
@@ -1719,16 +1804,29 @@ async fn build_executable_bundle(
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("root", "src/answer.m", source_text),
+            runmat_core::ExecutableSource::new(
+                project.graph.root.to_string(),
+                "src/answer.m",
+                source_text,
+            ),
             Some(revision.clone()),
         )
         .await
         .unwrap();
     let envelope = unit.portable_envelope_for(Some("answer")).unwrap();
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let function = usize::try_from(
+        envelope
+            .manifest
+            .identity
+            .entrypoint_function
+            .expect("answer fixture has a callable entrypoint")
+            .0,
+    )
+    .unwrap();
     let entrypoint = envelope.manifest.identity.entrypoint.clone();
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -1744,6 +1842,7 @@ async fn build_executable_bundle(
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let executable_bytes = envelope.canonical_bytes().unwrap();

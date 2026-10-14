@@ -550,7 +550,7 @@ impl Request {
             Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_)
         ) {
             return Err(error_with_detail(

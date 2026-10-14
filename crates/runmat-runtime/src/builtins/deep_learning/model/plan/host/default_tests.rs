@@ -2,20 +2,17 @@ use futures::executor::block_on;
 use runmat_builtins::{
     DeepLearningAxisLabel, DeepLearningLayerKind, DeepLearningLayerOption, LayerOptionDefault,
 };
-use runmat_value::{CellArray, ObjectInstance, Tensor, Value};
+use runmat_value::{CellArray, Tensor, Value};
 
 use super::HostNetworkPlan;
 use crate::builtins::deep_learning::{layers::*, model::dlnetwork_builtin};
 
-fn network(layers: Vec<Value>) -> ObjectInstance {
+fn network(layers: Vec<Value>) -> crate::execution::RootedValue {
     let len = layers.len();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(layers, len, 1).expect("layer array"),
     )]))
-    .expect("initialized network") else {
-        panic!("network object expected")
-    };
-    network
+    .expect("initialized network")
 }
 
 #[test]
@@ -44,8 +41,11 @@ fn public_conv_default_has_valid_geometry_and_explicit_same_remains_distinct() {
             panic!("convolution object expected")
         };
         assert_eq!(layer.properties.get("Padding"), Some(&expected_padding));
-        let network = network(vec![input_layer, convolution]);
-        let plan = HostNetworkPlan::admit(&network, &input, "forward")
+        let network_owner = network(vec![input_layer, convolution]);
+        let Value::Object(network) = network_owner.value() else {
+            panic!("network object expected")
+        };
+        let plan = HostNetworkPlan::admit(network, &input, "forward")
             .expect("public convolution must admit geometry");
         assert_eq!(
             plan.output_axes().axis_size(DeepLearningAxisLabel::Time),
@@ -103,8 +103,11 @@ fn public_recurrent_defaults_preserve_time_axis_for_both_directions() {
                 layer.properties.get("OutputMode"),
                 Some(&Value::String(expected_mode.into()))
             );
-            let network = network(vec![input_layer, recurrent]);
-            let plan = HostNetworkPlan::admit(&network, &input, "forward")
+            let network_owner = network(vec![input_layer, recurrent]);
+            let Value::Object(network) = network_owner.value() else {
+                panic!("network object expected")
+            };
+            let plan = HostNetworkPlan::admit(network, &input, "forward")
                 .expect("public recurrent layer must admit geometry");
             assert_eq!(
                 plan.output_axes().axis_size(DeepLearningAxisLabel::Time),

@@ -7,10 +7,18 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 mod lexical;
+mod portable_provenance;
 mod current_overlay;
+mod selected_program;
 use current_overlay::CurrentSourceOverlay;
 use lexical::SourceFileIdentity;
 pub use lexical::{lease_nested_source_context_in_context, NestedSourceIdentityError};
+pub use portable_provenance::{
+    lease_portable_source_context_in_context, portable_source_identity_in_context,
+    PortableSourceIdentity, PortableSourceIdentityError, PortableSourceRecordAdmission,
+    ValidatedPortableSourceMap,
+};
+pub use selected_program::{SelectedProgramSourceError, SelectedProgramSourceOwner};
 
 #[derive(Debug, Clone)]
 pub struct SourceInfo {
@@ -19,6 +27,7 @@ pub struct SourceInfo {
     pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
     lexical_file: Option<SourceFileIdentity>,
+    portable_identity: Option<PortableSourceIdentity>,
 }
 
 #[derive(Debug)]
@@ -227,7 +236,11 @@ pub(crate) struct LeasedSource {
 
 impl LeasedSource {
     fn live_info(&self) -> Option<SourceInfo> {
-        self.owner.upgrade().map(|owner| owner.info.clone())
+        self.owner.upgrade().map(|owner| {
+            let mut info = owner.info.clone();
+            info.portable_identity = owner.portable_identity.get().cloned();
+            info
+        })
     }
 }
 
@@ -254,6 +267,7 @@ struct LeaseInner {
     info: SourceInfo,
     authority: RuntimeSourceAuthority,
     state: Weak<crate::context::RuntimeContextState>,
+    portable_identity: std::cell::OnceCell<PortableSourceIdentity>,
 }
 
 impl Drop for LeaseInner {
@@ -296,9 +310,19 @@ pub(crate) struct ProgramSourceBinding {
     sources: HashMap<runmat_types::ProgramSourceId, RuntimeSourceRef>,
     _leases: Vec<RuntimeSourceLease>,
     portable_map: Option<Arc<runmat_execution::ExecutableSourceMapV2>>,
+    frame_owner: runmat_async::CallFrameSourceOwner,
 }
 
 impl ProgramSourceBinding {
+    pub(crate) fn frame_owner_for(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<runmat_async::CallFrameSourceOwner> {
+        self.sources
+            .contains_key(&ordinal)
+            .then(|| self.frame_owner.clone())
+    }
+
     pub(crate) fn get(&self, ordinal: runmat_types::ProgramSourceId) -> Option<SourceId> {
         self.sources.get(&ordinal).map(|source| source.source_id())
     }
@@ -325,9 +349,22 @@ impl ProgramSourceBinding {
 
     pub(crate) fn retain_portable_map(
         &mut self,
-        map: Arc<runmat_execution::ExecutableSourceMapV2>,
-    ) {
+        admitted: &ValidatedPortableSourceMap,
+    ) -> Result<(), PortableSourceIdentityError> {
+        let map = admitted.map_arc();
+        for record in &map.entries {
+            let selected = admitted
+                .record(record.source_id)
+                .ok_or(PortableSourceIdentityError::RecordMismatch)?;
+            let lease = self
+                ._leases
+                .iter()
+                .find(|lease| self.sources.get(&record.source_id) == Some(&lease.source_ref()))
+                .ok_or(PortableSourceIdentityError::RecordMismatch)?;
+            portable_provenance::attach_admitted_identity(lease, &selected)?;
+        }
         self.portable_map = Some(map);
+        Ok(())
     }
 
     /// A worker owns copied source records in its SourceState catalog. Its
@@ -337,6 +374,7 @@ impl ProgramSourceBinding {
             sources: self.sources.clone(),
             _leases: Vec::new(),
             portable_map: self.portable_map.clone(),
+            frame_owner: self.frame_owner.clone(),
         }
     }
 }
@@ -351,8 +389,8 @@ pub struct ProgramSourceRecord {
 #[path = "source_context/portable.rs"]
 mod portable;
 pub use portable::{
-    bind_portable_source_map_v2, bind_portable_source_map_v2_with_records,
-    PortableSourceBindingError,
+    bind_portable_source_map_v2, bind_portable_source_map_v2_with_existing_lease,
+    bind_portable_source_map_v2_with_records, PortableSourceBindingError,
 };
 #[cfg(test)]
 #[path = "source_context/authority_tests.rs"]
@@ -362,6 +400,7 @@ mod authority_tests;
 pub enum ProgramSourceBindingError {
     DuplicateOrdinal(runmat_types::ProgramSourceId),
     Exhausted,
+    ForeignOrRetired,
 }
 
 impl std::fmt::Display for ProgramSourceBindingError {
@@ -371,6 +410,9 @@ impl std::fmt::Display for ProgramSourceBindingError {
                 write!(formatter, "duplicate program source ordinal {}", ordinal.0)
             }
             Self::Exhausted => formatter.write_str("source identity space is exhausted"),
+            Self::ForeignOrRetired => formatter.write_str(
+                "existing source lease is retired or belongs to another runtime session",
+            ),
         }
     }
 }
@@ -408,6 +450,24 @@ pub(crate) fn bind_program_sources(
         sources,
         _leases: leases,
         portable_map: None,
+        frame_owner: runmat_async::CallFrameSourceOwner::issue(),
+    })
+}
+
+pub(crate) fn bind_existing_program_source(
+    runtime: &crate::context::RuntimeContext,
+    ordinal: runmat_types::ProgramSourceId,
+    lease: RuntimeSourceLease,
+) -> Result<ProgramSourceBinding, ProgramSourceBindingError> {
+    let reference = lease.source_ref();
+    if reference.resolve_in(runtime).is_none() {
+        return Err(ProgramSourceBindingError::ForeignOrRetired);
+    }
+    Ok(ProgramSourceBinding {
+        sources: HashMap::from([(ordinal, reference)]),
+        _leases: vec![lease],
+        portable_map: None,
+        frame_owner: runmat_async::CallFrameSourceOwner::issue(),
     })
 }
 
@@ -420,7 +480,9 @@ impl RuntimeSourceLease {
     }
 
     pub fn source_info(&self) -> SourceInfo {
-        self.0.info.clone()
+        let mut info = self.0.info.clone();
+        info.portable_identity = self.0.portable_identity.get().cloned();
+        info
     }
 
     pub fn source_ref(&self) -> RuntimeSourceRef {
@@ -439,6 +501,10 @@ impl crate::context::SourceEvaluationProvenance for RuntimeSourceLease {
 
     fn runtime_source_ref(&self) -> Option<RuntimeSourceRef> {
         Some(self.source_ref())
+    }
+
+    fn runtime_source_lease(&self) -> Option<RuntimeSourceLease> {
+        Some(self.clone())
     }
 }
 
@@ -530,6 +596,7 @@ fn lease_source_context_with_lexical_file(
         fullpath_name,
         text: text.into(),
         lexical_file,
+        portable_identity: None,
     };
     let authority = RuntimeSourceAuthority {
         issuer: runtime.local_identity(),
@@ -539,6 +606,7 @@ fn lease_source_context_with_lexical_file(
         info,
         authority,
         state: Rc::downgrade(runtime.state()),
+        portable_identity: std::cell::OnceCell::new(),
     });
     {
         let mut source = runtime.state().source.borrow_mut();
@@ -672,6 +740,7 @@ pub fn replace_current_source_context(
         fullpath_name: None,
         text: Arc::<str>::from(text),
         lexical_file: None,
+        portable_identity: None,
     });
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
@@ -788,6 +857,7 @@ pub fn replace_source_catalog_with_fullpaths(
                     fullpath_name: fullpath_name.map(Arc::<str>::from),
                     text: Arc::<str>::from(text),
                     lexical_file: None,
+                    portable_identity: None,
                 },
             )
             .is_some()
@@ -1027,6 +1097,7 @@ mod lease_tests {
                 fullpath_name: None,
                 text: Arc::from("old"),
                 lexical_file: None,
+                portable_identity: None,
             },
         );
         let first = lease_source_context_in_context(&runtime, "first", None, "one").unwrap();

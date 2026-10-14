@@ -336,7 +336,7 @@ fn public_extrema_dispatch_gathers_only_after_typed_unsupported() {
                     ("max", 3) => vec![4.0, 2.0],
                     _ => unreachable!(),
                 };
-                let Value::Tensor(output) = result else {
+                let Value::Tensor(output) = result.value() else {
                     panic!("capability fallback returns host tensor")
                 };
                 assert_eq!(output.shape(), &[2, 1]);

@@ -35,8 +35,10 @@ impl RuntimeAccelerationService for Service {
         self.0
             .borrow_mut()
             .push((count, request.admission().requested_outputs));
-        let result = PreparedBuiltinOperands::passthrough(request.into_operands());
-        Box::pin(async move { Ok(result) })
+        let result = request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinOperands::passthrough);
+        Box::pin(async move { result })
     }
 }
 

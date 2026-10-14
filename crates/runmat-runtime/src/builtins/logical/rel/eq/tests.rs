@@ -15,7 +15,9 @@ use runmat_value::{
 };
 
 fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(super::eq_builtin(lhs, rhs))
+    // Terminal fixture projection: comparison emits only logical, symbolic
+    // expression, or external GPU values, never a GC-managed child.
+    block_on(super::eq_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[test]
@@ -265,8 +267,7 @@ fn eq_handle_identity() {
 #[test]
 fn eq_listener_identity_is_disjoint_from_target_identity() {
     let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc target");
-    let callback =
-        runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
+    let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".into())).expect("gc callback");
     let handle = HandleRef {
         class_name: "EventTarget".into(),
         target,

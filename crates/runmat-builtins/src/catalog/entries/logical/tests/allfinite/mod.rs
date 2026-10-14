@@ -89,6 +89,7 @@ const EFFECTS: [runmat_types::EffectKind; 2] = [
     runmat_types::EffectKind::MayThrow,
 ];
 pub const ALLFINITE_CATALOG_ENTRY: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: crate::BuiltinCatalogIdentity { name: "allfinite" },
     category: "logical/tests",

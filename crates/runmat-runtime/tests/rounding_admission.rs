@@ -60,9 +60,9 @@ impl RuntimeAccelerationService for Recorder {
             .borrow_mut()
             .push(request.admission().binding.builtin.name);
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -95,7 +95,7 @@ fn admitted_floating_remainder_validates_shape_and_outputs_before_preparation() 
             .unwrap();
             assert_eq!(records.borrow().len(), before + 1);
             if outputs == 1 {
-                let Value::Tensor(result) = result else {
+                let Value::Tensor(result) = result.value() else {
                     panic!("floating matrix")
                 };
                 assert_eq!(result.shape(), &[2, 3]);
@@ -165,7 +165,7 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
             assert_eq!(records.borrow().len(), before + 1);
             assert_eq!(records.borrow().last(), Some(&name));
             if outputs == 1 {
-                let Value::Tensor(output) = output else {
+                let Value::Tensor(output) = output.value() else {
                     panic!("{name}: pages")
                 };
                 assert_eq!(output.shape(), &[1, 1, 2]);
@@ -215,7 +215,7 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
         ))
         .unwrap();
         assert_eq!(records.borrow().len(), before + 1);
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("round pages")
         };
         assert_eq!(output.as_f64_slice().unwrap(), expected);

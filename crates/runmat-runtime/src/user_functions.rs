@@ -1,7 +1,7 @@
 use crate::RuntimeError;
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,16 +12,23 @@ use std::sync::Arc;
 #[path = "user_functions/test_support.rs"]
 pub mod test_support;
 
-pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>>>>;
-pub type DynamicFunctionLoadFuture =
-    Pin<Box<dyn Future<Output = Option<Result<ValueSequence, RuntimeError>>>>>;
+pub type UserFunctionFuture =
+    Pin<Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>>>;
+pub type DynamicFunctionLoadFuture = Pin<
+    Box<dyn Future<Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>>>,
+>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
-pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
+pub type FunctionInvoker =
+    dyn Fn(Option<crate::context::RuntimeContext>, usize, &[Value], usize) -> UserFunctionFuture;
+/// Compatibility entrypoint for an embedding callback without a selected
+/// RuntimeContext. It cannot mint foreign reentry authority.
+pub type UnscopedFunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
 pub type BoundFunctionInvoker = dyn Fn(
     crate::context::RuntimeContext,
     runmat_value::BoundFunctionBinding,
     crate::execution::RootedValues,
     usize,
+    Option<runmat_value::LexicalEnvironment>,
 ) -> UserFunctionFuture;
 #[derive(Debug, Clone)]
 pub struct ExternalFunctionCall {
@@ -30,10 +37,17 @@ pub struct ExternalFunctionCall {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
 }
-pub type ExternalFunctionInvoker = dyn Fn(ExternalFunctionCall) -> UserFunctionFuture;
-pub type LexicalFunctionFuture =
-    Pin<Box<dyn Future<Output = Result<crate::call::lexical::LexicalCallResult, RuntimeError>>>>;
-pub type LexicalFunctionInvoker =
+pub type ExternalFunctionInvoker =
+    dyn Fn(Option<crate::context::RuntimeContext>, ExternalFunctionCall) -> UserFunctionFuture;
+pub type UnscopedExternalFunctionInvoker = dyn Fn(ExternalFunctionCall) -> UserFunctionFuture;
+pub type LexicalFunctionFuture = Pin<
+    Box<dyn Future<Output = Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>>>,
+>;
+pub type LexicalFunctionInvoker = dyn Fn(
+    Option<crate::context::RuntimeContext>,
+    crate::call::lexical::LexicalCall,
+) -> LexicalFunctionFuture;
+pub type UnscopedLexicalFunctionInvoker =
     dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 /// The active source owner's private-name target. A current publication needs
@@ -54,7 +68,9 @@ impl ScopedSemanticNameTarget {
     }
 }
 
-pub type ScopedNameTargetResolver = dyn Fn(&str) -> Option<ScopedSemanticNameTarget> + Send + Sync;
+/// Invocation-local private-name selection. Its retained definition leases
+/// belong to one RuntimeContext and are never sent to another thread.
+pub type ScopedNameTargetResolver = dyn Fn(&str) -> Option<ScopedSemanticNameTarget>;
 /// Ordered definition facts from the selected semantic resolver owner. A
 /// retained private body and a current publication may reuse a numeric ID;
 /// observation must not collapse those distinct definition owners.
@@ -93,11 +109,59 @@ pub type NativeNameObserverFuture =
     Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, String>>>>;
 pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
 
+pub type SelectedNativeInvoker =
+    dyn Fn(crate::context::RuntimeContext, String, Vec<Value>, usize) -> DynamicFunctionLoadFuture;
+
+/// Native resolution is either session-owned or confined to a selected
+/// product. A selected product without a grant cannot use the session owner.
+#[derive(Clone)]
+pub enum NativeResolutionScope {
+    Session,
+    SelectedClosed,
+    Selected(Rc<SelectedNativeRoute>),
+}
+
+/// Invocation-local native name owner. Both callbacks are supplied by the
+/// same selected host and retain its private byte lease through each future.
+#[derive(Clone)]
+pub struct SelectedNativeRoute {
+    observer: Rc<NativeNameObserver>,
+    invoker: Rc<SelectedNativeInvoker>,
+}
+
+impl SelectedNativeRoute {
+    pub fn new(observer: Rc<NativeNameObserver>, invoker: Rc<SelectedNativeInvoker>) -> Self {
+        Self { observer, invoker }
+    }
+
+    pub fn observe(&self, name: String) -> NativeNameObserverFuture {
+        (self.observer)(name)
+    }
+
+    pub fn invoke(
+        &self,
+        runtime: crate::context::RuntimeContext,
+        name: String,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    ) -> DynamicFunctionLoadFuture {
+        (self.invoker)(runtime, name, arguments, requested_outputs)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeNameFact {
     pub path: std::path::PathBuf,
     pub origin: Option<crate::builtins::common::path_search::FileCandidateOrigin>,
     pub installed: bool,
+    /// Search-path discovery cannot claim an installed artifact identity.
+    pub installed_artifact: Option<InstalledNativeArtifactFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledNativeArtifactFact {
+    pub identity: runmat_types::ForeignArtifactIdentity,
+    pub interop: runmat_types::InteropManifest,
 }
 #[path = "user_functions/source_facts.rs"]
 mod source_facts;
@@ -108,10 +172,21 @@ pub use source_facts::*;
 /// Native callable artifacts such as MEX modules have language-defined
 /// precedence over source functions. Ordinary dynamically discovered source
 /// files are consulted only after the analyzed semantic registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DynamicFunctionLoadPhase {
     BeforeSemantic,
     AfterSemantic,
+    /// Select an exact source definition for `@name` without invoking it.
+    /// A source observation carries its selected path and origin through
+    /// admission; class-folder discovery must not be re-resolved as a plain
+    /// source file after the precedence decision.
+    Handle {
+        class: Option<runmat_types::ClassIdentity>,
+        selected_source: Option<crate::builtins::common::path_search::FileCandidate>,
+    },
+    /// A registered class has an unresolved external constructor declaration.
+    /// Only a source entrypoint proven to own this exact constructor may run.
+    RegisteredConstructorSource(runmat_types::ClassIdentity),
 }
 
 pub type DynamicFunctionLoader = dyn Fn(
@@ -167,7 +242,7 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
-    static SCOPED_NAME_TARGET_RESOLVER: RefCell<Option<Arc<ScopedNameTargetResolver>>> =
+    static SCOPED_NAME_TARGET_RESOLVER: RefCell<Option<Rc<ScopedNameTargetResolver>>> =
         const { RefCell::new(None) };
     static SEMANTIC_NAME_CANDIDATES: RefCell<Option<Arc<SemanticNameCandidates>>> =
         const { RefCell::new(None) };
@@ -214,10 +289,11 @@ mod lexical_tests {
                 assert_eq!(call.function, 7);
                 assert_eq!(call.arguments, vec![Value::Num(2.0)]);
                 call.captures[0].value = Value::Num(5.0);
-                Ok(LexicalCallResult {
+                crate::call::lexical::RootedLexicalCallResult::new(LexicalCallResult {
                     outputs: runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap(),
                     captures: call.captures,
                 })
+                .map_err(|error| error.into_runtime_error())
             })
         })));
         let result = futures::executor::block_on(try_call_lexical_function(LexicalCall {
@@ -226,13 +302,16 @@ mod lexical_tests {
                 binding: runmat_types::BindingId(3),
                 value: Value::Num(1.0),
             }],
+            environment: None,
             arguments: vec![Value::Num(2.0)],
             requested_outputs: 1,
         }))
         .expect("lexical invoker is installed")
         .expect("lexical call succeeds");
-        assert_eq!(result.outputs.into_values(), vec![Value::Num(7.0)]);
         assert_eq!(result.captures[0].value, Value::Num(5.0));
+        result.with_owned(|result| {
+            assert_eq!(result.outputs.into_values(), vec![Value::Num(7.0)]);
+        });
         drop(guard);
         assert!(current_lexical_function_invoker().is_none());
     }
@@ -241,12 +320,12 @@ mod lexical_tests {
     fn external_invoker_preserves_identity_kind_and_restores_scope() {
         assert!(current_external_function_invoker().is_none());
         let guard = install_external_function_invoker(Some(Arc::new(|call| {
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 assert_eq!(call.function, 0);
                 assert_eq!(call.display_name, "published");
                 assert_eq!(call.arguments, vec![Value::Num(2.0)]);
                 assert_eq!(call.requested_outputs, 1);
-                Ok(Value::Num(12.0))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(12.0))
             })
         })));
         let result =
@@ -258,7 +337,7 @@ mod lexical_tests {
             }))
             .expect("external invoker is installed")
             .expect("external call succeeds");
-        assert_eq!(result.into_values(), vec![Value::Num(12.0)]);
+        assert_eq!(result.as_slice(), &[Value::Num(12.0)]);
         drop(guard);
         assert!(current_external_function_invoker().is_none());
     }

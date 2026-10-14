@@ -19,7 +19,7 @@ use runmat_value::{
 const EPS: f64 = 1e-12;
 
 fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::plus_builtin(None, lhs, rhs, rest))
+    block_on(super::plus_builtin(None, lhs, rhs, rest)).map(|owned| owned.value().clone())
 }
 
 mod host;

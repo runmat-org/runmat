@@ -238,6 +238,7 @@ impl MeshingHostWorkload {
             features: Default::default(),
             compile_options: std::collections::BTreeSet::from([workload_option]),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(

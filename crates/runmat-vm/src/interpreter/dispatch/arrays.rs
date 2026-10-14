@@ -1,4 +1,5 @@
 use crate::ops::arrays as array_ops;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -14,7 +15,7 @@ pub async fn create_matrix_dynamic<F, Fut>(
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Vec<Vec<Value>>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     array_ops::create_matrix_dynamic(stack, num_rows, create_from_values).await
 }
@@ -26,7 +27,7 @@ pub async fn create_range<F, Fut>(
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     array_ops::create_range(stack, has_step, call_colon).await
 }

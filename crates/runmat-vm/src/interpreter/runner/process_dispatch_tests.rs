@@ -19,6 +19,14 @@ struct ProcessDispatchControl {
 static PROCESS_DISPATCH_CONTROL: Mutex<Option<ProcessDispatchControl>> = Mutex::new(None);
 static PROCESS_DISPATCH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+struct ProcessLeafRetirement;
+
+impl Drop for ProcessLeafRetirement {
+    fn drop(&mut self) {
+        eprintln!("vm-process-dispatch phase: leaf future retired");
+    }
+}
+
 fn pending_process_builtin(
     _invocation: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
 ) -> runmat_runtime::builtin::RuntimeBuiltinFuture {
@@ -28,10 +36,16 @@ fn pending_process_builtin(
         .take()
         .expect("process dispatch control");
     Box::pin(async move {
+        let _retirement = ProcessLeafRetirement;
+        eprintln!("vm-process-dispatch phase: leaf entered before reach notification");
         control.reached.send(()).expect("test still receives entry");
         control.release.await.expect("release process builtin");
-        ValueSequence::single(Value::Num(17.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        eprintln!("vm-process-dispatch phase: leaf resumed after release");
+        runmat_runtime::execution::RootedValueSequence::new(
+            ValueSequence::single(Value::Num(17.0))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        )
+        .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -141,6 +155,7 @@ fn run_process_fixture_on_bounded_stack(depth: usize) {
             );
             let bytecode = nested_process_bytecode(depth);
             let mut vars = Vec::new();
+            eprintln!("vm-process-dispatch depth={depth} phase: interpreter poll begins");
             let outcome = block_on(interpret_with_vars_in_context(
                 &bytecode,
                 &mut vars,
@@ -148,18 +163,23 @@ fn run_process_fixture_on_bounded_stack(depth: usize) {
                 runtime,
             ))
             .expect("Process builtin execution");
+            eprintln!("vm-process-dispatch depth={depth} phase: interpreter completed");
             let InterpreterOutcome::Completed(completion) = outcome;
             assert_eq!(completion.values, vec![Value::Num(17.0)]);
         })
         .expect("spawn bounded-stack VM thread");
 
+    eprintln!("vm-process-dispatch depth={depth} phase: awaiting leaf entry");
     reached_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("Process builtin reached a genuine Pending boundary");
+    eprintln!("vm-process-dispatch depth={depth} phase: leaf entry observed; releasing");
     release_tx.send(()).expect("release Process builtin");
+    eprintln!("vm-process-dispatch depth={depth} phase: awaiting thread retirement");
     execution
         .join()
         .expect("bounded-stack VM thread must not overflow");
+    eprintln!("vm-process-dispatch depth={depth} phase: thread retired");
 }
 
 #[test]
@@ -206,17 +226,24 @@ fn nested_process_stack_calls_retire_a_pending_leaf_on_drop() {
             ));
             let waker = noop_waker();
             let mut cx = Context::from_waker(&waker);
+            eprintln!("vm-process-dispatch-drop phase: first poll begins");
             assert!(matches!(pending.as_mut().poll(&mut cx), Poll::Pending));
+            eprintln!("vm-process-dispatch-drop phase: first poll returned Pending");
+            eprintln!("vm-process-dispatch-drop phase: pending chain drop begins");
             drop(pending);
+            eprintln!("vm-process-dispatch-drop phase: pending chain dropped");
         })
         .expect("spawn bounded-stack VM thread");
 
+    eprintln!("vm-process-dispatch-drop phase: awaiting leaf entry");
     reached_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("Process builtin reached a genuine Pending boundary");
+    eprintln!("vm-process-dispatch-drop phase: leaf entry observed; awaiting thread retirement");
     execution
         .join()
         .expect("dropping a suspended Process chain must not overflow");
+    eprintln!("vm-process-dispatch-drop phase: thread retired");
     assert!(
         release_tx.send(()).is_err(),
         "leaf must have retired without replay"

@@ -8,6 +8,8 @@ pub struct CallableRequest {
     args: Vec<Value>,
     requested_outputs: usize,
     function_input_callsite: Option<crate::callsite::CallsiteInfo>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    selected_runtime: Option<crate::context::RuntimeContext>,
 }
 
 impl CallableRequest {
@@ -19,6 +21,8 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
+            lexical_environment: None,
+            selected_runtime: None,
         }
     }
 
@@ -34,6 +38,8 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
+            lexical_environment: None,
+            selected_runtime: None,
         }
     }
 
@@ -50,6 +56,8 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
+            lexical_environment: None,
+            selected_runtime: None,
         }
     }
 
@@ -60,23 +68,51 @@ impl CallableRequest {
         self.function_input_callsite = callsite;
         self
     }
+
+    pub(crate) fn with_lexical_environment(
+        mut self,
+        environment: Option<runmat_value::LexicalEnvironment>,
+    ) -> Self {
+        self.lexical_environment = environment;
+        self
+    }
+
+    pub(crate) fn with_selected_runtime(
+        mut self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> Self {
+        self.selected_runtime = runtime.cloned();
+        self
+    }
 }
 
 pub async fn try_call_semantic_function(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    try_call_semantic_function_in_context(None, function, args, requested_outputs).await
+}
+
+/// Carry an explicitly selected invocation owner into a semantic body. A
+/// callback-selected context must not be replaced by an invoker's installation
+/// context, or Java/Python reentry loses its exact active-lane authority.
+pub async fn try_call_semantic_function_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
-    Some(invoker(function, args, requested_outputs).await)
+    Some(invoker(runtime.cloned(), function, args, requested_outputs).await)
 }
 
 pub async fn try_call_bound_function(
     binding: runmat_value::BoundFunctionBinding,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let runtime = crate::context::legacy::active()?;
     if matches!(
         &binding.authority,
@@ -93,7 +129,7 @@ pub async fn try_call_bound_function(
         Ok(args) => args,
         Err(error) => return Some(Err(error.into_runtime_error())),
     };
-    Some(invoker(runtime, binding, args, requested_outputs).await)
+    Some(invoker(runtime, binding, args, requested_outputs, None).await)
 }
 
 pub async fn try_call_bound_function_in_context(
@@ -101,60 +137,148 @@ pub async fn try_call_bound_function_in_context(
     binding: runmat_value::BoundFunctionBinding,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<ValueSequence, RuntimeError>> {
-    if matches!(
-        &binding.authority,
-        runmat_value::BoundFunctionAuthority::Local { .. }
-    ) && !binding.authority.admits_local(&runtime.session_lease())
-    {
-        return Some(Err(crate::runtime_error::semantic_error(
-            "UnavailableBoundFunction",
-            "bound function belongs to another or ended session",
-        )));
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    try_call_bound_function_with_environment_in_context(
+        runtime,
+        binding,
+        args,
+        requested_outputs,
+        None,
+    )
+    .await
+}
+
+pub fn try_call_bound_function_with_environment_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    args: &[Value],
+    requested_outputs: usize,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> impl std::future::Future<
+    Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
+> + 'a {
+    // The public future itself can be queued without being polled. Acquire
+    // both leases at construction; invoker selection and user code stay lazy.
+    let admission = lexical_environment
+        .as_ref()
+        .map(crate::call::lexical::root_environment)
+        .transpose()
+        .and_then(|roots| {
+            crate::execution::RootedValues::new(args.to_vec())
+                .map(|args| (roots.unwrap_or_default(), args))
+                .map_err(|error| error.into_runtime_error())
+        });
+    async move {
+        let (_environment_roots, args) = match admission {
+            Ok(admission) => admission,
+            Err(error) => return Some(Err(error)),
+        };
+        if matches!(
+            &binding.authority,
+            runmat_value::BoundFunctionAuthority::Local { .. }
+        ) && !binding.authority.admits_local(&runtime.session_lease())
+        {
+            return Some(Err(crate::runtime_error::semantic_error(
+                "UnavailableBoundFunction",
+                "bound function belongs to another or ended session",
+            )));
+        }
+        let invoker = runtime
+            .selected_call_projection()
+            .borrow()
+            .bound_invoker()
+            .unwrap_or_else(|| runtime.state().call.borrow().bound_invoker.clone())?;
+        Some(
+            invoker(
+                runtime.clone(),
+                binding,
+                args,
+                requested_outputs,
+                lexical_environment,
+            )
+            .await,
+        )
     }
-    let invoker = runtime.state().call.borrow().bound_invoker.clone()?;
-    let args = match crate::execution::RootedValues::new(args.to_vec()) {
-        Ok(args) => args,
-        Err(error) => return Some(Err(error.into_runtime_error())),
-    };
-    Some(invoker(runtime.clone(), binding, args, requested_outputs).await)
 }
 
 pub async fn try_call_external_function(
     call: ExternalFunctionCall,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    try_call_external_function_in_context(None, call).await
+}
+
+pub async fn try_call_external_function_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    call: ExternalFunctionCall,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let invoker = current_external_function_invoker()?;
-    Some(invoker(call).await)
+    Some(invoker(runtime.cloned(), call).await)
 }
 
 pub async fn try_call_lexical_function(
     call: crate::call::lexical::LexicalCall,
-) -> Option<Result<crate::call::lexical::LexicalCallResult, RuntimeError>> {
+) -> Option<Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>> {
+    try_call_lexical_function_in_context(None, call).await
+}
+
+pub async fn try_call_lexical_function_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    call: crate::call::lexical::LexicalCall,
+) -> Option<Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>> {
     let invoker = current_lexical_function_invoker()?;
-    Some(invoker(call).await)
+    let _input_roots = match crate::execution::RootedValueLease::for_values(
+        call.arguments
+            .iter()
+            .chain(call.captures.iter().map(|capture| &capture.value)),
+    ) {
+        Ok(roots) => roots,
+        Err(error) => return Some(Err(error.into_runtime_error())),
+    };
+    let _environment_roots = match call.environment.as_ref() {
+        Some(environment) => match crate::call::lexical::root_environment(environment) {
+            Ok(roots) => roots,
+            Err(error) => return Some(Err(error)),
+        },
+        None => Vec::new(),
+    };
+    Some(invoker(runtime.cloned(), call).await)
 }
 
 pub async fn try_call_semantic_function_by_name(
     name: &str,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<ValueSequence, RuntimeError>> {
-    let function = resolve_semantic_function_by_name(name)?;
-    try_call_selected_semantic_name(name, function, args, requested_outputs).await
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    try_call_semantic_function_by_name_in_context(None, name, args, requested_outputs).await
 }
 
-async fn try_call_selected_semantic_name(
+pub async fn try_call_semantic_function_by_name_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    let function = resolve_semantic_function_by_name(name)?;
+    try_call_selected_semantic_name_in_context(runtime, name, function, args, requested_outputs)
+        .await
+}
+
+async fn try_call_selected_semantic_name_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     name: &str,
     function: usize,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     match selected_scoped_name_target(name, function) {
-        Some(ScopedSemanticNameTarget::Retained(binding)) => {
-            try_call_bound_function(binding, args, requested_outputs).await
-        }
+        Some(ScopedSemanticNameTarget::Retained(binding)) => match runtime {
+            Some(runtime) => {
+                try_call_bound_function_in_context(runtime, binding, args, requested_outputs).await
+            }
+            None => try_call_bound_function(binding, args, requested_outputs).await,
+        },
         Some(ScopedSemanticNameTarget::Published(_)) | None => {
-            try_call_semantic_function(function, args, requested_outputs).await
+            try_call_semantic_function_in_context(runtime, function, args, requested_outputs).await
         }
     }
 }
@@ -176,7 +300,7 @@ pub async fn try_load_and_call_dynamic_function(
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let loader = context.state().call.borrow().dynamic_loader.clone()?;
     loader(
@@ -188,6 +312,47 @@ pub async fn try_load_and_call_dynamic_function(
         input_callsite,
     )
     .await
+}
+
+/// Select an observed source definition without invoking its body. The
+/// registered session loader performs the same source/cache/admission path as
+/// `@name`; only its exact counted binding leaves this rooted result.
+pub async fn select_observed_source_binding_in_context(
+    runtime: crate::context::RuntimeContext,
+    name: String,
+    source: crate::builtins::common::path_search::FileCandidate,
+) -> Result<Option<runmat_value::BoundFunctionBinding>, RuntimeError> {
+    let loader = runtime.state().call.borrow().dynamic_loader.clone();
+    let Some(loader) = loader else {
+        return Ok(None);
+    };
+    let result = loader(
+        runtime,
+        name,
+        Vec::new(),
+        1,
+        DynamicFunctionLoadPhase::Handle {
+            class: None,
+            selected_source: Some(source),
+        },
+        None,
+    )
+    .await;
+    let Some(result) = result else {
+        return Ok(None);
+    };
+    let sequence = result?;
+    let [Value::BoundFunctionHandle(handle)] = sequence.value().as_slice() else {
+        return Err(crate::build_runtime_error(
+            "selected source handle did not return one bound callable",
+        )
+        .with_identifier("RunMat:DynamicEval:SelectedSource")
+        .build());
+    };
+    Ok(Some(runmat_value::BoundFunctionBinding {
+        function: handle.function,
+        authority: handle.authority.clone(),
+    }))
 }
 
 pub async fn try_clear_dynamic_functions(
@@ -231,7 +396,7 @@ fn refresh_execution_error(
 
 pub async fn try_call_semantic_descriptor(
     request: CallableRequest,
-) -> Option<Result<ValueSequence, RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let CallableRequest {
         identity,
         bound,
@@ -239,9 +404,28 @@ pub async fn try_call_semantic_descriptor(
         args,
         requested_outputs,
         function_input_callsite,
+        lexical_environment,
+        selected_runtime,
     } = request;
     if let CallableIdentity::BoundFunction(function) = identity {
         if let Some(binding) = bound {
+            if let Some(context) = selected_runtime.clone().or_else(|| {
+                lexical_environment
+                    .as_ref()
+                    .and_then(|_| crate::context::legacy::active())
+            }) {
+                return crate::callsite::with_function_input_callsite(
+                    function_input_callsite,
+                    try_call_bound_function_with_environment_in_context(
+                        &context,
+                        binding,
+                        &args,
+                        requested_outputs,
+                        lexical_environment,
+                    ),
+                )
+                .await;
+            }
             return crate::callsite::with_function_input_callsite(
                 function_input_callsite,
                 try_call_bound_function(binding, &args, requested_outputs),
@@ -250,7 +434,12 @@ pub async fn try_call_semantic_descriptor(
         }
         return crate::callsite::with_function_input_callsite(
             function_input_callsite,
-            try_call_semantic_function(function.0, &args, requested_outputs),
+            try_call_semantic_function_in_context(
+                selected_runtime.as_ref(),
+                function.0,
+                &args,
+                requested_outputs,
+            ),
         )
         .await;
     }
@@ -288,11 +477,66 @@ pub async fn try_call_semantic_descriptor(
             }
         }
     }
-    if matches!(identity, CallableIdentity::DynamicName(_))
-        && crate::class_registry::registered_constructor_identity(&name).is_some()
-    {
-        // Constructor calls for class names must flow through runtime constructor dispatch,
-        // not generic semantic name resolution.
+    let registered_constructor = matches!(
+        identity,
+        CallableIdentity::DynamicName(_) | CallableIdentity::ExternalName(_)
+    )
+    .then(|| crate::class_registry::registered_constructor_identity(&name))
+    .flatten();
+    if let Some(class) = registered_constructor {
+        // A registered constructor with an already bound semantic/builtin body,
+        // or no constructor declaration at all, keeps its existing runtime path.
+        // Only an unresolved external declaration may select class source. The
+        // loader must prove that source owns this exact typed constructor.
+        let constructor = class
+            .qualified_name()
+            .0
+            .last()
+            .map(|name| runmat_types::MethodName::from(name.0.as_str()))
+            .and_then(|method| crate::class_registry::lookup_bound_method(&class, &method))
+            .or_else(|| {
+                crate::class_registry::lookup_bound_method(
+                    &class,
+                    &runmat_types::MethodName::from(class.display_name()),
+                )
+            });
+        if let Some(constructor) = constructor.filter(|method| {
+            method.declaring_class == class
+                && !method.declaration.is_static
+                && matches!(&method.callable, CallableIdentity::ExternalName(_))
+                && method.fallback == CallableFallbackPolicy::ExternalBoundary
+        }) {
+            // Registration can precede installation of the semantic invoker.
+            // Preserve that existing constructor priority before source lookup.
+            let declared = &constructor.declaration.function_name;
+            let owner_qualified = format!(
+                "{}.{}",
+                constructor.declaring_class,
+                class
+                    .qualified_name()
+                    .0
+                    .last()
+                    .expect("registered class identity has a final segment")
+                    .0
+            );
+            if resolve_semantic_function_by_name(declared).is_none()
+                && resolve_semantic_function_by_name(&owner_qualified).is_none()
+            {
+                if let Some(result) = try_load_and_call_dynamic_function(
+                    name,
+                    args,
+                    requested_outputs,
+                    DynamicFunctionLoadPhase::RegisteredConstructorSource(class),
+                    function_input_callsite,
+                )
+                .await
+                {
+                    return Some(result);
+                }
+            }
+        }
+        // Constructor fallback never enters generic semantic-name or MEX
+        // dispatch, which could select an unrelated callable by spelling.
         return None;
     }
     if matches!(
@@ -309,10 +553,29 @@ pub async fn try_call_semantic_descriptor(
             let selected = async {
                 match target {
                     ScopedSemanticNameTarget::Published(function) => {
-                        try_call_semantic_function(function.0, &args, requested_outputs).await
+                        try_call_semantic_function_in_context(
+                            selected_runtime.as_ref(),
+                            function.0,
+                            &args,
+                            requested_outputs,
+                        )
+                        .await
                     }
                     ScopedSemanticNameTarget::Retained(binding) => {
-                        try_call_bound_function(binding, &args, requested_outputs).await
+                        match selected_runtime.as_ref() {
+                            Some(runtime) => {
+                                try_call_bound_function_in_context(
+                                    runtime,
+                                    binding,
+                                    &args,
+                                    requested_outputs,
+                                )
+                                .await
+                            }
+                            None => {
+                                try_call_bound_function(binding, &args, requested_outputs).await
+                            }
+                        }
                     }
                 }
             };
@@ -340,7 +603,13 @@ pub async fn try_call_semantic_descriptor(
     if let Some(function) = resolve_semantic_function_by_name(&name) {
         if let Some(result) = crate::callsite::with_function_input_callsite(
             function_input_callsite.clone(),
-            try_call_selected_semantic_name(&name, function, &args, requested_outputs),
+            try_call_selected_semantic_name_in_context(
+                selected_runtime.as_ref(),
+                &name,
+                function,
+                &args,
+                requested_outputs,
+            ),
         )
         .await
         {

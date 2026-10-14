@@ -62,6 +62,7 @@ fn setter(class: &mut RuntimeClass, function: &str) {
             access: MemberAccess::Public,
             function_name: function.into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
 }
@@ -107,7 +108,7 @@ fn strict_handle_stores_preserve_identity_nan_and_access_controls() {
             )
             .await
             .unwrap();
-            let Value::HandleObject(result) = result else {
+            let Value::HandleObject(result) = result.value() else {
                 panic!("same handle")
             };
             assert_eq!(result.target, handle.target);
@@ -233,7 +234,7 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
             let _invoker = runmat_runtime::user_functions::install_local_semantic_function_invoker(
-                Rc::new(move |function, args, requested| {
+                Rc::new(move |_runtime, function, args, requested| {
                     assert_eq!(function, 41);
                     assert_eq!(requested, 0, "handle setter has no replacement result");
                     observed.fetch_add(1, Ordering::SeqCst);
@@ -259,7 +260,8 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
                         )
                         .await?;
                         store_member(receiver, "Value".into(), rhs, false, None, |_, _| {}).await?;
-                        Ok(ValueSequence::empty())
+                        runmat_runtime::execution::RootedValueSequence::new(ValueSequence::empty())
+                            .map_err(|error| error.into_runtime_error())
                     })
                 }),
             );
@@ -273,7 +275,7 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
             )
             .await
             .unwrap();
-            let Value::HandleObject(result) = result else {
+            let Value::HandleObject(result) = result.value() else {
                 panic!("handle result")
             };
             assert_eq!(result.target, expected);
@@ -312,7 +314,10 @@ fn dependent_value_setter_still_returns_one_replacement() {
                 };
                 object.properties.insert("Value".into(), args[1].clone());
                 Box::pin(async move {
-                    runmat_runtime::sequence::single_value_sequence(Value::Object(object))
+                    let sequence =
+                        runmat_runtime::sequence::single_value_sequence(Value::Object(object))?;
+                    runmat_runtime::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
                 })
             }),
         ));
@@ -326,7 +331,7 @@ fn dependent_value_setter_still_returns_one_replacement() {
         )
         .await
         .unwrap();
-        let Value::Object(object) = result else {
+        let Value::Object(object) = result.value() else {
             panic!("replacement value")
         };
         assert_eq!(object.properties["Value"], Value::Num(8.0));
@@ -522,6 +527,7 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                     access: MemberAccess::Public,
                     function_name: "Overloaded.subsasgn".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
             register_class(definition);
@@ -530,7 +536,7 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
             let _invoker = runmat_runtime::user_functions::install_local_semantic_function_invoker(
-                Rc::new(move |function, args, requested| {
+                Rc::new(move |_runtime, function, args, requested| {
                     assert_eq!((function, requested), (44, 1));
                     observed.fetch_add(1, Ordering::SeqCst);
                     let Value::HandleObject(receiver) = &args[0] else {
@@ -539,7 +545,11 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                     assert_eq!(receiver.target, expected);
                     assert_eq!(args.last(), Some(&Value::Num(7.0)));
                     let result = args[0].clone();
-                    Box::pin(async move { runmat_runtime::sequence::single_value_sequence(result) })
+                    Box::pin(async move {
+                        let sequence = runmat_runtime::sequence::single_value_sequence(result)?;
+                        runmat_runtime::execution::RootedValueSequence::new(sequence)
+                            .map_err(|error| error.into_runtime_error())
+                    })
                 }),
             );
             let result = store_member(
@@ -552,7 +562,7 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
             )
             .await
             .unwrap();
-            let Value::HandleObject(result) = result else {
+            let Value::HandleObject(result) = result.value() else {
                 panic!("overload result")
             };
             assert_eq!(result.target, expected);

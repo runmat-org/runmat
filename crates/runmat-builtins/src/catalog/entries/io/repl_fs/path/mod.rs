@@ -126,6 +126,7 @@ const EFFECTS: [EffectKind; 4] = [
 ];
 
 pub const PATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "path" },
     category: "io/repl_fs",

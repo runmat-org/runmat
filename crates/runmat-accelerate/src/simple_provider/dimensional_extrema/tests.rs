@@ -47,19 +47,19 @@ fn native_include_contract_matches_actual_host_domains() {
                                 2,
                             ))
                             .unwrap();
-                        let Value::OutputList(expected) = host_result else {
+                        let Value::OutputList(expected) = host_result.value() else {
                             panic!("two host outputs required")
                         };
                         let actual = result(&provider, &input, dim, minimum).unwrap();
                         for (output_index, (actual, expected)) in [&actual.values, &actual.indices]
                             .into_iter()
-                            .zip(expected)
+                            .zip(expected.iter())
                             .enumerate()
                         {
                             let expected = match expected {
-                                Value::Tensor(t) => t,
+                                Value::Tensor(t) => t.clone(),
                                 Value::Num(x) => {
-                                    runmat_value::Tensor::new(vec![x], vec![1, 1]).unwrap()
+                                    runmat_value::Tensor::new(vec![*x], vec![1, 1]).unwrap()
                                 }
                                 _ => panic!("real host extrema expected"),
                             };

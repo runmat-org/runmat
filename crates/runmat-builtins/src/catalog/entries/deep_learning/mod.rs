@@ -9,9 +9,11 @@ mod losses;
 mod model;
 mod sequences;
 mod training;
+mod fixtures;
 
 pub use self::autodiff::*;
 pub use self::export::*;
+pub use self::fixtures::*;
 pub use self::graph::*;
 pub use self::layers::*;
 pub use self::losses::*;
@@ -28,4 +30,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     model::extend_entries(values);
     values.extend(sequences::ENTRIES.iter().copied());
     training::extend_entries(values);
+    values.extend(fixtures::ENTRIES.iter().copied());
 }

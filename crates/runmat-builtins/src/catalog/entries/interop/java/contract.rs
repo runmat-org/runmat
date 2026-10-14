@@ -81,7 +81,7 @@ pub(super) const FOREIGN_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementC
 
 pub(super) const FOREIGN_LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
-    policy: BuiltinLinkPolicy::ForeignRuntime,
+    policy: BuiltinLinkPolicy::ForeignRuntime(ForeignAdapterFamily::Java),
     execution_stack: ExecutionStackRequirement::Process,
     artifact_dependencies: &[],
 };
@@ -130,6 +130,7 @@ pub(super) const fn entry(
     behavior: JavaEntryBehavior,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "interop/java",

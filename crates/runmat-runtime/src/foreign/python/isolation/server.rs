@@ -15,17 +15,20 @@ use runmat_types::{CallableIdentity, SymbolName};
 use runmat_value::Value;
 
 use super::{
-    decode_portable, encode_portable, wire_error, PythonCallbackRequest, PythonDriverMessage,
-    PythonHostMessage, PythonInvocationRequest, PythonInvocationResult, PythonRemoteReference,
-    PythonShutdownResult, PythonWireError, PythonWireValue, PYTHON_HOST_CONFIG_ENV,
-    PYTHON_HOST_MAX_CALLBACK_DEPTH, PYTHON_HOST_MAX_MESSAGE_BYTES, PYTHON_HOST_PROTOCOL,
-    PYTHON_HOST_SCHEMA_VERSION, PYTHON_HOST_SECRET_ENV, PYTHON_HOST_SNAPSHOT_ROOT_ENV,
+    decode_portable, encode_portable, root_plain_value, wire_error, PythonCallbackRequest,
+    PythonDriverMessage, PythonHostMessage, PythonInvocationRequest, PythonInvocationResult,
+    PythonRemoteReference, PythonShutdownResult, PythonWireError, PythonWireValue,
+    PYTHON_HOST_CONFIG_ENV, PYTHON_HOST_MAX_CALLBACK_DEPTH, PYTHON_HOST_MAX_MESSAGE_BYTES,
+    PYTHON_HOST_PROTOCOL, PYTHON_HOST_SCHEMA_VERSION, PYTHON_HOST_SECRET_ENV,
+    PYTHON_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{
     ForeignCall, RuntimeCallRequest, RuntimeCallService, RuntimeContext, RuntimeLifecycleHost,
     RuntimeLocalTaskSupervisor, RuntimeServicePorts,
 };
-use crate::execution::RuntimeExecutionService;
+use crate::execution::{
+    RootedValueLease, RootedValueMember, RootedValuesBuilder, RuntimeExecutionService,
+};
 use crate::foreign::{
     ForeignAdapter, ForeignPlatform, ForeignRuntime, PythonAdapter, PythonRuntimeConfiguration,
 };
@@ -139,15 +142,21 @@ pub async fn run_python_extension_host() -> Result<(), String> {
                 request_id,
                 releases,
             } => {
+                // Extension hosts own this handle table, not a source workspace.
+                {
+                    let mut resources = resources.borrow_mut();
+                    resources.release(&releases);
+                    resources.values.clear();
+                    resources.identities.clear();
+                }
                 let cleanup = supervisor
-                    .participate_foreground(lifecycle.retire_workspace_and_drain(&context))
+                    .participate_foreground(lifecycle.drain_gracefully(&context))
                     .await;
                 let outcome = match cleanup {
                     Ok(outcome) => outcome.map_err(runtime_wire_error),
                     Err(error) => Err(runtime_wire_error(error)),
                 };
                 lifecycle.force_close();
-                resources.borrow_mut().release(&releases);
                 channel
                     .borrow_mut()
                     .write_host(&PythonHostMessage::Shutdown(PythonShutdownResult {
@@ -177,13 +186,15 @@ async fn invoke_request(
     resources: &Rc<RefCell<RemoteResources>>,
 ) -> Result<Vec<PythonWireValue>, PythonWireError> {
     resources.borrow_mut().release(&request.releases);
-    let arguments = request
-        .arguments
-        .into_iter()
-        .map(|value| decode_host_value(value, snapshots, resources))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut arguments = RootedValuesBuilder::with_capacity(request.arguments.len());
+    for value in request.arguments {
+        arguments.push_rooted(decode_host_value(value, snapshots, resources)?);
+    }
+    let arguments = arguments
+        .finish()
+        .map_err(|error| wire_error("RunMat:Python:ValueDecode", error.to_string()))?;
     let value = supervisor
-        .participate_foreground(async {
+        .participate_foreground(arguments.with_owned_values_async(|arguments| async {
             let value = context
                 .clone()
                 .scope(adapter.invoke(
@@ -196,12 +207,10 @@ async fn invoke_request(
                     },
                 ))
                 .await?;
-            let value = crate::execution::RootedValueSequence::new(value)
-                .map_err(|error| error.into_runtime_error())?;
             lifecycle.service_safepoint(context)?;
             lifecycle.drain_gracefully(context).await?;
             Ok(value)
-        })
+        }))
         .await
         .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?;
@@ -230,17 +239,22 @@ fn decode_host_value(
     value: PythonWireValue,
     snapshots: &SharedSnapshotStore,
     resources: &Rc<RefCell<RemoteResources>>,
-) -> Result<Value, PythonWireError> {
+) -> Result<RootedValueMember, PythonWireError> {
     match value {
         PythonWireValue::Portable(transfer) => decode_portable(&transfer, snapshots),
-        PythonWireValue::Foreign(reference) => resources
-            .borrow()
-            .values
-            .get(&reference.id)
-            .cloned()
-            .ok_or_else(|| wire_error("RunMat:Python:StaleHandle", "Python object was released")),
+        PythonWireValue::Foreign(reference) => {
+            let value = resources
+                .borrow()
+                .values
+                .get(&reference.id)
+                .cloned()
+                .ok_or_else(|| {
+                    wire_error("RunMat:Python:StaleHandle", "Python object was released")
+                })?;
+            root_plain_value(value)
+        }
         PythonWireValue::Callback { id } => {
-            Ok(Value::FunctionHandle(format!("{CALLBACK_PREFIX}{id}")))
+            root_plain_value(Value::function_handle(format!("{CALLBACK_PREFIX}{id}")))
         }
     }
 }
@@ -310,8 +324,12 @@ impl RuntimeCallService for HostCallbackRouter {
         &self,
         _runtime: RuntimeContext,
         request: RuntimeCallRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<runmat_value::ValueSequence, RuntimeError>> + 'static>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>
+                + 'static,
+        >,
+    > {
         let result = self
             .invoke_now(request)
             .map_err(super::client::runtime_error);
@@ -323,7 +341,7 @@ impl HostCallbackRouter {
     fn invoke_now(
         &self,
         request: RuntimeCallRequest,
-    ) -> Result<runmat_value::ValueSequence, PythonWireError> {
+    ) -> Result<crate::execution::RootedValueSequence, PythonWireError> {
         if request.binding.is_some() {
             return Err(wire_error(
                 "RunMat:Python:CallbackProtocol",
@@ -352,6 +370,8 @@ impl HostCallbackRouter {
         }
         self.depth.set(depth);
         let result = (|| {
+            let _argument_roots = RootedValueLease::for_values(request.arguments.iter())
+                .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
             let arguments = request
                 .arguments
                 .into_iter()
@@ -381,26 +401,33 @@ impl HostCallbackRouter {
                     PythonDriverMessage::CallbackResult(result)
                         if result.request_id == request_id && result.callback_id == callback_id =>
                     {
-                        let values = result
-                            .outcome?
-                            .into_iter()
-                            .map(|value| decode_host_value(value, &self.snapshots, &self.resources))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        return if request.requested_outputs == 1 && values.len() == 1 {
-                            runmat_value::ValueSequence::single(
-                                values
-                                    .into_iter()
-                                    .next()
-                                    .expect("one Python callback output"),
-                            )
+                        let returned = result.outcome?;
+                        let mut values = RootedValuesBuilder::with_capacity(returned.len());
+                        for value in returned {
+                            values.push_rooted(decode_host_value(
+                                value,
+                                &self.snapshots,
+                                &self.resources,
+                            )?);
+                        }
+                        let values = values.finish().map_err(|error| {
+                            wire_error("RunMat:Python:ValueDecode", error.to_string())
+                        })?;
+                        return values.with_owned_values(|mut values| {
+                            let sequence = if request.requested_outputs == 1 && values.len() == 1 {
+                                runmat_value::ValueSequence::single(
+                                    values.pop().expect("one Python callback output"),
+                                )
+                            } else {
+                                runmat_value::ValueSequence::comma_separated(values)
+                            }
                             .map_err(|error| {
                                 wire_error("RunMat:Python:CallbackProtocol", error.to_string())
+                            })?;
+                            crate::execution::RootedValueSequence::new(sequence).map_err(|error| {
+                                wire_error("RunMat:Python:ValueDecode", error.to_string())
                             })
-                        } else {
-                            runmat_value::ValueSequence::comma_separated(values).map_err(|error| {
-                                wire_error("RunMat:Python:CallbackProtocol", error.to_string())
-                            })
-                        };
+                        });
                     }
                     PythonDriverMessage::Invoke(nested) => {
                         let nested_id = nested.request_id;
@@ -446,22 +473,26 @@ fn invoke_nested_request(
     resources: &Rc<RefCell<RemoteResources>>,
 ) -> Result<Vec<PythonWireValue>, PythonWireError> {
     resources.borrow_mut().release(&request.releases);
-    let arguments = request
-        .arguments
-        .into_iter()
-        .map(|value| decode_host_value(value, snapshots, resources))
-        .collect::<Result<Vec<_>, _>>()?;
-    let value = pollster::block_on(context.scope(adapter.invoke(
-        context.clone(),
-        ForeignCall {
-            adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
-            symbol: request.operation,
-            arguments,
-            requested_outputs: request.requested_outputs as usize,
-        },
-    )))
-    .map_err(runtime_wire_error)?;
-    encode_host_outputs(value, snapshots, resources)
+    let mut arguments = RootedValuesBuilder::with_capacity(request.arguments.len());
+    for value in request.arguments {
+        arguments.push_rooted(decode_host_value(value, snapshots, resources)?);
+    }
+    let arguments = arguments
+        .finish()
+        .map_err(|error| wire_error("RunMat:Python:ValueDecode", error.to_string()))?;
+    arguments.with_owned_values(|arguments| {
+        let value = pollster::block_on(context.scope(adapter.invoke(
+            context.clone(),
+            ForeignCall {
+                adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                symbol: request.operation,
+                arguments,
+                requested_outputs: request.requested_outputs as usize,
+            },
+        )))
+        .map_err(runtime_wire_error)?;
+        value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
+    })
 }
 
 thread_local! {

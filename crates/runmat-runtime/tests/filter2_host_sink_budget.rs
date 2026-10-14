@@ -57,7 +57,7 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
         &args,
     ))
     .expect("admitted readback");
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("non-scalar host result must remain host tensor")
     };
     assert_eq!(result.shape(), &[2, 2]);
@@ -122,7 +122,7 @@ fn integer_host_h_with_resident_x_uses_admitted_host_route_without_upload() {
         &args,
     ))
     .expect("admitted host evaluator");
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("host result expected")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F64);

@@ -24,7 +24,7 @@ async fn call(
     runtime: &RuntimeContext,
     name: &str,
     arguments: &[Value],
-) -> Result<Value, runmat_runtime::RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValue, runmat_runtime::RuntimeError> {
     call_outputs(runtime, name, arguments, 1).await
 }
 
@@ -33,7 +33,7 @@ async fn call_outputs(
     name: &str,
     arguments: &[Value],
     outputs: usize,
-) -> Result<Value, runmat_runtime::RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValue, runmat_runtime::RuntimeError> {
     runmat_runtime::call_builtin_async_with_outputs_in_context(runtime, name, arguments, outputs)
         .await
 }
@@ -80,10 +80,16 @@ fn mex_base_callbacks_preserve_closed_workspace_diagnostics_and_global_isolation
     services
         .put_variable("global", "answer", Value::Num(2.0))
         .unwrap();
-    assert_eq!(
-        services.get_variable("global", "answer").unwrap(),
-        Some(Value::Num(2.0))
-    );
+    let output = services
+        .get_variable("global", "answer")
+        .unwrap()
+        .expect("global value remains available");
+    output
+        .publish(&mut |value| {
+            assert_eq!(value, Value::Num(2.0));
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
@@ -183,13 +189,13 @@ fn workspace_introspection_is_session_scoped_and_excludes_persistents() {
     }
 }
 
-fn names(value: Value) -> Vec<String> {
-    let Value::Cell(values) = value else {
-        panic!("expected who cell result, got {value:?}");
+fn names(value: runmat_runtime::execution::RootedValue) -> Vec<String> {
+    let Value::Cell(values) = value.value() else {
+        panic!("expected who cell result, got {:?}", value.value());
     };
     values
         .data
-        .into_iter()
-        .map(|value| String::try_from(&value).expect("name text"))
+        .iter()
+        .map(|value| String::try_from(value).expect("name text"))
         .collect()
 }

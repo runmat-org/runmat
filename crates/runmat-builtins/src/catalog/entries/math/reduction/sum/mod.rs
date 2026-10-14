@@ -33,6 +33,7 @@ const SUM_PREPARATION_FORMS: [BuiltinPreparationForm; 1] = [BuiltinPreparationFo
 }];
 
 pub const SUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sum" },
     category: "math/reduction",

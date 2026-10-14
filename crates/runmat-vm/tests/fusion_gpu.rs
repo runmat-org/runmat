@@ -48,14 +48,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
-fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+fn interpret(
+    bytecode: &runmat_vm::Bytecode,
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     block_on(interpret_async(bytecode))
 }
 
 fn interpret_function(
     bytecode: &runmat_vm::Bytecode,
     vars: Vec<Value>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     block_on(interpret_function_async(bytecode, vars))
 }
 use runmat_time::Instant;
@@ -2265,7 +2267,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 } else {
                     // Fallback: search all variables for a tensor of length==rows
                     let mut found: Option<runmat_value::Tensor> = None;
-                    for v in &vars_gpu {
+                    for v in vars_gpu.values() {
                         if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                             if t.materialize_f64().len() == rows {
                                 found = Some(t);
@@ -2342,7 +2344,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         }
 
         // Helper to run with/without GPU
-        let run_with = |use_gpu: bool| -> Vec<Value> {
+        let run_with = |use_gpu: bool| -> runmat_runtime::execution::RootedValues {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
             if use_gpu {
                 ensure_provider_registered();
@@ -2950,7 +2952,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 
         let bytecode = compile_semantic(&source);
 
-        let run_with = |use_gpu: bool| -> Vec<Value> {
+        let run_with = |use_gpu: bool| -> runmat_runtime::execution::RootedValues {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
             if use_gpu {
                 ensure_provider_registered();
@@ -2981,7 +2983,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 
         // Robustly locate SI1 (1 x cols) and SI2 (rows x 1) by shape
         let find_by_shape =
-            |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
+            |vars: &[Value], want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
                     if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape().len() == 2
@@ -3087,7 +3089,7 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         };
 
         if std::env::var("RUNMAT_DUMP_OMITNAN_VALUES").as_deref() == Ok("1") {
-            let dump = |vars: &Vec<Value>| {
+            let dump = |vars: &[Value]| {
                 vars.iter()
                     .enumerate()
                     .map(|(idx, v)| match gather_if_needed(v) {
@@ -4911,7 +4913,10 @@ fn explained_variance_matches_cpu() {
         }
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let vars_gpu = vars_cpu
+            .clone()
+            .with_owned_values(|vars| interpret_function(&bytecode, vars))
+            .expect("gpu interpret");
         let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
         assert!(matches!(eval_gpu, Value::GpuTensor(_) | Value::Tensor(_)));
         let gathered_gpu = gather_if_needed(eval_gpu).expect("gather gpu");
@@ -4970,7 +4975,7 @@ fn explained_variance_matches_cpu() {
             let q_t_value =
                 runmat_runtime::call_builtin("transpose", std::slice::from_ref(&q_tensor_value))
                     .expect("transpose");
-            if let Value::Tensor(ref q_t_tensor) = q_t_value {
+            if let Value::Tensor(q_t_tensor) = q_t_value.value() {
                 println!("q_t tensor data {:?}", q_t_tensor.materialize_f64());
             }
             let tmp_via_runtime = futures::executor::block_on(runmat_runtime::value_matmul(

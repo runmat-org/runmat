@@ -3,7 +3,7 @@ mod documentation;
 pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::ExecutionStackRequirement;
 
 pub use contract::{
     RMPATH_DESCRIPTOR, RMPATH_ERROR_ARGUMENT_TYPE, RMPATH_ERROR_CURRENT_FOLDER,
@@ -11,15 +11,8 @@ pub use contract::{
     RMPATH_ERROR_TOO_FEW_ARGUMENTS, RMPATH_ERROR_TOO_MANY_OUTPUTS,
 };
 
-const EFFECTS: [EffectKind; 5] = [
-    EffectKind::EnvironmentRead,
-    EffectKind::EnvironmentWrite,
-    EffectKind::FilesystemRead,
-    EffectKind::MaySuspend,
-    EffectKind::MayThrow,
-];
-
 pub const RMPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rmpath" },
     category: "io/repl_fs",
@@ -36,7 +29,7 @@ pub const RMPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::Workspace,
         workspace_effect: None,
         environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
-        effects: &EFFECTS,
+        effects: &contract::EFFECTS,
         capabilities: &[runmat_types::CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {

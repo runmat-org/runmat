@@ -102,8 +102,9 @@ fn manifest() -> ExecutableUnitManifest {
             program,
             root_package: "example@1.0.0".into(),
             entrypoint: "main".into(),
-            entrypoint_function: ProgramFunctionId(0),
+            entrypoint_function: Some(ProgramFunctionId(0)),
             entrypoint_kind: ExecutableEntrypointKind::Function,
+            declaration_class: None,
             source_digest: Digest::sha256(b"main.m"),
         },
         revisions,
@@ -202,6 +203,39 @@ fn executable_manifest_round_trips_all_contract_families() {
         manifest().cache_key().unwrap().to_string(),
         "sha256:81de17f9e5502f8e8dfde65379636ab81ef9021949d45662189ab60855a13cd0"
     );
+}
+
+#[test]
+fn declaration_only_entrypoint_has_no_callable_ordinal() {
+    let class = runmat_types::ClassIdentity::new("Base").unwrap();
+    let mut declaration = manifest();
+    declaration.identity.entrypoint = class.display_name().into();
+    declaration.identity.entrypoint_function = None;
+    declaration.identity.entrypoint_kind = ExecutableEntrypointKind::DeclarationOnly;
+    declaration.identity.declaration_class = Some(class.clone());
+    declaration
+        .validate()
+        .expect("typed declaration-only manifest");
+    assert_eq!(
+        declaration.identity.validated_entrypoint().unwrap(),
+        runmat_execution::ValidatedExecutableEntrypoint::DeclarationOnly(class)
+    );
+    let bytes = declaration.canonical_bytes().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(value["identity"].get("entrypoint_function").is_none());
+
+    let mut fabricated = declaration.clone();
+    fabricated.identity.entrypoint_function = Some(ProgramFunctionId(0));
+    assert!(fabricated.validate().is_err());
+    let mut mismatched = declaration.clone();
+    mismatched.identity.entrypoint = "Other".into();
+    assert!(mismatched.validate().is_err());
+    let mut missing_class = declaration.clone();
+    missing_class.identity.declaration_class = None;
+    assert!(missing_class.validate().is_err());
+    let mut old_schema = declaration;
+    old_schema.schema_version = EXECUTABLE_UNIT_SCHEMA_VERSION - 1;
+    assert!(old_schema.validate().is_err());
 }
 
 #[test]

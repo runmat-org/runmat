@@ -23,6 +23,72 @@ async fn provider() -> WgpuProvider {
     provider
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+#[ignore = "requires an actual WGPU adapter and timestamp-capability qualification"]
+async fn submitted_compute_pass_reports_two_physical_dispatches_and_optional_device_time() {
+    use runmat_accelerate_api::observation::{
+        with_provider_observation, ProviderObservationStatus, ProviderOperationReceipt,
+    };
+
+    let provider = provider().await;
+    let (_, pipeline) = scope_test_pipeline(&provider);
+    let progress = provider
+        .observation_progress
+        .clone()
+        .expect("native progress owner required");
+    let mut receipt =
+        ProviderOperationReceipt::with_wgpu_progress(provider.observation_budget.clone(), progress);
+    with_provider_observation(Some(receipt.recorder()), || {
+        provider.with_emission(|emission, pending| -> anyhow::Result<()> {
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("two-physical-dispatches"),
+                },
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("two-physical-dispatches-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&pipeline);
+                pass.dispatch_workgroups(1, 1, 1);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            provider.submit(emission, pending, encoder)?;
+            Ok(())
+        })
+    })
+    .unwrap()
+    .unwrap();
+    receipt.publish().unwrap();
+    let observed = futures::future::poll_fn(|cx| receipt.poll_completed(cx))
+        .await
+        .expect("one receipt");
+    assert!(matches!(
+        observed.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+    assert_eq!(observed.verified_wgpu_dispatches, Some(2));
+    let query_allocations = observed
+        .wgpu_query_allocations
+        .expect("physical query disposition is published by the submission owner");
+    if provider.timestamp_capability.is_some() {
+        assert_eq!(query_allocations.query_sets, 1);
+        assert_eq!(query_allocations.timestamp_slots, 16);
+        assert_eq!(query_allocations.resolve_requested_bytes, 16);
+        assert_eq!(query_allocations.staging_requested_bytes, 16);
+        assert_eq!(query_allocations.map_callbacks, 1);
+    } else {
+        assert_eq!(query_allocations.unsupported_submissions, 1);
+    }
+    assert_eq!(
+        observed.verified_wgpu_compute_elapsed.is_some(),
+        provider.timestamp_capability.is_some(),
+    );
+}
+
 fn scope_test_pipeline(provider: &WgpuProvider) -> (wgpu::BindGroupLayout, wgpu::ComputePipeline) {
     provider
         .with_emission(|emission, _| {

@@ -773,7 +773,7 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -2030,7 +2030,7 @@ pub(crate) mod tests {
             1,
         ))
         .expect("dispatch min");
-        match value {
+        match value.value() {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 1);
                 assert_eq!(
@@ -2040,7 +2040,7 @@ pub(crate) mod tests {
             }
             other => assert_eq!(
                 other,
-                Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
+                &Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
             ),
         }
     }

@@ -132,7 +132,12 @@ impl RemotePoolDriver {
                 .lock()
                 .expect("remote program catalog poisoned");
             for (task_id, request) in programs {
-                catalog.insert(task_id, request);
+                catalog.insert(
+                    task_id,
+                    Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+                        request,
+                    )),
+                );
             }
         }
         let mut ranks = Vec::with_capacity(receivers.len());
@@ -204,13 +209,15 @@ impl RemoteSpmdGangCompletion {
                         "remote SPMD rank returned the wrong output cardinality".into(),
                     ),
                 ),
-                Ok(AttemptSuccess::Values { .. }) => retain_first_failure(
-                    &mut first_failure,
-                    order,
-                    NativeProgramFailure::Infrastructure(
-                        "remote SPMD rank returned an ordinary task result".into(),
-                    ),
-                ),
+                Ok(AttemptSuccess::Values { .. } | AttemptSuccess::Graph { .. }) => {
+                    retain_first_failure(
+                        &mut first_failure,
+                        order,
+                        NativeProgramFailure::Infrastructure(
+                            "remote SPMD rank returned an ordinary task result".into(),
+                        ),
+                    )
+                }
                 Err(failure) => retain_first_failure(&mut first_failure, order, failure),
             }
             if first_failure.is_some() && !cancellation_sent {

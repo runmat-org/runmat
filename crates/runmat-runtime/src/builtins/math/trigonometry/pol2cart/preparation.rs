@@ -1,6 +1,6 @@
 //! The parsed coordinate form owns data roles and full broadcast admission.
 use super::*;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinPreparationFormId, POL2CART_CATALOG_ENTRY};
 use runmat_value::NumericDType;
 
@@ -24,16 +24,20 @@ fn floating_class(value: &Value) -> Option<NumericDType> {
 }
 
 pub(super) async fn execute(
+    runtime: Option<&RuntimeContext>,
     inputs: Vec<Value>,
     shape: &[usize],
     requested_outputs: Option<usize>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs =
+        RootedValueLease::for_values(inputs.iter()).map_err(|cause| cause.into_runtime_error())?;
     let class = floating_class(&inputs[0]);
     if class.is_none() || inputs.iter().any(|value| floating_class(value) != class) {
         return super::execute(inputs, shape, requested_outputs).await;
     }
     let count = inputs.len();
-    execute_current_invocation(
+    execute_invocation(
+        runtime,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: POL2CART_CATALOG_ENTRY.identity,

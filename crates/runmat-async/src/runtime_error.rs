@@ -54,7 +54,108 @@ pub struct CallFrame {
     pub function: String,
     pub source_id: Option<usize>,
     pub span: Option<(usize, usize)>,
+    /// Local issuance proof only. Portable failures carry an admitted source
+    /// ordinal instead; no process token enters the worker wire format.
+    pub source_owner: Option<CallFrameSourceOwner>,
+    /// Shared presentation text captured at the exact frame producer. It
+    /// remains useful after the executable definition retires, but cannot
+    /// authenticate a callable or portable source ordinal.
+    pub diagnostic_source: Option<CallFrameDiagnosticSource>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallFrameDiagnosticSource {
+    Local {
+        display_name: Arc<str>,
+        text: Arc<str>,
+    },
+    Detached {
+        display_name: Arc<str>,
+        line: u64,
+        column: u64,
+    },
+    DetachedUnknown {
+        display_name: Arc<str>,
+    },
+}
+
+impl CallFrameDiagnosticSource {
+    pub fn new(display_name: Arc<str>, text: Arc<str>) -> Self {
+        Self::Local { display_name, text }
+    }
+
+    pub fn detached(display_name: Arc<str>, line: u64, column: u64) -> Self {
+        Self::Detached {
+            display_name,
+            line,
+            column,
+        }
+    }
+
+    pub fn detached_unknown(display_name: Arc<str>) -> Self {
+        Self::DetachedUnknown { display_name }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Local { display_name, .. }
+            | Self::Detached { display_name, .. }
+            | Self::DetachedUnknown { display_name } => display_name,
+        }
+    }
+
+    pub fn is_detached(&self) -> bool {
+        matches!(self, Self::Detached { .. } | Self::DetachedUnknown { .. })
+    }
+
+    /// Use the same byte-offset and one-based coordinate convention as the
+    /// existing source call-stack renderer, including its end clamp.
+    pub fn line_column(&self, span: Option<(usize, usize)>) -> Option<(u64, u64)> {
+        match self {
+            Self::Local { text, .. } => Self::line_column_from_text(text, span),
+            Self::Detached { line, column, .. } => Some((*line, *column)),
+            Self::DetachedUnknown { .. } => None,
+        }
+    }
+
+    /// Shared byte-offset coordinate rule for retained and still-live text.
+    pub fn line_column_from_text(text: &str, span: Option<(usize, usize)>) -> Option<(u64, u64)> {
+        let (offset, _) = span?;
+        let prefix = &text.as_bytes()[..offset.min(text.len())];
+        let line = prefix.iter().filter(|byte| **byte == b'\n').count() + 1;
+        let column = prefix
+            .iter()
+            .rev()
+            .take_while(|byte| **byte != b'\n')
+            .count()
+            + 1;
+        Some((u64::try_from(line).ok()?, u64::try_from(column).ok()?))
+    }
+}
+
+/// One source-table issuance shared by the binding, selected body, and error
+/// frame. Equality is identity of the allocation, not equality of its empty
+/// payload; possession alone never authenticates a portable source ordinal.
+#[derive(Clone, Debug)]
+pub struct CallFrameSourceOwner(Arc<()>);
+
+impl CallFrameSourceOwner {
+    pub fn issue() -> Self {
+        Self(Arc::new(()))
+    }
+
+    pub fn same_issuance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl PartialEq for CallFrameSourceOwner {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_issuance(other)
+    }
+}
+
+impl Eq for CallFrameSourceOwner {}
 
 impl ErrorContext {
     pub fn with_builtin(mut self, builtin: impl Into<String>) -> Self {

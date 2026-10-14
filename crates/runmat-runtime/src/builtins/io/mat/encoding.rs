@@ -60,9 +60,14 @@ pub(crate) async fn encode_workspace_to_mat_bytes_for_owner(
             None => prepare_value_for_mat_save(value.clone()).await?,
         };
         completed(&mut cooperation, 0).await?;
+        let array = value
+            .with_owned_async(|value| {
+                convert_value_with_cooperation(value, owner, cooperation.as_deref_mut())
+            })
+            .await?;
         mat_vars.push(MatVar {
             name: name.clone(),
-            array: convert_value_with_cooperation(value, owner, cooperation.as_deref_mut()).await?,
+            array,
         });
     }
     write_mat_bytes_cooperative(&mat_vars, owner, cooperation).await

@@ -16,6 +16,7 @@ use crate::context::host_effect::{
     HostEffectResourceLivenessLease, HostEffectWorkload, MatAssignmentSuffix, MatDecodeOutput,
     MatDecodeSelection, MatEncodeMode, MatEncodeOutput, MatHandleControl,
 };
+use crate::execution::RootedValue;
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
     OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
@@ -107,7 +108,7 @@ pub async fn matfile_subsref(
     runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let first = path.steps().first().expect("parsed nonempty MAT path");
@@ -178,7 +179,7 @@ pub async fn matfile_subsasgn(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let first = path.steps().first().expect("parsed nonempty MAT path");
@@ -294,6 +295,7 @@ pub fn ensure_matfile_class_registered() {
                 access: MemberAccess::Public,
                 function_name: MATFILE_SUBSREF.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         methods.insert(
@@ -306,6 +308,7 @@ pub fn ensure_matfile_class_registered() {
                 access: MemberAccess::Public,
                 function_name: MATFILE_SUBSASGN.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
 

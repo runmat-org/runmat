@@ -195,13 +195,14 @@ pub(crate) mod tests {
         let func_handle = Value::FunctionHandle("sin".into());
         assert_eq!(class_name_for_value(&func_handle), "function_handle");
 
-        let closure = Value::Closure(Closure {
+        let closure = Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "anon".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![],
-        });
+        }));
         assert_eq!(class_name_for_value(&closure), "function_handle");
 
         let class_ref = Value::ClassRef("pkg.Point".into());

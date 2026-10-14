@@ -10,7 +10,7 @@ fn bsxfun_callable_text_is_gated_but_function_handles_are_ordinary() {
         Some("RunMat:compatibility:BsxfunTextCallableExtension")
     );
     call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Num(1.0),
         Value::Num(2.0),
     )
@@ -35,11 +35,13 @@ fn bsxfun_does_not_logicalize_shadowed_callback_names() {
         })));
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, _args, _requested_outputs| {
-            Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(2.0)) })
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(2.0))
+            })
         },
     )));
     let result = call(
-        Value::FunctionHandle("gt".to_string()),
+        Value::FunctionHandle("gt".into()),
         Value::Num(10.0),
         Value::Num(1.0),
     )
@@ -61,17 +63,18 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
     let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, _requested_outputs| {
-            let args = args.to_vec();
-            crate::sequence::single_value_future(async move {
-                let a = match &args[0] {
-                    Value::Num(value) => *value,
-                    _ => 0.0,
-                };
-                let b = match &args[1] {
-                    Value::Num(value) => *value,
-                    _ => 0.0,
-                };
-                Ok(Value::Num(a + 2.0 * b))
+            let a = match &args[0] {
+                Value::Num(value) => *value,
+                _ => 0.0,
+            };
+            let b = match &args[1] {
+                Value::Num(value) => *value,
+                _ => 0.0,
+            };
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                    a + 2.0 * b,
+                ))
             })
         },
     )));
@@ -103,8 +106,8 @@ fn bsxfun_rejects_non_scalar_callback_output() {
     let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, _args, _requested_outputs| {
-            crate::sequence::single_value_future(async move {
-                Ok(Value::Tensor(
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Tensor(
                     Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
                 ))
             })

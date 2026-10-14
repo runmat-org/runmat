@@ -18,6 +18,7 @@ pub use contract::{
 pub use options::{ScatterhistIntegerRole, ScatterhistOptionKind};
 
 pub const SCATTERHIST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "scatterhist",

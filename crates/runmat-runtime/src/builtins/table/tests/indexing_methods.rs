@@ -33,7 +33,7 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
     ]))
     .expect("table");
     let selected = block_on(table_subsref(table.clone(), member("Count"))).expect("read variable");
-    let Value::Tensor(selected) = selected else {
+    let Value::Tensor(selected) = selected.value() else {
         panic!("expected numeric column");
     };
     assert_eq!(
@@ -47,11 +47,13 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
     let updated = block_on(table_subsasgn(table.clone(), member("Count"), replacement))
         .expect("replace variable");
     let original = block_on(table_subsref(table, member("Count"))).expect("original read");
-    let modified = block_on(table_subsref(updated, member("Count"))).expect("updated read");
-    let Value::Tensor(original) = original else {
+    let modified = updated
+        .with_owned(|value| block_on(table_subsref(value, member("Count"))))
+        .expect("updated read");
+    let Value::Tensor(original) = original.value() else {
         panic!("expected original column");
     };
-    let Value::Tensor(modified) = modified else {
+    let Value::Tensor(modified) = modified.value() else {
         panic!("expected updated column");
     };
     assert_eq!(
@@ -89,7 +91,9 @@ fn dictionary_methods_compare_wide_keys_and_keep_original_value() {
         Value::Int(IntValue::U64(u64::MAX)),
     );
     assert_eq!(
-        block_on(dictionary_subsref(updated, key(large_key))).expect("updated"),
+        updated
+            .with_owned(|value| block_on(dictionary_subsref(value, key(large_key))))
+            .expect("updated"),
         Value::Int(IntValue::U64(3)),
     );
 }

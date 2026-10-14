@@ -50,7 +50,7 @@ fn invalid_calls_do_not_prepare_and_valid_shapes_observe_once() {
         ] {
             let args = [Value::Tensor(Tensor::new(data, shape.clone()).unwrap())];
             let output = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
-            let Value::Tensor(output) = output else {
+            let Value::Tensor(output) = output.value() else {
                 panic!("shape-preserving typed array")
             };
             assert_eq!(output.shape(), shape);
@@ -72,9 +72,8 @@ fn wide_integer_contents_survive_preparation_without_float_materialization() {
         )
         .unwrap(),
     )];
-    let Value::Tensor(output) =
-        block_on(crate::dispatcher::call_builtin_async("uint64", &args)).unwrap()
-    else {
+    let result = block_on(crate::dispatcher::call_builtin_async("uint64", &args)).unwrap();
+    let Value::Tensor(output) = result.value() else {
         panic!("typed output")
     };
     assert_eq!(
@@ -148,11 +147,12 @@ fn characters_preserve_column_major_order_and_full_nd_shape() {
             .iter()
             .map(|value| *value as u16)
             .collect();
-        let Value::Tensor(output) = block_on(crate::dispatcher::call_builtin_async(
+        let result = block_on(crate::dispatcher::call_builtin_async(
             "uint16",
             &[Value::CharArray(chars)],
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Tensor(output) = result.value() else {
             panic!("character array conversion")
         };
         assert_eq!(output.shape(), shape);

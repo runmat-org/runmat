@@ -9,6 +9,7 @@ use runmat_value::{ForeignRef, ForeignResourceKey, ForeignResourceRelease};
 
 mod control;
 use control::ControlRecord;
+pub use control::{HostPolicyChange, PreparedHostPolicyChanges, PreparedHostReconfiguration};
 
 use super::{foreign_error, ForeignErrorKind, ForeignExecutionPolicy};
 use crate::RuntimeError;
@@ -113,18 +114,11 @@ impl ForeignHandleRegistry {
                 "foreign host registry lock was poisoned",
             )
         })?;
-        let host = state.hosts.get_mut(host_identity).ok_or_else(|| {
-            foreign_error(
-                ForeignErrorKind::HostUnavailable,
-                format!("foreign host {host_identity} is not registered"),
-            )
-        })?;
-        if !host.resources.is_empty() {
-            return Err(foreign_error(
-                ForeignErrorKind::InvalidCall,
-                "foreign host isolation cannot change while resources are live",
-            ));
-        }
+        control::host_policy_available(&state, host_identity)?;
+        let host = state
+            .hosts
+            .get_mut(host_identity)
+            .expect("validated host remains registered under held lock");
         host.policy = policy;
         Ok(())
     }
@@ -781,5 +775,137 @@ mod tests {
         drop(fresh);
         drop(old);
         assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn grouped_policy_admission_rejects_late_resource_without_partial_change() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(Arc::clone(&releases));
+        registry
+            .register_host(ForeignHostRegistration {
+                identity: "host-b".into(),
+                adapter: "test".into(),
+                session_identity: "session-b".into(),
+                capabilities: BTreeSet::new(),
+                policy: ForeignExecutionPolicy::trusted_in_process(),
+                release: releases,
+            })
+            .unwrap();
+        let control = registry
+            .register_host_control("host-b", metadata())
+            .unwrap();
+        let resource = registry.register_resource("host-b", metadata()).unwrap();
+        let isolated = ForeignExecutionPolicy {
+            trust: crate::foreign::ForeignTrust::Untrusted,
+            isolation: crate::foreign::ForeignIsolation::IsolatedProcess,
+        };
+        let changes = [
+            HostPolicyChange::Set {
+                host_identity: "host-a",
+                policy: isolated,
+            },
+            HostPolicyChange::Reconfigure {
+                host_identity: "host-b",
+                policy: isolated,
+            },
+        ];
+        assert_eq!(
+            registry
+                .prepare_host_policy_changes(&changes)
+                .err()
+                .unwrap()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        {
+            let state = registry.state.lock().unwrap();
+            assert_eq!(
+                state.hosts.get("host-a").unwrap().policy,
+                ForeignExecutionPolicy::trusted_in_process()
+            );
+            assert_eq!(
+                state.hosts.get("host-b").unwrap().policy,
+                ForeignExecutionPolicy::trusted_in_process()
+            );
+        }
+        drop(resource);
+        registry
+            .prepare_host_policy_changes(&changes)
+            .unwrap()
+            .commit();
+        assert_eq!(
+            registry
+                .state
+                .lock()
+                .unwrap()
+                .hosts
+                .get("host-a")
+                .unwrap()
+                .policy,
+            isolated
+        );
+        assert_eq!(
+            registry
+                .state
+                .lock()
+                .unwrap()
+                .hosts
+                .get("host-b")
+                .unwrap()
+                .policy,
+            isolated
+        );
+        assert_eq!(
+            registry
+                .resolve_host_control(&control, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+    }
+
+    #[test]
+    fn project_restart_rejects_live_object_then_fences_both_generations() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(releases);
+        let control = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        let resource = registry.register_resource("host-a", metadata()).unwrap();
+        assert_eq!(
+            registry
+                .admit_host_restart("host-a")
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        drop(resource);
+        registry.admit_host_restart("host-a").unwrap();
+        let change = HostPolicyChange::Restart {
+            host_identity: "host-a",
+            policy: ForeignExecutionPolicy::trusted_in_process(),
+        };
+        let before = {
+            let state = registry.state.lock().unwrap();
+            let host = state.hosts.get("host-a").unwrap();
+            (host.generation, host.control_generation)
+        };
+        registry
+            .prepare_host_policy_changes(&[change])
+            .unwrap()
+            .commit();
+        let state = registry.state.lock().unwrap();
+        let host = state.hosts.get("host-a").unwrap();
+        assert_eq!(host.generation, before.0 + 1);
+        assert_eq!(host.control_generation, before.1 + 1);
+        assert!(host.controls.is_empty());
+        drop(state);
+        assert_eq!(
+            registry
+                .resolve_host_control(&control, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
     }
 }

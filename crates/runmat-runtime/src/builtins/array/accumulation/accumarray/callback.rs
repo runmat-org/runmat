@@ -16,7 +16,11 @@ pub(super) async fn evaluate(
     function: Value,
     fill: Option<Value>,
     sparse: bool,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _inputs_root = crate::execution::RootedValueLease::for_values(
+        [&data, &function].into_iter().chain(fill.iter()),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     if sparse && !data::is_double(&data) {
         return Err(error::invalid(
             "accumarray: sparse output requires double input data",
@@ -31,7 +35,7 @@ pub(super) async fn evaluate(
     let fill = match fill {
         Some(value) => scalar(value)?,
         None => prototype
-            .map(zero_like)
+            .map(|value| zero_like(value.value()))
             .transpose()?
             .unwrap_or(Value::Num(0.0)),
     };
@@ -40,21 +44,45 @@ pub(super) async fn evaluate(
             "accumarray: sparse output requires a zero fill value",
         ));
     }
-    let mut values = vec![fill; output_len];
-    for (linear, value) in computed {
-        values[linear] = value;
+    let fill =
+        crate::execution::RootedValue::new(fill).map_err(|error| error.into_runtime_error())?;
+    let mut values = crate::execution::RootedValuesBuilder::with_capacity(output_len);
+    for linear in 0..output_len {
+        if let Some(value) = computed.remove(&linear) {
+            value
+                .with_owned(|value| values.push(value))
+                .map_err(|error| error.into_runtime_error())?;
+        } else {
+            values
+                .push(fill.value().clone())
+                .map_err(|error| error.into_runtime_error())?;
+        }
     }
-    output::from_scalars(values, shape, sparse)
+    values
+        .finish()
+        .map_err(|error| error.into_runtime_error())?
+        .with_owned_values(|values| {
+            let output = output::from_scalars(values, shape, sparse)?;
+            crate::execution::RootedValue::new(output).map_err(|error| error.into_runtime_error())
+        })
 }
 
-async fn invoke(function: Value, values: Value) -> BuiltinResult<Value> {
+async fn invoke(function: Value, values: Value) -> BuiltinResult<crate::execution::RootedValue> {
+    let _inputs_root =
+        crate::execution::RootedValueLease::for_values([&function, &values].into_iter())
+            .map_err(|error| error.into_runtime_error())?;
     let result = call_feval_async_with_outputs(function, &[values], 1)
         .await
         .map_err(|source| error::callback("accumarray: callback failed", source))?;
-    scalar(match result {
-        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
-        other => other,
-    })
+    result.try_map_owned(
+        |value| {
+            scalar(match value {
+                Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+                other => other,
+            })
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 fn scalar(value: Value) -> BuiltinResult<Value> {

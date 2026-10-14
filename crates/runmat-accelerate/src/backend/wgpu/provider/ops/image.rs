@@ -193,7 +193,7 @@ impl WgpuProvider {
                         let chunk = remaining.min(chunk_limit).max(1);
                         uniforms.batch_count = chunk;
                         uniforms.batch_offset = offset;
-                        emission.queue().write_buffer(
+                        emission.write_buffer(
                             uniform_buf.as_ref(),
                             0,
                             bytemuck::bytes_of(&uniforms),

@@ -11,6 +11,7 @@ pub(super) struct LibraryEntry {
     pub library: Rc<LoadedLibrary>,
     pub metadata: Rc<NativeLibraryMetadata>,
     pub artifact_identity: String,
+    pub project_owned: bool,
 }
 
 impl std::fmt::Debug for LibraryEntry {

@@ -23,7 +23,31 @@ mod source_facts;
 use source_facts::{ensure_all_origins, exact_origin_resolver};
 #[path = "callable_artifacts/dynamic.rs"]
 mod dynamic;
-pub(in crate::session) use dynamic::admit_dynamic_callable;
+pub(in crate::session) use dynamic::{admit_dynamic_callable, DynamicCallableDependency};
+#[path = "callable_artifacts/selected_sites.rs"]
+mod selected_sites;
+
+enum BoundInvocationKind {
+    SuperBody,
+    Constructor(runmat_types::ClassMethodOwner),
+    Ordinary,
+}
+
+struct PreparedBoundInvocation {
+    kind: BoundInvocationKind,
+    state: BoundInvocationState,
+}
+
+struct BoundInvocationState {
+    _generation: Rc<FunctionRegistryGeneration>,
+    selected: runmat_vm::FunctionRegistry,
+    arguments: runmat_runtime::execution::RootedValues,
+    runtime: RuntimeContext,
+    selected_product: Option<Rc<runmat_vm::SelectedClassProduct>>,
+    // Keep caller closure handles rooted until the invocation has settled.
+    _environment_roots: Option<Vec<runmat_gc::ExplicitRoot>>,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+}
 
 pub(super) struct SessionCallableArtifactService {
     evaluator: Weak<SessionSourceEvaluator>,
@@ -178,11 +202,15 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
                     .with_identifier("RunMat:CallableArtifact:UnreferencedExecutable")
                     .build());
                 }
-                units.push(
-                    admitted
-                        .bind_runtime_sources(runtime.clone())
-                        .map_err(executable_admission_error)?,
-                );
+                let mut unit = admitted
+                    .bind_runtime_sources(runtime.clone())
+                    .map_err(executable_admission_error)?;
+                unit.attach_local_selected_product().map_err(|message| {
+                    executable_admission_error(
+                        runmat_vm::ExecutableUnitAdmissionError::SourceBinding(message),
+                    )
+                })?;
+                units.push(unit);
             }
             let prepared = runmat_vm::prepare_retained_callable_units(
                 &runtime,
@@ -197,7 +225,7 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
             .map_err(staging_error)?;
             let exact_facts = Arc::clone(prepared.exact_origin_facts());
             ensure_all_origins(&origins, &exact_facts)?;
-            let resolver = exact_origin_resolver(exact_facts);
+            let resolver = exact_origin_resolver(exact_facts, Rc::new(prepared.registry().clone()));
             let values = runtime
                 .clone()
                 .scope(async move {
@@ -212,7 +240,8 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
                     .map_err(cooperative_codec_error)
                 })
                 .await?;
-            let (registry, _, staging_leases, imported_owners) = prepared.into_parts();
+            let (registry, _, staging_leases, imported_owners) =
+                prepared.into_parts().map_err(staging_error)?;
             let mut artifacts = existing_artifacts.as_ref().clone();
             for bytes in unit_bytes {
                 artifacts
@@ -248,8 +277,19 @@ pub(in crate::session) fn install_bound_invoker(
 ) {
     let evaluator = Rc::downgrade(evaluator);
     runtime.set_bound_function_invoker(Some(Rc::new(
-        move |runtime, binding: BoundFunctionBinding, arguments, requested_outputs| {
+        move |runtime,
+              binding: BoundFunctionBinding,
+              arguments,
+              requested_outputs,
+              lexical_environment| {
             let prepared = (|| {
+                // The boxed sibling future can be queued without a first poll.
+                // Retain the exact caller activation before source selection or
+                // constructor admission can allocate or trigger a collection.
+                let environment_roots = lexical_environment
+                    .as_ref()
+                    .map(runmat_runtime::call::lexical::root_environment)
+                    .transpose()?;
                 let evaluator = evaluator.upgrade().ok_or_else(|| {
                     build_runtime_error("bound function session has ended")
                         .with_identifier("RunMat:BoundFunction:SessionEnded")
@@ -258,22 +298,277 @@ pub(in crate::session) fn install_bound_invoker(
                 evaluator.ensure_runtime_owner(&runtime)?;
                 let generation = evaluator.current_generation();
                 let registry = generation.registry()?;
+                let function = runmat_hir::FunctionId(binding.function);
                 let selected = registry
-                    .owned_view(runmat_hir::FunctionId(binding.function), &binding.authority)
+                    .owned_view(function, &binding.authority)
                     .ok_or_else(|| unavailable_binding(binding.function))?;
-                Ok::<_, RuntimeError>((generation, selected, arguments))
-            })();
-            Box::pin(async move {
-                let (_generation, selected, arguments) = prepared?;
-                runmat_vm::invoke_semantic_function_value_in_context(
-                    binding.function,
-                    arguments.values(),
-                    requested_outputs,
-                    &selected,
+                // The constructor receiver is poll-local. Capture its exact
+                // admitted owner while this caller is still selected, before
+                // the boxed VM future can be polled as a sibling process.
+                let selected_body = selected
+                    .get(function)
+                    .ok_or_else(|| unavailable_binding(binding.function))?;
+                let dynamic_admission =
+                    evaluator.dynamic_admission_port_for_selected_body(selected_body)?;
+                let source_evaluation = evaluator
+                    .source_evaluation_for_selected_body(dynamic_admission.clone());
+                let owner = selected_body.class_method_owner.clone();
+                let selected_product = selected_body.selected_class_product.clone();
+                let (runtime, selected_method) =
+                    runtime.take_selected_method_body_for(&binding)?;
+                let (runtime, super_body_owner) =
+                    runtime.take_retained_super_body_for(&binding)?;
+                let super_body = if let Some(expected) = super_body_owner {
+                    if owner.as_ref() != Some(&expected)
+                        || expected.role != runmat_types::ClassMethodRole::Constructor
+                        || expected.is_static
+                    {
+                        return Err(build_runtime_error(
+                            "selected superclass body disagrees with its admitted method owner",
+                        )
+                        .with_identifier("RunMat:ConstructorOwnerInvalid")
+                        .build());
+                    }
+                    true
+                } else {
+                    false
+                };
+                let runtime = if let Some((facts, expected)) = selected_method {
+                    let selected_product =
+                        selected.validate_selected_receiver_method(&binding, &facts, &expected)?;
+                    selected_product
+                        .invocation_runtime(runtime)?
+                        .with_selected_object_class(facts)
+                } else if super_body {
+                    runtime
+                } else {
+                    runtime.without_selected_object_class()
+                };
+                let runtime = runtime
+                    .without_selected_graph_program()
+                    .with_selected_native_route(None);
+                let ports = runtime
+                    .service_ports()
+                    .clone()
+                    .with_source_evaluation(source_evaluation);
+                let runtime = runtime.with_service_ports(ports);
+                let runtime = if owner.as_ref().is_some_and(|owner| {
+                    owner.role == runmat_types::ClassMethodRole::Constructor
+                }) {
+                    runtime
+                } else {
+                    runtime.with_constructor_receiver_for_method(owner.as_ref())?
+                };
+                let receipt = selected_body
+                    .selected_executable_product
+                    .as_ref()
+                    .and_then(|product| product.interop_receipt())
+                    .cloned();
+                let needs_graph = runtime.execution().requires_program_capture();
+                let runtime = if needs_graph || receipt.is_some() {
+                    let (origin, source_owner) = selected_body
+                        .binding_origin
+                        .zip(selected_body.selected_source_owner.as_ref())
+                        .ok_or_else(|| {
+                            build_runtime_error("bound callable has no selected V3 source owner")
+                                .with_identifier("RunMat:CallableArtifact:SelectedGraph")
+                                .build()
+                        })?;
+                    let bytes = selected_body
+                        .selected_executable_product
+                        .as_ref()
+                        .filter(|product| product.source_owner().same_issuance(source_owner))
+                        .map(|product| Arc::clone(product.canonical_v3()))
+                        .ok_or_else(|| {
+                            build_runtime_error("bound callable has no selected V3 product")
+                                .with_identifier("RunMat:CallableArtifact:SelectedGraph")
+                                .build()
+                        })?;
+                    let primary = super::SelectedGraphPrimary::retained(
+                        bytes,
+                        source_owner.clone(),
+                        selected.clone(),
+                        function,
+                        origin,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:CallableArtifact:SelectedGraph")
+                            .build()
+                    })?;
+                    let primary = Rc::new(primary);
+                    if receipt.is_some() {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            evaluator.bind_selected_foreign(
+                                runtime,
+                                primary,
+                                Some(selected_body),
+                                receipt,
+                            )?
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            return Err(build_runtime_error(
+                                "selected native foreign artifacts cannot execute in this browser host",
+                            )
+                            .with_identifier("RunMat:SelectedForeignHost")
+                            .build());
+                        }
+                    } else {
+                        let ports = runtime.service_ports().clone().without_foreign();
+                        runtime
+                            .with_service_ports(ports)
+                            .with_selected_graph_program(super::SelectedGraphSnapshot::program(
+                                primary,
+                                &evaluator,
+                            ))
+                    }
+                } else {
+                    let ports = runtime.service_ports().clone().without_foreign();
+                    runtime.with_service_ports(ports)
+                };
+                let runtime = selected_sites::bind_selected_body_sites(
                     runtime,
-                )
-                .await
-            })
+                    &binding,
+                    selected_body,
+                    registry.as_ref(),
+                )?;
+                let kind = if super_body {
+                    BoundInvocationKind::SuperBody
+                } else if let Some(owner) = owner.filter(|owner| {
+                    owner.role == runmat_types::ClassMethodRole::Constructor
+                }) {
+                    BoundInvocationKind::Constructor(owner)
+                } else {
+                    BoundInvocationKind::Ordinary
+                };
+                Ok::<_, RuntimeError>(PreparedBoundInvocation {
+                    kind,
+                    state: BoundInvocationState {
+                        _generation: generation,
+                        selected,
+                        arguments,
+                        runtime,
+                        selected_product,
+                        _environment_roots: environment_roots,
+                        dynamic_admission,
+                    },
+                })
+            })();
+            // The caller already requires one boxed UserFunctionFuture. Select
+            // its branch before boxing, so an ordinary callback's poll frame
+            // does not reserve the constructor branch's future state too.
+            let invocation: runmat_runtime::user_functions::UserFunctionFuture = match prepared {
+                Err(error) => Box::pin(async move { Err(error) }),
+                Ok(PreparedBoundInvocation {
+                    kind: BoundInvocationKind::SuperBody,
+                    state,
+                }) => Box::pin(async move {
+                    let BoundInvocationState {
+                        _generation,
+                        selected,
+                        arguments,
+                        runtime,
+                        selected_product: _selected_product,
+                        _environment_roots,
+                        dynamic_admission,
+                    } = state;
+                    // The exact parent body already has the caller's rooted
+                    // Derived receiver and selected class projection.
+                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                        binding.function,
+                        arguments.values(),
+                        requested_outputs,
+                        &selected,
+                        runtime,
+                        lexical_environment,
+                        dynamic_admission,
+                    )
+                    .await
+                }),
+                Ok(PreparedBoundInvocation {
+                    kind: BoundInvocationKind::Constructor(owner),
+                    state,
+                }) => {
+                    Box::pin(async move {
+                        let BoundInvocationState {
+                            _generation,
+                            selected,
+                            arguments,
+                            runtime,
+                            selected_product,
+                            _environment_roots,
+                            dynamic_admission,
+                        } = state;
+                        let runtime = selected_product
+                            .ok_or_else(|| {
+                                build_runtime_error(
+                                    "selected constructor lacks its exact class product",
+                                )
+                                .with_identifier("RunMat:ConstructorOwnerInvalid")
+                                .build()
+                            })?
+                            .invocation_runtime_with_binding(runtime, &selected, &binding)?;
+                        let arguments = Rc::new(arguments);
+                        let policy_arguments = Rc::clone(&arguments);
+                        let invocation_owner = owner.clone();
+                        let admitted_binding = binding.clone();
+                        let constructor_dynamic_admission = dynamic_admission.clone();
+                        let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke =
+                            Box::new(move |selected_runtime| {
+                                Box::pin(async move {
+                                    let selected_runtime = selected_runtime
+                                        .with_constructor_receiver_for_method(Some(&invocation_owner))?;
+                                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                                        binding.function,
+                                        arguments.values(),
+                                        requested_outputs,
+                                        &selected,
+                                        selected_runtime,
+                                        lexical_environment,
+                                        constructor_dynamic_admission,
+                                    )
+                                    .await
+                                })
+                            });
+                        runmat_runtime::dispatcher::call_prepared_constructor_sequence_in_context(
+                            &runtime,
+                            owner,
+                            admitted_binding,
+                            policy_arguments.values(),
+                            requested_outputs,
+                            invoke,
+                        )
+                        .await
+                    })
+                }
+                Ok(PreparedBoundInvocation {
+                    kind: BoundInvocationKind::Ordinary,
+                    state,
+                }) => Box::pin(async move {
+                    let BoundInvocationState {
+                        _generation,
+                        selected,
+                        arguments,
+                        runtime,
+                        selected_product: _selected_product,
+                        _environment_roots,
+                        dynamic_admission,
+                    } = state;
+                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                        binding.function,
+                        arguments.values(),
+                        requested_outputs,
+                        &selected,
+                        runtime,
+                        lexical_environment,
+                        dynamic_admission,
+                    )
+                    .await
+                }),
+            };
+            invocation
         },
     )));
 }

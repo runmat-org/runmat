@@ -2,8 +2,9 @@ use super::*;
 use crate::builtins::io::net::test_support::cpu_turn::CodecTurnService;
 use crate::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts, RuntimeTcpBind, RuntimeTcpClient,
-    RuntimeTcpClientStatus, RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpReadPublication,
-    RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
+    RuntimeTcpClientStatus, RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpInvocation,
+    RuntimeTcpIssuer, RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer,
+    RuntimeTcpService,
 };
 use crate::tcp::TcpTransportError;
 use runmat_execution::cancellation::CancellationSource;
@@ -37,7 +38,7 @@ impl RuntimeTcpService for CountedReadService {
     }
     fn read(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: RuntimeTcpReadMode,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, TcpTransportError>> {
@@ -55,28 +56,28 @@ impl RuntimeTcpService for CountedReadService {
     }
     fn describe_client(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, TcpTransportError>> {
         panic!("read codec witness does not describe")
     }
     fn connect(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpConnect,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
         panic!("read codec witness does not connect")
     }
     fn bind(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpBind,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpServer, TcpTransportError>> {
         panic!("read codec witness does not bind")
     }
     fn accept(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
@@ -84,7 +85,7 @@ impl RuntimeTcpService for CountedReadService {
     }
     fn write(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Vec<u8>,
     ) -> RuntimeServiceFuture<Result<usize, TcpTransportError>> {

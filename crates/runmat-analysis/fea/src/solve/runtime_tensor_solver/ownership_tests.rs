@@ -2,8 +2,8 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, AllocationIdentity, GpuTensorStorage,
-    HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
+    AccelDownloadFuture, AccelProvider, AllocationIdentity, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericDataView, HostNumericTensorOwned,
 };
 use std::sync::Mutex;
 
@@ -96,7 +96,7 @@ impl AccelProvider for Provider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if matches!(self.mode, Mode::Alias) {
                 assert_eq!(self.values(b), vec![1.0]);
@@ -115,7 +115,7 @@ impl AccelProvider for Provider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let data = self
                 .values(a)

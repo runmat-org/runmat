@@ -6,7 +6,7 @@
 use super::{RuntimeContext, RuntimeContextLocalId, RuntimeLanguagePolicy, RuntimeServiceFuture};
 use crate::RuntimeError;
 use runmat_types::SourceId;
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -19,6 +19,12 @@ pub trait SourceEvaluationProvenance: std::fmt::Debug {
     /// external provenance that only reports a display ID cannot authorize a
     /// production source evaluation.
     fn runtime_source_ref(&self) -> Option<crate::source_context::RuntimeSourceRef> {
+        None
+    }
+
+    /// Retain the exact issued source for selected-product admission. An
+    /// external display-only provenance cannot mint a portable source owner.
+    fn runtime_source_lease(&self) -> Option<crate::source_context::RuntimeSourceLease> {
         None
     }
 }
@@ -130,6 +136,10 @@ impl SessionSourceEvaluation {
         self.provenance.runtime_source_ref()
     }
 
+    pub fn runtime_source_lease(&self) -> Option<crate::source_context::RuntimeSourceLease> {
+        self.provenance.runtime_source_lease()
+    }
+
     pub fn source_label(&self) -> &str {
         &self.source_label
     }
@@ -151,7 +161,7 @@ impl SessionSourceEvaluation {
     pub fn evaluate(
         self,
         runtime: RuntimeContext,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         let owner = runtime.clone();
         Box::pin(owner.scope(async move {
             self.validate_session(&runtime)?;
@@ -210,7 +220,7 @@ pub trait RuntimeSourceEvaluationAuthority: std::fmt::Debug {
         &self,
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
 }
 
 impl std::fmt::Debug for SessionSourceEvaluation {
@@ -257,7 +267,7 @@ pub trait RuntimeSourceEvaluationService {
         &self,
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
 }
 
 #[cfg(test)]

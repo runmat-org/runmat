@@ -50,10 +50,15 @@ async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinRe
     let mut declaration_seen = false;
     let mut declaration_position_open = true;
     loop {
-        let event = reader
-            .read_event_into_async(&mut event_buf)
-            .await
-            .map_err(|error| quick_xml_error(error, cooperation))?;
+        let event = match reader.read_event_into_async(&mut event_buf).await {
+            Ok(event) => event,
+            Err(error) => {
+                return Err(match reader.get_mut().take_execution_error() {
+                    Some(execution) => cooperation.execution_error(execution),
+                    None => quick_xml_error(error, cooperation),
+                });
+            }
+        };
         match event {
             Event::Start(start) => {
                 declaration_position_open = false;

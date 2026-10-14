@@ -1,12 +1,13 @@
 use runmat_builtins::BuiltinBindingIdentity;
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::{future::Future, pin::Pin};
 
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 
-pub type RuntimeBuiltinFuture =
-    Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>>;
+pub type RuntimeBuiltinFuture = Pin<
+    Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'static>,
+>;
 /// One admitted builtin call. The arguments are borrowed only until the
 /// implementation constructs its owned future; the session authority is an
 /// inexpensive `Rc`-backed clone that may be retained across suspension.

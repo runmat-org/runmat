@@ -13,6 +13,9 @@ pub(super) use crate::{
 };
 pub(super) use runmat_types::{EffectKind, ExecutionStackRequirement, NumericClass};
 
+#[macro_use]
+mod descriptors;
+
 macro_rules! define_floating_conversion_contract {
     (
         $name:literal,
@@ -81,58 +84,14 @@ macro_rules! define_floating_conversion_contract {
             },
         ];
 
-        pub const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-            code: concat!("RM.", $upper, ".INVALID_ARGUMENT"),
-            identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-            when: "Optional arguments are malformed or unsupported, or more than one output is requested.",
-            message: concat!($name, ": invalid argument"),
-        };
-        pub const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-            code: concat!("RM.", $upper, ".INVALID_INPUT"),
-            identifier: Some(concat!("RunMat:", $name, ":InvalidInput")),
-            when: concat!(
-                "Input value or prototype cannot be converted to ",
-                $name,
-                "."
-            ),
-            message: concat!($name, ": invalid input"),
-        };
-        pub const ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-            code: concat!("RM.", $upper, ".GPU_UNSUPPORTED"),
-            identifier: Some(concat!("RunMat:", $name, ":GpuUnsupported")),
-            when: concat!(
-                "GPU output via \"like\" is requested but no compatible ",
-                $gpu_storage_description,
-                " provider is active."
-            ),
-            message: concat!($name, ": gpu output not supported"),
-        };
-        pub const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-            code: concat!("RM.", $upper, ".INTERNAL"),
-            identifier: Some(concat!("RunMat:", $name, ":Internal")),
-            when: "Internal conversion, gather, or provider upload failed.",
-            message: concat!($name, ": internal error"),
-        };
-        const ERRORS: [BuiltinErrorDescriptor; 4] = [
-            ERROR_INVALID_ARGUMENT,
-            ERROR_INVALID_INPUT,
-            ERROR_GPU_UNSUPPORTED,
-            ERROR_INTERNAL,
-        ];
-        pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &SIGNATURES,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-
-        pub const LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $extension_id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: $extension_description,
-            error_identifier: Some($extension_error),
-        };
-        pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LIKE_EXTENSION];
+        define_floating_conversion_descriptors!(
+            $name,
+            $upper,
+            $gpu_storage_description,
+            $extension_id,
+            $extension_description,
+            $extension_error
+        );
 
         const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
             [BuiltinIntegerInputCapability {
@@ -159,29 +118,32 @@ macro_rules! define_floating_conversion_contract {
 
         // Form 0 retains its original meaning and signature coverage. New
         // audited routes use fresh IDs rather than reinterpret serialized facts.
-        const DEFAULT_PREPARATION_FORM: crate::BuiltinPreparationForm = crate::BuiltinPreparationForm {
-            id: crate::BuiltinPreparationFormId(0),
-            binding_variant: "default",
-            signatures: &[0, 1],
-            data_arguments: &[0],
-            operation: crate::BuiltinPreparationOperation::Unary,
-            provider_requirement: $preparation_requirement,
-        };
+        const DEFAULT_PREPARATION_FORM: crate::BuiltinPreparationForm =
+            crate::BuiltinPreparationForm {
+                id: crate::BuiltinPreparationFormId(0),
+                binding_variant: "default",
+                signatures: &[0, 1],
+                data_arguments: &[0],
+                operation: crate::BuiltinPreparationOperation::Unary,
+                provider_requirement: $preparation_requirement,
+            };
 
         // The like prototype selects output residency inside this domain;
         // single/double determine the conversion class. Preserve legacy form 0
         // and plain-cast form 1 identities;
         // this distinct form does not claim a shared unary physical route.
-        const LIKE_PREPARATION_FORM: crate::BuiltinPreparationForm = crate::BuiltinPreparationForm {
-            id: crate::BuiltinPreparationFormId(2),
-            binding_variant: "default",
-            signatures: &[1],
-            data_arguments: &[0],
-            operation: crate::BuiltinPreparationOperation::RuntimeOwned,
-            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
-        };
+        const LIKE_PREPARATION_FORM: crate::BuiltinPreparationForm =
+            crate::BuiltinPreparationForm {
+                id: crate::BuiltinPreparationFormId(2),
+                binding_variant: "default",
+                signatures: &[1],
+                data_arguments: &[0],
+                operation: crate::BuiltinPreparationOperation::RuntimeOwned,
+                provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+            };
 
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "math/elementwise",

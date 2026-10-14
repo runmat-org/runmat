@@ -16,6 +16,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const RMDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rmdir" },
     category: "io/repl_fs",

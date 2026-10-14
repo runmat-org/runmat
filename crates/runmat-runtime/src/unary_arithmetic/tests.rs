@@ -101,6 +101,7 @@ fn unary_object_overloads_preserve_errors_and_missing_method_fallback() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "unary_fixture_minus".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]
         .into_iter()

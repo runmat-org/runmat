@@ -279,7 +279,7 @@ mod literal_capability_tests {
                 _ => None,
             })
             .expect("fixture call");
-        (call, FlowState::entry(body, &[], &[]))
+        (call, FlowState::entry(body, &[], &[], None))
     }
 
     #[test]

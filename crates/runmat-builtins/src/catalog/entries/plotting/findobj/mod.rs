@@ -9,6 +9,7 @@ mod tests;
 pub use contract::*;
 
 pub const FINDOBJ_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "findobj" },
     category: "plotting",

@@ -13,6 +13,7 @@ pub(super) const fn entry(
     integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name },
         category: "datetime/duration",

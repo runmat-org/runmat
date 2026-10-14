@@ -33,6 +33,29 @@ pub fn table_replace_variables_like(
     Ok(Value::Object(object))
 }
 
+/// Retain each completed variable through validation and replacement Object
+/// publication. The input batch and names are constructed in the same table
+/// traversal; no raw column may escape an awaited producer before admission.
+pub(crate) fn table_replace_variables_like_owned(
+    source: &ObjectInstance,
+    names: Vec<String>,
+    columns: crate::execution::RootedValues,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    columns.with_owned_values(|values| {
+        if names.len() != values.len() {
+            return Err(crate::RuntimeError::new(
+                "table: owned column count differs from variable names",
+            ));
+        }
+        let mut variables = StructValue::new();
+        for (name, value) in names.into_iter().zip(values) {
+            variables.insert(name, value);
+        }
+        let replacement = table_replace_variables_like(source, variables)?;
+        crate::execution::RootedValue::new(replacement).map_err(|error| error.into_runtime_error())
+    })
+}
+
 pub(crate) fn table_from_columns_with_properties(
     names: Vec<String>,
     columns: Vec<Value>,

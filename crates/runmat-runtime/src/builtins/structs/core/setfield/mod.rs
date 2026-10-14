@@ -33,7 +33,10 @@ pub(crate) use spec::{
     binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
-async fn setfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn setfield_builtin(
+    base: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::SETFIELD_DESCRIPTOR,
         &runmat_builtins::SETFIELD_ERROR_TOO_MANY_OUTPUTS,

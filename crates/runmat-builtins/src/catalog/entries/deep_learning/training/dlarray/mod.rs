@@ -16,6 +16,7 @@ pub use contract::{
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DLARRAY_CATALOG_ENTRY];
 
 pub const DLARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlarray" },
     category: "deep_learning",

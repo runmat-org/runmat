@@ -19,6 +19,7 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                     Value::Num(value + 10.0),
                 ])
                 .map_err(crate::sequence::sequence_error_to_runtime)
+                .and_then(rooted_sequence)
             })
         },
     )));
@@ -38,10 +39,10 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                 ],
             )
             .unwrap();
-            let Value::OutputList(outputs) = result else {
+            let Value::OutputList(outputs) = result.value() else {
                 panic!("two outputs")
             };
-            for (slot, output) in outputs.into_iter().enumerate() {
+            for (slot, output) in outputs.iter().enumerate() {
                 let expected = (1..=len)
                     .map(|n| n as f64 + 10.0 * slot as f64)
                     .collect::<Vec<_>>();
@@ -92,7 +93,10 @@ fn handler_context_refers_to_the_original_column_major_element() {
                     .collect::<Vec<_>>();
                 assert_eq!(indices.materialize_f64(), expected);
                 let value = *value;
-                crate::sequence::single_value_future(async move { Ok(Value::Num(value)) })
+                Box::pin(async move {
+                    crate::sequence::single_value_sequence(Value::Num(value))
+                        .and_then(rooted_sequence)
+                })
             },
         )));
         let linear = (1..=shape.iter().product::<usize>())
@@ -111,7 +115,7 @@ fn handler_context_refers_to_the_original_column_major_element() {
         )
         .unwrap();
         assert_eq!(
-            tensor_values(result),
+            tensor_values(result.value()),
             linear
                 .into_iter()
                 .map(|v| match v {

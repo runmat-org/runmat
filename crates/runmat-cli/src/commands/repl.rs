@@ -70,19 +70,15 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
             .await
             .context("Local callback driver stopped during piped REPL input")???
         {
+            let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
             engine.shutdown_local_tasks();
-            engine
-                .shutdown_foreign_runtime()
-                .await
-                .context("Failed to finish foreign runtime lifecycle")?;
+            foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
             finalize_repl_session(&engine, session_start, repl_run);
             return Ok(());
         }
+        let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
         engine.shutdown_local_tasks();
-        engine
-            .shutdown_foreign_runtime()
-            .await
-            .context("Failed to finish foreign runtime lifecycle")?;
+        foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
         finalize_repl_session(&engine, session_start, repl_run);
         return Ok(());
     }
@@ -173,11 +169,9 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         .join()
         .map_err(|_| anyhow::anyhow!("REPL input thread panicked"))?;
 
+    let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
     engine.shutdown_local_tasks();
-    engine
-        .shutdown_foreign_runtime()
-        .await
-        .context("Failed to finish foreign runtime lifecycle")?;
+    foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
     finalize_repl_session(&engine, session_start, repl_run);
     Ok(())
 }
@@ -448,7 +442,7 @@ async fn process_repl_line(
                     .as_ref()
                     .is_some_and(|profiling| profiling.total_ms > 10)
             {
-                if let Some(profiling) = outcome.profiling {
+                if let Some(profiling) = outcome.profiling.as_ref() {
                     println!(
                         "  {}",
                         presentation::stdout().muted(format!("({}ms)", profiling.total_ms))

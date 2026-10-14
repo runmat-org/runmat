@@ -8,7 +8,7 @@ mod target;
 
 pub use compatibility::{
     ExecutionHostInventory, ExecutionHostRequirement, ExecutionHostTarget, ForeignAdapterInventory,
-    EXECUTION_HOST_SCHEMA_VERSION,
+    SelectedUnitHostRequirement, EXECUTION_HOST_SCHEMA_VERSION,
 };
 pub use target::{
     NativeAbi, NativeArchitecture, NativeObjectFormat, NativeOperatingSystem, NativeTargetIdentity,

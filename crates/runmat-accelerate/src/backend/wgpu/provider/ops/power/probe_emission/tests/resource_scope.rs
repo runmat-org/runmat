@@ -97,6 +97,8 @@ async fn actual_probe_scope(provider: &'static WgpuProvider) {
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn actual_flag_probe_has_four_scoped_resource_phases_and_completion() {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = env_logger::builder().is_test(true).try_init();
     actual_probe_scope(owner().await).await;
 }
 

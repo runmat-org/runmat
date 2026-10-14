@@ -53,9 +53,11 @@ pub(crate) fn observation_capability(
         .as_ref()
         .is_some_and(|route| route.demand == ProviderExtremaDemand::ValuesAndIndices)
         && provider.precision() == ProviderPrecision::F32;
-    let Some(submissions) = estimate
-        .dispatches
-        .and_then(|count| count.checked_add(u32::from(produced_readback)))
+    let Some(compute_encoders) = estimate.dispatches else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    let Some(submissions) = compute_encoders
+        .checked_add(u32::from(produced_readback))
         .filter(|count| *count != 0)
     else {
         return ProviderObservationCapability::Unsupported;
@@ -70,6 +72,10 @@ pub(crate) fn observation_capability(
         requested_peak_buffer_bytes,
         clear_commands: submissions,
         map_callbacks: submissions,
+        wgpu_compute_query: crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+            compute_encoders,
+            submissions,
+        ),
     })
 }
 

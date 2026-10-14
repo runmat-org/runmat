@@ -1,8 +1,12 @@
 use crate::array::{should_expand_nd_display, write_nd_pages};
 use crate::*;
-use runmat_thread_local::runmat_thread_local;
-use std::cell::RefCell;
 use std::fmt;
+
+mod context;
+pub use context::{
+    get_display_format, select_display_format_owner, set_display_format, DisplayFormatOwner,
+    DisplayFormatSelectionGuard,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum FormatMode {
@@ -25,19 +29,7 @@ pub enum FormatMode {
     Hex,
 }
 
-runmat_thread_local! {
-    static DISPLAY_FORMAT: RefCell<FormatMode> = const { RefCell::new(FormatMode::Short) };
-}
-
-pub fn set_display_format(mode: FormatMode) {
-    DISPLAY_FORMAT.with(|c| *c.borrow_mut() = mode);
-}
-
-pub fn get_display_format() -> FormatMode {
-    DISPLAY_FORMAT.with(|c| *c.borrow())
-}
-
-/// Format a number using the current thread-local display format.
+/// Format a number using the selected session owner, or the bare-value fallback.
 pub fn format_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
@@ -307,7 +299,7 @@ impl fmt::Display for Value {
             | Value::MethodFunctionHandle(name) => {
                 write!(f, "@{name}")
             }
-            Value::BoundFunctionHandle { name, .. } => write!(f, "@{name}"),
+            Value::BoundFunctionHandle(handle) => write!(f, "@{}", handle.name),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",

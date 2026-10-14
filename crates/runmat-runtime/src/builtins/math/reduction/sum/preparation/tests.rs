@@ -40,9 +40,9 @@ impl RuntimeAccelerationService for RecordingService {
             .borrow_mut()
             .push(request.sum_reduction().expect("typed sum controls").clone());
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -55,9 +55,10 @@ fn nansum_uses_its_own_catalog_binding_with_the_shared_typed_omit_route() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(observed.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
+    let _context = RuntimeContextGuard::enter(context.clone());
     let data = Value::Tensor(Tensor::from_f32(vec![1.0, f32::NAN, 3.0, 4.0], vec![2, 2]).unwrap());
     let output = block_on(super::super::sum_for_invocation(
+        Some(&context),
         data,
         vec![Value::from("native")],
         None,
@@ -76,6 +77,7 @@ fn nansum_uses_its_own_catalog_binding_with_the_shared_typed_omit_route() {
     assert_eq!(admitted[0].publication_class, NumericClass::Single);
     drop(admitted);
     let invalid = block_on(super::super::sum_for_invocation(
+        Some(&context),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         vec![Value::Num(0.0)],
         None,
@@ -94,9 +96,10 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(observed.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
+    let _context = RuntimeContextGuard::enter(context.clone());
     let data = || Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let result = block_on(super::super::sum_builtin(
+        Some(context.clone()),
         None,
         data(),
         vec![
@@ -106,7 +109,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
         ],
     ))
     .unwrap();
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("non-scalar sum returns a tensor")
     };
     assert_eq!(result.materialize_f64(), vec![3.0, 7.0]);
@@ -120,6 +123,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     drop(admitted);
 
     let error = block_on(super::super::sum_builtin(
+        Some(context),
         None,
         data(),
         vec![
@@ -149,7 +153,7 @@ impl BuiltinPreparationObservation for NativeObservation {
         self.0.borrow_mut().push("begin");
     }
 
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -187,10 +191,9 @@ impl RuntimeAccelerationService for NativeService {
         self.events.borrow_mut().push("prepare");
         let events = self.events.clone();
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                request.into_operands(),
-                Some(Box::new(NativeObservation(events))),
-            ))
+            request.into_operands().with_owned_values(|values| {
+                PreparedBuiltinOperands::new(values, Some(Box::new(NativeObservation(events))))
+            })
         })
     }
 }
@@ -206,7 +209,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
                 events: events.clone(),
             },
         )));
-    let _context = RuntimeContextGuard::enter(context);
+    let _context = RuntimeContextGuard::enter(context.clone());
 
     let native = || {
         Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![100, 100]), vec![2, 1]).unwrap())
@@ -216,6 +219,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
         runmat_types::SumInvocation::NanSum,
     ] {
         let result = block_on(super::super::sum_for_invocation(
+            Some(&context),
             native(),
             vec![Value::from("native")],
             None,
@@ -225,6 +229,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
         assert_eq!(result, Value::Int(IntValue::I8(127)));
     }
     let scalar = block_on(super::super::sum_for_invocation(
+        Some(&context),
         Value::Int(IntValue::U64(u64::MAX)),
         vec![Value::from("native")],
         None,
@@ -250,6 +255,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
     );
 
     let unpolled = super::super::sum_for_invocation(
+        Some(&context),
         native(),
         vec![Value::from("native")],
         None,
@@ -258,6 +264,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
     drop(unpolled);
     assert_eq!(controls.borrow().len(), 3);
     let error = block_on(super::super::sum_for_invocation(
+        Some(&context),
         native(),
         vec![Value::Num(0.0), Value::from("native")],
         None,

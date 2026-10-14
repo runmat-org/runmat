@@ -88,19 +88,15 @@ fn bandpass_doubles_order_and_analog_lowpass_has_no_zeros() {
 #[test]
 fn proven_bad_order_and_output_count_are_diagnosed() {
     let bad_order = infer(LiteralValue::Number(0.0), ShapeFact::Scalar, None, 2);
-    assert!(
-        bad_order
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-BUTTER-ORDER")
-    );
+    assert!(bad_order
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-BUTTER-ORDER"));
     let bad_outputs = infer(LiteralValue::Number(2.0), ShapeFact::Scalar, None, 5);
-    assert!(
-        bad_outputs
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-BUTTER-OUTPUTS")
-    );
+    assert!(bad_outputs
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-BUTTER-OUTPUTS"));
 }
 
 #[test]

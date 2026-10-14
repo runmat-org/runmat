@@ -51,6 +51,13 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         .collect::<Vec<_>>();
     let mut manifest_descriptors = bundle.manifest.sources.clone();
     manifest_descriptors.extend(bundle.manifest.foreign_artifacts.clone());
+    let policy_descriptors = bundle
+        .manifest
+        .recipes
+        .iter()
+        .filter_map(|recipe| recipe.foreign_policy.clone())
+        .collect::<BTreeSet<_>>();
+    manifest_descriptors.extend(policy_descriptors);
     manifest_descriptors.sort();
     if descriptors != manifest_descriptors
         || bundle
@@ -73,6 +80,10 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             .foreign_artifacts
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
+        || bundle.objects.iter().any(|object| {
+            object.descriptor.namespace == ObjectNamespace::ForeignPolicy
+                && crate::object::validate_foreign_policy_object(object).is_err()
+        })
         || bundle
             .manifest
             .foreign_artifact_closures
@@ -239,10 +250,12 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || package.source_digest != bundle.manifest.project_revision.source_digest
                 || !bundle.manifest.sources.is_empty()
                 || !bundle.manifest.callables.is_empty()
-                || bundle
-                    .objects
-                    .iter()
-                    .any(|object| object.descriptor.namespace != ObjectNamespace::ForeignArtifact)
+                || bundle.objects.iter().any(|object| {
+                    !matches!(
+                        object.descriptor.namespace,
+                        ObjectNamespace::ForeignArtifact | ObjectNamespace::ForeignPolicy
+                    )
+                })
                 || bundle.manifest.artifacts.is_empty()
                 || bundle.manifest.artifacts.iter().any(|artifact| {
                     !matches!(
@@ -451,6 +464,7 @@ fn encode_capability(
     capability: &Capability,
 ) -> ArtifactResult<()> {
     match capability {
+        Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),

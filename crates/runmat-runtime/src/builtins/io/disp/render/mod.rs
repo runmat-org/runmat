@@ -137,7 +137,7 @@ pub(super) fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ObjectArray(_)
         | Value::Object(_)

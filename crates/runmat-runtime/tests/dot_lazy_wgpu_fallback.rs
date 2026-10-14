@@ -133,13 +133,13 @@ fn real_lazy_transpose_fallback_preserves_logical_order_class_and_intent() {
             ],
         ))
         .unwrap();
-        let Value::GpuTensor(output) = output else {
+        let Value::GpuTensor(output) = output.value() else {
             panic!("actual native class supports restoration")
         };
         assert_eq!(output.shape(), &[1, 2]);
-        assert_eq!(handle_precision(&output), Some(provider.precision()));
-        assert_eq!(handle_provenance(&output), Some(intent));
-        assert_eq!(read(&provider.inner, &output), [105., 248.]);
+        assert_eq!(handle_precision(output), Some(provider.precision()));
+        assert_eq!(handle_provenance(output), Some(intent));
+        assert_eq!(read(&provider.inner, output), [105., 248.]);
         assert_eq!(provider.hooks.load(Ordering::SeqCst), hooks + 1);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), downloads + 2);
         assert!(!output.shares_allocation_with(&left));

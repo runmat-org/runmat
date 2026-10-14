@@ -8,6 +8,7 @@ fn infer(
     super::inference::infer_integer(request, entry, runmat_types::NumericClass::UInt32)
 }
 pub const UINT32_EMPTY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "uint32.empty",

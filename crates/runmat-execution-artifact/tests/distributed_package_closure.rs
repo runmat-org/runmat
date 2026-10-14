@@ -307,6 +307,7 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }

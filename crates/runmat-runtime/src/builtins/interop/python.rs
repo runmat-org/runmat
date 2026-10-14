@@ -4,6 +4,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, Value};
 
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult};
 
 #[derive(Clone, Copy)]
@@ -37,7 +38,7 @@ async fn invoke_python(
     context: Option<crate::context::RuntimeContext>,
     operation: PythonBuiltinOperation,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments);
@@ -72,9 +73,14 @@ async fn invoke_python(
                 },
             ))
             .await?;
-        Ok(crate::call::arguments::project_legacy_builtin_value_abi(
-            sequence,
-        ))
+        sequence.try_map_owned(
+            |sequence| {
+                Ok::<_, crate::RuntimeError>(
+                    crate::call::arguments::project_legacy_builtin_value_abi(sequence),
+                )
+            },
+            |error| error.into_runtime_error(),
+        )
     }
 }
 
@@ -87,7 +93,7 @@ async fn invoke_python(
 async fn pyenv_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         invoke_python(context, PythonBuiltinOperation::Status, arguments).await
     } else {
@@ -138,7 +144,7 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 async fn pyrun_builtin(
     context: Option<crate::context::RuntimeContext>,
     mut arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrun requires Python source code"));
     }
@@ -158,7 +164,7 @@ async fn pyrun_builtin(
 async fn pyrunfile_builtin(
     context: Option<crate::context::RuntimeContext>,
     mut arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrunfile requires a Python file"));
     }
@@ -178,7 +184,7 @@ async fn pyrunfile_builtin(
 async fn terminate_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.len() != 1
         || !matches!(
             arguments.first(),

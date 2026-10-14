@@ -12,8 +12,8 @@ use runmat_accelerate_api::*;
 use runmat_runtime::GpuGatherRetry;
 use runmat_value::Value;
 use std::sync::{
-    Mutex,
     atomic::{AtomicUsize, Ordering},
+    Mutex,
 };
 
 #[derive(Debug)]
@@ -253,7 +253,7 @@ fn typed_unsupported_runs_existing_host_fft_without_replaying_provider() {
     *provider.source.lock().unwrap() = Some(input.probe);
     let args = vec![Value::GpuTensor(input.handle.clone())];
     let result = block_on(runmat_runtime::call_builtin_async("fft", &args)).unwrap();
-    let Value::ComplexTensor(result) = result else {
+    let Value::ComplexTensor(result) = result.value() else {
         panic!("existing precision-preserving restoration retains host result")
     };
     assert_eq!(result.shape(), &[4, 1]);

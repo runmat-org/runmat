@@ -61,20 +61,30 @@ pub(super) async fn append_existing_entries(
     new_entries: Vec<(String, Value)>,
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut MatCodecCooperation<'_>,
+    workspace: &mut WorkspaceReadSet,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut entries = read_existing_entries_for_append(path, runtime, cooperation).await?;
-    entries.extend(new_entries);
-    Ok(deduplicate_entries(entries))
+    let entries = read_existing_entries_for_append(path, runtime, cooperation).await?;
+    entries.with_owned(|entries| {
+        workspace.retain_values(entries.0.iter().map(|(_, value)| value))?;
+        let mut entries = entries.0;
+        entries.extend(new_entries);
+        Ok(deduplicate_entries(entries))
+    })
 }
 
 async fn read_existing_entries_for_append(
     path: &MatFsPath,
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut MatCodecCooperation<'_>,
-) -> BuiltinResult<Vec<(String, Value)>> {
+) -> BuiltinResult<super::super::load::RootedMatEntries> {
     match cooperation.await_io(path.metadata()).await? {
         Ok(_) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return super::super::load::RootedMatEntries::new(super::super::load::MatEntries(
+                Vec::new(),
+            ))
+            .map_err(|error| error.into_runtime_error());
+        }
         Err(err) => {
             return Err(save_error_with_source(
                 &SAVE_ERROR_IO,

@@ -26,14 +26,14 @@ async fn dispatch_num_arguments_overload(
     target: Value,
     subscript: Value,
     indexing_context: Value,
-) -> crate::BuiltinResult<Option<Value>> {
+) -> crate::BuiltinResult<Option<crate::execution::RootedValue>> {
     match crate::object::protocol::resolve_object_protocol(
         &target,
         crate::object::protocol::ObjectProtocol::NumArgumentsFromSubscript,
         &crate::object::protocol::ObjectAccessContext::default(),
     )? {
-        crate::object::protocol::ProtocolResolution::DefaultIndexing => Ok(None),
-        crate::object::protocol::ProtocolResolution::Method(method) => {
+        None => Ok(None),
+        Some(method) => {
             let arguments = vec![target, subscript, indexing_context];
             let sequence = match runtime {
                 Some(runtime) => {
@@ -47,7 +47,9 @@ async fn dispatch_num_arguments_overload(
                         .await?
                 }
             };
-            Ok(Some(require_single_sequence(sequence)?))
+            sequence
+                .try_map_owned(require_single_sequence, |error| error.into_runtime_error())
+                .map(Some)
         }
     }
 }
@@ -57,7 +59,7 @@ pub(crate) async fn dispatch_subsasgn(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     dispatch_subsasgn_with_context(None, obj, subscript, rhs).await
 }
 
@@ -66,7 +68,7 @@ async fn dispatch_subsasgn_with_context(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     match runtime {
         Some(runtime) => {
@@ -93,11 +95,14 @@ pub async fn subsref_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     subsref_with_context(runtime.as_ref(), obj, subscript).await
 }
 
-pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+pub async fn subsref_builtin(
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     subsref_with_context(None, obj, subscript).await
 }
 
@@ -105,7 +110,7 @@ async fn subsref_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let requested = crate::output_count::current_output_count();
     let access = crate::object::protocol::ObjectAccessContext::default();
@@ -126,14 +131,18 @@ async fn subsref_with_context(
                 .await?
         }
     };
-    let mut values =
-        sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
-    if requested.is_some() {
-        // Existing shared builtin ABI carrier; S2 owns its eventual replacement.
-        Ok(Value::OutputList(values))
-    } else {
-        Ok(values.remove(0))
-    }
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values =
+                sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
+            if requested.is_some() {
+                Ok(Value::OutputList(values))
+            } else {
+                Ok(values.remove(0))
+            }
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 #[runtime_builtin(
@@ -147,7 +156,7 @@ pub async fn subsasgn_builtin_registered(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     subsasgn_with_context(runtime.as_ref(), obj, subscript, rhs).await
 }
 
@@ -155,7 +164,7 @@ pub async fn subsasgn_builtin(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     subsasgn_with_context(None, obj, subscript, rhs).await
 }
 
@@ -164,7 +173,7 @@ async fn subsasgn_with_context(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::SUBSASGN_DESCRIPTOR,
         &runmat_builtins::SUBSASGN_ERROR_OUTPUTS,
@@ -184,7 +193,7 @@ pub async fn num_arguments_from_subscript_builtin_registered(
     target: Value,
     subscript: Value,
     indexing_context: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     num_arguments_from_subscript_with_context(runtime.as_ref(), target, subscript, indexing_context)
         .await
 }
@@ -193,7 +202,7 @@ pub async fn num_arguments_from_subscript_builtin(
     target: Value,
     subscript: Value,
     indexing_context: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     num_arguments_from_subscript_with_context(None, target, subscript, indexing_context).await
 }
 
@@ -202,7 +211,7 @@ async fn num_arguments_from_subscript_with_context(
     target: Value,
     subscript: Value,
     indexing_context: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR,
         &runmat_builtins::NUM_ARGUMENTS_FROM_SUBSCRIPT_ERROR_OUTPUTS,
@@ -223,9 +232,10 @@ async fn num_arguments_from_subscript_with_context(
         }
     }
     let levels = parse_subscript_levels(&subscript)?;
-    Ok(Value::Num(exact_count_as_f64(default_num_arguments(
+    crate::execution::RootedValue::new(Value::Num(exact_count_as_f64(default_num_arguments(
         &target, &levels, context,
     )?)?))
+    .map_err(|error| error.into_runtime_error())
 }
 
 mod context;

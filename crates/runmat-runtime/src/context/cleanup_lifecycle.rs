@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use super::{LocalTaskOwnerToken, RuntimeContext, RuntimeContextState};
+use super::{LocalTaskCommandOrigin, LocalTaskOwnerToken, RuntimeContext, RuntimeContextState};
 use crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupRegistry;
 use crate::RuntimeError;
 
@@ -87,24 +87,27 @@ impl RuntimeLifecycleHost {
                 "onCleanup lifecycle host observer identity is exhausted",
             )
         })?;
-        let dispatcher_runtime = runtime.clone();
         let dispatcher_registry = Rc::downgrade(&registry);
         let dispatcher_wake = Arc::clone(&wake);
-        let dispatcher = tasks
-            .spawn_local(
-                runtime.local_identity(),
-                Box::pin(runtime.clone().scope(async move {
-                    while dispatcher_wake.next().await {
-                        let Some(registry) = dispatcher_registry.upgrade() else {
-                            break;
-                        };
-                        crate::builtins::introspection::on_cleanup::lifecycle::dispatch::schedule_eligible(
-                            &dispatcher_runtime,
-                            &registry,
-                            &[],
-                        );
-                    }
-                })),
+        let dispatcher = runtime
+            .spawn_local_with_command_origin(
+                "onCleanup lifecycle dispatcher",
+                LocalTaskCommandOrigin::Unknown,
+                move |dispatcher_runtime| {
+                    let scoped_runtime = dispatcher_runtime.clone();
+                    Box::pin(scoped_runtime.scope(async move {
+                        while dispatcher_wake.next().await {
+                            let Some(registry) = dispatcher_registry.upgrade() else {
+                                break;
+                            };
+                            crate::builtins::introspection::on_cleanup::lifecycle::dispatch::schedule_eligible(
+                                &dispatcher_runtime,
+                                &registry,
+                                &[],
+                            );
+                        }
+                    }))
+                },
             )
             .map_err(|error| {
                 crate::runtime_error::semantic_error(

@@ -112,8 +112,11 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
             })
             .expect("valid resident validator fixture allocation");
         state.borrow_mut().probe = Some(allocation.probe);
-        ValueSequence::single(Value::GpuTensor(allocation.handle))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        runmat_runtime::execution::RootedValueSequence::new(
+            ValueSequence::single(Value::GpuTensor(allocation.handle))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        )
+        .map_err(|error| error.into_runtime_error())
     })
 }
 

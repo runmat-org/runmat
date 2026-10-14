@@ -7,11 +7,12 @@ pub(crate) fn warmup_noop_single(
     pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-noop-single-pass"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-noop-pass-single"),
@@ -28,11 +29,12 @@ pub(crate) fn warmup_noop_after_pass2(
     pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-noop-after-pass2"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-noop-pass"),
@@ -51,11 +53,12 @@ pub(crate) fn run_single_pass(
     bind_group: &wgpu::BindGroup,
     groups_x: u32,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-reduction-encoder"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-reduction-pass"),
@@ -83,11 +86,12 @@ pub(crate) fn run_two_pass(
 ) -> anyhow::Result<()> {
     // Pass 1 in its own encoder
     {
-        let mut enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-reduction-pass1-enc"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-reduction-pass1"),
@@ -101,11 +105,12 @@ pub(crate) fn run_two_pass(
     }
     // Pass 2 in a fresh encoder to avoid any usage scope overlap on Metal
     {
-        let mut enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-reduction-pass2-enc"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-reduction-pass2"),

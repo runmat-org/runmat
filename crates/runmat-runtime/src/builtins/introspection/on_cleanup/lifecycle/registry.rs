@@ -4,6 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use runmat_execution::profiling::{CommandProfilingReceipt, DeferredWorkTerminal};
 use runmat_gc::{GcHandle, RootId, ValueRootRegistration};
 use runmat_value::{HandleRef, Value};
 
@@ -15,6 +16,10 @@ use super::dependencies::{mark_admissible_batch, ActiveCleanupIdentity};
 
 #[path = "registry/retirement.rs"]
 mod retirement;
+#[path = "registry/deferred.rs"]
+mod deferred;
+
+use deferred::{CleanupDeferredOrigin, CleanupFutureHandoff};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CleanupPhase {
@@ -46,12 +51,32 @@ pub(crate) struct CleanupEntry {
     phase: Cell<CleanupPhase>,
     receipt: RefCell<Option<CleanupReceipt>>,
     lease: RefCell<Option<RuntimeLocalTaskLease>>,
+    // Captured only on Active→Queued. Object creation and later drain do not
+    // establish the callback's command attribution.
+    queued_command_origin: RefCell<Option<CommandProfilingReceipt>>,
+    deferred_origin: RefCell<CleanupDeferredOrigin>,
+    future_handoff: Cell<CleanupFutureHandoff>,
     reported: Cell<bool>,
 }
 
 impl CleanupEntry {
     pub(crate) fn phase(&self) -> CleanupPhase {
         self.phase.get()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_has_callback_roots_and_deferred_admission(&self) -> bool {
+        self.root.borrow().is_some()
+            && self.target_root.borrow().is_some()
+            && matches!(
+                &*self.deferred_origin.borrow(),
+                CleanupDeferredOrigin::Admitted(_)
+            )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_callback_root_released(&self) -> bool {
+        self.root.borrow().is_none()
     }
 
     pub(crate) fn callback(&self) -> Option<Value> {
@@ -68,6 +93,10 @@ impl CleanupEntry {
 
     pub(crate) fn lease(&self) -> Option<RuntimeLocalTaskLease> {
         self.lease.borrow().clone()
+    }
+
+    pub(crate) fn queued_command_origin(&self) -> Option<CommandProfilingReceipt> {
+        self.queued_command_origin.borrow().clone()
     }
 
     pub(crate) fn has_task_lease(&self) -> bool {
@@ -103,7 +132,8 @@ impl CleanupEntry {
         let root = self.root.borrow_mut().take();
         let target_root = self.target_root.borrow_mut().take();
         let lease = self.lease.borrow_mut().take();
-        drop((callback, root, target_root, lease));
+        let origin = self.queued_command_origin.borrow_mut().take();
+        drop((callback, root, target_root, lease, origin));
     }
 
     pub(crate) fn dispatch_failed(&self, error: crate::RuntimeError) {
@@ -114,10 +144,14 @@ impl CleanupEntry {
         *self.receipt.borrow_mut() = Some(CleanupReceipt::DispatchFailed(RuntimeErrorOwner::new(
             error,
         )));
-        let callback = self.callback.borrow_mut().take();
-        let root = self.root.borrow_mut().take();
-        let target_root = self.target_root.borrow_mut().take();
-        drop((callback, root, target_root));
+        if !self.future_may_own_resources() {
+            let callback = self.callback.borrow_mut().take();
+            let root = self.root.borrow_mut().take();
+            let target_root = self.target_root.borrow_mut().take();
+            let origin = self.queued_command_origin.borrow_mut().take();
+            drop((callback, root, target_root, origin));
+            self.settle_deferred(DeferredWorkTerminal::Failed);
+        }
     }
 
     pub(crate) fn abandon(&self) {
@@ -127,19 +161,22 @@ impl CleanupEntry {
         ) {
             self.phase.set(CleanupPhase::Abandoned);
             *self.receipt.borrow_mut() = Some(CleanupReceipt::Abandoned);
+            self.queued_command_origin.borrow_mut().take();
         }
     }
 
     pub(crate) fn release_terminal_after_future_drop(&self) {
         if matches!(
             self.phase.get(),
-            CleanupPhase::Abandoned | CleanupPhase::Cancelled
+            CleanupPhase::Abandoned | CleanupPhase::Cancelled | CleanupPhase::DispatchFailed
         ) {
             let callback = self.callback.borrow_mut().take();
             let root = self.root.borrow_mut().take();
             let target_root = self.target_root.borrow_mut().take();
             let lease = self.lease.borrow_mut().take();
-            drop((callback, root, target_root, lease));
+            let origin = self.queued_command_origin.borrow_mut().take();
+            drop((callback, root, target_root, lease, origin));
+            self.settle_deferred_from_receipt();
         }
     }
 }
@@ -217,6 +254,9 @@ impl CleanupRegistry {
             phase: Cell::new(CleanupPhase::Active),
             receipt: RefCell::new(None),
             lease: RefCell::new(None),
+            queued_command_origin: RefCell::new(None),
+            deferred_origin: RefCell::new(CleanupDeferredOrigin::Unowned),
+            future_handoff: Cell::new(CleanupFutureHandoff::NotStarted),
             reported: Cell::new(false),
         });
         let mut index = self.index.borrow_mut();
@@ -259,7 +299,11 @@ impl CleanupRegistry {
     /// Snapshot active IDs, then atomically admit independent source SCCs
     /// while the GC root-publication guard still protects that proof.
     /// The caller must retain detached Values until this method returns.
-    pub(crate) fn admit_batch(&self, temporary: &[RootId]) -> CleanupAdmission {
+    pub(crate) fn admit_batch(
+        &self,
+        temporary: &[RootId],
+        origin: Option<&CommandProfilingReceipt>,
+    ) -> CleanupAdmission {
         self.prune_terminal_after_collection();
         let mut active = self
             .index
@@ -332,6 +376,12 @@ impl CleanupRegistry {
                 .zip(selected)
                 .filter_map(|(entry, selected)| selected.then_some(entry))
                 .collect::<Vec<_>>();
+            // The GC reachability decision held ROOT_ADMISSION.read. Admit
+            // profiling only after it returns: this may take the command
+            // receipt mutex, and no callback can start on this thread yet.
+            for entry in &queued {
+                entry.queue_command_origin(origin);
+            }
             let mut index = self.index.borrow_mut();
             for entry in &queued {
                 index.active.remove(&entry.target);
@@ -345,8 +395,13 @@ impl CleanupRegistry {
         }
     }
 
-    pub(crate) fn queue_explicit(&self, entry: &CleanupEntry) -> bool {
+    pub(crate) fn queue_explicit(
+        &self,
+        entry: &CleanupEntry,
+        origin: Option<&CommandProfilingReceipt>,
+    ) -> bool {
         if entry.phase.get() == CleanupPhase::Active {
+            entry.queue_command_origin(origin);
             entry.phase.set(CleanupPhase::Queued);
             let mut index = self.index.borrow_mut();
             if let Some(entry) = index.active.remove(&entry.target) {
@@ -365,11 +420,12 @@ impl CleanupRegistry {
         ) {
             entry.phase.set(CleanupPhase::Cancelled);
             *entry.receipt.borrow_mut() = Some(CleanupReceipt::Cancelled);
+            entry.queued_command_origin.borrow_mut().take();
             if let Some(lease) = entry.lease() {
                 // The child may still be retained by its task slot. Its drop
                 // guard releases captured roots at actual future retirement.
                 lease.cancel();
-            } else {
+            } else if !entry.future_may_own_resources() {
                 entry.release_terminal_after_future_drop();
             }
             let owned = { self.index.borrow().entries.get(&entry.target).cloned() };
@@ -411,7 +467,7 @@ impl CleanupRegistry {
             // A currently polling child may remain alive until that poll
             // unwinds. Its future's drop guard releases roots at the actual
             // destruction boundary, not at the lease's Cancelled signal.
-            if !entry.has_task_lease() {
+            if !entry.has_task_lease() && !entry.future_may_own_resources() {
                 entry.release_terminal_after_future_drop();
             }
         }

@@ -33,7 +33,7 @@ fn complex_like_keeps_all_integer_payloads_exact_including_scalar_and_empty() {
                 1,
             ))
             .unwrap();
-            let Value::ComplexTensor(tensor) = output else {
+            let Value::ComplexTensor(tensor) = output.value() else {
                 panic!("exact integer complex tensor")
             };
             assert_eq!(tensor.shape(), shape);

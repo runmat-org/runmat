@@ -267,11 +267,11 @@ fn both_rgb_calls_select_one_owner_upload_and_observe_complete_publication() {
             &[Value::GpuTensor(source.clone())],
         ))
         .unwrap();
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("{name} must restore to source owner")
         };
         assert!(!output.shares_allocation_with(&source));
-        assert!(provider_for_handle(&output)
+        assert!(provider_for_handle(output)
             .is_some_and(|owner| same_provider_instance(owner, provider)));
         assert_eq!(
             witness.selections.get(),
@@ -325,15 +325,16 @@ fn one_pixel_single_gray_upload_is_typed_double_scalar_hsv_stays_single() {
         let witness = Rc::new(Witness::default());
         let runtime =
             runmat_accelerate::native_auto::install_preparation_service(witness.context());
-        let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+        let result = block_on(call_builtin_async_in_context(
             &runtime,
             name,
             &[Value::GpuTensor(source.clone())],
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::GpuTensor(output) = result.value() else {
             panic!("{name} output must be resident")
         };
-        assert_eq!(handle_precision(&output), Some(expected));
+        assert_eq!(handle_precision(output), Some(expected));
         assert_eq!(witness.selections.get(), 1);
     }
 }
@@ -397,17 +398,18 @@ fn restored_color_conversions_select_once_and_observe_exact_owner_upload() {
         let witness = Rc::new(Witness::default());
         let runtime =
             runmat_accelerate::native_auto::install_preparation_service(witness.context());
-        let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+        let result = block_on(call_builtin_async_in_context(
             &runtime,
             name,
             &[Value::GpuTensor(source.clone())],
         ))
-        .expect("resident color conversion") else {
+        .expect("resident color conversion");
+        let Value::GpuTensor(output) = result.value() else {
             panic!("{name} must publish to the resident owner")
         };
         assert_eq!(output.shape(), source.shape());
         assert!(!output.shares_allocation_with(&source));
-        assert!(provider_for_handle(&output)
+        assert!(provider_for_handle(output)
             .is_some_and(|owner| same_provider_instance(owner, provider)));
         assert_eq!(
             witness.selections.get(),
@@ -445,14 +447,15 @@ fn indexed_color_two_resident_readbacks_select_one_owner_and_finite_quota_reject
 
     let witness = Rc::new(Witness::default());
     let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
-    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+    let result = block_on(call_builtin_async_in_context(
         &runtime, "ind2rgb", &operands,
     ))
-    .expect("two resident operands") else {
+    .expect("two resident operands");
+    let Value::GpuTensor(output) = result.value() else {
         panic!("indexed conversion must restore")
     };
     assert_eq!(output.shape(), &[1, 2, 3]);
-    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert!(runmat_accelerate_api::handle_is_explicit(output));
     assert!(!output.shares_allocation_with(&indexed));
     assert!(!output.shares_allocation_with(&map));
     assert_eq!(witness.selections.get(), 1);
@@ -504,7 +507,7 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
     map_provider.reset_telemetry();
     let witness = Rc::new(Witness::default());
     let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
-    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+    let result = block_on(call_builtin_async_in_context(
         &runtime,
         "ind2rgb",
         &[
@@ -512,13 +515,14 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
             Value::GpuTensor(map.clone()),
         ],
     ))
-    .expect("cross-provider indexed conversion") else {
+    .expect("cross-provider indexed conversion");
+    let Value::GpuTensor(output) = result.value() else {
         panic!("cross-provider output must restore to explicit map owner")
     };
     assert_eq!(output.shape(), &[1, 2, 3]);
-    assert!(provider_for_handle(&output)
+    assert!(provider_for_handle(output)
         .is_some_and(|owner| same_provider_instance(owner, map_provider)));
-    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert!(runmat_accelerate_api::handle_is_explicit(output));
     assert!(!output.shares_allocation_with(&indexed));
     assert!(!output.shares_allocation_with(&map));
     assert_eq!(index_provider.telemetry_snapshot().upload_bytes, 0);
@@ -560,7 +564,7 @@ fn cross_owner_readback_staging_exact_boundary_and_preeffect_rejection() {
     let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
     index_provider.inner.reset_telemetry();
     map_provider.reset_telemetry();
-    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+    let result = block_on(call_builtin_async_in_context(
         &runtime,
         "ind2rgb",
         &[
@@ -568,18 +572,19 @@ fn cross_owner_readback_staging_exact_boundary_and_preeffect_rejection() {
             Value::GpuTensor(map.clone()),
         ],
     ))
-    .expect("exact source staging quota admits cross-owner gather") else {
+    .expect("exact source staging quota admits cross-owner gather");
+    let Value::GpuTensor(output) = result.value() else {
         panic!("indexed result stays with explicit map owner")
     };
     assert_eq!(output.shape(), &[1, 2, 3]);
-    assert!(provider_for_handle(&output)
+    assert!(provider_for_handle(output)
         .is_some_and(|owner| same_provider_instance(owner, map_provider)));
     assert_eq!(witness.selections.get(), 1);
     witness.drain();
     assert_eq!(witness.feedback.borrow().len(), 1);
     assert!(witness.feedback.borrow()[0].succeeded);
     assert!(index_provider.inner.telemetry_snapshot().download_bytes > 0);
-    let host = block_on(map_provider.download(&output)).unwrap();
+    let host = block_on(map_provider.download(output)).unwrap();
     assert_eq!(host.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
 
     index_provider.scratch_available.store(7, Ordering::Relaxed);
@@ -617,12 +622,13 @@ fn gray_host_sink_observes_completed_readback_and_replicated_host_result() {
     let witness = Rc::new(Witness::default());
     let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
     provider.reset_telemetry();
-    let Value::Tensor(output) = block_on(call_builtin_async_in_context(
+    let result = block_on(call_builtin_async_in_context(
         &runtime,
         "gray2rgb",
         &[Value::GpuTensor(source.clone())],
     ))
-    .expect("resident gray host sink") else {
+    .expect("resident gray host sink");
+    let Value::Tensor(output) = result.value() else {
         panic!("gray2rgb publishes host Tensor")
     };
     assert_eq!(output.shape(), &[1, 2, 3]);
@@ -767,12 +773,13 @@ fn actual_wgpu_gray_host_sink_completes_nonempty_empty_and_lazy_readbacks() {
         let runtime =
             runmat_accelerate::native_auto::install_preparation_service(witness.context());
         provider.reset_telemetry();
-        let Value::Tensor(output) = block_on(call_builtin_async_in_context(
+        let result = block_on(call_builtin_async_in_context(
             &runtime,
             "gray2rgb",
             &[Value::GpuTensor(source.clone())],
         ))
-        .expect("required actual WGPU gray readback") else {
+        .expect("required actual WGPU gray readback");
+        let Value::Tensor(output) = result.value() else {
             panic!("{name} must publish host tensor")
         };
         assert_eq!(

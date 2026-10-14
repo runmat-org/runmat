@@ -421,19 +421,15 @@ fn exact_resolvers_remain_invocation_owned_across_sibling_pending_and_drop() {
             None,
         )))
         .expect("sibling exact resolver");
-    let [Value::BoundFunctionHandle {
-        function,
-        authority,
-        ..
-    }] = decoded_b.values()
-    else {
+    let [Value::BoundFunctionHandle(handle)] = decoded_b.values() else {
         panic!("bound callable result");
     };
-    assert_eq!(*function, 73);
-    assert!(authority
+    assert_eq!(handle.function, 73);
+    assert!(handle
+        .authority
         .local_lease(73)
         .is_some_and(|lease| lease.matches(&owner_b)));
-    assert!(authority.local_lease(41).is_none());
+    assert!(handle.authority.local_lease(41).is_none());
 
     drop(pending);
     drop(ambient_resolver);

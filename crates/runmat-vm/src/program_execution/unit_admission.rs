@@ -1,9 +1,24 @@
 use runmat_execution::{ExecutableComponentKind, ExecutableUnitEnvelope};
+use std::sync::Arc;
 
 use crate::{Bytecode, FunctionRegistry, VmAssemblyLayout};
 
 #[path = "unit_admission/entrypoint.rs"]
 mod entrypoint;
+#[path = "unit_admission/graph_codec.rs"]
+mod graph_codec;
+#[path = "unit_admission/retained_source_owner.rs"]
+mod retained_source_owner;
+#[path = "unit_admission/selected_interop.rs"]
+mod selected_interop;
+#[path = "unit_admission/static_import.rs"]
+mod static_import;
+pub use graph_codec::{
+    selected_graph_callable_facts, selected_graph_callable_facts_for_owner, GraphCodecAdmission,
+    SelectedGraphCallableFacts,
+};
+pub use retained_source_owner::RetainedExecutableSourceOwner;
+pub use selected_interop::SelectedUnitInteropReceipt;
 
 /// Fully decoded executable unit whose component identities and revisions have
 /// been validated, but whose portable source ordinals have not yet issued
@@ -11,32 +26,75 @@ mod entrypoint;
 #[derive(Clone, Debug)]
 pub struct AdmittedExecutableUnit {
     envelope: ExecutableUnitEnvelope,
+    canonical_v3: Arc<[u8]>,
     bytecode: Bytecode,
     registry: FunctionRegistry,
     layout: VmAssemblyLayout,
     source_map: runmat_execution::ExecutableSourceMapV2,
-    entrypoint_origin: runmat_execution::FunctionBindingOrigin,
-    entrypoint_function: Option<runmat_hir::FunctionId>,
+    entrypoint: entrypoint::AdmittedEntrypoint,
+    static_imports: Vec<runmat_execution::executable::ExecutableStaticImport>,
 }
 
 /// Executable unit bound to one exact runtime source owner. The runtime must
 /// stay with the registry: its source leases are part of executable authority.
 #[derive(Debug)]
 pub struct RuntimeBoundExecutableUnit {
+    canonical_v3: Option<Arc<[u8]>>,
+    selected_source_map: Option<runmat_execution::ExecutableSourceMapV2>,
+    selected_source_owner: Option<runmat_runtime::source_context::SelectedProgramSourceOwner>,
     bytecode: Bytecode,
     registry: FunctionRegistry,
     layout: VmAssemblyLayout,
     runtime: runmat_runtime::context::RuntimeContext,
-    entrypoint_function: Option<runmat_hir::FunctionId>,
+    entrypoint: RuntimeBoundEntrypoint,
+    static_imports: Vec<runmat_execution::executable::ExecutableStaticImport>,
+    declares_interop: bool,
+}
+
+#[derive(Debug)]
+enum RuntimeBoundEntrypoint {
+    Function(runmat_hir::FunctionId),
+    Script,
+    DeclarationOnly(runmat_types::ClassIdentity),
+    #[cfg(test)]
+    Fixture,
 }
 
 impl AdmittedExecutableUnit {
+    /// Validated code and class declarations retained by this admitted unit.
+    pub fn bytecode(&self) -> &Bytecode {
+        &self.bytecode
+    }
+
+    /// Registry-local function admitted by the manifest's immutable origin.
+    pub fn entrypoint_function(&self) -> Option<runmat_hir::FunctionId> {
+        match &self.entrypoint {
+            entrypoint::AdmittedEntrypoint::Function { local_function, .. } => {
+                Some(*local_function)
+            }
+            entrypoint::AdmittedEntrypoint::Script { .. }
+            | entrypoint::AdmittedEntrypoint::DeclarationOnly { .. } => None,
+        }
+    }
+
     pub fn envelope(&self) -> &ExecutableUnitEnvelope {
         &self.envelope
     }
 
+    pub fn admitted_source_map(&self) -> &runmat_execution::ExecutableSourceMapV2 {
+        &self.source_map
+    }
+
+    pub fn canonical_v3(&self) -> &Arc<[u8]> {
+        &self.canonical_v3
+    }
+
     pub fn registry(&self) -> &FunctionRegistry {
         &self.registry
+    }
+
+    pub fn static_imports(&self) -> &[runmat_execution::executable::ExecutableStaticImport] {
+        &self.static_imports
     }
 
     /// Canonical per-origin definition fingerprints for this admitted unit.
@@ -48,9 +106,26 @@ impl AdmittedExecutableUnit {
         std::collections::HashMap<runmat_execution::FunctionBindingOrigin, String>,
         crate::RetainedCallableStageError,
     > {
-        crate::bytecode::program::retained_artifacts::admitted_callable_origin_fingerprints(
+        crate::bytecode::program::retained_artifacts::admitted_callable_origin_fingerprints_with_imports(
             &self.registry,
             &self.source_map,
+            &self.static_imports,
+        )
+    }
+
+    pub fn admitted_semantic_body_digests(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<
+            runmat_execution::FunctionBindingOrigin,
+            runmat_execution::executable::SelectedBodySemanticDigest,
+        >,
+        crate::RetainedCallableStageError,
+    > {
+        crate::bytecode::program::retained_artifacts::admitted_semantic_body_digests(
+            &self.registry,
+            &self.source_map,
+            &self.static_imports,
         )
     }
 
@@ -60,14 +135,50 @@ impl AdmittedExecutableUnit {
     pub fn entrypoint_origin(
         &self,
     ) -> Result<runmat_execution::FunctionBindingOrigin, ExecutableUnitAdmissionError> {
-        Ok(self.entrypoint_origin)
+        match &self.entrypoint {
+            entrypoint::AdmittedEntrypoint::Function { origin, .. }
+            | entrypoint::AdmittedEntrypoint::Script { origin } => Ok(*origin),
+            entrypoint::AdmittedEntrypoint::DeclarationOnly { .. } => {
+                Err(ExecutableUnitAdmissionError::SourceBinding(
+                    "declaration-only product has no callable entrypoint origin".into(),
+                ))
+            }
+        }
+    }
+
+    pub fn declaration_class(&self) -> Option<&runmat_types::ClassIdentity> {
+        match &self.entrypoint {
+            entrypoint::AdmittedEntrypoint::DeclarationOnly { class } => Some(class),
+            entrypoint::AdmittedEntrypoint::Function { .. }
+            | entrypoint::AdmittedEntrypoint::Script { .. } => None,
+        }
     }
 
     pub fn bind_runtime_sources(
         self,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
-        self.bind_runtime_sources_with_optional_records(runtime, None)
+        self.bind_runtime_sources_with_optional_records(runtime, None, None, None)
+            .map(|(unit, _)| unit)
+    }
+
+    /// Bind the exact admitted V3 and its matching unit-owned foreign bundle
+    /// under one issued source owner. A declaration-only product has no body
+    /// to carry the returned checked receipt, so its selected class product
+    /// retains the receipt for the duration of graph execution.
+    pub fn bind_runtime_sources_with_bundle(
+        self,
+        runtime: runmat_runtime::context::RuntimeContext,
+        bundle: Option<runmat_execution_artifact::ExecutionBundle>,
+        limits: runmat_execution_artifact::archive::ArchiveLimits,
+    ) -> Result<
+        (
+            RuntimeBoundExecutableUnit,
+            Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
+        ),
+        ExecutableUnitAdmissionError,
+    > {
+        self.bind_runtime_sources_with_optional_records(runtime, None, bundle, Some(limits))
     }
 
     /// Bind an admitted portable unit to the originating host's captured
@@ -78,14 +189,23 @@ impl AdmittedExecutableUnit {
         runtime: runmat_runtime::context::RuntimeContext,
         records: Vec<runmat_runtime::source_context::ProgramSourceRecord>,
     ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
-        self.bind_runtime_sources_with_optional_records(runtime, Some(records))
+        self.bind_runtime_sources_with_optional_records(runtime, Some(records), None, None)
+            .map(|(unit, _)| unit)
     }
 
     fn bind_runtime_sources_with_optional_records(
         mut self,
         runtime: runmat_runtime::context::RuntimeContext,
         records: Option<Vec<runmat_runtime::source_context::ProgramSourceRecord>>,
-    ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
+        bundle: Option<runmat_execution_artifact::ExecutionBundle>,
+        limits: Option<runmat_execution_artifact::archive::ArchiveLimits>,
+    ) -> Result<
+        (
+            RuntimeBoundExecutableUnit,
+            Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
+        ),
+        ExecutableUnitAdmissionError,
+    > {
         let runtime = super::unit_sources::bind_unit_sources(
             &self.envelope,
             &self.source_map,
@@ -95,18 +215,155 @@ impl AdmittedExecutableUnit {
             records,
         )
         .map_err(ExecutableUnitAdmissionError::SourceBinding)?;
+        let source_owner = runmat_runtime::source_context::SelectedProgramSourceOwner::capture(
+            &runtime,
+            &self.source_map,
+        )
+        .map_err(|error| ExecutableUnitAdmissionError::SourceBinding(error.to_string()))?;
+        let interop = &self.envelope.manifest.interop;
+        let has_interop = !interop.foreign_types.is_empty()
+            || !interop.adapters.is_empty()
+            || !interop.adapter_contracts.is_empty();
+        let interop_receipt = if has_interop || bundle.is_some() {
+            crate::SelectedUnitInteropReceipt::from_bundle(
+                bundle,
+                &self.canonical_v3,
+                &source_owner,
+                limits.unwrap_or_default(),
+            )
+            .map_err(ExecutableUnitAdmissionError::SourceBinding)?
+        } else {
+            None
+        };
+        let program = self
+            .envelope
+            .manifest
+            .identity
+            .program
+            .identity_digest()
+            .map_err(|error| ExecutableUnitAdmissionError::SourceBinding(error.to_string()))?;
+        let ids = self.registry.functions.keys().copied().collect::<Vec<_>>();
+        self.registry
+            .attach_selected_program_source_owner(ids, program, &source_owner)
+            .map_err(|error| ExecutableUnitAdmissionError::SourceBinding(error.into()))?;
+        for (id, selected) in &self.registry.functions {
+            if let Some(bound) = self.bytecode.bound_functions.get_mut(id) {
+                if bound.binding_origin == selected.binding_origin
+                    && bound.source_id == selected.source_id
+                    && std::sync::Arc::ptr_eq(&bound.definition_owner, &selected.definition_owner)
+                {
+                    bound.selected_source_owner = selected.selected_source_owner.clone();
+                }
+            }
+        }
+        self.bytecode.function_registry = self.registry.clone();
         self.bytecode.layout = Some(self.layout.clone());
-        Ok(RuntimeBoundExecutableUnit {
-            bytecode: self.bytecode,
-            registry: self.registry,
-            layout: self.layout,
-            runtime,
-            entrypoint_function: self.entrypoint_function,
-        })
+        let entrypoint = match self.entrypoint {
+            entrypoint::AdmittedEntrypoint::Function { local_function, .. } => {
+                RuntimeBoundEntrypoint::Function(local_function)
+            }
+            entrypoint::AdmittedEntrypoint::Script { .. } => RuntimeBoundEntrypoint::Script,
+            entrypoint::AdmittedEntrypoint::DeclarationOnly { class } => {
+                RuntimeBoundEntrypoint::DeclarationOnly(class)
+            }
+        };
+        Ok((
+            RuntimeBoundExecutableUnit {
+                canonical_v3: Some(self.canonical_v3),
+                selected_source_map: Some(self.source_map),
+                selected_source_owner: Some(source_owner),
+                bytecode: self.bytecode,
+                registry: self.registry,
+                layout: self.layout,
+                runtime,
+                entrypoint,
+                static_imports: self.static_imports,
+                declares_interop: has_interop,
+            },
+            interop_receipt,
+        ))
     }
 }
 
 impl RuntimeBoundExecutableUnit {
+    /// Pin the checked code/source product on every body before retained
+    /// staging remaps those bodies into the destination's retired registry.
+    /// Dynamic source loading currently admits only units without foreign
+    /// artifacts; a foreign-bearing unit needs its checked archive receipt.
+    pub fn attach_local_selected_product(&mut self) -> Result<(), String> {
+        let bytes = self
+            .canonical_v3
+            .as_ref()
+            .ok_or("selected unit has no canonical V3 product")?;
+        let owner = self
+            .selected_source_owner
+            .as_ref()
+            .ok_or("selected unit has no issued source owner")?;
+        if self.declares_interop {
+            return Err("dynamic selected foreign unit needs its checked archive receipt".into());
+        }
+        let product = crate::SelectedExecutableProduct::admit(Arc::clone(bytes), owner.clone())?;
+        let ids = self.registry.functions.keys().copied().collect::<Vec<_>>();
+        self.registry
+            .attach_current_selected_executable_product(ids.iter().copied(), product)
+            .map_err(str::to_string)?;
+        for id in ids {
+            let selected = self
+                .registry
+                .get_current(id)
+                .ok_or("selected unit lost its current definition")?;
+            if let Some(bound) = self.bytecode.bound_functions.get_mut(&id) {
+                if bound.binding_origin != selected.binding_origin
+                    || bound.source_id != selected.source_id
+                    || !Arc::ptr_eq(&bound.definition_owner, &selected.definition_owner)
+                {
+                    return Err("selected unit bound body differs from its registry owner".into());
+                }
+                bound.selected_executable_product = selected.selected_executable_product.clone();
+            }
+        }
+        self.bytecode.function_registry = self.registry.clone();
+        Ok(())
+    }
+
+    pub fn static_imports(&self) -> &[runmat_execution::executable::ExecutableStaticImport] {
+        &self.static_imports
+    }
+
+    pub fn declares_interop(&self) -> bool {
+        self.declares_interop
+    }
+
+    pub fn canonical_v3(&self) -> Option<&Arc<[u8]>> {
+        self.canonical_v3.as_ref()
+    }
+
+    pub fn selected_source_map(&self) -> Option<&runmat_execution::ExecutableSourceMapV2> {
+        self.selected_source_map.as_ref()
+    }
+
+    pub fn selected_source_owner(
+        &self,
+    ) -> Option<&runmat_runtime::source_context::SelectedProgramSourceOwner> {
+        self.selected_source_owner.as_ref()
+    }
+
+    pub fn matches_bound_definition(
+        &self,
+        origin: runmat_execution::FunctionBindingOrigin,
+        lease: &runmat_value::FunctionDefinitionLease,
+    ) -> bool {
+        let mut bodies = self
+            .registry
+            .selected_execution_bodies()
+            .into_iter()
+            .filter(|body| body.binding_origin == Some(origin));
+        let Some(body) = bodies.next() else {
+            return false;
+        };
+        bodies.next().is_none() && lease.matches(&body.definition_owner)
+    }
+
     /// Whether a decoded value or an in-flight staged graph still owns any
     /// definition from this source-bearing unit.
     pub fn has_live_definition_owners(&self) -> bool {
@@ -148,7 +405,21 @@ impl RuntimeBoundExecutableUnit {
 
     /// Exact registry key selected while admitting the function entrypoint.
     pub fn entrypoint_function(&self) -> Option<runmat_hir::FunctionId> {
-        self.entrypoint_function
+        match self.entrypoint {
+            RuntimeBoundEntrypoint::Function(function) => Some(function),
+            RuntimeBoundEntrypoint::Script | RuntimeBoundEntrypoint::DeclarationOnly(_) => None,
+            #[cfg(test)]
+            RuntimeBoundEntrypoint::Fixture => None,
+        }
+    }
+
+    pub fn declaration_class(&self) -> Option<&runmat_types::ClassIdentity> {
+        match &self.entrypoint {
+            RuntimeBoundEntrypoint::DeclarationOnly(class) => Some(class),
+            RuntimeBoundEntrypoint::Function(_) | RuntimeBoundEntrypoint::Script => None,
+            #[cfg(test)]
+            RuntimeBoundEntrypoint::Fixture => None,
+        }
     }
 
     pub fn into_parts(
@@ -168,6 +439,9 @@ impl RuntimeBoundExecutableUnit {
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
         Self {
+            canonical_v3: None,
+            selected_source_map: None,
+            selected_source_owner: None,
             bytecode: Bytecode::with_instructions(Vec::new(), 0),
             registry,
             layout: VmAssemblyLayout {
@@ -176,7 +450,9 @@ impl RuntimeBoundExecutableUnit {
                 storage_bindings: Default::default(),
             },
             runtime,
-            entrypoint_function: None,
+            entrypoint: RuntimeBoundEntrypoint::Fixture,
+            static_imports: Vec::new(),
+            declares_interop: false,
         }
     }
 }
@@ -280,6 +556,14 @@ pub fn admit_executable_unit(
     }
     let envelope = ExecutableUnitEnvelope::from_canonical_bytes(bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
+    let supported_sections = runmat_execution::ExecutableSectionSupport::known([
+        runmat_execution::executable::KnownExecutableSection::StaticImports,
+    ])
+    .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
+    envelope
+        .manifest
+        .validate_for(&supported_sections)
+        .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
     if let Some(message) = super::unsupported_executable_revisions(&envelope.manifest.revisions) {
         return Err(ExecutableUnitAdmissionError::ComponentRevisions(message));
     }
@@ -306,6 +590,7 @@ pub fn admit_executable_unit(
         ))?;
     let registry = serde_json::from_slice(&registry_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidRegistry)?;
+    validate_class_method_roles(&bytecode, &registry)?;
     let layout_payload = envelope
         .component(ExecutableComponentKind::VmLayout)
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("VM layout"))?;
@@ -318,13 +603,67 @@ pub fn admit_executable_unit(
         .map_err(ExecutableUnitAdmissionError::InvalidSourceMap)?;
     let entrypoint =
         entrypoint::admit(&envelope, &mir, &bytecode, &registry, &layout, &source_map)?;
+    let static_imports = static_import::admit(&envelope, &bytecode, &registry)?;
     Ok(AdmittedExecutableUnit {
         envelope,
+        canonical_v3: Arc::from(bytes),
         bytecode,
         registry,
         layout,
         source_map,
-        entrypoint_origin: entrypoint.origin,
-        entrypoint_function: entrypoint.local_function,
+        entrypoint,
+        static_imports,
     })
+}
+
+/// A sealed class registration may refer to a method body in this unit or to
+/// a separately selected dependency. When a body for the typed class/member
+/// is local, its role and static mode must agree with the registration before
+/// the unit can issue runtime effects. This consistency check does not select
+/// a body by display name; selected Graph admission proves the exact method
+/// unit, definition lease, and source owner separately.
+fn validate_class_method_roles(
+    bytecode: &Bytecode,
+    registry: &FunctionRegistry,
+) -> Result<(), ExecutableUnitAdmissionError> {
+    use runmat_types::{ClassIdentity, ClassMethodRole, MethodName};
+    use std::collections::HashMap;
+
+    let mut roles = HashMap::<(ClassIdentity, MethodName), (ClassMethodRole, bool)>::new();
+    for body in registry.functions.values() {
+        let Some(owner) = body.class_method_owner.as_ref() else {
+            continue;
+        };
+        let key = (owner.declaring_class.clone(), owner.method.clone());
+        let actual = (owner.role, owner.is_static);
+        if roles
+            .insert(key, actual)
+            .is_some_and(|prior| prior != actual)
+        {
+            return Err(ExecutableUnitAdmissionError::SourceBinding(
+                "class method bodies disagree on their typed role".into(),
+            ));
+        }
+    }
+    for instruction in bytecode.instructions.iter().chain(
+        registry
+            .functions
+            .values()
+            .flat_map(|body| body.instructions.iter()),
+    ) {
+        let crate::Instr::RegisterClass { name, methods, .. } = instruction else {
+            continue;
+        };
+        for method in methods {
+            let key = (name.clone(), method.name.clone());
+            if roles.get(&key).is_some_and(|(role, is_static)| {
+                role != &method.role || is_static != &method.is_static
+            }) {
+                return Err(ExecutableUnitAdmissionError::SourceBinding(
+                    "class registration method role or static mode differs from a locally admitted class-method body".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

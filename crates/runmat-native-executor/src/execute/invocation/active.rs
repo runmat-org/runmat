@@ -6,7 +6,7 @@ use runmat_runtime::native::{
 use crate::osr::OsrTarget;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::super::executor::NativeExecution;
+use super::super::executor::{NativeExecution, RootedNativeExecution};
 use super::super::state::HostState;
 use super::NativeInvocationStep;
 
@@ -183,7 +183,7 @@ impl ActiveInvocation {
                         .take(exit.produced_outputs as usize)
                         .map(|reference| self.state.arena.get(*reference).cloned())
                         .collect::<NativeExecutorResult<Vec<_>>>()?;
-                    return Ok(NativeInvocationStep::Completed(NativeExecution {
+                    let execution = NativeExecution {
                         outputs,
                         captures: self.state.capture_results()?,
                         loop_backedges: self.state.loop_backedges(),
@@ -191,7 +191,10 @@ impl ActiveInvocation {
                         vectorized_regions: self.state.vectorized_regions(),
                         workspace: self.state.workspace_snapshot(),
                         expression: self.state.expression_result()?,
-                    }));
+                    };
+                    let execution = RootedNativeExecution::new(execution)
+                        .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                    return Ok(NativeInvocationStep::Completed(execution));
                 }
                 NativeExitKind::EXCEPTION => {
                     let error = self.state.last_error.take().unwrap_or_else(|| {

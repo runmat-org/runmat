@@ -199,7 +199,10 @@ fn bayesopt_error_with_source(
     builder.build()
 }
 
-async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {
+async fn call_function(
+    handle: &Value,
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone());
     crate::call_feval_async_with_outputs(callback, &args, 1).await
 }

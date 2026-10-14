@@ -6,10 +6,10 @@ fn evaluator() -> Rc<SessionSourceEvaluator> {
     let runtime = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ));
-    Rc::new(SessionSourceEvaluator::new(
+    SessionSourceEvaluator::new(
         runmat_runtime::workspace::BaseWorkspaceOwner::new(),
         runtime.local_identity(),
-    ))
+    )
 }
 
 fn scalar_bundle() -> RuntimeCallableArtifactBundle {
@@ -184,10 +184,10 @@ fn unpolled_and_foreign_preparation_leave_destination_unchanged() {
     let runtime = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ));
-    let evaluator = Rc::new(SessionSourceEvaluator::new(
+    let evaluator = SessionSourceEvaluator::new(
         runmat_runtime::workspace::BaseWorkspaceOwner::new(),
         runtime.local_identity(),
-    ));
+    );
     let expected = evaluator.current_generation();
     let service = SessionCallableArtifactService {
         evaluator: Rc::downgrade(&evaluator),
@@ -297,20 +297,16 @@ fn escaped_handle_after_error_exports_into_fresh_session_without_publishing_name
         .resolve_name("artifact_helper")
         .is_none());
 
-    let Value::BoundFunctionHandle {
-        function,
-        authority,
-        ..
-    } = committed.values()[0].clone()
-    else {
+    let Value::BoundFunctionHandle(handle) = committed.values()[0].clone() else {
         panic!("imported value must remain an exact bound handle");
     };
+    let data = handle.into_data();
     let result = futures::executor::block_on(
         runmat_runtime::user_functions::try_call_bound_function_in_context(
             &destination_runtime,
             BoundFunctionBinding {
-                function,
-                authority,
+                function: data.function,
+                authority: data.authority,
             },
             &[Value::Num(2.0)],
             1,
@@ -319,4 +315,16 @@ fn escaped_handle_after_error_exports_into_fresh_session_without_publishing_name
     .expect("selected destination invoker")
     .expect("imported callback execution");
     assert_eq!(result.as_slice(), &[Value::Num(42.0)]);
+
+    // The imported generation retains the admitted code and issued source
+    // table while its handle lives, but must not retain the runtime service
+    // port that points back to this evaluator.
+    let evaluator = Rc::downgrade(&destination.source_evaluator);
+    assert!(evaluator.upgrade().is_some());
+    drop(result);
+    drop(committed);
+    drop(destination_service);
+    drop(destination_runtime);
+    drop(destination);
+    assert!(evaluator.upgrade().is_none());
 }

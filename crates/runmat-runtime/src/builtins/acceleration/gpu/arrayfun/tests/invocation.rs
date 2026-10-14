@@ -7,13 +7,13 @@ fn arrayfun_additional_scalar_argument() {
     let tensor = Tensor::new(vec![0.5, 1.0, -1.0], vec![3, 1]).unwrap();
     let expected: Vec<f64> = values(&tensor).into_iter().map(|y| y.atan2(1.0)).collect();
     let result = call(
-        Value::FunctionHandle("atan2".to_string()),
+        Value::FunctionHandle("atan2".into()),
         vec![Value::Tensor(tensor), Value::Num(1.0)],
     )
     .expect("arrayfun");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
-            assert_eq!(values(&out), expected);
+            assert_eq!(values(out), expected);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -28,7 +28,7 @@ fn arrayfun_uniform_false_returns_cell() {
         .map(|x| Value::Num(x.sin()))
         .collect();
     let result = call(
-        Value::FunctionHandle("sin".to_string()),
+        Value::FunctionHandle("sin".into()),
         vec![
             Value::Tensor(tensor),
             Value::String("UniformOutput".into()),
@@ -36,7 +36,7 @@ fn arrayfun_uniform_false_returns_cell() {
         ],
     )
     .expect("arrayfun");
-    let Value::Cell(cell) = result else {
+    let Value::Cell(cell) = result.value() else {
         panic!("expected cell, got something else");
     };
     assert_eq!(cell.rows, 2);
@@ -51,7 +51,7 @@ fn arrayfun_uniform_false_returns_cell() {
 fn arrayfun_uniform_output_option_identifier() {
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let err = call(
-        Value::FunctionHandle("sin".to_string()),
+        Value::FunctionHandle("sin".into()),
         vec![
             Value::Tensor(tensor),
             Value::String("UniformOutput".into()),
@@ -70,7 +70,7 @@ fn arrayfun_uniform_output_option_identifier() {
 fn arrayfun_unknown_name_value_identifier() {
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let err = call(
-        Value::FunctionHandle("sin".to_string()),
+        Value::FunctionHandle("sin".into()),
         vec![
             Value::Tensor(tensor),
             Value::String("MysteryFlag".into()),
@@ -87,7 +87,7 @@ fn arrayfun_size_mismatch_errors() {
     let taller = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let shorter = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
     let err = call(
-        Value::FunctionHandle("sin".to_string()),
+        Value::FunctionHandle("sin".into()),
         vec![Value::Tensor(taller), Value::Tensor(shorter)],
     )
     .expect_err("expected size mismatch error");
@@ -103,11 +103,11 @@ fn arrayfun_size_mismatch_errors() {
 fn arrayfun_uniform_logical_result() {
     let tensor = Tensor::new(vec![1.0, f64::NAN, 0.0, f64::INFINITY], vec![4, 1]).unwrap();
     let result = call(
-        Value::FunctionHandle("isfinite".to_string()),
+        Value::FunctionHandle("isfinite".into()),
         vec![Value::Tensor(tensor)],
     )
     .expect("arrayfun isfinite");
-    match result {
+    match result.value() {
         Value::LogicalArray(la) => {
             assert_eq!(la.shape, vec![4, 1]);
             assert_eq!(la.data, vec![1, 0, 1, 0]);
@@ -121,11 +121,11 @@ fn arrayfun_uniform_logical_result() {
 fn arrayfun_uniform_character_result() {
     let tensor = Tensor::new(vec![65.0, 66.0, 67.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::FunctionHandle("char".to_string()),
+        Value::FunctionHandle("char".into()),
         vec![Value::Tensor(tensor)],
     )
     .expect("arrayfun char");
-    match result {
+    match result.value() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 3);

@@ -59,6 +59,13 @@ use runmat_types::{
 };
 use runmat_value::{Value, ValueSequence};
 
+fn rooted_sequence(
+    values: ValueSequence,
+) -> Result<runmat_runtime::execution::RootedValueSequence, Box<runmat_runtime::RuntimeError>> {
+    runmat_runtime::execution::RootedValueSequence::new(values)
+        .map_err(|error| Box::new(error.into_runtime_error()))
+}
+
 fn compile_executor(
     assembly: runmat_native_codegen::NativeAssembly,
 ) -> Result<NativeExecutor, JitError> {
@@ -620,7 +627,9 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
             Arc::new(move |_function, arguments, _requested_outputs| {
                 observed.fetch_add(1, Ordering::SeqCst);
                 let result = arguments[0].clone();
-                Box::pin(async move { Ok(ValueSequence::single(result).unwrap()) })
+                Box::pin(async move {
+                    rooted_sequence(ValueSequence::single(result).unwrap()).map_err(|error| *error)
+                })
             }),
         ));
         drop(activation);
@@ -693,7 +702,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
                         ))
                     })?;
                 }
-                Ok(ValueSequence::single(value).unwrap())
+                rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
     ));
@@ -782,7 +791,8 @@ fn suspending_external_call_resumes_exactly_without_replay() {
                     }
                 })
                 .await;
-                Ok(ValueSequence::single(Value::Num(7.0)).unwrap())
+                rooted_sequence(ValueSequence::single(Value::Num(7.0)).unwrap())
+                    .map_err(|error| *error)
             })
         }),
     ));
@@ -822,6 +832,7 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "suspending_prefix_subsref".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]
         .into_iter()
@@ -846,10 +857,13 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
                     }
                 })
                 .await;
-                Ok(ValueSequence::single(Value::Tensor(
-                    runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
-                ))
-                .unwrap())
+                rooted_sequence(
+                    ValueSequence::single(Value::Tensor(
+                        runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+                    ))
+                    .unwrap(),
+                )
+                .map_err(|error| *error)
             })
         }),
     ));
@@ -890,6 +904,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
         access: runmat_types::MemberAccess::Public,
         function_name: function_name.into(),
         implicit_class_argument: None,
+        role: runmat_types::ClassMethodRole::Ordinary,
     };
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
         events: Default::default(),
@@ -915,10 +930,13 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                     let call = observed_subsref.fetch_add(1, Ordering::SeqCst);
                     Box::pin(async move {
                         if call == 0 {
-                            return Ok(ValueSequence::single(Value::Object(
-                                runmat_value::ObjectInstance::new("StagedPathObject"),
-                            ))
-                            .unwrap());
+                            return rooted_sequence(
+                                ValueSequence::single(Value::Object(
+                                    runmat_value::ObjectInstance::new("StagedPathObject"),
+                                ))
+                                .unwrap(),
+                            )
+                            .map_err(|error| *error);
                         }
                         let mut yielded = false;
                         futures::future::poll_fn(|context| {
@@ -931,7 +949,8 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                             }
                         })
                         .await;
-                        Ok(ValueSequence::single(Value::Num(42.0)).unwrap())
+                        rooted_sequence(ValueSequence::single(Value::Num(42.0)).unwrap())
+                            .map_err(|error| *error)
                     })
                 }
                 12 => {
@@ -948,7 +967,8 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                             }
                         })
                         .await;
-                        Ok(ValueSequence::single(Value::Num(1.0)).unwrap())
+                        rooted_sequence(ValueSequence::single(Value::Num(1.0)).unwrap())
+                            .map_err(|error| *error)
                     })
                 }
                 _ => panic!("unexpected semantic function {function}"),
@@ -996,13 +1016,10 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     );
 
     let range = compile_executor(range_fixture()).unwrap();
-    let output = range
+    let execution = range
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
         .unwrap();
-    let Value::Tensor(range) = output else {
+    let Value::Tensor(range) = execution.outputs.first().unwrap() else {
         panic!("expected colon to produce a tensor")
     };
     assert_eq!(range.materialize_f64(), vec![1.0, 2.0, 3.0]);
@@ -1016,13 +1033,10 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     );
 
     let aggregate = compile_executor(aggregate_fixture()).unwrap();
-    let Value::Tensor(matrix) = aggregate
+    let execution = aggregate
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::Tensor(matrix) = execution.outputs.first().unwrap() else {
         panic!("expected a tensor aggregate")
     };
     assert_eq!(matrix.shape(), &[1, 2]);
@@ -1048,6 +1062,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "native_parent_increment".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]
         .into_iter()
@@ -1070,8 +1085,15 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
             let value = arguments[0].clone();
             Box::pin(async move {
                 runmat_runtime::call_builtin_async("plus", &[value, Value::Num(1.0)])
-                    .await
-                    .map(|value| ValueSequence::single(value).unwrap())
+                    .await?
+                    .try_map_owned(
+                        |value| {
+                            ValueSequence::single(value).map_err(|error| {
+                                runmat_runtime::RuntimeError::new(error.to_string())
+                            })
+                        },
+                        |error| error.into_runtime_error(),
+                    )
             })
         }),
     ));
@@ -1104,13 +1126,10 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     });
     drop(activation);
     let constructor = compile_executor(super_constructor_fixture()).unwrap();
-    let Value::Object(value) = constructor
+    let execution = constructor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::Object(value) = execution.outputs.first().unwrap() else {
         panic!("super constructor must return the active child receiver");
     };
     assert_eq!(value.class_name.display_name(), "NativeChild");
@@ -1231,25 +1250,19 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
 #[test]
 fn generic_index_and_member_mutations_publish_updated_root_values() {
     let indexing = compile_executor(index_assignment_fixture()).unwrap();
-    let Value::Tensor(updated) = indexing
+    let execution = indexing
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::Tensor(updated) = execution.outputs.first().unwrap() else {
         panic!("expected updated tensor")
     };
     assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
 
     let member = compile_executor(member_assignment_fixture()).unwrap();
-    let Value::Struct(updated) = member
+    let execution = member
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::Struct(updated) = execution.outputs.first().unwrap() else {
         panic!("expected updated structure")
     };
     assert_eq!(updated.fields.get("answer"), Some(&Value::Num(42.0)));
@@ -1271,13 +1284,10 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
         SequenceDestinationFixture::Dynamic,
     ] {
         let executor = compile_executor(sequence_member_assignment_fixture(destination)).unwrap();
-        let Value::StructArray(array) = executor
+        let execution = executor
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs
-            .pop()
-            .unwrap()
-        else {
+            .unwrap();
+        let Value::StructArray(array) = execution.outputs.first().unwrap() else {
             panic!("expected updated structure array")
         };
         assert_eq!(
@@ -1290,13 +1300,10 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
         SequenceDestinationFixture::Indexed,
     ))
     .unwrap();
-    let Value::StructArray(array) = executor
+    let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::StructArray(array) = execution.outputs.first().unwrap() else {
         panic!("expected indexed structure-array update")
     };
     assert_eq!(
@@ -1320,22 +1327,32 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
                         9 => {
                             assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 0);
                             if dynamic {
-                                Ok(ValueSequence::single(Value::String("value".into())).unwrap())
+                                rooted_sequence(
+                                    ValueSequence::single(Value::String("value".into())).unwrap(),
+                                )
+                                .map_err(|error| *error)
                             } else {
-                                Ok(ValueSequence::single(Value::Tensor(
-                                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
-                                ))
-                                .unwrap())
+                                rooted_sequence(
+                                    ValueSequence::single(Value::Tensor(
+                                        runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2])
+                                            .unwrap(),
+                                    ))
+                                    .unwrap(),
+                                )
+                                .map_err(|error| *error)
                             }
                         }
                         10 => {
                             assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 1);
                             assert_eq!(requested_outputs, 2);
-                            Ok(ValueSequence::comma_separated(vec![
-                                Value::Num(7.0),
-                                Value::Num(8.0),
-                            ])
-                            .unwrap())
+                            rooted_sequence(
+                                ValueSequence::comma_separated(vec![
+                                    Value::Num(7.0),
+                                    Value::Num(8.0),
+                                ])
+                                .unwrap(),
+                            )
+                            .map_err(|error| *error)
                         }
                         _ => unreachable!("unexpected fixture function"),
                     }
@@ -1345,13 +1362,10 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
         drop(activation);
 
         let executor = compile_executor(sequence_member_order_fixture(dynamic)).unwrap();
-        let Value::StructArray(array) = executor
+        let execution = executor
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-            .unwrap()
-            .outputs
-            .pop()
-            .unwrap()
-        else {
+            .unwrap();
+        let Value::StructArray(array) = execution.outputs.first().unwrap() else {
             panic!("expected updated structure array")
         };
         assert_eq!(order.load(Ordering::SeqCst), 2);
@@ -1366,13 +1380,10 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
 #[test]
 fn generic_native_structure_assignment_uses_shared_growth_semantics() {
     let executor = compile_executor(structure_growth_fixture()).unwrap();
-    let Value::StructArray(array) = executor
+    let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::StructArray(array) = execution.outputs.first().unwrap() else {
         panic!("expected grown structure array")
     };
     assert_eq!(array.shape(), &[1, 3]);
@@ -1477,8 +1488,8 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
     };
     assert_eq!(execution.outputs, vec![Value::Num(42.0)]);
     assert_eq!(
-        execution.workspace.unwrap().values,
-        BTreeMap::from([("counter".into(), Value::Num(42.0))])
+        &execution.workspace.as_ref().unwrap().values,
+        &BTreeMap::from([("counter".into(), Value::Num(42.0))])
     );
 }
 
@@ -1506,13 +1517,10 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
     );
 
     let range = compile_executor(end_range_fixture()).unwrap();
-    let Value::Tensor(selected) = range
+    let execution = range
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap()
-        .outputs
-        .pop()
-        .unwrap()
-    else {
+        .unwrap();
+    let Value::Tensor(selected) = execution.outputs.first().unwrap() else {
         panic!("expected end-relative range selection to return a tensor")
     };
     assert_eq!(selected.materialize_f64(), vec![10.0, 20.0, 30.0]);
@@ -1529,7 +1537,8 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
             let value = arguments[0].clone();
             Box::pin(async move {
                 if function == 8 {
-                    return Ok(ValueSequence::single(value).unwrap());
+                    return rooted_sequence(ValueSequence::single(value).unwrap())
+                        .map_err(|error| *error);
                 }
                 let mut yielded = false;
                 futures::future::poll_fn(|context| {
@@ -1542,7 +1551,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
                     }
                 })
                 .await;
-                Ok(ValueSequence::single(value).unwrap())
+                rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
     ));
@@ -1597,7 +1606,7 @@ fn contextual_regions_at_one_site_resume_without_replaying_prior_regions() {
                     })
                     .await;
                 }
-                Ok(ValueSequence::single(value).unwrap())
+                rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
     ));
@@ -1642,7 +1651,8 @@ fn contextual_step_calls_have_distinct_resume_identities() {
                     })
                     .await;
                 }
-                Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                    .map_err(|error| *error)
             })
         }),
     ));
@@ -1691,12 +1701,16 @@ fn nested_contextual_call_restores_the_outer_operation_identity() {
                         }
                     })
                     .await;
-                    return Ok(ValueSequence::single(Value::Bool(true)).unwrap());
+                    return rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                        .map_err(|error| *error);
                 }
-                Ok(ValueSequence::single(
-                    argument.expect("fixture function 8 receives one argument"),
+                rooted_sequence(
+                    ValueSequence::single(
+                        argument.expect("fixture function 8 receives one argument"),
+                    )
+                    .unwrap(),
                 )
-                .unwrap())
+                .map_err(|error| *error)
             })
         }),
     ));
@@ -1823,12 +1837,15 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
                             "contextual roots did not retain their handle: {error}"
                         ))
                     })?;
-                    return Ok(ValueSequence::single(completed).unwrap());
+                    return rooted_sequence(ValueSequence::single(completed).unwrap())
+                        .map_err(|error| *error);
                 }
                 if call == 0 {
-                    Ok(ValueSequence::single(retained).unwrap())
+                    rooted_sequence(ValueSequence::single(retained).unwrap())
+                        .map_err(|error| *error)
                 } else {
-                    Ok(ValueSequence::single(Value::Num(4.0)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Num(4.0)).unwrap())
+                        .map_err(|error| *error)
                 }
             })
         }),
@@ -2018,6 +2035,7 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -2035,7 +2053,7 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -2168,6 +2186,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -2179,7 +2198,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -2569,6 +2588,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -2580,7 +2600,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -2697,6 +2717,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -2708,7 +2729,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -2999,7 +3020,8 @@ fn generic_native_omitted_input_can_be_initialized_before_member_assignment() {
         .unwrap();
         let result = executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context());
         if initialize {
-            let output = result.unwrap().outputs.pop().unwrap();
+            let result = result.unwrap();
+            let output = result.outputs.first().unwrap();
             let Value::Struct(root) = output else {
                 panic!("initialized struct")
             };
@@ -3016,12 +3038,10 @@ fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() 
     for (initialize, nested) in [(false, false), (false, true), (true, true)] {
         let executor =
             compile_executor(member_assignment_fixture_with_root(initialize, nested)).unwrap();
-        let output = executor
+        let execution = executor
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs
-            .pop()
             .unwrap();
+        let output = execution.outputs.first().unwrap();
         let Value::Struct(root) = output else {
             panic!("expected initialized structure")
         };
@@ -3031,7 +3051,7 @@ fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() 
             };
             child
         } else {
-            &root
+            root
         };
         assert_eq!(structure.fields.get("answer"), Some(&Value::Num(42.0)));
     }
@@ -3434,6 +3454,7 @@ fn lower_body_with_inputs(
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -3445,7 +3466,7 @@ fn lower_body_with_inputs(
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: Some(
@@ -3540,6 +3561,7 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -3552,7 +3574,7 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: Some(&binding_names),
@@ -3647,6 +3669,7 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -3659,7 +3682,7 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: Some(&binding_names),
@@ -3748,6 +3771,7 @@ fn workspace_binding_fixture(
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -3760,7 +3784,7 @@ fn workspace_binding_fixture(
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: Some(&binding_names),
@@ -3849,6 +3873,7 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -3861,7 +3886,7 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: Some(&binding_names),
@@ -4430,6 +4455,7 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -4441,7 +4467,7 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -4632,6 +4658,7 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -4643,7 +4670,7 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,
@@ -4737,8 +4764,9 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
             program,
             root_package: "r13-fixture@1.0.0".into(),
             entrypoint: "main".into(),
-            entrypoint_function: ProgramFunctionId(0),
+            entrypoint_function: Some(ProgramFunctionId(0)),
             entrypoint_kind: ExecutableEntrypointKind::Function,
+            declaration_class: None,
             source_digest: Digest::sha256(b"r13-main.m"),
         },
         revisions,

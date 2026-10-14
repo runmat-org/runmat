@@ -2,6 +2,7 @@ use std::future::Future;
 
 use runmat_value::Value;
 
+use crate::execution::RootedValue;
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
@@ -11,10 +12,10 @@ pub async fn execute_owned_subsref<Read, ReadFuture>(
     path: ObjectSubscriptPath,
     read_first: Read,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     execute_owned_subsref_with_context(None, base, path, read_first, caller_function_name).await
 }
@@ -25,10 +26,10 @@ pub async fn execute_owned_subsref_in_context<Read, ReadFuture>(
     path: ObjectSubscriptPath,
     read_first: Read,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     execute_owned_subsref_with_context(Some(runtime), base, path, read_first, caller_function_name)
         .await
@@ -40,10 +41,10 @@ pub async fn execute_owned_subsref_with_context<Read, ReadFuture>(
     path: ObjectSubscriptPath,
     read_first: Read,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let work =
         execute_owned_subsref_in_scope(runtime, base, path, read_first, caller_function_name);
@@ -56,10 +57,10 @@ async fn execute_owned_subsref_in_scope<Read, ReadFuture>(
     path: ObjectSubscriptPath,
     read_first: Read,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let mut steps = path.into_steps().into_iter();
     let first = steps.next().ok_or_else(empty_path_error)?;
@@ -71,10 +72,18 @@ where
         let suffix = ObjectSubscriptPath::new(remaining)?;
         match runtime {
             Some(runtime) => {
-                super::read_subscript_path_in_context(runtime, value, suffix, caller_function_name)
+                super::read_subscript_path_in_context(
+                    runtime,
+                    value.value().clone(),
+                    suffix,
+                    caller_function_name,
+                )
+                .await
+            }
+            None => {
+                super::read_subscript_path(value.value().clone(), suffix, caller_function_name)
                     .await
             }
-            None => super::read_subscript_path(value, suffix, caller_function_name).await,
         }
     }
 }
@@ -86,12 +95,12 @@ pub async fn execute_owned_subsasgn<Read, ReadFuture, Write, WriteFuture>(
     read_first: Read,
     write_first: Write,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
-    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+    WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     execute_owned_subsasgn_with_context(
         None,
@@ -113,12 +122,12 @@ pub async fn execute_owned_subsasgn_in_context<Read, ReadFuture, Write, WriteFut
     read_first: Read,
     write_first: Write,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
-    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+    WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     execute_owned_subsasgn_with_context(
         Some(runtime),
@@ -140,12 +149,12 @@ pub async fn execute_owned_subsasgn_with_context<Read, ReadFuture, Write, WriteF
     read_first: Read,
     write_first: Write,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
-    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+    WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let work = execute_owned_subsasgn_in_scope(
         runtime,
@@ -167,12 +176,12 @@ async fn execute_owned_subsasgn_in_scope<Read, ReadFuture, Write, WriteFuture>(
     read_first: Read,
     write_first: Write,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
-    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
-    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+    WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let mut steps = path.into_steps().into_iter();
     let first = steps.next().ok_or_else(empty_path_error)?;
@@ -186,16 +195,24 @@ where
         Some(runtime) => {
             super::assign_subscript_path_in_context(
                 runtime,
-                child,
+                child.value().clone(),
                 suffix,
                 values,
                 caller_function_name,
             )
             .await?
         }
-        None => super::assign_subscript_path(child, suffix, values, caller_function_name).await?,
+        None => {
+            super::assign_subscript_path(
+                child.value().clone(),
+                suffix,
+                values,
+                caller_function_name,
+            )
+            .await?
+        }
     };
-    write_first(base, first, vec![updated]).await
+    write_first(base, first, vec![updated.value().clone()]).await
 }
 
 fn empty_path_error() -> RuntimeError {

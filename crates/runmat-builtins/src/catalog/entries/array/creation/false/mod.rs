@@ -251,6 +251,7 @@ pub const FALSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 pub const FALSE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "false" },
     category: "array/creation",
@@ -298,4 +299,5 @@ pub(super) const CONSTANTS: &[BuiltinConstantCatalogEntry] = &[BuiltinConstantCa
     "false",
     BuiltinConstantKind::Logical,
     BuiltinCatalogProvenance::new(file!(), module_path!()),
-)];
+)
+.with_literal(crate::BuiltinConstantLiteral::Logical(false))];

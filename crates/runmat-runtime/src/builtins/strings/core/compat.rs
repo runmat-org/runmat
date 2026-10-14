@@ -2767,7 +2767,7 @@ mod tests {
     #[test]
     fn text_boundary_pattern_works_with_replace() {
         let pattern = block(text_boundary_builtin(vec![Value::String("start".into())])).unwrap();
-        let result = block(crate::call_builtin_async(
+        let result = futures::executor::block_on(crate::call_builtin_async(
             "replace",
             &[
                 Value::String("abc".into()),
@@ -2776,6 +2776,6 @@ mod tests {
             ],
         ))
         .expect("replace");
-        assert_eq!(result, Value::String(">abc".into()));
+        assert_eq!(result.value(), &Value::String(">abc".into()));
     }
 }

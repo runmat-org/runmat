@@ -9,10 +9,14 @@ mod isolation_input;
 mod java;
 mod manifest;
 #[cfg(not(target_arch = "wasm32"))]
+mod native_lane_profiling;
+#[cfg(not(target_arch = "wasm32"))]
 mod mex;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ffi;
 mod policy;
+#[cfg(not(target_arch = "wasm32"))]
+mod project_retirement;
 #[cfg(not(target_arch = "wasm32"))]
 mod python;
 mod runtime;
@@ -26,6 +30,8 @@ pub use handle::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use java::*;
 pub use manifest::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use mex::MexCallbackAncestry;
 #[cfg(not(target_arch = "wasm32"))]
 pub use mex::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -60,7 +66,7 @@ pub async fn run_extension_host() -> Result<(), String> {
 pub async fn load_foreign_member(
     reference: runmat_value::ForeignRef,
     member: String,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     invoke_foreign_member(
         reference.clone(),
         "get_member",
@@ -79,7 +85,7 @@ pub async fn store_foreign_member(
     reference: runmat_value::ForeignRef,
     member: String,
     value: runmat_value::Value,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     invoke_foreign_member(
         reference.clone(),
         "set_member",
@@ -98,7 +104,7 @@ pub async fn store_foreign_member(
 pub async fn index_foreign_resource(
     reference: runmat_value::ForeignRef,
     indices: Vec<runmat_value::Value>,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     let mut arguments = Vec::with_capacity(indices.len() + 1);
     arguments.push(runmat_value::Value::Foreign(reference.clone()));
     arguments.extend(indices);
@@ -111,7 +117,7 @@ pub async fn assign_foreign_resource_index(
     reference: runmat_value::ForeignRef,
     indices: Vec<runmat_value::Value>,
     value: runmat_value::Value,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     let mut arguments = Vec::with_capacity(indices.len() + 2);
     arguments.push(runmat_value::Value::Foreign(reference.clone()));
     arguments.extend(indices);
@@ -127,7 +133,7 @@ pub async fn invoke_foreign_method(
     method: String,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     let mut call_arguments = Vec::with_capacity(arguments.len() + 2);
     call_arguments.push(runmat_value::Value::Foreign(reference.clone()));
     call_arguments.push(runmat_value::Value::String(method));
@@ -145,7 +151,7 @@ async fn invoke_foreign_member(
     reference: runmat_value::ForeignRef,
     operation: &str,
     arguments: Vec<runmat_value::Value>,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     let sequence = invoke_foreign(reference, operation, arguments, 1).await?;
     require_foreign_single(sequence)
 }
@@ -155,7 +161,7 @@ async fn invoke_foreign(
     operation: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     let context = crate::context::legacy::active().ok_or_else(|| {
         foreign_error(
             ForeignErrorKind::HostUnavailable,
@@ -181,16 +187,21 @@ async fn invoke_foreign(
 }
 
 fn require_foreign_single(
-    sequence: runmat_value::ValueSequence,
-) -> Result<runmat_value::Value, crate::RuntimeError> {
+    sequence: crate::execution::RootedValueSequence,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
     use crate::sequence::ResolveValueSequence;
-    let mut values = sequence.resolve(
-        runmat_types::SequenceUse::RequireSingle,
-        crate::sequence::SequenceResolutionContext::default(),
-    )?;
-    Ok(values
-        .pop()
-        .expect("RequireSingle returned one foreign value"))
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values = sequence.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                crate::sequence::SequenceResolutionContext::default(),
+            )?;
+            Ok(values
+                .pop()
+                .expect("RequireSingle returned one foreign value"))
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 /// Resolve the modern `clib.<interface>.<function>` namespace through the same
@@ -200,7 +211,7 @@ pub async fn try_invoke_clib(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<runmat_value::ValueSequence, crate::RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
     let segments = name.split('.').collect::<Vec<_>>();
     if segments.len() < 3 || segments[0] != "clib" {
         return None;
@@ -245,7 +256,7 @@ pub async fn try_invoke_clibgen(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<runmat_value::ValueSequence, crate::RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
     if name != "clibgen.buildInterface" {
         return None;
     }
@@ -278,7 +289,7 @@ pub async fn try_invoke_java(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<runmat_value::ValueSequence, crate::RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
     if !is_java_qualified_candidate(name) {
         return None;
     }
@@ -304,7 +315,7 @@ pub async fn try_invoke_java(
             .await;
         if !matches!(
             configured.and_then(require_foreign_single),
-            Ok(runmat_value::Value::Bool(true))
+            Ok(value) if matches!(value.value(), runmat_value::Value::Bool(true))
         ) {
             return None;
         }
@@ -340,7 +351,7 @@ pub async fn try_invoke_python(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<runmat_value::ValueSequence, crate::RuntimeError>> {
+) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
     if !name.starts_with("py.") || name.len() <= 3 {
         return None;
     }

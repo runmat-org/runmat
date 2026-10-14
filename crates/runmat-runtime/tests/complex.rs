@@ -10,9 +10,9 @@ fn complex_scalar_arithmetic() {
     let a = Value::Complex(3.0, 2.0);
     let b = Value::Complex(1.5, -4.0);
     let s = runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]).unwrap();
-    if let Value::Complex(re, im) = s {
-        assert!((re - 4.5).abs() < 1e-12);
-        assert!((im + 2.0).abs() < 1e-12);
+    if let Value::Complex(re, im) = s.value() {
+        assert!((*re - 4.5).abs() < 1e-12);
+        assert!((*im + 2.0).abs() < 1e-12);
     } else {
         panic!("expected complex");
     }
@@ -37,9 +37,9 @@ fn complex_scalar_arithmetic() {
 fn complex_scalar_with_real() {
     let a = Value::Complex(2.0, -1.0);
     let s = runmat_runtime::call_builtin("plus", &[a.clone(), Value::Num(3.0)]).unwrap();
-    if let Value::Complex(re, im) = s {
-        assert!((re - 5.0).abs() < 1e-12);
-        assert!((im + 1.0).abs() < 1e-12);
+    if let Value::Complex(re, im) = s.value() {
+        assert!((*re - 5.0).abs() < 1e-12);
+        assert!((*im + 1.0).abs() < 1e-12);
     } else {
         panic!();
     }
@@ -68,7 +68,7 @@ fn complex_array_elementwise_add() {
     let a = Value::ComplexTensor(ct);
     let b = Value::Num(2.0);
     let c = runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]).unwrap();
-    if let Value::ComplexTensor(t) = c {
+    if let Value::ComplexTensor(t) = c.value() {
         assert_eq!(t.rows(), 2);
         assert_eq!(t.cols(), 2);
         assert_eq!(
@@ -114,7 +114,7 @@ fn complex_matmul_and_transpose() {
     }
     // transpose conjugate on complex matrix
     let t = runmat_runtime::call_builtin("transpose", &[Value::ComplexTensor(a)]).unwrap();
-    if let Value::ComplexTensor(ct) = t {
+    if let Value::ComplexTensor(ct) = t.value() {
         assert_eq!(ct.rows(), 2);
         assert_eq!(ct.cols(), 2);
     }
@@ -125,7 +125,7 @@ fn complex_matmul_and_transpose() {
 fn complex_string_formats_and_logical_conversion_rejects_complex_values() {
     let a = Value::Complex(0.0, -2.5);
     let s = runmat_runtime::call_builtin("string", std::slice::from_ref(&a)).unwrap();
-    if let Value::StringArray(sa) = s {
+    if let Value::StringArray(sa) = s.value() {
         assert_eq!(sa.data[0], "-2.5i");
     } else {
         panic!();

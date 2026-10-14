@@ -71,7 +71,7 @@ impl WgpuProvider {
         let mut pending = PendingSubmissions::new(self.access.clone());
         let receipt = self
             .access
-            .with_scoped(|emission| {
+            .with_profiled_scoped(&self.emission_authority, |emission| {
                 crate::backend::wgpu::dispatch::fft::run(
                     emission,
                     &mut pending,

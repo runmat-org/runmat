@@ -1,8 +1,12 @@
 //! Executor-owned source evaluation against a session base workspace.
 
-use super::{compile_dynamic_workspace_eval, FunctionRegistry};
+use super::{
+    compile_dynamic_workspace_eval_inner, parse_dynamic_eval, DynamicEvalCompileRequest,
+    DynamicEvalCompiled, FunctionRegistry,
+};
 use crate::interpreter::api::InterpreterOutcome;
-use crate::interpreter::runner::interpret_with_workspace_in_context;
+use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
+use crate::interpreter::runner::interpret_with_workspace_and_dynamic_admission_in_context;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
@@ -18,7 +22,43 @@ pub async fn evaluate_session_source_in_context(
     source_ref: runmat_runtime::source_context::RuntimeSourceRef,
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    evaluate_session_source_with_dynamic_admission_in_context(
+        runtime,
+        source,
+        source_label,
+        source_ref,
+        requested_outputs,
+        function_registry,
+        None,
+    )
+    .await
+}
+
+pub struct DynamicSessionEvalAdmission {
+    pub source_lease: runmat_runtime::source_context::RuntimeSourceLease,
+    pub port: DynamicEvalAdmissionPort,
+}
+
+pub async fn evaluate_session_source_with_dynamic_admission_in_context(
+    runtime: runmat_runtime::context::RuntimeContext,
+    source: String,
+    source_label: String,
+    source_ref: runmat_runtime::source_context::RuntimeSourceRef,
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    selected: Option<DynamicSessionEvalAdmission>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    if selected
+        .as_ref()
+        .is_some_and(|selected| selected.source_lease.source_ref() != source_ref)
+    {
+        return Err(runmat_runtime::build_runtime_error(
+            "dynamic source lease does not match the admitted source reference",
+        )
+        .with_identifier("RunMat:SourceEvaluation:SourceMismatch")
+        .build());
+    }
     if requested_outputs > 1 {
         return Err(runmat_runtime::build_runtime_error(format!(
             "source evaluation supports at most one output, but {requested_outputs} were requested"
@@ -63,16 +103,62 @@ pub async fn evaluate_session_source_in_context(
         assigned.insert(name.clone());
         global_aliases.declare_named(slot, name);
     }
-    let Some((bytecode, result_slot)) = compile_dynamic_workspace_eval(
-        "source evaluation",
-        &source,
-        &names,
+    let requires_product = |canonical: &crate::bytecode::Bytecode, inherited: &FunctionRegistry| {
+        selected.as_ref().map_or(Ok(false), |selected| {
+            selected
+                .port
+                .host()
+                .requires_selected_product(canonical, inherited)
+        })
+    };
+    let ast = parse_dynamic_eval("source evaluation", &source)?;
+    let Some(compiled) = compile_dynamic_workspace_eval_inner(DynamicEvalCompileRequest {
+        builtin: "source evaluation",
+        ast: &ast,
+        workspace_bindings: &names,
+        lowering_bindings: &names,
         function_registry,
-        Some(source_ref),
+        source_ref: Some(source_ref),
         requested_outputs,
-    )?
+        select_product: selected.as_ref().map(|_| {
+            &requires_product
+                as &dyn Fn(
+                    &crate::bytecode::Bytecode,
+                    &FunctionRegistry,
+                ) -> Result<bool, RuntimeError>
+        }),
+        selected_sources: super::eval_static_selection::EvalSelectedSources::default(),
+    })?
     else {
-        return Ok(runmat_value::ValueSequence::empty());
+        return runmat_runtime::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::empty(),
+        )
+        .map_err(|error| error.into_runtime_error());
+    };
+    let (bytecode, result_slot, runtime, _publication) = match compiled {
+        DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (
+            *bytecode,
+            result_slot,
+            runtime.without_selected_graph_program(),
+            None,
+        ),
+        DynamicEvalCompiled::Selected(product) => {
+            let selected = selected.as_ref().expect("selected product has a port");
+            let admitted = selected.port.host().admit(
+                &runtime,
+                &selected.source_lease,
+                &source,
+                None,
+                *product,
+                function_registry,
+            )?;
+            (
+                admitted.execution_bytecode,
+                admitted.result_slot,
+                admitted.runtime,
+                Some(admitted.publication),
+            )
+        }
     };
 
     let projection = Rc::new(projection);
@@ -86,25 +172,35 @@ pub async fn evaluate_session_source_in_context(
         assigned,
         global_aliases,
     );
-    let execution = interpret_with_workspace_in_context(
+    let execution = interpret_with_workspace_and_dynamic_admission_in_context(
         &bytecode,
         &mut values,
         Some(&source_label),
         execution_runtime,
         Some(admission),
+        selected.as_ref().map(|selected| selected.port.clone()),
     )
     .await;
 
-    if projection.has_pending_changes()? {
+    let pending_changes = projection.has_pending_changes()?;
+    if pending_changes {
         projection.publish()?;
     }
     let InterpreterOutcome::Completed(completion) = execution.outcome?;
     if requested_outputs == 0 {
-        return Ok(runmat_value::ValueSequence::empty());
+        return runmat_runtime::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::empty(),
+        )
+        .map_err(|error| error.into_runtime_error());
     }
-    let value = result_slot
-        .and_then(|slot| completion.values.get(slot).cloned())
-        .unwrap_or(Value::Num(0.0));
-    runmat_value::ValueSequence::single(value)
-        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+    completion.try_map_owned(
+        |completion| {
+            let value = result_slot
+                .and_then(|slot| completion.values.get(slot).cloned())
+                .unwrap_or(Value::Num(0.0));
+            runmat_value::ValueSequence::single(value)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        },
+        |error| error.into_runtime_error(),
+    )
 }

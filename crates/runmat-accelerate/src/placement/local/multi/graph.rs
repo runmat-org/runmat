@@ -139,10 +139,10 @@ pub(super) fn cpu_resource(cpu: &ExecutionCandidateDescriptor) -> CandidateResou
 mod tests {
     use super::*;
     use runmat_accelerate_api::{
+        reduction::{ReductionStrategy, SelectedReductionWork},
         ProviderCostContext, ProviderElementType, ProviderFeasibilityQuery, ProviderLayout,
         ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation,
         ProviderResidency, ProviderStorage, ProviderTypedReductionWorkload, ProviderWorkload,
-        reduction::{ReductionStrategy, SelectedReductionWork},
     };
     use runmat_execution::{
         CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,

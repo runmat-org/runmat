@@ -23,7 +23,7 @@ impl Drop for BrowserRecordOnDrop {
 }
 
 #[derive(Clone)]
-struct BrowserPort {
+pub(super) struct BrowserPort {
     supervisor: Weak<BrowserInner>,
     owner: RuntimeContextLocalId,
     token: LocalTaskOwnerToken,
@@ -34,38 +34,60 @@ impl RuntimeLocalTaskService for BrowserPort {
         Some(self.token.clone())
     }
 
+    fn canonical_admission(&self) -> Option<CanonicalLocalTaskAdmission> {
+        Some(CanonicalLocalTaskAdmission { port: self.clone() })
+    }
+
     fn spawn_local(
         &self,
         owner_id: RuntimeContextLocalId,
         future: RuntimeLocalTaskFuture,
     ) -> Result<RuntimeLocalTaskLease, RuntimeError> {
+        self.submit(owner_id, future, None)
+    }
+}
+
+impl BrowserPort {
+    pub(super) fn submit(
+        &self,
+        owner_id: RuntimeContextLocalId,
+        future: RuntimeLocalTaskFuture,
+        deferred: Option<CommandDeferredWork>,
+    ) -> Result<RuntimeLocalTaskLease, RuntimeError> {
         if owner_id != self.owner {
-            return Err(LocalTaskFailure::ForeignSession.runtime_error());
+            return reject_admitted(
+                LocalTaskFailure::ForeignSession.runtime_error(),
+                future,
+                deferred,
+            );
         }
-        let owner = self
-            .supervisor
-            .upgrade()
-            .ok_or_else(|| LocalTaskFailure::Closed.runtime_error())?;
+        let Some(owner) = self.supervisor.upgrade() else {
+            return reject_admitted(LocalTaskFailure::Closed.runtime_error(), future, deferred);
+        };
         if owner.closed.get() {
-            return Err(LocalTaskFailure::Closed.runtime_error());
+            return reject_admitted(LocalTaskFailure::Closed.runtime_error(), future, deferred);
         }
+        let id = owner.next_task.get();
+        let Some(next_id) = id.checked_add(1) else {
+            return reject_admitted(
+                LocalTaskFailure::IdentityExhausted.runtime_error(),
+                future,
+                deferred,
+            );
+        };
         let state = Rc::new(TaskState {
             outcome: Cell::new(None),
             waiters: RefCell::new(HashMap::new()),
             next_waiter: Cell::new(0),
         });
-        let id = owner.next_task.get();
-        owner.next_task.set(
-            id.checked_add(1)
-                .ok_or_else(|| LocalTaskFailure::IdentityExhausted.runtime_error())?,
-        );
+        owner.next_task.set(next_id);
         let completion = CompletionOnDrop(state.clone());
         let child: RuntimeLocalTaskFuture = Box::pin(async move {
             let completion = completion;
             future.await;
             completion.0.finish(RuntimeLocalTaskOutcome::Completed);
         });
-        let slot = Rc::new(TaskSlot::new(child, state.clone()));
+        let slot = Rc::new(TaskSlot::new(child, state.clone(), deferred));
         owner.tasks.borrow_mut().insert(id, slot.clone());
         let weak = Rc::downgrade(&owner);
         let abort: Rc<dyn Fn()> = Rc::new(move || {
@@ -139,14 +161,108 @@ impl Drop for BrowserLocalTaskSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::RuntimeContext;
+    use crate::context::{LocalTaskCommandOrigin, RuntimeContext, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;
+    use runmat_execution::profiling::CommandProfilingRoot;
     use std::marker::PhantomPinned;
     use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn owner() -> RuntimeContextLocalId {
         RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).local_identity()
+    }
+
+    fn profiled_runtime(
+        supervisor: &BrowserLocalTaskSupervisor,
+        command: &CommandProfilingRoot,
+    ) -> RuntimeContext {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        runtime
+            .clone()
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_local_tasks(supervisor.submission_port(runtime.local_identity())),
+            )
+            .with_command_profiling(command.receipt())
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn browser_canonical_ready_and_active_cancel_settle_after_task_retirement() {
+        let supervisor = Rc::new(BrowserLocalTaskSupervisor::new());
+        let completed = CommandProfilingRoot::new();
+        let ready_runtime = profiled_runtime(&supervisor, &completed);
+        let ready = ready_runtime
+            .spawn_local_with_command_origin(
+                "browser ready",
+                LocalTaskCommandOrigin::CurrentSelected,
+                |selected| {
+                    assert!(selected.command_profiling().is_some());
+                    Box::pin(async {})
+                },
+            )
+            .expect("ready admission");
+        assert_eq!(ready.join().await, RuntimeLocalTaskOutcome::Completed);
+        assert_eq!(completed.seal().deferred_work.expect("valid").completed, 1);
+
+        let cancelled = CommandProfilingRoot::new();
+        let cancelled_runtime = profiled_runtime(&supervisor, &cancelled);
+        let weak = Rc::downgrade(&supervisor);
+        let active = cancelled_runtime
+            .spawn_local_with_command_origin(
+                "browser active cancellation",
+                LocalTaskCommandOrigin::CurrentSelected,
+                move |_| {
+                    Box::pin(async move {
+                        weak.upgrade().expect("host alive").shutdown();
+                    })
+                },
+            )
+            .expect("active admission");
+        assert_eq!(active.join().await, RuntimeLocalTaskOutcome::Cancelled);
+        assert_eq!(cancelled.seal().deferred_work.expect("valid").missing, 1);
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_rejected_foreign_admission_drops_future_before_failed_receipt() {
+        let supervisor = BrowserLocalTaskSupervisor::new();
+        let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let command = CommandProfilingRoot::new();
+        let runtime = foreign
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_local_tasks(supervisor.submission_port(owner())),
+            )
+            .with_command_profiling(command.receipt());
+        let drops = Rc::new(Cell::new(0));
+        let task_drops = drops.clone();
+        let result = runtime.spawn_local_with_command_origin(
+            "browser foreign admission",
+            LocalTaskCommandOrigin::CurrentSelected,
+            move |_| Box::pin(PendingDrop(task_drops, PhantomPinned)),
+        );
+        assert!(result.is_err());
+        assert_eq!(drops.get(), 1);
+        assert_eq!(command.seal().deferred_work.expect("valid").failed, 1);
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_unpolled_shutdown_retires_deferred_future_as_missing() {
+        let supervisor = BrowserLocalTaskSupervisor::new();
+        let command = CommandProfilingRoot::new();
+        let runtime = profiled_runtime(&supervisor, &command);
+        let drops = Rc::new(Cell::new(0));
+        let task_drops = drops.clone();
+        let lease = runtime
+            .spawn_local_with_command_origin(
+                "browser pending",
+                LocalTaskCommandOrigin::CurrentSelected,
+                move |_| Box::pin(PendingDrop(task_drops, PhantomPinned)),
+            )
+            .expect("pending admission");
+        supervisor.shutdown();
+        assert_eq!(drops.get(), 1);
+        assert_eq!(lease.outcome(), Some(RuntimeLocalTaskOutcome::Cancelled));
+        assert_eq!(command.seal().deferred_work.expect("valid").missing, 1);
     }
 
     #[wasm_bindgen_test(async)]

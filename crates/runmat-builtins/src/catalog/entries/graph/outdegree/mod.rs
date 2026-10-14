@@ -8,6 +8,7 @@ pub use contract::OUTDEGREE_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&OUTDEGREE_CATALOG_ENTRY];
 
 pub const OUTDEGREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "outdegree" },
     category: "graph",

@@ -395,7 +395,7 @@ fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars(
                 ))
                 .unwrap();
                 assert_eq!(result, expected, "{name}");
-                match result {
+                result.with_owned(|result| match result {
                     Value::Tensor(t) => assert!(matches!(
                         t.into_numeric_storage().unwrap(),
                         NumericStorage::F32(_)
@@ -405,7 +405,7 @@ fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars(
                     }
                     Value::Int(_) | Value::Num(_) | Value::Complex(..) => (),
                     other => panic!("unexpected result {other:?}"),
-                }
+                });
             }
             for allocation in [left, right] {
                 allocation

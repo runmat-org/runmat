@@ -18,6 +18,10 @@ const FORM: BuiltinPreparationForm = BuiltinPreparationForm {
     provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
 };
 
+fn owned(value: Value) -> Result<RootedValue, RuntimeError> {
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
+}
+
 fn admission() -> BuiltinPreparationAdmission {
     BuiltinPreparationAdmission {
         binding: BuiltinBindingIdentity {
@@ -42,6 +46,127 @@ fn request_with(
 
 fn request() -> AdmittedBuiltinPreparation {
     request_with(admission(), vec![Value::Num(3.0)]).unwrap()
+}
+
+fn managed_operand(handle: runmat_gc::GcHandle) -> Value {
+    Value::HandleObject(runmat_value::HandleRef {
+        class_name: "PreparedOperandFixture".into(),
+        target: handle,
+        valid: true,
+    })
+}
+
+#[test]
+fn admitted_request_roots_managed_operand_before_its_first_poll() {
+    runmat_gc::gc_test_context(|| {
+        let allocation = runmat_gc::gc_allocate_rooted(Value::String("request".into()))
+            .expect("allocate request target");
+        let handle = allocation.handle();
+        let request = request_with(admission(), vec![managed_operand(handle)])
+            .expect("admit managed request fixture");
+        allocation.unroot().expect("retire allocation root");
+        runmat_gc::gc_collect_major().expect("collect with unpolled request");
+        assert_eq!(
+            runmat_gc::gc_clone_value(&handle).expect("request retains operand"),
+            Value::String("request".into())
+        );
+        drop(request);
+        runmat_gc::gc_collect_major().expect("collect after request retirement");
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
+}
+
+#[test]
+fn prepared_replacement_roots_through_pending_cancel_and_output_publication() {
+    runmat_gc::gc_test_context(|| {
+        for complete in [false, true] {
+            let allocation = runmat_gc::gc_allocate_rooted(Value::String("replacement".into()))
+                .expect("allocate replacement target");
+            let handle = allocation.handle();
+            let prepared = PreparedBuiltinOperands::new(vec![managed_operand(handle)], None)
+                .expect("publish prepared replacement");
+            allocation.unroot().expect("retire allocation root");
+            runmat_gc::gc_collect_major().expect("collect before body poll");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            if complete {
+                let output = block_on(execute_prepared(prepared, |mut values| async move {
+                    owned(values.pop().expect("one replacement"))
+                }))
+                .expect("publish rooted result");
+                runmat_gc::gc_collect_major().expect("collect under completed output owner");
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                drop(output);
+            } else {
+                let mut pending = Box::pin(execute_prepared(prepared, |_| {
+                    std::future::pending::<Result<RootedValue, RuntimeError>>()
+                }));
+                assert!(pending
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&noop_waker()))
+                    .is_pending());
+                runmat_gc::gc_collect_major().expect("collect while prepared body pending");
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                drop(pending);
+            }
+            runmat_gc::gc_collect_major().expect("collect after owner retirement");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        }
+    });
+}
+
+struct ManagedReplacementService {
+    published: Rc<RefCell<Option<runmat_gc::GcHandle>>>,
+}
+
+impl RuntimeAccelerationService for ManagedReplacementService {
+    fn supports_operation(&self, _: &str) -> bool {
+        true
+    }
+
+    fn prepare_admitted(
+        &self,
+        _: RuntimeContext,
+        request: AdmittedBuiltinPreparation,
+    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
+        let allocation = runmat_gc::gc_allocate_rooted(Value::String("service".into()))
+            .expect("allocate service replacement");
+        let handle = allocation.handle();
+        *self.published.borrow_mut() = Some(handle);
+        let prepared = request.into_operands().with_owned_values(|_| {
+            PreparedBuiltinOperands::new(vec![managed_operand(handle)], None)
+        });
+        allocation.unroot().expect("retire service allocation root");
+        Box::pin(async move { prepared })
+    }
+}
+
+#[test]
+fn service_replacement_is_rooted_before_return_and_retires_after_cancel() {
+    runmat_gc::gc_test_context(|| {
+        let published = Rc::new(RefCell::new(None));
+        let context = context().with_service_ports(
+            RuntimeServicePorts::default().with_acceleration(Rc::new(ManagedReplacementService {
+                published: published.clone(),
+            })),
+        );
+        let prepared =
+            block_on(prepare_admitted(&context, request())).expect("prepare managed replacement");
+        let handle = *published.borrow().as_ref().expect("published handle");
+        runmat_gc::gc_collect_major().expect("collect before prepared body poll");
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        let mut pending = Box::pin(execute_prepared(prepared, |_| {
+            std::future::pending::<Result<RootedValue, RuntimeError>>()
+        }));
+        assert!(pending
+            .as_mut()
+            .poll(&mut Context::from_waker(&noop_waker()))
+            .is_pending());
+        runmat_gc::gc_collect_major().expect("collect while service body pending");
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        drop(pending);
+        runmat_gc::gc_collect_major().expect("collect after cancellation");
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
 }
 
 #[test]
@@ -195,10 +320,9 @@ impl RuntimeAccelerationService for OutputCountService {
         self.events.borrow_mut().push("prepare");
         let observation = Observation(self.events.clone());
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                request.into_operands(),
-                Some(Box::new(observation)),
-            ))
+            request.into_operands().with_owned_values(|operands| {
+                PreparedBuiltinOperands::new(operands, Some(Box::new(observation)))
+            })
         })
     }
 }
@@ -232,13 +356,17 @@ fn admitted_zero_and_padded_outputs_execute_body_once_with_and_without_service()
                 Value::OutputList(vec![Value::Num(3.0); requested_outputs.unwrap_or(1)]);
             let expected = domain_result.clone();
             let body_events = events.clone();
-            let result = block_on(execute_admitted(&context, request, |operands| async move {
-                body_events.borrow_mut().push("body");
-                assert_eq!(operands, vec![Value::Num(3.0)]);
-                Ok(domain_result)
-            }))
+            let result = block_on(execute_request(
+                Some(&context),
+                request,
+                |operands| async move {
+                    body_events.borrow_mut().push("body");
+                    assert_eq!(operands, vec![Value::Num(3.0)]);
+                    owned(domain_result)
+                },
+            ))
             .unwrap();
-            assert_eq!(result, expected);
+            assert_eq!(result.value(), &expected);
             if installed {
                 assert_eq!(*admitted.borrow(), vec![requested_outputs]);
                 assert_eq!(
@@ -306,7 +434,7 @@ struct Observation(Events);
 
 struct RejectedCompletion;
 impl BuiltinPreparationObservation for RejectedCompletion {
-    fn finish(self: Box<Self>, _: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, _: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
             "result ownership could not be established",
         ))
@@ -316,9 +444,10 @@ impl BuiltinPreparationObservation for RejectedCompletion {
 
 #[test]
 fn failed_completion_does_not_publish_a_successful_body_result() {
-    let prepared = PreparedBuiltinOperands::new(vec![], Some(Box::new(RejectedCompletion)));
+    let prepared = PreparedBuiltinOperands::new(vec![], Some(Box::new(RejectedCompletion)))
+        .expect("root prepared fixture");
     let result = futures::executor::block_on(execute_prepared(prepared, |_| async {
-        Ok(Value::Num(42.))
+        owned(Value::Num(42.))
     }));
     assert!(result.is_err());
 }
@@ -327,7 +456,7 @@ impl BuiltinPreparationObservation for Observation {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "error" });
@@ -342,6 +471,7 @@ fn prepared(events: &Events) -> PreparedBuiltinOperands {
         vec![Value::Num(3.0)],
         Some(Box::new(Observation(events.clone()))),
     )
+    .expect("root prepared fixture")
 }
 
 #[test]
@@ -352,7 +482,7 @@ fn completion_observes_success_and_failure_exactly_once() {
             prepared(&events),
             |mut values| async move {
                 if succeed {
-                    Ok(values.remove(0))
+                    owned(values.remove(0))
                 } else {
                     Err(request::invalid("body failed"))
                 }
@@ -360,7 +490,7 @@ fn completion_observes_success_and_failure_exactly_once() {
         ));
         assert_eq!(result.is_ok(), succeed);
         if let Ok(value) = result {
-            assert!(matches!(value, Value::Num(3.0)));
+            assert!(matches!(value.value(), Value::Num(3.0)));
         }
         assert_eq!(
             *events.borrow(),
@@ -373,7 +503,7 @@ fn completion_observes_success_and_failure_exactly_once() {
 fn cancellation_before_and_during_execution_aborts_without_success() {
     let events = Events::default();
     drop(execute_prepared(prepared(&events), |_| async {
-        Ok(Value::Num(0.0))
+        owned(Value::Num(0.0))
     }));
     assert_eq!(*events.borrow(), vec!["abort"]);
     events.borrow_mut().clear();
@@ -413,12 +543,7 @@ impl RuntimeAccelerationService for MalformedService {
         _: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         let observer = Observation(self.0.clone());
-        Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                vec![],
-                Some(Box::new(observer)),
-            ))
-        })
+        Box::pin(async move { PreparedBuiltinOperands::new(vec![], Some(Box::new(observer))) })
     }
 }
 
@@ -428,10 +553,12 @@ fn malformed_service_response_aborts_without_executing() {
     let context = context().with_service_ports(
         RuntimeServicePorts::default().with_acceleration(Rc::new(MalformedService(events.clone()))),
     );
-    assert!(block_on(execute_admitted(&context, request(), |_| async {
-        panic!("must not execute")
-    }))
-    .is_err());
+    assert!(
+        block_on(execute_request(Some(&context), request(), |_| async {
+            panic!("must not execute")
+        }))
+        .is_err()
+    );
     assert_eq!(*events.borrow(), vec!["abort"]);
 }
 
@@ -451,12 +578,12 @@ fn absent_or_default_service_preserves_runtime_owned_execution() {
         ),
     ];
     for context in contexts {
-        let result = block_on(execute_admitted(
-            &context,
+        let result = block_on(execute_request(
+            Some(&context),
             request(),
-            |mut values| async move { Ok(values.remove(0)) },
+            |mut values| async move { owned(values.remove(0)) },
         ))
         .unwrap();
-        assert!(matches!(result, Value::Num(3.0)));
+        assert!(matches!(result.value(), Value::Num(3.0)));
     }
 }

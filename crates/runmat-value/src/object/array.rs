@@ -1,9 +1,11 @@
+use std::collections::HashSet;
 use std::fmt;
+use std::rc::Rc;
 
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
 
-use crate::{HandleRef, ObjectInstance, Value};
+use crate::{HandleRef, ObjectInstance, SelectedObjectClassFacts, Value};
 
 #[path = "array/admission.rs"]
 mod admission;
@@ -21,6 +23,12 @@ pub struct ObjectArray {
     class_name: ClassIdentity,
     data: Vec<Value>,
     shape: Vec<usize>,
+    // Empty-only exact products captured before slicing/deletion discards all
+    // elements. Nonempty elements already own their own selected facts, so an
+    // array-level copy would be redundant. Distinct old/new products of one
+    // ClassIdentity remain distinct; no current-name lookup is licensed.
+    selected_provenance: Vec<Rc<SelectedObjectClassFacts>>,
+    unselected_provenance: bool,
 }
 
 impl ObjectArray {
@@ -77,8 +85,60 @@ impl ObjectArray {
         &self.data
     }
 
+    pub fn selected_provenance(&self) -> &[Rc<SelectedObjectClassFacts>] {
+        &self.selected_provenance
+    }
+
+    pub fn has_unselected_provenance(&self) -> bool {
+        self.unselected_provenance
+    }
+
+    pub fn with_unselected_provenance(mut self) -> Self {
+        if self.is_empty() {
+            self.unselected_provenance = true;
+        }
+        self
+    }
+
+    pub fn with_selected_provenance(
+        mut self,
+        provenance: impl IntoIterator<Item = Rc<SelectedObjectClassFacts>>,
+    ) -> Result<Self, String> {
+        let mut seen = self
+            .selected_provenance
+            .iter()
+            .map(Rc::as_ptr)
+            .collect::<HashSet<_>>();
+        for facts in provenance {
+            if facts.class() != &self.class_name {
+                return Err("object-array selected product has a different class".into());
+            }
+            if !self.is_empty() {
+                // The element itself is the authority until an empty-result
+                // frontier captures its facts. Never duplicate that Rc here.
+                continue;
+            }
+            if seen.insert(Rc::as_ptr(&facts)) {
+                self.selected_provenance.push(facts);
+            }
+        }
+        Ok(self)
+    }
+
     pub fn into_data(self) -> Vec<Value> {
         self.data
+    }
+
+    pub fn reshape_preserving_provenance(mut self, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |length, axis| length.checked_mul(*axis))
+            .ok_or("object array shape overflows addressable storage")?;
+        if shape.len() < 2 || expected != self.data.len() {
+            return Err("object array shape differs from its element count".into());
+        }
+        self.shape = shape;
+        Ok(self)
     }
 
     pub fn shape(&self) -> &[usize] {
@@ -107,7 +167,18 @@ impl ObjectArray {
                     .ok_or_else(|| format!("object array index {} is out of bounds", index + 1))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Self::new(self.class_name.clone(), data, shape)
+        let selected = Self::new(self.class_name.clone(), data, shape)?;
+        if selected.is_empty() {
+            let selected =
+                selected.with_selected_provenance(self.selected_provenance.iter().cloned())?;
+            Ok(if self.unselected_provenance {
+                selected.with_unselected_provenance()
+            } else {
+                selected
+            })
+        } else {
+            Ok(selected)
+        }
     }
 }
 

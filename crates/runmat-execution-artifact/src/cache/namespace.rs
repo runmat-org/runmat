@@ -15,6 +15,7 @@ impl CacheNamespace {
             ObjectNamespace::Log => "log",
             ObjectNamespace::Checkpoint => "checkpoint",
             ObjectNamespace::ForeignArtifact => "foreign-artifact",
+            ObjectNamespace::ForeignPolicy => "foreign-policy",
         }
     }
 }

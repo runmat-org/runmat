@@ -1,8 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use futures::FutureExt;
-
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{EmbeddedOperationIdentity, HostState};
@@ -56,16 +54,7 @@ pub(in crate::execute) fn begin_prepared_receiver(
             .map(Box::new)
             .map(CallCompletion::PreparedReceiver)
     });
-    let mut future = super::scope_completion(state, future);
-    if let Some(result) = future.as_mut().now_or_never() {
-        drop(future);
-        let CallCompletion::PreparedReceiver(prepared) =
-            super::super::sync::CompletedOperation::new(result).finish(state)?
-        else {
-            unreachable!("prepared receiver future has a typed completion")
-        };
-        return Ok(*prepared);
-    }
+    let future = super::scope_completion(state, future);
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending receiver preparation has no active site".into())
     })?;

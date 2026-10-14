@@ -2,6 +2,7 @@
 //! draws and user callbacks; generated values are published only as a set.
 use super::parameters::{ParameterRole, ParameterShape};
 use super::*;
+use crate::execution::{RootedValue, RootedValueLease};
 
 mod generate;
 mod plan;
@@ -12,7 +13,7 @@ mod tests;
 struct StagedParameter {
     layer_index: usize,
     role: ParameterRole,
-    value: Value,
+    value: RootedValue,
     generated: bool,
     existing_precision: Option<NumericDType>,
 }
@@ -21,7 +22,7 @@ struct StagedParameter {
 pub(in crate::builtins) async fn initialise_layers(
     layers: &mut [Value],
     function: &'static str,
-) -> BuiltinResult<()> {
+) -> BuiltinResult<RootedValueLease> {
     initialise_layers_in_runtime(None, layers, function).await
 }
 
@@ -29,7 +30,9 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     layers: &mut [Value],
     function: &'static str,
-) -> BuiltinResult<()> {
+) -> BuiltinResult<RootedValueLease> {
+    let _source_roots =
+        RootedValueLease::for_values(layers.iter()).map_err(|error| error.into_runtime_error())?;
     let tasks = plan::tasks(layers, function)?;
     let mut replacements = Vec::new();
     replacements.try_reserve_exact(tasks.len()).map_err(|_| {
@@ -41,13 +44,14 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
     for task in tasks {
         let generated = matches!(&task.initializer, plan::Initializer::Builtin(_));
         let value = match task.initializer {
-            plan::Initializer::Builtin(kind) => generate::builtin(
+            plan::Initializer::Builtin(kind) => RootedValue::new(generate::builtin(
                 kind,
                 task.kind,
                 &task.shape,
                 task.precision.unwrap_or(NumericDType::F64),
                 function,
-            )?,
+            )?)
+            .map_err(|error| error.into_runtime_error())?,
             plan::Initializer::Callback(callback) => {
                 let size = tensor_value(
                     task.shape.iter().map(|size| *size as f64).collect(),
@@ -76,20 +80,21 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
                     .with_source(source)
                     .build()
                 })?;
-                match result {
-                    Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
-                    Value::OutputList(values) => {
-                        return Err(deep_learning_error(
+                result.try_map_owned(
+                    |result| match result {
+                        Value::OutputList(mut values) if values.len() == 1 => Ok(values.remove(0)),
+                        Value::OutputList(values) => Err(deep_learning_error(
                             function,
                             format!(
                                 "{function}: {} initializer returned {} outputs, expected one",
                                 task.role.name(),
                                 values.len()
                             ),
-                        ));
-                    }
-                    value => value,
-                }
+                        )),
+                        value => Ok(value),
+                    },
+                    |error| error.into_runtime_error(),
+                )?
             }
         };
         parameters::validate_initialized_parameter(
@@ -141,27 +146,46 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
             && staged.existing_precision.is_none()
             && callback_precision[staged.layer_index] == Some(NumericDType::F32)
         {
-            let Value::Tensor(tensor) = &staged.value else {
+            let Value::Tensor(tensor) = staged.value.value() else {
                 unreachable!("built-in initializer produced a host tensor")
             };
-            staged.value = Tensor::new_with_dtype(
-                tensor.materialize_f64(),
-                tensor.shape().to_vec(),
-                NumericDType::F32,
+            staged.value = RootedValue::new(
+                Tensor::new_with_dtype(
+                    tensor.materialize_f64(),
+                    tensor.shape().to_vec(),
+                    NumericDType::F32,
+                )
+                .map(Value::Tensor)
+                .map_err(|error| deep_learning_error(function, error))?,
             )
-            .map(Value::Tensor)
-            .map_err(|error| deep_learning_error(function, error))?;
+            .map_err(|error| error.into_runtime_error())?;
         }
     }
+    publish_staged_parameters(layers, replacements)
+}
+
+fn publish_staged_parameters(
+    layers: &mut [Value],
+    replacements: Vec<StagedParameter>,
+) -> BuiltinResult<RootedValueLease> {
+    // Register the complete old/new graph before the first mutation. This
+    // registration cannot fail after a partial publication, and it survives
+    // each staged owner's retirement until the caller roots the final network.
+    let publication_roots = RootedValueLease::for_values(
+        layers
+            .iter()
+            .chain(replacements.iter().map(|staged| staged.value.value())),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     for staged in replacements {
         let Value::Object(layer) = &mut layers[staged.layer_index] else {
             unreachable!("preflight established layer objects")
         };
-        layer
-            .properties
-            .insert(staged.role.name().into(), staged.value);
+        staged.value.with_owned(|value| {
+            layer.properties.insert(staged.role.name().into(), value);
+        });
     }
-    Ok(())
+    Ok(publication_roots)
 }
 
 /// Reuse the initializer's effect-free structural plan when training needs

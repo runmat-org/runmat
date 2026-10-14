@@ -2,6 +2,7 @@
 
 use runmat_value::Value;
 
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy, Debug)]
@@ -10,7 +11,10 @@ pub enum UnaryArithmeticOperation {
     Minus,
 }
 
-pub async fn evaluate(operation: UnaryArithmeticOperation, value: Value) -> BuiltinResult<Value> {
+pub async fn evaluate(
+    operation: UnaryArithmeticOperation,
+    value: Value,
+) -> BuiltinResult<RootedValue> {
     evaluate_in_context(None, operation, value).await
 }
 
@@ -18,7 +22,7 @@ pub async fn evaluate_in_context(
     context: Option<&crate::context::RuntimeContext>,
     operation: UnaryArithmeticOperation,
     value: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()) {
         return Err(crate::runtime_error::semantic_error(
             "ComplexIntegerArithmetic",
@@ -51,7 +55,9 @@ pub async fn evaluate_in_context(
     }
 
     match operation {
-        UnaryArithmeticOperation::Plus => Ok(value),
+        UnaryArithmeticOperation::Plus => {
+            RootedValue::new(value).map_err(|error| error.into_runtime_error())
+        }
         UnaryArithmeticOperation::Minus => match context {
             Some(context) => {
                 crate::call_builtin_async_in_context(context, "times", &[value, Value::Num(-1.0)])

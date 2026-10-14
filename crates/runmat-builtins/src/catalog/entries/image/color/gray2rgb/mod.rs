@@ -71,6 +71,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
 }
 
 pub const GRAY2RGB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "gray2rgb" },
     category: "image/color",

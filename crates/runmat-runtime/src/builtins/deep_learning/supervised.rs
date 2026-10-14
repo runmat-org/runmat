@@ -28,12 +28,14 @@ async fn train_network_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     train_network_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
-pub(super) async fn train_network_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn train_network_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     train_network_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
 
@@ -41,7 +43,7 @@ async fn train_network_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     admit_training_output_count("trainNetwork", requested_outputs)?;
     if args.len() != 4 {
         return Err(deep_learning_error(
@@ -74,12 +76,14 @@ async fn trainnet_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     trainnet_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
-pub(super) async fn trainnet_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn trainnet_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     trainnet_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
 
@@ -87,7 +91,7 @@ async fn trainnet_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     admit_training_output_count("trainnet", requested_outputs)?;
     if args.len() != 5 {
         return Err(deep_learning_error(

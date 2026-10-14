@@ -43,6 +43,7 @@ pub const DATETIME_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DATETIME_CATALOG_ENTRY];
 
 pub const DATETIME_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "datetime" },
     category: "datetime/construction",

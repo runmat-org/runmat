@@ -1,6 +1,10 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
-use runmat_execution_artifact::{ExecutionBundle, ObjectNamespace};
+use runmat_core::foreign_artifacts::{
+    MaterializedForeignView, PrivateArtifactPath, PrivateArtifactRoot,
+};
+use runmat_execution_artifact::{ExecutionBundle, ObjectNamespace, ProgramBuildRecipe};
 use runmat_package::FrozenProjectHandoff;
 
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -19,7 +23,8 @@ use python_artifacts::MaterializedPythonArtifact;
 /// The temporary root owns only verified bundle bytes. Keeping this guard alive
 /// keeps every path installed in the frozen-project handoff valid.
 pub(crate) struct MaterializedProject {
-    _root: tempfile::TempDir,
+    _root: PrivateArtifactRoot,
+    bundle_identity: runmat_execution::Digest,
     handoff: Option<FrozenProjectHandoff>,
     native_interfaces: Vec<MaterializedNativeInterface>,
     mex_artifacts: Vec<MaterializedMexArtifact>,
@@ -27,14 +32,69 @@ pub(crate) struct MaterializedProject {
     python_bundle: Option<runmat_python::PythonArtifactBundle>,
 }
 
+/// One exact recipe's typed view over the already materialized original bundle.
+/// Only the bounded Config policy is owned; foreign payloads and private paths
+/// remain borrowed from the original materialization.
+pub(crate) struct SelectedMaterializedView<'a> {
+    project: &'a MaterializedProject,
+    policy: Option<runmat_config::runtime::ForeignConfig>,
+    native: BTreeSet<runmat_types::ForeignArtifactIdentity>,
+    mex: BTreeSet<runmat_types::ForeignArtifactIdentity>,
+    java: BTreeSet<runmat_types::ForeignArtifactIdentity>,
+    python: BTreeSet<runmat_types::ForeignArtifactIdentity>,
+}
+
+impl<'a> SelectedMaterializedView<'a> {
+    pub(crate) fn from_admitted_recipe(
+        project: &'a MaterializedProject,
+        bundle: &ExecutionBundle,
+        recipe: &ProgramBuildRecipe,
+    ) -> Result<Self, String> {
+        if !project
+            .matches_bundle(bundle)
+            .map_err(|error| error.to_string())?
+        {
+            return Err("selected materialization differs from admitted bundle".into());
+        }
+        let selection = bundle
+            .selected_foreign_projection(recipe)
+            .map_err(|error| error.to_string())?;
+        let policy = selection
+            .policy_object()
+            .map(runmat_core::foreign_artifacts::decode_admitted_policy)
+            .transpose()?;
+        let native_adapter =
+            runmat_types::ForeignAdapterId::new(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID)
+                .map_err(|error| error.to_string())?;
+        let mex_adapter = runmat_types::ForeignAdapterId::new(runmat_mex::MEX_ADAPTER_ID)
+            .map_err(|error| error.to_string())?;
+        let java_adapter = runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID)
+            .map_err(|error| error.to_string())?;
+        let python_adapter = runmat_types::ForeignAdapterId::new(runmat_python::PYTHON_ADAPTER_ID)
+            .map_err(|error| error.to_string())?;
+        let selected = |adapter: &runmat_types::ForeignAdapterId| {
+            selection
+                .closures()
+                .filter(|closure| &closure.adapter == adapter)
+                .map(|closure| closure.identity.clone())
+                .collect()
+        };
+        Ok(Self {
+            project,
+            policy,
+            native: selected(&native_adapter),
+            mex: selected(&mex_adapter),
+            java: selected(&java_adapter),
+            python: selected(&python_adapter),
+        })
+    }
+}
+
 impl MaterializedProject {
     pub(crate) fn from_bundle(bundle: &ExecutionBundle) -> NativeExecutionResult<Self> {
         bundle.validate().map_err(protocol)?;
-        let root = tempfile::Builder::new()
-            .prefix("runmat-execution-")
-            .tempdir()
-            .map_err(protocol)?;
-        make_private(root.path())?;
+        let bundle_identity = bundle.identity().map_err(protocol)?;
+        let mut root = PrivateArtifactRoot::new("runmat-execution-").map_err(protocol)?;
         for object in &bundle.objects {
             if !matches!(
                 object.descriptor.namespace,
@@ -42,13 +102,7 @@ impl MaterializedProject {
             ) {
                 continue;
             }
-            let target = root.path().join(&object.descriptor.logical_name);
-            let parent = target
-                .parent()
-                .ok_or_else(|| protocol("bundle source has no materialization parent"))?;
-            std::fs::create_dir_all(parent).map_err(protocol)?;
-            make_private(parent)?;
-            write_exact(&target, &object.bytes)?;
+            root.write_object(object).map_err(protocol)?;
         }
         let mut handoff = bundle
             .requires_source_project()
@@ -67,7 +121,7 @@ impl MaterializedProject {
         let native_interfaces = native_interfaces::discover(&foreign_objects, root.path())?;
         let mex_artifacts = mex_artifacts::discover(&foreign_objects, root.path())?;
         let java_artifacts = java_artifacts::discover(&foreign_objects, root.path())?;
-        let python = python_artifacts::discover(&foreign_objects, root.path())?;
+        let python = python_artifacts::discover(&foreign_objects, &mut root)?;
         if let Some(handoff) = handoff.as_mut() {
             rebase_foreign_artifacts(
                 handoff,
@@ -79,6 +133,7 @@ impl MaterializedProject {
         }
         Ok(Self {
             _root: root,
+            bundle_identity,
             handoff,
             native_interfaces,
             mex_artifacts,
@@ -91,16 +146,18 @@ impl MaterializedProject {
         self.handoff.as_ref()
     }
 
+    pub(crate) fn private_root(&self) -> &PrivateArtifactRoot {
+        &self._root
+    }
+
+    pub(crate) fn matches_bundle(&self, bundle: &ExecutionBundle) -> NativeExecutionResult<bool> {
+        Ok(self.bundle_identity == bundle.identity().map_err(protocol)?)
+    }
+
     pub(crate) fn native_interface(&self, identity: &str) -> Option<&MaterializedNativeInterface> {
         self.native_interfaces
             .iter()
             .find(|interface| interface.manifest.identity.as_str() == identity)
-    }
-
-    pub(crate) fn java_artifact(&self, identity: &str) -> Option<&MaterializedJavaArtifact> {
-        self.java_artifacts
-            .iter()
-            .find(|artifact| artifact.identity.as_str() == identity)
     }
 
     pub(crate) fn mex_artifact(&self, identity: &str) -> Option<&MaterializedMexArtifact> {
@@ -108,19 +165,67 @@ impl MaterializedProject {
             .iter()
             .find(|artifact| artifact.manifest.identity.as_str() == identity)
     }
+}
 
-    pub(crate) fn requires_cuda_mex(&self) -> bool {
-        self.mex_artifacts.iter().any(|artifact| {
-            artifact.manifest.source_language == runmat_mex::MexSourceLanguage::Cuda
-        })
+impl MaterializedForeignView for SelectedMaterializedView<'_> {
+    fn private_byte_lease(&self) -> runmat_execution_artifact::PrivateArtifactLease {
+        self.project.private_root().lease()
     }
 
-    pub(crate) fn java_artifacts(&self) -> &[MaterializedJavaArtifact] {
-        &self.java_artifacts
+    fn foreign_policy(&self) -> Option<&runmat_config::runtime::ForeignConfig> {
+        self.policy.as_ref()
     }
 
-    pub(crate) fn python_bundle(&self) -> Option<&runmat_python::PythonArtifactBundle> {
-        self.python_bundle.as_ref()
+    fn native_interface(
+        &self,
+        identity: &runmat_types::ForeignArtifactIdentity,
+    ) -> Option<(&PrivateArtifactPath, &PrivateArtifactPath)> {
+        if !self.native.contains(identity) {
+            return None;
+        }
+        let interface = self.project.native_interface(identity.as_str())?;
+        Some((
+            self.project._root.admitted_path(&interface.library_path)?,
+            self.project._root.admitted_path(&interface.manifest_path)?,
+        ))
+    }
+
+    fn mex_module(
+        &self,
+        identity: &runmat_types::ForeignArtifactIdentity,
+    ) -> Option<(&PrivateArtifactPath, &PrivateArtifactPath, bool)> {
+        if !self.mex.contains(identity) {
+            return None;
+        }
+        let artifact = self.project.mex_artifact(identity.as_str())?;
+        Some((
+            self.project._root.admitted_path(&artifact.module_path)?,
+            self.project._root.admitted_path(&artifact.manifest_path)?,
+            artifact.manifest.source_language == runmat_mex::MexSourceLanguage::Cuda,
+        ))
+    }
+
+    fn java_archives(&self) -> Vec<(runmat_java::JavaArtifactIdentity, &PrivateArtifactPath)> {
+        self.project
+            .java_artifacts
+            .iter()
+            .filter(|artifact| {
+                runmat_types::ForeignArtifactIdentity::new(artifact.identity.to_string())
+                    .is_ok_and(|identity| self.java.contains(&identity))
+            })
+            .filter_map(|artifact| {
+                self.project
+                    ._root
+                    .admitted_path(&artifact.path)
+                    .map(|path| (artifact.identity.clone(), path))
+            })
+            .collect()
+    }
+
+    fn python_bundle(&self) -> Option<&runmat_python::PythonArtifactBundle> {
+        (!self.python.is_empty())
+            .then_some(self.project.python_bundle.as_ref())
+            .flatten()
     }
 }
 
@@ -155,11 +260,7 @@ fn rebase_foreign_artifacts(
             .iter()
             .find(|materialized| {
                 materialized.manifest.module_name == artifact.name
-                    && digest_path(&runmat_mex::MexArtifactManifest::path_for_module(
-                        &materialized.module_path,
-                    ))
-                    .ok()
-                    .as_ref()
+                    && digest_path(&materialized.manifest_path).ok().as_ref()
                         == Some(&artifact.manifest_digest)
                     && digest_path(&materialized.module_path).ok().as_ref()
                         == Some(&artifact.module_digest)
@@ -171,8 +272,7 @@ fn rebase_foreign_artifacts(
                 ))
             })?;
         artifact.module_path = materialized.module_path.clone();
-        artifact.manifest_path =
-            runmat_mex::MexArtifactManifest::path_for_module(&materialized.module_path);
+        artifact.manifest_path = materialized.manifest_path.clone();
     }
     for artifact in &mut handoff.project.java_artifacts {
         let materialized = java_artifacts
@@ -213,23 +313,6 @@ fn digest_path(path: &Path) -> NativeExecutionResult<runmat_package::ContentDige
         .map_err(protocol)
 }
 
-fn write_exact(path: &Path, bytes: &[u8]) -> NativeExecutionResult<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path).map_err(protocol)?;
-    std::io::Write::write_all(&mut file, bytes).map_err(protocol)?;
-    file.sync_all().map_err(protocol)?;
-    let mut permissions = file.metadata().map_err(protocol)?.permissions();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(path, permissions).map_err(protocol)?;
-    Ok(())
-}
-
 fn verify_materialized_sources(handoff: &FrozenProjectHandoff) -> NativeExecutionResult<()> {
     for (source, path) in handoff.project.all_sources() {
         let bytes = std::fs::read(path).map_err(protocol)?;
@@ -240,19 +323,6 @@ fn verify_materialized_sources(handoff: &FrozenProjectHandoff) -> NativeExecutio
             )));
         }
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn make_private(path: &Path) -> NativeExecutionResult<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(protocol)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn make_private(_path: &Path) -> NativeExecutionResult<()> {
     Ok(())
 }
 
@@ -324,6 +394,7 @@ mod tests {
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let bundle = ExecutionBundleBuilder::native(&project, revision)
@@ -553,6 +624,19 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             )
             .unwrap()
         }));
+        let mut policy_config = runmat_config::runtime::ForeignConfig::default();
+        policy_config.python.execution_mode =
+            runmat_config::runtime::PythonExecutionModeConfig::OutOfProcess;
+        policy_config.python.exact_version = Some(runmat_config::runtime::PythonExactVersion {
+            major: 3,
+            minor: 12,
+            patch: 0,
+        });
+        policy_config.python.required_abi_tag = Some("cp312".into());
+        policy_config.python.required_platform_tag = Some("fixture".into());
+        policy_config.python.artifact_identities = python_bundle.artifact_identities();
+        let policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&policy_config).unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
@@ -563,6 +647,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             execution_mode: "compiled".into(),
             target: runmat_execution_artifact::ProgramTarget::native("host", native_target),
             interop,
+            foreign_policy: Some(policy.descriptor.clone()),
             accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
@@ -571,7 +656,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         };
         let mut builder = ExecutionBundleBuilder::native(&project, revision)
             .unwrap()
-            .with_compiled_package_closure();
+            .with_compiled_package_closure()
+            .with_foreign_policy_object(policy)
+            .unwrap();
         for object in [sidecar, library, java, python, mex_sidecar, mex_module] {
             builder = builder.with_foreign_object(object).unwrap();
         }
@@ -609,9 +696,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .unwrap()
             .permissions()
             .readonly());
-        let java = materialized.java_artifact(java_identity.as_str()).unwrap();
+        let java = materialized
+            .java_artifacts
+            .iter()
+            .find(|artifact| artifact.identity == java_identity)
+            .unwrap();
         assert_eq!(std::fs::read(&java.path).unwrap(), java_bytes);
-        assert_eq!(materialized.python_bundle(), Some(&python_bundle));
+        assert_eq!(materialized.python_bundle.as_ref(), Some(&python_bundle));
         assert!(std::fs::metadata(&java.path)
             .unwrap()
             .permissions()

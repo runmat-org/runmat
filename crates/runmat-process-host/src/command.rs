@@ -11,6 +11,21 @@ pub enum ChildLifetime {
     Detached,
 }
 
+/// Unix process-group ownership for a child launched by RunMat. A joined
+/// member is owned by an already-contained ancestor; its own shutdown may
+/// reap that member, but only the ancestor can certify group retirement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessGroupPlacement {
+    OwnGroup,
+    JoinAncestorGroup,
+}
+
+impl Default for ProcessGroupPlacement {
+    fn default() -> Self {
+        Self::OwnGroup
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StdioPolicy {
     Piped,
@@ -34,6 +49,7 @@ pub struct HostCommand {
     pub environment: BTreeMap<String, String>,
     pub environment_policy: EnvironmentPolicy,
     pub lifetime: ChildLifetime,
+    pub process_group_placement: ProcessGroupPlacement,
     pub stdio: StdioPolicy,
     pub max_stderr_bytes: usize,
     pub resource_limits: ResourceLimits,
@@ -55,6 +71,7 @@ impl HostCommand {
             environment: BTreeMap::new(),
             environment_policy: EnvironmentPolicy::Clear,
             lifetime: ChildLifetime::Owned,
+            process_group_placement: ProcessGroupPlacement::OwnGroup,
             stdio: StdioPolicy::Piped,
             max_stderr_bytes: 1024 * 1024,
             resource_limits: ResourceLimits::default(),
@@ -82,6 +99,21 @@ impl HostCommand {
             ));
         }
         self.resource_limits.validate()?;
+        if self.process_group_placement == ProcessGroupPlacement::JoinAncestorGroup
+            && (self.lifetime != ChildLifetime::Owned || self.stdio != StdioPolicy::Piped)
+        {
+            return Err(ProcessHostError::Configuration(
+                "ancestor-group helpers require an owned piped child".into(),
+            ));
+        }
+        #[cfg(windows)]
+        if self.process_group_placement == ProcessGroupPlacement::JoinAncestorGroup
+            && self.resource_limits != ResourceLimits::default()
+        {
+            return Err(ProcessHostError::Configuration(
+                "joined JobObject helpers cannot override ancestor resource limits".into(),
+            ));
+        }
         if self.lifetime == ChildLifetime::Detached
             && matches!(
                 self.stdio,
@@ -101,6 +133,16 @@ impl HostCommand {
     pub async fn spawn(self) -> ProcessHostResult<ChildProcess> {
         self.validate()?;
         child::spawn(self).await
+    }
+
+    /// Track the exact OS-spawn phase for callers that must retain private
+    /// bytes after a post-spawn containment or stdio failure.
+    pub async fn spawn_observed(
+        self,
+        evidence: &crate::ProcessSpawnEvidence,
+    ) -> ProcessHostResult<ChildProcess> {
+        self.validate()?;
+        child::spawn_observed(self, evidence).await
     }
 
     /// Collect both pipes to EOF without truncation, retaining the owned child

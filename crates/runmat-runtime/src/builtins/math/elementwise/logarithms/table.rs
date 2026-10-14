@@ -1,16 +1,23 @@
 use super::operation::LogarithmOperation;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::BuiltinResult;
-use runmat_value::{ObjectInstance, StructValue, Value};
+use runmat_value::{ObjectInstance, Value};
 
 pub(super) async fn evaluate(
+    runtime: Option<&RuntimeContext>,
     operation: LogarithmOperation,
     object: ObjectInstance,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let source = Value::Object(object.clone());
+    let _source = RootedValueLease::for_values(std::iter::once(&source))
+        .map_err(|cause| cause.into_runtime_error())?;
     let variables = crate::builtins::table::table_variables(&object)
         .map_err(|error| super::errors::invalid(operation, error.message()))?;
-    let mut output = StructValue::new();
+    let mut names = Vec::with_capacity(variables.fields.len());
+    let mut output = RootedValuesBuilder::with_capacity(variables.fields.len());
     for (name, value) in variables.fields {
-        let transformed = super::engine::execute_non_table(operation, value)
+        let transformed = super::engine::execute_non_table(runtime, operation, value)
             .await
             .map_err(|error| {
                 super::errors::invalid(
@@ -22,8 +29,12 @@ pub(super) async fn evaluate(
                     ),
                 )
             })?;
-        output.insert(name, transformed);
+        names.push(name);
+        output.push_owned(transformed);
     }
-    crate::builtins::table::table_replace_variables_like(&object, output)
+    let output = output
+        .finish()
+        .map_err(|cause| cause.into_runtime_error())?;
+    crate::builtins::table::table_replace_variables_like_owned(&object, names, output)
         .map_err(|error| super::errors::internal(operation, error.message()))
 }

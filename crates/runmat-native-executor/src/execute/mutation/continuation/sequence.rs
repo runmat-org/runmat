@@ -4,7 +4,7 @@ use runmat_runtime::sequence::PreparedSequenceDestination;
 use runmat_value::Value;
 
 use super::super::{HostState, PreparedSequenceAssignment};
-use super::{member_call, write_step};
+use super::{member_call, single_member_sequence, write_step};
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 #[derive(Clone, Copy)]
@@ -58,7 +58,7 @@ impl PendingSequenceAssign {
                                 Some(&caller),
                             ))
                             .await?;
-                        Ok(vec![value])
+                        single_member_sequence(value).map_err(|error| *error)
                     }),
                 )?;
                 self.phase = SequencePhase::Writeback(state.arena.insert(updated));
@@ -163,7 +163,7 @@ pub(in crate::execute) fn assign_prepared_sequence(
             let value = runtime
                 .scope(destination.assign_in_context(&runtime, root, values, Some(&caller)))
                 .await?;
-            Ok(vec![value])
+            single_member_sequence(value).map_err(|error| *error)
         }),
     );
     let next_step = usize::from(result.is_ok());

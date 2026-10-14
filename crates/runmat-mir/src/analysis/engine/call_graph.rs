@@ -116,6 +116,10 @@ pub(crate) fn call_graph(assembly: &MirAssembly) -> BTreeMap<FunctionId, BTreeSe
         .collect()
 }
 
+pub(crate) use lexical::lexical_reference_graph;
+
+mod lexical;
+
 fn collect_expansion_calls(source: &crate::MirExpansionSource, callees: &mut BTreeSet<FunctionId>) {
     source.visit_direct_expression_steps_dyn(&mut |steps| {
         for step in steps {

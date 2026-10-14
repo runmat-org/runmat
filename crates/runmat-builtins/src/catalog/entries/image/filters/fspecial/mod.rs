@@ -12,6 +12,7 @@ use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 pub const FSPECIAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fspecial" },
     category: "image/filters",

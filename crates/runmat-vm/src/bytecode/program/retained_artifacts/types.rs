@@ -5,6 +5,10 @@ use runmat_runtime::user_functions::SourceFunctionInfo;
 use runmat_value::FunctionDefinitionLease;
 
 use super::{FunctionRegistry, RuntimeBoundExecutableUnit};
+use crate::bytecode::program::{
+    RetainedImplicitSuperConstructorTarget, SuperConstructorDependencyError,
+};
+use crate::RetainedExecutableSourceOwner;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RetainedCallableStageLimits {
@@ -22,7 +26,15 @@ pub struct PreparedRetainedCallableUnits {
     exact_origin_facts: Arc<Vec<SourceFunctionInfo>>,
     staging_leases: Vec<FunctionDefinitionLease>,
     source_owners: Vec<RuntimeBoundExecutableUnit>,
+    linked_constructorless_classes: Vec<runmat_runtime::context::RetainedClassDeclaration>,
 }
+
+pub type RetainedCallableParts = (
+    FunctionRegistry,
+    Arc<Vec<SourceFunctionInfo>>,
+    Vec<FunctionDefinitionLease>,
+    Vec<RetainedExecutableSourceOwner>,
+);
 
 impl PreparedRetainedCallableUnits {
     pub(super) fn new(
@@ -30,12 +42,14 @@ impl PreparedRetainedCallableUnits {
         exact_origin_facts: Arc<Vec<SourceFunctionInfo>>,
         staging_leases: Vec<FunctionDefinitionLease>,
         source_owners: Vec<RuntimeBoundExecutableUnit>,
+        linked_constructorless_classes: Vec<runmat_runtime::context::RetainedClassDeclaration>,
     ) -> Self {
         Self {
             registry,
             exact_origin_facts,
             staging_leases,
             source_owners,
+            linked_constructorless_classes,
         }
     }
 
@@ -50,25 +64,53 @@ impl PreparedRetainedCallableUnits {
         &self.exact_origin_facts
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        FunctionRegistry,
-        Arc<Vec<SourceFunctionInfo>>,
-        Vec<FunctionDefinitionLease>,
-        Vec<RuntimeBoundExecutableUnit>,
-    ) {
-        (
+    /// Capture only the selected class declarations and already-issued source
+    /// tables. The resulting owner holds no runtime execution service.
+    pub fn selected_class_product_for(
+        &self,
+        class: &runmat_types::ClassIdentity,
+    ) -> Result<crate::SelectedClassProduct, runmat_runtime::RuntimeError> {
+        crate::SelectedClassProduct::from_bound_units(
+            &self.source_owners.iter().collect::<Vec<_>>(),
+            class,
+        )
+    }
+
+    /// Resolve an explicit no-body super call against the same validated,
+    /// runtime-bound units being staged. A constructorless script class has no
+    /// FunctionBytecode, so its admitted RegisterClass remains here with its
+    /// selected source lease instead of becoming a fabricated definition.
+    pub fn retained_implicit_super_constructor_targets_for(
+        &self,
+        selected: &FunctionRegistry,
+        caller: FunctionId,
+    ) -> Result<Vec<RetainedImplicitSuperConstructorTarget>, SuperConstructorDependencyError> {
+        selected.retained_implicit_super_constructor_targets_with_linked(
+            caller,
+            &self.linked_constructorless_classes,
+        )
+    }
+
+    pub fn into_parts(self) -> Result<RetainedCallableParts, RetainedCallableStageError> {
+        let source_owners = self
+            .source_owners
+            .iter()
+            .map(RetainedExecutableSourceOwner::capture)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RetainedCallableStageError::RetainedSourceOwner)?;
+        Ok((
             self.registry,
             self.exact_origin_facts,
             self.staging_leases,
-            self.source_owners,
-        )
+            source_owners,
+        ))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum RetainedCallableStageError {
+    #[error("staged imported source owner is invalid: {0}")]
+    RetainedSourceOwner(&'static str),
     #[error("{field} exceeds its staging limit of {limit}")]
     Limit { field: &'static str, limit: usize },
     #[error("callable artifact function {function:?} has no authenticated binding origin")]

@@ -46,11 +46,15 @@ runmat_thread_local! {
 
 pub struct CallsiteGuard {
     did_push: bool,
+    projection: Option<crate::context::call_projection::CallProjectionGuard>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for CallsiteGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         if !self.did_push {
             return;
         }
@@ -67,11 +71,15 @@ impl Drop for CallsiteGuard {
 
 pub struct FunctionInputCallsiteGuard {
     did_push: bool,
+    projection: Option<crate::context::call_projection::CallProjectionGuard>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for FunctionInputCallsiteGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         if !self.did_push {
             return;
         }
@@ -90,6 +98,7 @@ pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) 
     let Some(arg_spans) = arg_spans else {
         return CallsiteGuard {
             did_push: false,
+            projection: None,
             state: None,
         };
     };
@@ -97,16 +106,28 @@ pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) 
         source_id,
         arg_spans,
     };
+    if let Some(runtime) = crate::context::legacy::active() {
+        return CallsiteGuard {
+            did_push: true,
+            projection: Some(crate::context::call_projection::push_callsite(
+                runtime.call_projection(),
+                info,
+            )),
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         state.call.borrow_mut().callsites.push(info);
         CallsiteGuard {
             did_push: true,
+            projection: None,
             state: Some(state),
         }
     } else {
         CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
         CallsiteGuard {
             did_push: true,
+            projection: None,
             state: None,
         }
     }
@@ -119,6 +140,7 @@ pub fn push_function_input_callsite(
     let Some(arg_spans) = arg_spans else {
         return FunctionInputCallsiteGuard {
             did_push: false,
+            projection: None,
             state: None,
         };
     };
@@ -126,31 +148,61 @@ pub fn push_function_input_callsite(
         source_id,
         arg_spans,
     };
+    if let Some(runtime) = crate::context::legacy::active() {
+        return FunctionInputCallsiteGuard {
+            did_push: true,
+            projection: Some(
+                crate::context::call_projection::push_function_input_callsite(
+                    runtime.call_projection(),
+                    info,
+                ),
+            ),
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         state.call.borrow_mut().function_input_callsites.push(info);
         FunctionInputCallsiteGuard {
             did_push: true,
+            projection: None,
             state: Some(state),
         }
     } else {
         FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
         FunctionInputCallsiteGuard {
             did_push: true,
+            projection: None,
             state: None,
         }
     }
 }
 
 pub fn current_callsite() -> Option<CallsiteInfo> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().callsites.last().cloned();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .callsite()
+            .or_else(|| runtime.state().call.borrow().callsites.last().cloned());
     }
     CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 pub fn current_function_input_callsite() -> Option<CallsiteInfo> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().function_input_callsites.last().cloned();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .function_input_callsite()
+            .or_else(|| {
+                runtime
+                    .state()
+                    .call
+                    .borrow()
+                    .function_input_callsites
+                    .last()
+                    .cloned()
+            });
     }
     FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
 }

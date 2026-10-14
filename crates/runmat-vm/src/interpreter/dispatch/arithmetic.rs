@@ -4,6 +4,7 @@ use crate::accel::auto_promote::{
 use crate::interpreter::dispatch::logical_truth_from_value;
 use crate::ops::arithmetic as arithmetic_ops;
 use crate::ops::comparison as comparison_ops;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -12,7 +13,7 @@ async fn call_operator_method_in_context(
     obj: Value,
     method: &str,
     arg: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let _roots = crate::call::root_values([&obj, &arg])?;
     runmat_runtime::object::dispatch::call_object_operator_method_in_context(
         runtime, obj, method, arg,
@@ -25,7 +26,7 @@ async fn call_right_operator_method_ordered_in_context(
     lhs: Value,
     rhs: Value,
     method: &str,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let _roots = crate::call::root_values([&lhs, &rhs])?;
     runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
         runtime, lhs, rhs, method,
@@ -79,7 +80,8 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(runtime, AutoBinaryOp::MatMul, &a, &b).await?;
-                    runmat_runtime::value_matmul(&a_acc, &b_acc).await
+                    RootedValue::new(runmat_runtime::value_matmul(&a_acc, &b_acc).await?)
+                        .map_err(|error| error.into_runtime_error())
                 },
             )
             .await?;
@@ -222,7 +224,10 @@ pub async fn dispatch_arithmetic(
                     }
                     let (a_acc, b_acc) =
                         accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
+                    RootedValue::new(
+                        runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 },
             )
             .await?;
@@ -350,7 +355,10 @@ pub async fn dispatch_arithmetic(
             let value = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async(runtime, "not", &[value]).await?);
+            let _roots = crate::call::root_values([&value])?;
+            crate::call::call_builtin_async(runtime, "not", &[value])
+                .await?
+                .with_owned(|result| stack.push(result));
             Ok(true)
         }
         crate::bytecode::Instr::LogicalAnd => {
@@ -360,7 +368,10 @@ pub async fn dispatch_arithmetic(
             let lhs = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async(runtime, "and", &[lhs, rhs]).await?);
+            let _roots = crate::call::root_values([&lhs, &rhs])?;
+            crate::call::call_builtin_async(runtime, "and", &[lhs, rhs])
+                .await?
+                .with_owned(|result| stack.push(result));
             Ok(true)
         }
         crate::bytecode::Instr::LogicalOr => {
@@ -370,7 +381,10 @@ pub async fn dispatch_arithmetic(
             let lhs = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async(runtime, "or", &[lhs, rhs]).await?);
+            let _roots = crate::call::root_values([&lhs, &rhs])?;
+            crate::call::call_builtin_async(runtime, "or", &[lhs, rhs])
+                .await?
+                .with_owned(|result| stack.push(result));
             Ok(true)
         }
         _ => Ok(false),

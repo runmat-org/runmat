@@ -175,6 +175,7 @@ const fn entry(
     async_behavior: BuiltinAsyncBehavior,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name },
         category: "testing/qualifications",

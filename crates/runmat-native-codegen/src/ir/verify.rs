@@ -3,6 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::*;
 use crate::{NativeCodegenError, NativeCodegenResult, NATIVE_IR_SCHEMA_VERSION};
 
+#[path = "verify/super_constructor.rs"]
+mod super_constructor;
+
 impl NativeAssembly {
     pub fn verify(&self) -> NativeCodegenResult<()> {
         if self.schema_version != NATIVE_IR_SCHEMA_VERSION {
@@ -20,7 +23,10 @@ impl NativeAssembly {
                 "assembly and executable identities name different programs",
             ));
         }
-        if self.selected_portable_entrypoint != self.executable_identity.entrypoint_function {
+        if self.executable_identity.entrypoint_function != Some(self.selected_portable_entrypoint)
+            || self.executable_identity.entrypoint_kind
+                == runmat_execution::ExecutableEntrypointKind::DeclarationOnly
+        {
             return Err(NativeCodegenError::new(
                 "native.ir.entrypoint_binding",
                 "selected portable entrypoint differs from the executable identity",
@@ -111,7 +117,76 @@ impl NativeAssembly {
                 &self.requirements.regions,
                 &self.requirements.capabilities,
             )?;
+            for binding in &function.inherited_storage_bindings {
+                let owner = functions.get(&binding.owner).ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.ir.inherited_storage",
+                        "canonical storage owner is absent from the admitted program",
+                    )
+                    .at_function(function.id)
+                })?;
+                let mut cursor = function.lexical_parent;
+                let mut visible = false;
+                for _ in 0..self.functions.len() {
+                    let Some(parent) = cursor else { break };
+                    let ancestor = functions.get(&parent).ok_or_else(|| {
+                        NativeCodegenError::new(
+                            "native.ir.inherited_storage",
+                            "canonical storage ancestry is incomplete",
+                        )
+                        .at_function(function.id)
+                    })?;
+                    if ancestor.source != function.source {
+                        return Err(NativeCodegenError::new(
+                            "native.ir.inherited_storage",
+                            "canonical storage ancestry crosses a source owner",
+                        )
+                        .at_function(function.id));
+                    }
+                    if parent == binding.owner {
+                        visible = true;
+                        break;
+                    }
+                    cursor = ancestor.lexical_parent;
+                }
+                if !visible
+                    || owner.source != function.source
+                    || owner.name != binding.owner_function
+                {
+                    return Err(NativeCodegenError::new(
+                        "native.ir.inherited_storage",
+                        "canonical storage owner is outside the child's lexical ancestry",
+                    )
+                    .at_function(function.id));
+                }
+                let expected_effect = match binding.kind {
+                    NativeInheritedStorageKind::Global => {
+                        runmat_hir::WorkspaceEffect::MutatesGlobal
+                    }
+                    NativeInheritedStorageKind::Persistent => {
+                        runmat_hir::WorkspaceEffect::MutatesPersistent
+                    }
+                };
+                let declared = owner.locals.iter().any(|local| {
+                    local.binding == Some(binding.binding)
+                        && local.name.as_deref() == Some(binding.name.as_str())
+                        && owner.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+                            matches!(&instruction.operation,
+                                NativeOperation::Statement(runmat_mir::MirStmtKind::WorkspaceEffect { effect, bindings })
+                                    if *effect == expected_effect
+                                        && bindings.contains(&runmat_mir::MirLocalId(local.id.0 as usize)))
+                        })
+                });
+                if !declared {
+                    return Err(NativeCodegenError::new(
+                        "native.ir.inherited_storage",
+                        "canonical storage declaration is absent from its owner",
+                    )
+                    .at_function(function.id));
+                }
+            }
         }
+        super_constructor::verify(self, &functions)?;
         Ok(())
     }
 }
@@ -141,6 +216,57 @@ fn verify_function(
         return Err(error(
             "native.ir.function_locals",
             "locals must be ordered and bound locals must retain non-empty canonical names",
+        ));
+    }
+    ensure_sorted_unique_by(
+        "native.ir.lexical_bindings",
+        &function.lexical_bindings,
+        |binding| binding.binding,
+    )
+    .map_err(|error| error.at_function(function.id))?;
+    if has_duplicates(
+        &function
+            .lexical_bindings
+            .iter()
+            .map(|binding| binding.local)
+            .collect::<Vec<_>>(),
+    ) || function.lexical_bindings.iter().any(|binding| {
+        function
+            .local(binding.local)
+            .is_none_or(|local| local.binding != Some(binding.binding))
+            || (binding.kind == NativeLexicalBindingKind::Owned
+                && !function.creates_lexical_environment)
+            || (binding.kind == NativeLexicalBindingKind::Transit
+                && function.source_role != runmat_types::FunctionSourceRole::Anonymous)
+            || (binding.kind == NativeLexicalBindingKind::Inherited
+                && function.source_role == runmat_types::FunctionSourceRole::Anonymous)
+    }) {
+        return Err(error(
+            "native.ir.lexical_bindings",
+            "shared lexical bindings must name unique owned locals and activations",
+        ));
+    }
+    ensure_sorted_unique_by(
+        "native.ir.inherited_storage",
+        &function.inherited_storage_bindings,
+        |binding| binding.binding,
+    )
+    .map_err(|error| error.at_function(function.id))?;
+    if function.inherited_storage_bindings.iter().any(|binding| {
+        function.local(binding.local).is_none_or(|local| {
+            local.binding != Some(binding.binding)
+                || local.name.as_deref() != Some(binding.name.as_str())
+        }) || binding.name.is_empty()
+            || binding.owner_function.is_empty()
+            || function.source_role != runmat_types::FunctionSourceRole::Nested
+            || function
+                .lexical_bindings
+                .iter()
+                .any(|shared| shared.binding == binding.binding)
+    }) {
+        return Err(error(
+            "native.ir.inherited_storage",
+            "inherited canonical storage must name a nested capture and its owner",
         ));
     }
     for local in function

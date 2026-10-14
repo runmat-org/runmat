@@ -30,6 +30,8 @@ pub(super) async fn dispatch(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _operand_roots =
+                crate::call::root_values(numeric.iter().chain(std::iter::once(&base)))?;
             let mut logical_base = false;
             base = match base {
                 Value::LogicalArray(la) => {
@@ -49,10 +51,7 @@ pub(super) async fn dispatch(
                 base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
                     let resolution =
                         resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-                    if matches!(
-                        resolution,
-                        runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-                    ) {
+                    if resolution.is_some() {
                         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
                             object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
                         ));
@@ -64,7 +63,7 @@ pub(super) async fn dispatch(
                             1,
                         )
                         .await?;
-                        stack.push(resolve_single_sequence(sequence)?);
+                        resolve_single_sequence(sequence)?.with_owned(|value| stack.push(value));
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -80,7 +79,7 @@ pub(super) async fn dispatch(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_) => {
                     if *colon_mask != 0 || *end_mask != 0 {
                         return Err(crate::interpreter::errors::mex(
@@ -99,7 +98,7 @@ pub(super) async fn dispatch(
                     .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(sequence) => {
-                            stack.push(resolve_single_sequence(sequence)?)
+                            resolve_single_sequence(sequence)?.with_owned(|value| stack.push(value))
                         }
                     }
                 }

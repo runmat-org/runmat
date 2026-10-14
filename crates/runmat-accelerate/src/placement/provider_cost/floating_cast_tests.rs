@@ -61,6 +61,7 @@ fn plain_cast_prior_prices_actual_staging_params_and_fences_once() {
             requested_peak_buffer_bytes: 8,
             clear_commands: 1,
             map_callbacks: 1,
+            wgpu_compute_query: None,
         },
     );
     let observed = wgpu_cost_estimate(&provider, &request).cost;

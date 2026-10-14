@@ -3,8 +3,10 @@ use crate::accel::fusion as accel_fusion;
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
+use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
 use crate::interpreter::engine as interp_engine;
-use crate::interpreter::errors::{attach_span_from_pc, mex, set_vm_pc};
+use crate::interpreter::errors::{attach_span_from_pc, mex, scope_vm_pc, set_vm_pc};
+use crate::interpreter::process_driver::{ProcessContinuationDriver, ProcessDriverHandle};
 use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::call_stack::attach_call_frames;
 use crate::runtime::globals as runtime_globals;
@@ -25,10 +27,12 @@ use runmat_value::{CellArray, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Once;
-use tracing::{debug, info_span};
+use tracing::{debug, info_span, Instrument};
 
 #[path = "runner/instruction_loop.rs"]
 mod instruction_loop;
+#[path = "runner/super_constructor.rs"]
+mod super_constructor;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::future::Future;
@@ -38,19 +42,9 @@ use runmat_accelerate::placement::{
     begin_trace, fusion_operation_token, PlacementEventKind, PlacementVariant,
 };
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{activate_fusion_plan, deactivate_fusion_plan, set_current_pc};
+use runmat_accelerate::set_current_pc;
 #[cfg(feature = "native-accel")]
 use runmat_time::{duration_ns_saturating, Instant};
-
-#[cfg(feature = "native-accel")]
-struct FusionPlanGuard;
-
-#[cfg(feature = "native-accel")]
-impl Drop for FusionPlanGuard {
-    fn drop(&mut self) {
-        deactivate_fusion_plan();
-    }
-}
 
 type VmResult<T> = Result<T, RuntimeError>;
 
@@ -104,7 +98,7 @@ pub async fn invoke_semantic_function_value(
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     let runtime = active_or_standalone_runtime_context();
     let (value, _) = invoke_semantic_function_with_captures(
         function,
@@ -112,6 +106,8 @@ pub async fn invoke_semantic_function_value(
         requested_outputs,
         function_registry,
         runtime,
+        None,
+        None,
     )
     .await?;
     Ok(value)
@@ -123,16 +119,94 @@ pub async fn invoke_semantic_function_value_in_context(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    invoke_semantic_function_value_with_environment_in_context(
+        function,
+        args,
+        requested_outputs,
+        function_registry,
+        runtime,
+        None,
+    )
+    .await
+}
+
+pub async fn invoke_semantic_function_value_with_environment_in_context(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     let (value, _) = invoke_semantic_function_with_captures(
         function,
         args,
         requested_outputs,
         function_registry,
         runtime,
+        None,
+        lexical_environment,
     )
     .await?;
     Ok(value)
+}
+
+/// Worker-selected bound invocation uses the same constructor, superclass,
+/// access, and output policy as a local bound handle. The graph dispatcher
+/// supplies its exact unit registry and issued runtime; this function never
+/// resolves an origin or name from ambient state.
+pub(crate) async fn invoke_selected_graph_bound_in_context(
+    runtime: runmat_runtime::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    args: runmat_runtime::execution::RootedValues,
+    requested_outputs: usize,
+    registry: FunctionRegistry,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
+    super_constructor::invoke_selected_bound(
+        runtime,
+        binding,
+        args,
+        requested_outputs,
+        registry,
+        None,
+        lexical_environment,
+    )
+    .await
+}
+
+/// Host-selected source admission remains invocation-local across queued
+/// semantic calls. Imported pure selected products may have no local source
+/// capability; that absence must remain explicit until source is demanded.
+pub async fn invoke_semantic_function_value_with_dynamic_admission_in_context(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    dynamic_admission: impl Into<Option<DynamicEvalAdmissionPort>>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let invocation = |driver| {
+        invoke_semantic_function_with_captures(
+            function,
+            args,
+            requested_outputs,
+            function_registry,
+            runtime,
+            driver,
+            lexical_environment,
+        )
+    };
+    let (values, _) = if let Some(port) = dynamic_admission.into() {
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission(Some(port));
+        let driver = owner.handle();
+        owner.drive(invocation(Some(driver))).await?
+    } else {
+        invocation(None).await?
+    };
+    Ok(values)
 }
 
 pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
@@ -141,13 +215,23 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    driver: Option<ProcessDriverHandle>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<
+    (
+        runmat_runtime::execution::RootedValueSequence,
+        runmat_runtime::execution::RootedValues,
+    ),
+    RuntimeError,
+> {
     invoke_semantic_function_with_captures(
         function,
         args,
         requested_outputs,
         function_registry,
         runtime,
+        driver,
+        lexical_environment,
     )
     .await
 }
@@ -158,17 +242,53 @@ async fn invoke_semantic_function_with_captures(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    driver: Option<ProcessDriverHandle>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<
+    (
+        runmat_runtime::execution::RootedValueSequence,
+        runmat_runtime::execution::RootedValues,
+    ),
+    RuntimeError,
+> {
+    let arguments = runmat_runtime::execution::RootedValues::new(args.to_vec())
+        .map_err(|error| error.into_runtime_error())?;
+    let runtime = runtime.with_constructor_receiver_for_method(
+        function_registry
+            .get(runmat_hir::FunctionId(function))
+            .and_then(|function| function.class_method_owner.as_ref()),
+    )?;
+    let _lexical_roots = lexical_environment
+        .as_ref()
+        .map(runmat_runtime::call::lexical::root_environment)
+        .transpose()?;
+    let registry = function_registry.clone();
     let runtime = with_default_acceleration_service(runtime);
-    runtime
-        .scope(invoke_semantic_function_with_captures_inner(
+    let owner = driver.is_none().then(ProcessContinuationDriver::new);
+    let handle = driver.unwrap_or_else(|| owner.as_ref().expect("new VM driver").handle());
+    let selected_handle = handle.clone();
+    let scoped_runtime = runtime.clone();
+    // Construct the scoped owner while the caller's invocation is active. The
+    // queued child is later polled as a sibling, not beneath that caller.
+    let child = scoped_runtime.scope_pinned(Box::pin(async move {
+        invoke_semantic_function_with_captures_inner(
             function,
-            args,
+            arguments.values(),
             requested_outputs,
-            function_registry,
-            runtime.clone(),
-        ))
+            &registry,
+            runtime,
+            selected_handle,
+            lexical_environment,
+        )
         .await
+    }));
+    if let Some(owner) = owner {
+        owner
+            .drive(async move { handle.enqueue(child)?.await })
+            .await
+    } else {
+        handle.enqueue(child)?.await
+    }
 }
 
 async fn invoke_semantic_function_with_captures_inner(
@@ -177,13 +297,29 @@ async fn invoke_semantic_function_with_captures_inner(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    driver: ProcessDriverHandle,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<
+    (
+        runmat_runtime::execution::RootedValueSequence,
+        runmat_runtime::execution::RootedValues,
+    ),
+    RuntimeError,
+> {
     let _arguments = crate::call::root_values(args)?;
+    let _inherited_environment_roots = lexical_environment
+        .as_ref()
+        .map(runmat_runtime::call::lexical::root_environment)
+        .transpose()?;
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
         mex("UndefinedSemanticFunction", &message)
     })?;
+    // The entered body, not a numeric caller ID or ambient name, selects the
+    // instruction-site namespace for this invocation's static imports.
+    let runtime = runtime.with_selected_static_caller(func.binding_origin);
+    lexical_storage::validate_inherited_storage(func, function_registry)?;
     if args.len() < func.capture_slots.len() {
         let message = format!(
             "semantic function {} received too few arguments",
@@ -197,6 +333,27 @@ async fn invoke_semantic_function_with_captures_inner(
         if *slot < vars.len() {
             vars[*slot] = value.clone();
         }
+    }
+    let mut constructor_instance_slot = None;
+    if let Some(receiver) = runtime.captured_constructor_receiver().filter(|_| {
+        func.class_method_owner
+            .as_ref()
+            .is_some_and(|owner| owner.role == runmat_types::ClassMethodRole::Constructor)
+    }) {
+        let slot = *func.output_slots.first().ok_or_else(|| {
+            mex(
+                "ConstructorOutputInvalid",
+                "constructor has no fixed instance output",
+            )
+        })?;
+        let output = vars.get_mut(slot).ok_or_else(|| {
+            mex(
+                "ConstructorOutputInvalid",
+                "constructor instance output is out of bounds",
+            )
+        })?;
+        *output = receiver.clone();
+        constructor_instance_slot = Some(slot);
     }
     let input_specs = func
         .argument_validations
@@ -264,6 +421,12 @@ async fn invoke_semantic_function_with_captures_inner(
     for slot in &func.capture_slots {
         initially_unassigned_slots.remove(slot);
     }
+    for binding in &func.inherited_storage_slots {
+        initially_unassigned_slots.remove(&binding.slot);
+    }
+    if let Some(slot) = constructor_instance_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
     for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
         if value.is_some() {
             initially_unassigned_slots.remove(slot);
@@ -282,18 +445,95 @@ async fn invoke_semantic_function_with_captures_inner(
         initially_unassigned_slots.remove(&slot);
     }
     bytecode.initially_unassigned_slots = initially_unassigned_slots;
+    let (lexical_environment, _activation_roots) = if func.creates_lexical_environment {
+        let (environment, roots) =
+            runmat_runtime::call::lexical::allocate_environment(lexical_environment)?;
+        (Some(environment), roots)
+    } else {
+        (lexical_environment, Vec::new())
+    };
+    for binding in &func.lexical_binding_slots {
+        if (binding.kind == crate::bytecode::program::LexicalBindingKind::Transit
+            && func.source_role != runmat_types::FunctionSourceRole::Anonymous)
+            || (binding.kind == crate::bytecode::program::LexicalBindingKind::Inherited
+                && func.source_role == runmat_types::FunctionSourceRole::Anonymous)
+        {
+            return Err(mex(
+                "LexicalEnvironment",
+                "lexical binding kind does not match callable role",
+            ));
+        }
+        let Some(environment) = lexical_environment.as_ref() else {
+            return Err(mex(
+                "LexicalEnvironment",
+                "shared lexical binding has no admitted activation",
+            ));
+        };
+        match binding.kind {
+            crate::bytecode::program::LexicalBindingKind::Owned => {
+                if !environment.reserve_owned_binding(binding.binding) {
+                    return Err(mex(
+                        "LexicalEnvironment",
+                        "owned shared binding was reserved twice",
+                    ));
+                }
+                if !bytecode.initially_unassigned_slots.contains(&binding.slot) {
+                    let value = vars.get(binding.slot).cloned().ok_or_else(|| {
+                        mex(
+                            "LexicalEnvironment",
+                            "shared binding slot is outside its frame",
+                        )
+                    })?;
+                    runmat_runtime::call::lexical::write_owned_binding(
+                        environment,
+                        binding.binding,
+                        value,
+                    )?;
+                }
+            }
+            crate::bytecode::program::LexicalBindingKind::Inherited => {
+                let slot = vars.get_mut(binding.slot).ok_or_else(|| {
+                    mex(
+                        "LexicalEnvironment",
+                        "inherited binding slot is outside its frame",
+                    )
+                })?;
+                if let Some(value) =
+                    runmat_runtime::call::lexical::read_binding(environment, binding.binding)?
+                {
+                    *slot = value;
+                    bytecode.initially_unassigned_slots.remove(&binding.slot);
+                } else {
+                    bytecode.initially_unassigned_slots.insert(binding.slot);
+                }
+            }
+            crate::bytecode::program::LexicalBindingKind::Transit => {
+                if vars.get(binding.slot).is_none() {
+                    return Err(mex(
+                        "LexicalEnvironment",
+                        "transit binding slot is outside its frame",
+                    ));
+                }
+            }
+        }
+    }
     let result_vars = {
         #[cfg(not(target_arch = "wasm32"))]
         let execution_runtime = runtime.clone();
         #[cfg(target_arch = "wasm32")]
-        let future = interpret_function_with_counts_in_context(
-            &bytecode,
+        let future = interpret_function_with_counts_in_context_with_driver(
+            FunctionExecutionInvocation {
+                bytecode: &bytecode,
+                name: &func.display_name,
+                arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
+                missing_input_slots,
+                runtime: runtime.clone(),
+                driver: Some(driver.clone()),
+                lexical_environment: lexical_environment.clone(),
+                lexical_binding_slots: func.lexical_binding_slots.clone(),
+                inherited_storage_slots: func.inherited_storage_slots.clone(),
+            },
             vars,
-            &func.display_name,
-            requested_outputs,
-            prepared.nargin,
-            missing_input_slots,
-            runtime.clone(),
         );
         #[cfg(target_arch = "wasm32")]
         {
@@ -313,14 +553,19 @@ async fn invoke_semantic_function_with_captures_inner(
             // it before boxing would still consume the caller's native stack.
             // No interpreter polling or foreign execution occurs here.
             let mut future = stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
-                Box::pin(interpret_function_with_counts_in_context(
-                    &bytecode,
+                Box::pin(interpret_function_with_counts_in_context_with_driver(
+                    FunctionExecutionInvocation {
+                        bytecode: &bytecode,
+                        name: &func.display_name,
+                        arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
+                        missing_input_slots,
+                        runtime: runtime.clone(),
+                        driver: Some(driver.clone()),
+                        lexical_environment: lexical_environment.clone(),
+                        lexical_binding_slots: func.lexical_binding_slots.clone(),
+                        inherited_storage_slots: func.inherited_storage_slots.clone(),
+                    },
                     vars,
-                    &func.display_name,
-                    requested_outputs,
-                    prepared.nargin,
-                    missing_input_slots,
-                    runtime.clone(),
                 ))
             });
             if execution_stack == runmat_types::ExecutionStackRequirement::Process {
@@ -341,8 +586,7 @@ async fn invoke_semantic_function_with_captures_inner(
             }
         }
     };
-    let projected = super::CompletedFrameProjection::new(result_vars)?;
-    let result_vars = projected.values();
+    let result_vars = result_vars.values();
     let fixed_outputs = func
         .output_slots
         .iter()
@@ -361,8 +605,79 @@ async fn invoke_semantic_function_with_captures_inner(
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
     let outputs = output_sequence(output_values, requested_outputs)?;
-    drop(projected);
+    let outputs = runmat_runtime::execution::RootedValueSequence::new(outputs)
+        .map_err(|error| error.into_runtime_error())?;
+    let updated_captures = runmat_runtime::execution::RootedValues::new(updated_captures)
+        .map_err(|error| error.into_runtime_error())?;
     Ok((outputs, updated_captures))
+}
+
+async fn await_prior_semantic_invoker(
+    driver: Option<ProcessDriverHandle>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    future: user_functions::UserFunctionFuture,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let Some(driver) = driver else {
+        return future.await;
+    };
+    if runtime
+        .service_ports()
+        .local_tasks()
+        .and_then(|tasks| tasks.canonical_admission())
+        .is_some()
+    {
+        // A prior invoker can start a second VM owner. Its selected runtime
+        // and rooted inputs are already owned, so poll it as a foreground
+        // sibling rather than under this VM driver's still-live poll stack.
+        return runmat_runtime::context::run_selected_callback_continuation(&runtime, future).await;
+    }
+    // The prior invoker may itself be another VM owner. Select its call and
+    // source projections before yielding this frame to the queue.
+    let child = runtime.scope(async move {
+        let outputs = future.await?;
+        let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
+            .map_err(|error| error.into_runtime_error())?;
+        Ok((outputs, captures))
+    });
+    let (outputs, _) = driver.enqueue(child)?.await?;
+    Ok(outputs)
+}
+
+/// Select the previous bound invoker under the same continuation that polls
+/// it. Its factory performs synchronous selected-source admission, so calling
+/// the factory in the suspended interpreter frame defeats sibling placement.
+/// Root the copied lexical activation before enqueueing either continuation.
+async fn await_prior_bound_invoker(
+    driver: Option<ProcessDriverHandle>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    environment_roots: Option<Vec<runmat_gc::ExplicitRoot>>,
+    factory: impl FnOnce() -> user_functions::UserFunctionFuture + 'static,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let Some(driver) = driver else {
+        let _environment_roots = environment_roots;
+        return factory().await;
+    };
+    if runtime
+        .service_ports()
+        .local_tasks()
+        .and_then(|tasks| tasks.canonical_admission())
+        .is_some()
+    {
+        return runmat_runtime::context::run_selected_callback_continuation(&runtime, async move {
+            let _environment_roots = environment_roots;
+            factory().await
+        })
+        .await;
+    }
+    let child = runtime.scope(async move {
+        let _environment_roots = environment_roots;
+        let outputs = factory().await?;
+        let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
+            .map_err(|error| error.into_runtime_error())?;
+        Ok((outputs, captures))
+    });
+    let (outputs, _) = driver.enqueue(child)?.await?;
+    Ok(outputs)
 }
 
 fn output_sequence(
@@ -420,6 +735,25 @@ pub async fn interpret_with_workspace_in_context(
     runtime: runmat_runtime::context::RuntimeContext,
     admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
 ) -> WorkspaceInterpreterOutcome {
+    interpret_with_workspace_and_dynamic_admission_in_context(
+        bytecode,
+        initial_vars,
+        current_function_name,
+        runtime,
+        admission,
+        None,
+    )
+    .await
+}
+
+pub async fn interpret_with_workspace_and_dynamic_admission_in_context(
+    bytecode: &Bytecode,
+    initial_vars: &mut Vec<Value>,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+) -> WorkspaceInterpreterOutcome {
     let arity = runtime
         .invocation_arity()
         .unwrap_or(RuntimeInvocationArity::Script);
@@ -434,14 +768,17 @@ pub async fn interpret_with_workspace_in_context(
         current_function_name.unwrap_or("<main>"),
     );
     let outcome = workspace_activation
-        .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
-            interpret_with_vars_inner(
-                bytecode,
-                initial_vars,
-                current_function_name,
-                runtime.clone(),
-            ),
-        )))
+        .scope(
+            runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
+                interpret_with_vars_inner(
+                    bytecode,
+                    initial_vars,
+                    current_function_name,
+                    runtime.clone(),
+                    dynamic_admission,
+                ),
+            ))),
+        )
         .await;
     let workspace = crate::runtime::workspace::take_workspace_completion(frame);
     WorkspaceInterpreterOutcome { outcome, workspace }
@@ -453,12 +790,80 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    interpret_resume_with_environment_in_context(
+        bytecode,
+        resume,
+        current_function_name,
+        runtime,
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .await
+}
+
+pub async fn interpret_resume_with_environment_in_context(
+    bytecode: &Bytecode,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
+    inherited_storage_slots: Vec<crate::bytecode::program::InheritedStorageSlot>,
+) -> VmResult<InterpreterOutcome> {
+    interpret_resume_with_dynamic_admission_in_context(
+        bytecode,
+        resume,
+        current_function_name,
+        runtime,
+        DynamicResumeSelection {
+            lexical_environment,
+            lexical_binding_slots,
+            inherited_storage_slots,
+            dynamic_admission: None,
+        },
+    )
+    .await
+}
+
+pub struct DynamicResumeSelection {
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    pub lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
+    pub inherited_storage_slots: Vec<crate::bytecode::program::InheritedStorageSlot>,
+    pub dynamic_admission: Option<DynamicEvalAdmissionPort>,
+}
+
+pub async fn interpret_resume_with_dynamic_admission_in_context(
+    bytecode: &Bytecode,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    selected: DynamicResumeSelection,
+) -> VmResult<InterpreterOutcome> {
+    let DynamicResumeSelection {
+        lexical_environment,
+        lexical_binding_slots,
+        inherited_storage_slots,
+        dynamic_admission,
+    } = selected;
+    let _environment_roots = lexical_environment
+        .as_ref()
+        .map(runmat_runtime::call::lexical::root_environment)
+        .transpose()?;
     // Resume authority is checked before installing workspace services or
     // reconstructing any local. A foreign continuation is not a clear.
     let selected_authority = runtime.session_variable_authority();
     let selected_function = current_function_name.unwrap_or("<main>");
-    for binding in resume.persistent_aliases.values() {
-        binding.validate_selected(&selected_authority, selected_function)?;
+    for (slot, binding) in &resume.persistent_aliases {
+        let owner = inherited_storage_slots
+            .iter()
+            .find(|entry| {
+                entry.slot == *slot
+                    && entry.kind == crate::bytecode::program::InheritedStorageKind::Persistent
+                    && binding.matches_inherited_owner(&entry.owner_function, &entry.name)
+            })
+            .map_or(selected_function, |entry| entry.owner_function.as_str());
+        binding.validate_selected(&selected_authority, owner)?;
     }
     let runtime = runtime.with_invocation_arity(RuntimeInvocationArity::function(
         resume.supplied_inputs,
@@ -473,9 +878,19 @@ pub async fn interpret_resume_in_context(
         current_function_name.unwrap_or("<main>"),
     );
     workspace_activation
-        .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
-            interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
-        )))
+        .scope(
+            runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
+                interpret_resume_inner(
+                    bytecode,
+                    resume,
+                    current_function_name,
+                    runtime.clone(),
+                    lexical_environment,
+                    lexical_binding_slots,
+                    dynamic_admission,
+                ),
+            ))),
+        )
         .await
 }
 
@@ -490,16 +905,26 @@ fn with_default_acceleration_service(
     runtime
 }
 
+#[path = "runner/lexical_storage.rs"]
+mod lexical_storage;
 #[path = "runner/native_metadata.rs"]
 mod native_metadata;
-pub use native_metadata::prepare_native_execution_metadata;
 use native_metadata::register_class_metadata;
+pub use native_metadata::{
+    prepare_admitted_execution_metadata, prepare_admitted_execution_metadata_batch,
+    prepare_admitted_execution_metadata_for_class_batch, prepare_native_execution_metadata,
+    unresolved_admitted_class_parents, unresolved_admitted_class_parents_for, SelectedClassProduct,
+    SelectedDeclarationProduct,
+};
 
 async fn interpret_resume_inner(
     bytecode: &Bytecode,
     resume: InterpreterResumeState,
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
 ) -> VmResult<InterpreterOutcome> {
     if resume.pc > bytecode.instructions.len() {
         return Err(mex(
@@ -547,6 +972,9 @@ async fn interpret_resume_inner(
         invocation_arity,
         runtime,
     );
+    state.context.lexical_environment = lexical_environment;
+    state.context.dynamic_eval_admission = dynamic_admission;
+    state.context.lexical_binding_slots = lexical_binding_slots;
     state.pc = resume.pc;
     state.completion_boundary = resume.completion_boundary;
     state.completion_assigned_slots = Some(assigned_slots);
@@ -569,13 +997,24 @@ async fn interpret_resume_inner(
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&state.context.runtime));
+    let (source_owner, diagnostic_source) =
+        selected_frame_source_basis(bytecode, &state.context.runtime)
+            .map_or((None, None), |(owner, diagnostic)| {
+                (Some(owner), Some(diagnostic))
+            });
     let mut output_vars = vars;
     let result = run_interpreter(Box::new(state), &mut output_vars).await;
     match result {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
-            Err(attach_call_frames(current_name, source_id, err))
+            Err(attach_call_frames(
+                current_name,
+                source_id,
+                source_owner,
+                diagnostic_source,
+                err,
+            ))
         }
     }
 }
@@ -585,6 +1024,7 @@ async fn interpret_with_vars_inner(
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
 ) -> VmResult<InterpreterOutcome> {
     bytecode
         .validate_selected_source_owners(&runtime)
@@ -594,25 +1034,79 @@ async fn interpret_with_vars_inner(
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
+    let (source_owner, diagnostic_source) = selected_frame_source_basis(bytecode, &runtime)
+        .map_or((None, None), |(owner, diagnostic)| {
+            (Some(owner), Some(diagnostic))
+        });
     let invocation_arity = runtime
         .invocation_arity()
         .unwrap_or(RuntimeInvocationArity::Script);
     let _borrowed_inputs =
         crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
-    let state = Box::new(InterpreterState::new_in_context(
+    let mut state = Box::new(InterpreterState::new_in_context(
         bytecode.clone(),
         initial_vars,
         current_function_name,
         invocation_arity,
         runtime,
     ));
+    state.context.dynamic_eval_admission = dynamic_admission;
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
             let current_name = current_function_name.unwrap_or("<main>");
-            Err(attach_call_frames(current_name, source_id, err))
+            Err(attach_call_frames(
+                current_name,
+                source_id,
+                source_owner,
+                diagnostic_source,
+                err,
+            ))
         }
+    }
+}
+
+/// Attach an error-frame token only from the selected executable's issued
+/// source table. A function body uses its exact retained definition owner;
+/// scripts and native resume without an active function use the explicitly
+/// bound invocation table. Display names and numeric SourceIds never select
+/// an owner.
+fn selected_frame_source_basis(
+    bytecode: &Bytecode,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Option<(
+    runmat_runtime::CallFrameSourceOwner,
+    runmat_runtime::CallFrameDiagnosticSource,
+)> {
+    let source = bytecode.source_id?;
+    let issued = source.runtime()?;
+    issued.resolve_in(runtime)?;
+    if let Some(function) = bytecode.active_function {
+        let body = bytecode.function_registry.get(function)?;
+        if body.source_id != Some(source) {
+            return None;
+        }
+        let owner = body.selected_source_owner.as_ref()?;
+        let ordinal = owner.source_ordinal_for(issued)?;
+        let token = owner.call_frame_source_owner_for(ordinal)?;
+        let info = owner.issued_source_info_for(ordinal)?;
+        Some((
+            token,
+            runmat_runtime::CallFrameDiagnosticSource::new(
+                std::sync::Arc::clone(&info.name),
+                std::sync::Arc::clone(&info.text),
+            ),
+        ))
+    } else {
+        let ordinal = runtime.portable_ordinal_for_source(issued)?;
+        let token = runtime.call_frame_source_owner_for_program_source(ordinal)?;
+        let source = issued.resolve_in(runtime)?;
+        let info = runmat_runtime::source_context::source_info_in_context(runtime, source)?;
+        Some((
+            token,
+            runmat_runtime::CallFrameDiagnosticSource::new(info.name, info.text),
+        ))
     }
 }
 
@@ -639,13 +1133,22 @@ fn runtime_with_bytecode_debug_frame(
 }
 
 fn run_interpreter<'a>(
-    state: Box<InterpreterState>,
+    mut state: Box<InterpreterState>,
     initial_vars: &'a mut Vec<Value>,
 ) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + 'a {
+    let owner = if state.context.process_driver.is_none() {
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission(
+            state.context.dynamic_eval_admission.clone(),
+        );
+        state.context.process_driver = Some(owner.handle());
+        Some(owner)
+    } else {
+        None
+    };
     let mut state = Some(state);
     let mut initial_vars = Some(initial_vars);
     let mut active = None;
-    futures::future::poll_fn(move |cx| {
+    let interpreter = futures::future::poll_fn(move |cx| {
         if active.is_none() {
             let state = state
                 .take()
@@ -666,7 +1169,14 @@ fn run_interpreter<'a>(
             active.take();
         }
         result
-    })
+    });
+    async move {
+        if let Some(owner) = owner {
+            owner.drive(interpreter).await
+        } else {
+            interpreter.await
+        }
+    }
 }
 
 // This constructor runs on the first poll, then returns before the inner
@@ -687,26 +1197,25 @@ fn prepare_run_interpreter<'a>(
         .map_err(RuntimeError::new)?;
     let catch_runtime = state.context.runtime.clone();
     let inherited_catch = catch_runtime.active_catch_exception_shared();
+    let run_span = info_span!(
+        "interpreter.run",
+        function = state.current_function_name.as_str()
+    );
+    #[cfg(feature = "native-accel")]
+    let fusion_plan = state.fusion_plan.clone();
     let state = *state;
-    Ok(catch_runtime
-        .scope_active_catch_shared(inherited_catch, run_interpreter_inner(state, initial_vars)))
+    let future = run_interpreter_inner(state, initial_vars).instrument(run_span);
+    #[cfg(feature = "native-accel")]
+    let future = runmat_accelerate::scope_fusion_plan(fusion_plan, future);
+    Ok(catch_runtime.scope_active_catch_shared(inherited_catch, future))
 }
 
 async fn run_interpreter_inner(
     state: InterpreterState,
     initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
-    let run_span = info_span!(
-        "interpreter.run",
-        function = state.current_function_name.as_str()
-    );
-    let _run_guard = run_span.enter();
     ensure_wasm_builtins_registered();
     ensure_workspace_resolver_registered();
-    #[cfg(feature = "native-accel")]
-    activate_fusion_plan(state.fusion_plan.clone());
-    #[cfg(feature = "native-accel")]
-    let _fusion_guard = FusionPlanGuard;
     let InterpreterState {
         mut stack,
         mut vars,
@@ -746,7 +1255,7 @@ async fn run_interpreter_inner(
         .runtime
         .invocation_arity()
         .expect("interpreter state has selected script or function arity");
-    let function_registry = Arc::new(bytecode.function_registry());
+    let function_registry = std::rc::Rc::new(bytecode.function_registry());
     let catch_runtime = context.runtime.clone();
     let mut catch_exceptions: HashMap<
         runmat_mir::CatchScopeId,
@@ -763,25 +1272,53 @@ async fn run_interpreter_inner(
         })
         .collect();
     let nested_runtime = context.runtime.clone();
+    let nested_driver = context.process_driver.clone();
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     // Numeric/name calls select the currently published registry. An old
     // bound body's static edges are routed through the distinct typed bound
     // invoker below; an overlay must never shadow a dynamic name lookup.
-    let registry_for_function_invoker = Arc::new(function_registry.current_view());
+    let registry_for_function_invoker = std::rc::Rc::new(function_registry.current_view());
     let _semantic_function_guard =
         user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
-            move |function: usize, args: &[Value], requested_outputs: usize| {
+            move |selected, function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
-                let function_registry = Arc::clone(&registry_for_function_invoker);
-                let runtime = nested_runtime.clone();
+                let function_registry = std::rc::Rc::clone(&registry_for_function_invoker);
+                let same_owner = selected.as_ref().is_none_or(|context| {
+                    context.local_identity() == nested_runtime.local_identity()
+                });
+                let runtime = if same_owner {
+                    selected.map_or_else(
+                        || nested_runtime.clone(),
+                        |context| {
+                            nested_runtime
+                                .clone()
+                                .try_with_inherited_callback_invocation_authority_from(&context)
+                                .expect(
+                                    "callback Runtime owner checked before authority projection",
+                                )
+                        },
+                    )
+                } else {
+                    nested_runtime.clone()
+                };
+                let driver = nested_driver.clone();
                 Box::pin(async move {
+                    if !same_owner {
+                        return Err(runmat_runtime::build_runtime_error(
+                            "semantic callback selected another VM runtime owner",
+                        )
+                        .with_identifier("RunMat:VmCallbackOwner")
+                        .build());
+                    }
                     let local_function = function_registry
                         .get(runmat_hir::FunctionId(function))
                         .is_some();
                     if !local_function {
                         if let Some(invoker) = previous_invoker {
-                            return invoker(function, &args, requested_outputs).await;
+                            let future =
+                                invoker(Some(runtime.clone()), function, &args, requested_outputs);
+                            return await_prior_semantic_invoker(driver, runtime, future).await;
                         }
                     }
                     invoke_semantic_function_value_with_capture_updates(
@@ -790,6 +1327,8 @@ async fn run_interpreter_inner(
                         requested_outputs,
                         &function_registry,
                         runtime,
+                        driver,
+                        None,
                     )
                     .await
                     .map(|(value, _)| value)
@@ -797,65 +1336,96 @@ async fn run_interpreter_inner(
             },
         ));
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
-    let registry_for_bound_invoker = Arc::clone(&function_registry);
-    let _bound_function_guard = user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |runtime, binding, args, requested_outputs| {
-            let previous = previous_bound_invoker.clone();
-            let registry = Arc::clone(&registry_for_bound_invoker);
-            Box::pin(async move {
-                let function = runmat_hir::FunctionId(binding.function);
-                if let runmat_value::BoundFunctionAuthority::Portable { origin } =
-                    &binding.authority
-                {
-                    if registry
-                        .get_current(function)
-                        .is_some_and(|body| body.binding_origin == Some(*origin))
+    let registry_for_bound_invoker = std::rc::Rc::clone(&function_registry);
+    let bound_driver = context.process_driver.clone();
+    let _bound_function_guard =
+        user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+            move |runtime, binding, args, requested_outputs, lexical_environment| {
+                let previous = previous_bound_invoker.clone();
+                let registry = std::rc::Rc::clone(&registry_for_bound_invoker);
+                let driver = bound_driver.clone();
+                Box::pin(async move {
+                    let function = runmat_hir::FunctionId(binding.function);
+                    if let runmat_value::BoundFunctionAuthority::Portable { origin } =
+                        &binding.authority
                     {
-                        return invoke_semantic_function_value_with_capture_updates(
-                            binding.function,
-                            args.values(),
-                            requested_outputs,
-                            &registry,
-                            runtime,
-                        )
-                        .await
-                        .map(|(value, _)| value);
+                        if registry
+                            .get_current(function)
+                            .filter(|body| body.binding_origin == Some(*origin))
+                            .is_some()
+                        {
+                            return super_constructor::invoke_selected_bound(
+                                runtime,
+                                binding,
+                                args,
+                                requested_outputs,
+                                registry.as_ref().clone(),
+                                driver.clone(),
+                                lexical_environment,
+                            )
+                            .await;
+                        }
                     }
-                }
-                let view = registry.owned_view(function, &binding.authority);
-                if let Some(view) = view {
-                    return invoke_semantic_function_value_with_capture_updates(
-                        binding.function,
-                        args.values(),
-                        requested_outputs,
-                        &view,
-                        runtime,
-                    )
-                    .await
-                    .map(|(value, _)| value);
-                }
-                if let Some(previous) = previous {
-                    return previous(runtime, binding, args, requested_outputs).await;
-                }
-                Err(mex(
-                    "UnavailableBoundFunction",
-                    "bound function definition is unavailable in this execution owner",
-                ))
-            })
-        }),
-    );
+                    let view = registry.owned_view(function, &binding.authority);
+                    if let Some(view) = view {
+                        return super_constructor::invoke_selected_bound(
+                            runtime,
+                            binding,
+                            args,
+                            requested_outputs,
+                            view,
+                            driver,
+                            lexical_environment,
+                        )
+                        .await;
+                    }
+                    if let Some(previous) = previous {
+                        let selected_runtime = runtime.clone();
+                        let environment_roots = if driver.is_some() {
+                            lexical_environment
+                                .as_ref()
+                                .map(runmat_runtime::call::lexical::root_environment)
+                                .transpose()?
+                        } else {
+                            None
+                        };
+                        return await_prior_bound_invoker(
+                            driver,
+                            selected_runtime,
+                            environment_roots,
+                            move || {
+                                previous(
+                                    runtime,
+                                    binding,
+                                    args,
+                                    requested_outputs,
+                                    lexical_environment,
+                                )
+                            },
+                        )
+                        .await;
+                    }
+                    Err(mex(
+                        "UnavailableBoundFunction",
+                        "bound function definition is unavailable in this execution owner",
+                    ))
+                })
+            },
+        ));
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
     let previous_semantic_candidates = user_functions::current_semantic_name_candidates();
-    let registry_for_function_resolver = Arc::new(function_registry.current_view());
-    let active_definition_registry = Arc::clone(&function_registry);
-    let registry_for_scoped_names = Arc::clone(&function_registry);
-    let _scoped_name_target_guard =
-        user_functions::install_scoped_name_target_resolver(Some(Arc::new(move |name: &str| {
+    let registry_for_function_resolver = function_registry.current_view();
+    let published_name_resolution = registry_for_function_resolver.private_name_resolution_view();
+    let selected_private_name_resolution = function_registry.private_name_resolution_view();
+    let registry_for_scoped_names = std::rc::Rc::clone(&function_registry);
+    let _scoped_name_target_guard = user_functions::install_scoped_name_target_resolver(Some(
+        std::rc::Rc::new(move |name: &str| {
             user_functions::current_active_semantic_function().and_then(|caller| {
                 registry_for_scoped_names
                     .scoped_private_name_target_for_caller(runmat_hir::FunctionId(caller), name)
             })
-        })));
+        }),
+    ));
     let current_name_facts = Arc::new(
         registry_for_function_resolver.semantic_name_candidate_facts_in(
             &context.runtime,
@@ -878,7 +1448,7 @@ async fn run_interpreter_inner(
         Arc::new(move |name: &str| {
             let mut candidates = Vec::new();
             if let Some(active_function) = user_functions::current_active_semantic_function() {
-                if let Some(scoped_function) = active_definition_registry
+                if let Some(scoped_function) = selected_private_name_resolution
                     .resolve_private_name_for_caller(runmat_hir::FunctionId(active_function), name)
                 {
                     if let Some(candidate) = retained_name_facts
@@ -889,7 +1459,7 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            if let Some(function) = registry_for_function_resolver.resolve_name(name) {
+            if let Some(function) = published_name_resolution.resolve_name(name) {
                 if let Some(candidate) = current_name_facts.get(&function) {
                     if !candidates
                         .iter()
@@ -936,31 +1506,9 @@ async fn run_interpreter_inner(
         })));
     let _semantic_candidates_guard =
         user_functions::install_semantic_name_candidates(Some(semantic_candidates));
-    let registry_for_execution_source = Arc::clone(&function_registry);
-    let registry_for_execution_group = Arc::clone(&function_registry);
-    let registry_for_execution_owners = Arc::clone(&function_registry);
-    let registry_for_execution_origin = Arc::clone(&function_registry);
-    let source_runtime = context.runtime.clone();
-    let group_runtime = context.runtime.clone();
-    let origin_runtime = context.runtime.clone();
+    let execution_sources = function_registry.execution_source_resolver_in(&context.runtime);
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
-        std::rc::Rc::new(user_functions::ExecutionSourceFacts::new(
-            std::rc::Rc::new(move |function| {
-                registry_for_execution_source
-                    .execution_source_fact_in(&source_runtime, runmat_hir::FunctionId(function))
-            }),
-            std::rc::Rc::new(move |source| {
-                registry_for_execution_group.execution_source_group_facts_in(&group_runtime, source)
-            }),
-            std::rc::Rc::new(move |function| {
-                registry_for_execution_owners
-                    .execution_definition_owners(runmat_hir::FunctionId(function))
-            }),
-            std::rc::Rc::new(move |origin| {
-                registry_for_execution_origin
-                    .execution_source_fact_for_origin_in(&origin_runtime, origin)
-            }),
-        )),
+        std::rc::Rc::clone(&execution_sources),
     ));
     let mut source_function_catalog = function_registry
         .functions
@@ -985,6 +1533,12 @@ async fn run_interpreter_inner(
     source_function_catalog.sort_by_key(|info| info.function);
     let _source_function_catalog_guard =
         user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)));
+    super_constructor::bind_selected(
+        &mut context,
+        &bytecode,
+        &function_registry,
+        &execution_sources,
+    )?;
     let _workspace_guard = interp_engine::prepare_workspace_guard(
         &bytecode.var_names,
         &mut vars,
@@ -992,6 +1546,56 @@ async fn run_interpreter_inner(
         &bytecode.initially_unassigned_slots,
         global_aliases.clone(),
     );
+    let inherited_storage = std::mem::take(&mut context.inherited_storage_slots);
+    let mut _storage_roots = Vec::new();
+    if !inherited_storage.is_empty() {
+        _storage_roots.push(
+            runmat_runtime::execution::RootedValueLease::for_values(vars.iter())
+                .map_err(|error| error.into_runtime_error())?,
+        );
+    }
+    for binding in inherited_storage {
+        if binding.slot >= vars.len() {
+            return Err(mex(
+                "LexicalStorage",
+                "inherited storage slot is outside its frame",
+            ));
+        }
+        match binding.kind {
+            crate::bytecode::program::InheritedStorageKind::Global => {
+                crate::runtime::globals::declare_global_named(
+                    vec![binding.slot],
+                    vec![binding.name],
+                    &mut vars,
+                    &global_aliases,
+                )?;
+            }
+            crate::bytecode::program::InheritedStorageKind::Persistent => {
+                crate::interpreter::persistent::declare(
+                    &mut persistent_aliases,
+                    &mut vars,
+                    &context.runtime.session_variable_authority(),
+                    &binding.owner_function,
+                    binding.slot,
+                    crate::interpreter::persistent::PersistentAlias::InheritedNamed(binding.name),
+                )?;
+                crate::runtime::workspace::declare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    binding.slot,
+                    &vars[binding.slot],
+                );
+            }
+        }
+        _storage_roots.push(
+            runmat_runtime::execution::RootedValueLease::for_values(vars.iter())
+                .map_err(|error| error.into_runtime_error())?,
+        );
+    }
+    crate::runtime::workspace::attach_lexical_workspace_bindings(
+        context.lexical_environment.as_ref(),
+        &context.lexical_binding_slots,
+    )
+    .map_err(|error| mex("LexicalEnvironment", &error))?;
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut sequence_register = interp_dispatch::SequenceState::default();
     // All owner objects stay at these frame addresses through the inner
@@ -1078,18 +1682,26 @@ async fn run_interpreter_inner(
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(
-        crate::interpreter::state::InterpreterCompletion {
-            assigned_slots: completion_assigned_slots
-                .unwrap_or_else(crate::runtime::workspace::current_workspace_assigned_slots),
-            values: vars,
-        },
+        runmat_runtime::execution::RootedResult::new(
+            crate::interpreter::state::InterpreterCompletion {
+                assigned_slots: completion_assigned_slots
+                    .unwrap_or_else(crate::runtime::workspace::current_workspace_assigned_slots),
+                values: vars,
+            },
+        )
+        .map_err(|error| error.into_runtime_error())?,
     ))
 }
 
-pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> {
+pub async fn interpret(
+    bytecode: &Bytecode,
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
-        Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
+        Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
+            runmat_runtime::execution::RootedValues::new(completion.values)
+                .map_err(|error| error.into_runtime_error())
+        }),
         Err(e) => Err(e),
     }
 }
@@ -1113,7 +1725,7 @@ pub(crate) struct ParforTaskExecution<'a> {
 
 pub(crate) async fn interpret_parfor_task_in_context(
     execution: ParforTaskExecution<'_>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     let ParforTaskExecution {
         bytecode,
         region,
@@ -1124,6 +1736,10 @@ pub(crate) async fn interpret_parfor_task_in_context(
         current_function_name,
         runtime,
     } = execution;
+    let _input_roots = runmat_runtime::execution::RootedValueLease::for_values(
+        inputs.iter().chain(iterations.iter()),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     randomness
         .validate_for_iterations(iterations.len())
         .map_err(|error| mex("ParallelRandomness", &error.to_string()))?;
@@ -1180,8 +1796,17 @@ pub(crate) async fn interpret_parfor_task_in_context(
     let mut reduction_outputs = reduction_inputs
         .keys()
         .copied()
-        .map(|slot| (slot, Vec::new()))
+        .map(|slot| {
+            (
+                slot,
+                runmat_runtime::execution::RootedValuesBuilder::default(),
+            )
+        })
         .collect::<HashMap<_, _>>();
+    let mut frame_roots = runmat_runtime::execution::RootedValueLease::for_values(
+        frame.iter().filter_map(Option::as_ref),
+    )
+    .map_err(|error| error.into_runtime_error())?;
 
     for (iteration_index, iteration) in iterations.into_iter().enumerate() {
         for variable in &region.variables {
@@ -1235,9 +1860,15 @@ pub(crate) async fn interpret_parfor_task_in_context(
         ))
         .await?
         {
-            InterpreterOutcome::Completed(completion) => {
-                completion.values.into_iter().map(Some).collect()
-            }
+            InterpreterOutcome::Completed(completion) => completion.with_owned(|completion| {
+                let next_frame = completion.values.into_iter().map(Some).collect::<Vec<_>>();
+                let next_roots = runmat_runtime::execution::RootedValueLease::for_values(
+                    next_frame.iter().filter_map(Option::as_ref),
+                )
+                .map_err(|error| error.into_runtime_error())?;
+                frame_roots = next_roots;
+                Ok::<_, RuntimeError>(next_frame)
+            })?,
         };
         if mode == ParforTaskMode::IndependentIterations {
             for (slot, values) in &mut reduction_outputs {
@@ -1247,48 +1878,65 @@ pub(crate) async fn interpret_parfor_task_in_context(
                         "parallel task did not assign a declared reduction output",
                     )
                 })?;
-                values.push(value);
+                values
+                    .push(value)
+                    .map_err(|error| error.into_runtime_error())?;
             }
         }
     }
 
-    region
-        .output_variables()
-        .map(|variable| {
-            if mode == ParforTaskMode::IndependentIterations
-                && matches!(
-                    variable.contract.role,
-                    runmat_types::ParallelVariableRole::Reduction { .. }
+    let mut outputs = runmat_runtime::execution::RootedValuesBuilder::default();
+    for variable in region.output_variables() {
+        if mode == ParforTaskMode::IndependentIterations
+            && matches!(
+                variable.contract.role,
+                runmat_types::ParallelVariableRole::Reduction { .. }
+            )
+        {
+            let values = reduction_outputs.remove(&variable.slot).ok_or_else(|| {
+                mex(
+                    "ParallelTaskOutput",
+                    "parallel task lost a declared reduction output",
                 )
-            {
-                let values = reduction_outputs.remove(&variable.slot).ok_or_else(|| {
-                    mex(
-                        "ParallelTaskOutput",
-                        "parallel task lost a declared reduction output",
-                    )
+            })?;
+            values
+                .finish()
+                .map_err(|error| error.into_runtime_error())?
+                .with_owned_values(|values| {
+                    let length = values.len();
+                    let value = runmat_value::CellArray::new(values, 1, length)
+                        .map(Value::Cell)
+                        .map_err(|error| mex("ParallelTaskOutput", &error))?;
+                    outputs
+                        .push(value)
+                        .map_err(|error| error.into_runtime_error())
                 })?;
-                let length = values.len();
-                return runmat_value::CellArray::new(values, 1, length)
-                    .map(Value::Cell)
-                    .map_err(|error| mex("ParallelTaskOutput", &error));
-            }
-            frame
-                .get(variable.slot)
-                .and_then(Clone::clone)
-                .ok_or_else(|| {
-                    mex(
-                        "ParallelTaskOutput",
-                        "parallel task did not assign a declared output",
-                    )
-                })
-        })
-        .collect()
+            continue;
+        }
+        let value = frame
+            .get(variable.slot)
+            .and_then(Clone::clone)
+            .ok_or_else(|| {
+                mex(
+                    "ParallelTaskOutput",
+                    "parallel task did not assign a declared output",
+                )
+            })?;
+        outputs
+            .push(value)
+            .map_err(|error| error.into_runtime_error())?;
+    }
+    let outputs = outputs
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+    drop(frame_roots);
+    Ok(outputs)
 }
 
 pub async fn interpret_function(
     bytecode: &Bytecode,
     vars: Vec<Value>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0, HashSet::new()).await
 }
 
@@ -1299,7 +1947,7 @@ pub async fn interpret_function_with_counts(
     out_count: usize,
     in_count: usize,
     missing_input_slots: HashSet<usize>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     let runtime = active_or_standalone_runtime_context();
     interpret_function_with_counts_in_context(
         bytecode,
@@ -1321,45 +1969,81 @@ async fn interpret_function_with_counts_in_context(
     in_count: usize,
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
-    let runtime =
-        runtime.with_invocation_arity(RuntimeInvocationArity::function(in_count, out_count));
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    interpret_function_with_counts_in_context_with_driver(
+        FunctionExecutionInvocation {
+            bytecode,
+            name,
+            arity: RuntimeInvocationArity::function(in_count, out_count),
+            missing_input_slots,
+            runtime,
+            driver: None,
+            lexical_environment: None,
+            lexical_binding_slots: Vec::new(),
+            inherited_storage_slots: Vec::new(),
+        },
+        vars,
+    )
+    .await
+}
+
+/// Exact selected function frame, including its invocation-local arity and
+/// continuation owner. The session runtime service remains shared.
+struct FunctionExecutionInvocation<'a> {
+    bytecode: &'a Bytecode,
+    name: &'a str,
+    arity: RuntimeInvocationArity,
+    missing_input_slots: HashSet<usize>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    driver: Option<ProcessDriverHandle>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
+    inherited_storage_slots: Vec<crate::bytecode::program::InheritedStorageSlot>,
+}
+
+async fn interpret_function_with_counts_in_context_with_driver(
+    mut invocation: FunctionExecutionInvocation<'_>,
+    vars: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    let runtime = invocation.runtime.with_invocation_arity(invocation.arity);
     let (runtime, workspace_activation) =
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
-    let runtime = runtime_with_bytecode_debug_frame(runtime, bytecode, name);
+    let runtime = runtime_with_bytecode_debug_frame(runtime, invocation.bytecode, invocation.name);
+    invocation.runtime = runtime.clone();
     let result = workspace_activation
-        .scope(
-            runtime.scope(interpret_function_with_counts_in_context_inner(
-                bytecode,
-                vars,
-                name,
-                out_count,
-                in_count,
-                missing_input_slots,
-                runtime.clone(),
-            )),
-        )
+        .scope(runtime.scope(scope_vm_pc(
+            interpret_function_with_counts_in_context_inner(invocation, vars),
+        )))
         .await;
     let _ = crate::runtime::workspace::take_workspace_completion(frame);
     result
 }
 
 async fn interpret_function_with_counts_in_context_inner(
-    bytecode: &Bytecode,
+    invocation: FunctionExecutionInvocation<'_>,
     vars: Vec<Value>,
-    name: &str,
-    out_count: usize,
-    in_count: usize,
-    missing_input_slots: HashSet<usize>,
-    runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    let FunctionExecutionInvocation {
+        bytecode,
+        name,
+        arity: invocation_arity,
+        missing_input_slots,
+        runtime,
+        driver,
+        lexical_environment,
+        lexical_binding_slots,
+        inherited_storage_slots,
+    } = invocation;
     let mut vars = vars;
-    let invocation_arity = RuntimeInvocationArity::function(in_count, out_count);
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
+    let (source_owner, diagnostic_source) = selected_frame_source_basis(bytecode, &runtime)
+        .map_or((None, None), |(owner, diagnostic)| {
+            (Some(owner), Some(diagnostic))
+        });
     let mut state = InterpreterState::new_in_context(
         bytecode.clone(),
         &mut vars,
@@ -1367,13 +2051,31 @@ async fn interpret_function_with_counts_in_context_inner(
         invocation_arity,
         runtime,
     );
+    state.context.process_driver = driver;
+    state.context.dynamic_eval_admission = state
+        .context
+        .process_driver
+        .as_ref()
+        .and_then(ProcessDriverHandle::dynamic_admission);
+    state.context.lexical_environment = lexical_environment;
+    state.context.lexical_binding_slots = lexical_binding_slots;
+    state.context.inherited_storage_slots = inherited_storage_slots;
     state.missing_input_slots = missing_input_slots;
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
     let res = match res {
-        Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
+        Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
+            runmat_runtime::execution::RootedValues::new(completion.values)
+                .map_err(|error| error.into_runtime_error())
+        }),
         Err(error) => {
             let error = attach_span_from_pc(bytecode, error);
-            Err(attach_call_frames(name, source_id, error))
+            Err(attach_call_frames(
+                name,
+                source_id,
+                source_owner,
+                diagnostic_source,
+                error,
+            ))
         }
     }?;
     Ok(res)
@@ -1388,12 +2090,20 @@ mod native_metadata_tests;
 mod process_dispatch_tests;
 
 #[cfg(test)]
+#[path = "runner/frame_source_tests.rs"]
+mod frame_source_tests;
+
+#[cfg(test)]
 #[path = "runner/persistent_resume_tests.rs"]
 mod persistent_resume_tests;
 
 #[cfg(test)]
 #[path = "runner/private_name_execution_tests.rs"]
 mod private_name_execution_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "runner/parfor_ownership_tests.rs"]
+mod parfor_ownership_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1636,7 +2346,7 @@ mod tests {
                         crate::runtime::workspace::workspace_lookup("caller_mark"),
                         Some(Value::Num(17.0))
                     );
-                    let base = crate::runtime::workspace::workspace_target_snapshot(
+                    let (_, base) = crate::runtime::workspace::capture_workspace_target(
                         crate::runtime::workspace::WorkspaceTarget::Base,
                     )
                     .expect("nested child should retain its inherited base lineage");

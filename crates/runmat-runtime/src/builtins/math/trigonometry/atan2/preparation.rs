@@ -1,13 +1,19 @@
 //! The scalar/array binary form owns preparation; tabular mapping stays outside.
 use super::*;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinPreparationFormId};
 
 #[cfg(test)]
 #[path = "preparation_tests.rs"]
 mod tests;
 
-pub(super) async fn execute(y: Value, x: Value) -> BuiltinResult<Value> {
+pub(super) async fn execute(
+    runtime: Option<&RuntimeContext>,
+    y: Value,
+    x: Value,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&y, &x].into_iter())
+        .map_err(|cause| cause.into_runtime_error())?;
     let floating = admission::pair(&y, &x)?;
     let protected: Vec<_> = [&y, &x]
         .into_iter()
@@ -20,9 +26,11 @@ pub(super) async fn execute(y: Value, x: Value) -> BuiltinResult<Value> {
         })
         .collect();
     if !floating {
-        return atan2_admitted(y, x, &protected).await;
+        let output = atan2_admitted(y, x, &protected).await?;
+        return RootedValue::new(output).map_err(|cause| cause.into_runtime_error());
     }
-    execute_current_invocation(
+    execute_invocation(
+        runtime,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: runmat_builtins::ATAN2_CATALOG_ENTRY.identity,
@@ -43,7 +51,8 @@ pub(super) async fn execute(y: Value, x: Value) -> BuiltinResult<Value> {
                     "preparation changed admitted floating representation",
                 ));
             }
-            atan2_admitted(y, x, &protected).await
+            let output = atan2_admitted(y, x, &protected).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
         },
     )
     .await

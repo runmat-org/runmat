@@ -1409,12 +1409,12 @@ pub(crate) mod tests {
                 FindFault::Execution => unreachable!(),
                 FindFault::MissingValues => {
                     if let Some(values) = result.values.take() {
-                        values.release()?;
+                        values.release().expect("release omitted fixture values");
                     }
                 }
                 FindFault::AliasedInput => {
                     let discarded = std::mem::replace(&mut result.rows, input.clone());
-                    discarded.release()?;
+                    discarded.release().expect("release replaced fixture rows");
                 }
                 FindFault::WrongShape => {
                     let count = result.rows.shape()[0];
@@ -1424,12 +1424,15 @@ pub(crate) mod tests {
                 }
                 FindFault::WrongClass => {
                     let count = result.rows.shape()[0];
-                    let logical = self.inner.upload_logical(&HostLogicalTensorView {
-                        data: &vec![1; count],
-                        shape: &[count, 1],
-                    })?;
+                    let logical = self
+                        .inner
+                        .upload_logical(&HostLogicalTensorView {
+                            data: &vec![1; count],
+                            shape: &[count, 1],
+                        })
+                        .expect("fixture logical output allocation");
                     let discarded = std::mem::replace(&mut result.rows, logical);
-                    discarded.release()?;
+                    discarded.release().expect("release replaced fixture rows");
                 }
                 FindFault::ForeignOwner | FindFault::ExpiredOutput => {
                     let count = result.rows.shape()[0];
@@ -1443,11 +1446,11 @@ pub(crate) mod tests {
                     }
                     self.foreign_probes.lock().unwrap().push(allocation.probe);
                     let discarded = std::mem::replace(&mut result.rows, allocation.handle);
-                    discarded.release()?;
+                    discarded.release().expect("release replaced fixture rows");
                 }
                 FindFault::CrossOutputAlias => {
                     let discarded = std::mem::replace(&mut result.rows, result.linear.clone());
-                    discarded.release()?;
+                    discarded.release().expect("release replaced fixture rows");
                 }
             }
             Ok(result)

@@ -9,7 +9,9 @@ pub struct PythonObjectMetadata {
     pub type_name: String,
     pub module: String,
     pub callable: bool,
-    pub iterable: bool,
+    /// A passive iterator-slot capability. `None` is unknown for static
+    /// CPython 3.9 types, whose slots cannot be inspected through its stable ABI.
+    pub iterable: Option<bool>,
     pub mapping: bool,
     pub sequence: bool,
     pub none: bool,
@@ -19,20 +21,4 @@ pub struct PythonObjectMetadata {
 pub struct PythonCallbackInvocation {
     pub callback: u64,
     pub arguments: Vec<crate::PythonValue>,
-}
-
-pub(crate) enum PythonCallbackCommand {
-    Return(Result<crate::PythonValue, crate::PythonError>),
-    Reenter {
-        call: crate::PythonCall,
-        reply: std::sync::mpsc::SyncSender<Result<Vec<crate::PythonValue>, crate::PythonError>>,
-    },
-}
-
-pub(crate) enum PythonLaneEvent {
-    Complete(Result<Vec<crate::PythonValue>, crate::PythonError>),
-    Callback {
-        invocation: PythonCallbackInvocation,
-        commands: std::sync::mpsc::SyncSender<PythonCallbackCommand>,
-    },
 }

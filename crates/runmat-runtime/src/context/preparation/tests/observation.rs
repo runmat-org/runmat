@@ -25,7 +25,7 @@ impl BuiltinPreparationObservation for Observed {
     fn begin_execution(&mut self) {
         self.events.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, _: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, _: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.events.borrow_mut().push("finish");
         Ok(())
     }
@@ -46,7 +46,8 @@ fn prepared_body_and_unpolled_or_pending_drop_keep_their_own_recorder() {
                 recorder: inner.recorder(),
                 events: events.clone(),
             })),
-        );
+        )
+        .expect("root observed operands");
         let mut future = Box::pin(execute_prepared(prepared, |_| std::future::pending()));
         with_provider_observation(Some(outer.recorder()), || {
             if poll {
@@ -89,12 +90,13 @@ fn internal_fallback_invalidates_body_receipt_even_if_body_succeeds() {
             recorder: receipt.recorder(),
             events: events.clone(),
         })),
-    );
+    )
+    .expect("root observed operands");
     block_on(execute_prepared(prepared, |_| async {
         current_provider_observation()
             .unwrap()
             .execution_disposition(ProviderExecutionDisposition::SharedRuntimeFallback);
-        Ok(Value::Num(1.0))
+        super::owned(Value::Num(1.0))
     }))
     .unwrap();
     assert_eq!(

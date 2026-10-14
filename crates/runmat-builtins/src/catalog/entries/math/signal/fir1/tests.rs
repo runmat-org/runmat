@@ -84,19 +84,15 @@ fn known_bad_window_and_cutoff_are_diagnosed() {
         real(ShapeFact::Scalar),
         &[(window, LiteralValue::Unknown)],
     );
-    assert!(
-        invalid_window
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-WINDOW")
-    );
+    assert!(invalid_window
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-WINDOW"));
     let invalid_order = infer(LiteralValue::Number(-1.0), real(ShapeFact::Scalar), &[]);
-    assert!(
-        invalid_order
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-ORDER")
-    );
+    assert!(invalid_order
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-ORDER"));
 }
 
 #[test]
@@ -188,10 +184,8 @@ fn complex_zero_imaginary_cutoff_is_not_rejected_but_known_nonzero_window_is() {
             }]),
         )],
     );
-    assert!(
-        rejected
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-WINDOW")
-    );
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FIR1-WINDOW"));
 }

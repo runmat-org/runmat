@@ -28,7 +28,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => handle.class_name.to_string(),
         Value::Listener(_) => "event.listener".to_string(),
@@ -196,7 +196,7 @@ pub fn preview_numeric_values(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

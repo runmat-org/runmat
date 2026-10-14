@@ -61,7 +61,9 @@ async fn delete_builtin(
                 "delete: ResolveSymbolicLinks is only valid for filename inputs",
             ));
         }
-        let result = cooperation.await_io(delete_handles(operands)).await??;
+        let result = cooperation
+            .await_io(delete_handles(context.as_ref(), operands))
+            .await??;
         cooperation.completed(0).await?;
         return Ok(result);
     }

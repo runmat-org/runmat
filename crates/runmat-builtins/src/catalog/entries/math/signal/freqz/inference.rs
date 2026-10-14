@@ -1,5 +1,5 @@
-use crate::BuiltinCatalogEntry;
 use crate::catalog::inference::argument_error;
+use crate::BuiltinCatalogEntry;
 use runmat_types::*;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

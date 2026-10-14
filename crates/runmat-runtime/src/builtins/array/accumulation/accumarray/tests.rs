@@ -19,7 +19,7 @@ fn sums_vector_and_matrix_subscripts() {
         Vec::new(),
     ))
     .expect("vector accumulation");
-    let Value::Tensor(vector) = vector else {
+    let Value::Tensor(vector) = vector.value() else {
         panic!("expected tensor");
     };
     assert_eq!(vector.materialize_f64(), vec![7.0, 4.0, 2.0, 8.0]);
@@ -33,7 +33,7 @@ fn sums_vector_and_matrix_subscripts() {
         Vec::new(),
     ))
     .expect("matrix accumulation");
-    let Value::Tensor(matrix) = matrix else {
+    let Value::Tensor(matrix) = matrix.value() else {
         panic!("expected tensor");
     };
     assert_eq!(matrix.shape(), vec![4, 2]);
@@ -68,7 +68,7 @@ fn preserves_callback_numeric_classes() {
             ],
         ))
         .expect("integer callback accumulation");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("expected integer tensor")
         };
         assert_eq!(output.integer_storage(), Some(&expected));
@@ -86,7 +86,7 @@ fn preserves_callback_numeric_classes() {
         ],
     ))
     .expect("single callback accumulation");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected single tensor")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
@@ -105,7 +105,7 @@ fn sparse_output_enforces_compatible_constraints() {
         ],
     ))
     .expect("sparse accumulation");
-    let Value::SparseTensor(sparse) = sparse else {
+    let Value::SparseTensor(sparse) = sparse.value() else {
         panic!("expected sparse tensor")
     };
     assert_eq!((sparse.rows, sparse.cols, sparse.nnz()), (4, 1, 2));
@@ -172,7 +172,7 @@ fn every_integer_class_is_exact_for_indices_and_sizes() {
             )],
         ))
         .expect("integer structural inputs");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("expected dense output");
         };
         assert_eq!(output.shape(), vec![3, 1]);

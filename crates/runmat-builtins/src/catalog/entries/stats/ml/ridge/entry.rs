@@ -3,6 +3,7 @@ use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
 pub const RIDGE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ridge" },
     category: "stats/ml",

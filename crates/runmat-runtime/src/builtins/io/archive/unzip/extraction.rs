@@ -4,72 +4,21 @@ mod control;
 use self::control::ExtractionControl;
 mod partial;
 use self::partial::PartialEntry;
+#[cfg(not(target_arch = "wasm32"))]
+mod worker;
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) use worker::extract_archive_file_on_worker;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 #[cfg(test)]
 mod path_tests;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) async fn extract_archive_file_on_worker(
-    input: super::source::TempArchive,
-    output_folder: PathBuf,
-    cancellation: Option<runmat_execution::cancellation::CancellationToken>,
-    provider: std::sync::Arc<dyn vfs::FsProvider>,
-    resource_lease: ArchiveResourceLease,
-) -> BuiltinResult<Vec<String>> {
-    let (tx, rx) = futures::channel::oneshot::channel();
-    let abandonment = control::Abandonment::new();
-    let worker_abandonment = abandonment.worker_flag();
-    std::thread::Builder::new()
-        .name("runmat-unzip-extract".to_string())
-        .spawn(move || {
-            let result = (|| {
-                check_resource_lease(&resource_lease)?;
-                let file = std::fs::File::open(input.path()).map_err(|err| {
-                    unzip_error_with_source(
-                        &UNZIP_ERROR_IO,
-                        format!("unzip: unable to open '{}': {err}", input.path().display()),
-                        err,
-                    )
-                })?;
-                check_resource_lease(&resource_lease)?;
-                let control =
-                    ExtractionControl::native(cancellation, worker_abandonment, resource_lease);
-                futures::executor::block_on(extract_archive_impl(
-                    file,
-                    &output_folder,
-                    control,
-                    provider,
-                ))
-            })();
-            // The worker, not the dropped caller future, owns the source until
-            // its last read and any partial-output cleanup have completed.
-            drop(input);
-            let _ = tx.send(result);
-        })
-        .map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!("unzip: unable to spawn extraction worker: {err}"),
-                err,
-            )
-        })?;
-    let result = rx.await.map_err(|err| {
-        unzip_error_with_source(
-            &UNZIP_ERROR_IO,
-            format!("unzip: extraction worker did not return a result: {err}"),
-            err,
-        )
-    })?;
-    abandonment.disarm();
-    result
-}
 
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn extract_archive<R>(
     reader: R,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
     resource_lease: ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>>
@@ -79,7 +28,7 @@ where
     extract_archive_impl(
         reader,
         output_folder,
-        ExtractionControl::browser(runtime, resource_lease),
+        ExtractionControl::browser(runtime, resource_lease, command_origin),
         provider,
     )
     .await
@@ -155,8 +104,16 @@ where
         .await?;
 
         control.check_resource()?;
+        #[cfg(not(target_arch = "wasm32"))]
         let mut partial =
             PartialEntry::create(temporary_output_path(&output_path), provider.clone()).await?;
+        #[cfg(target_arch = "wasm32")]
+        let mut partial = PartialEntry::create_with_origin(
+            temporary_output_path(&output_path),
+            provider.clone(),
+            control.command_origin(),
+        )
+        .await?;
         control.check_resource()?;
         let mut buffer = [0u8; 64 * 1024];
         loop {

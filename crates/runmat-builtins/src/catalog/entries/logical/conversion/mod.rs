@@ -125,6 +125,7 @@ const EFFECTS: [runmat_types::EffectKind; 2] = [
     runmat_types::EffectKind::MayThrow,
 ];
 pub const LOGICAL_CATALOG_ENTRY: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: crate::BuiltinCatalogIdentity { name: "logical" },
     category: "logical",

@@ -35,24 +35,28 @@ fn session_transport(
 impl RuntimeHttpService for LazyNativeHttpService {
     fn send(
         &self,
+        runtime: runmat_runtime::context::RuntimeContext,
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         let service = self.service.clone();
         Box::pin(async move {
             let transport = session_transport(&service, &request)?;
-            transport.send(request).await
+            transport.send(runtime, request).await
         })
     }
 
     fn open_bounded(
         &self,
+        runtime: runmat_runtime::context::RuntimeContext,
         request: HttpRequest,
         accepted_limit: u64,
     ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
         let service = self.service.clone();
         Box::pin(async move {
             let transport = session_transport(&service, &request)?;
-            transport.open_bounded(request, accepted_limit).await
+            transport
+                .open_bounded(runtime, request, accepted_limit)
+                .await
         })
     }
 }
@@ -70,7 +74,13 @@ pub(super) fn default_http_service() -> Rc<dyn RuntimeHttpService> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use runmat_runtime::context::RuntimeContext;
+    use runmat_runtime::execution::RuntimeExecutionService;
     use runmat_runtime::http::HttpMethod;
+
+    fn runtime() -> RuntimeContext {
+        RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+    }
 
     #[test]
     fn unpolled_host_request_does_not_initialize_session_transport() {
@@ -83,7 +93,7 @@ mod tests {
             timeout: std::time::Duration::from_secs(1),
             user_agent: "RunMat test".into(),
         };
-        drop(service.send(request));
+        drop(service.send(runtime(), request));
         assert!(service.service.get().is_none());
     }
 
@@ -98,7 +108,7 @@ mod tests {
             timeout: std::time::Duration::from_secs(1),
             user_agent: "RunMat test".into(),
         };
-        drop(service.open_bounded(request, 1024));
+        drop(service.open_bounded(runtime(), request, 1024));
         assert!(service.service.get().is_none());
     }
 

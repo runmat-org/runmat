@@ -2,6 +2,7 @@
 
 use crate::builtins::io::filetext::{fopen, fread, fwrite, registry};
 use crate::context::{RuntimeContext, RuntimeServiceFuture};
+use crate::execution::RootedValueSequence;
 use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
     RuntimeExecutionServices,
@@ -11,7 +12,7 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::{Tensor, Value, ValueSequence};
+use runmat_value::{Tensor, Value};
 use std::cell::Cell;
 use std::io::Seek;
 use std::num::NonZeroU64;
@@ -93,7 +94,7 @@ impl RuntimeExecutionServices for TurnService {
     fn complete_future(
         &self,
         _: &FutureHandle,
-        _: Result<ValueSequence, ExecutionServiceError>,
+        _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }

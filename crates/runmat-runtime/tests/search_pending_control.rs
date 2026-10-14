@@ -91,7 +91,7 @@ impl SearchControlCase {
         }
     }
 
-    fn assert_output(self, result: Value) {
+    fn assert_output(self, result: &Value) {
         match self {
             Self::Strfind => {
                 let Value::Cell(cell) = result else {
@@ -104,7 +104,7 @@ impl SearchControlCase {
                 assert_eq!(indices.shape(), &[1, 1]);
                 assert_eq!(indices.materialize_f64(), vec![4.0]);
             }
-            Self::EndsWith | Self::StartsWith => assert_eq!(result, Value::Bool(true)),
+            Self::EndsWith | Self::StartsWith => assert_eq!(result, &Value::Bool(true)),
         }
     }
 }
@@ -241,7 +241,7 @@ fn search_resident_control_pending_drop_error_and_success_keep_borrowed_input() 
         else {
             panic!("{name}: same future must complete after wake");
         };
-        case.assert_output(result);
+        case.assert_output(result.value());
         drop(resumed);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 3);
         assert!(weak.acquire().is_some());

@@ -172,7 +172,7 @@ fn gpu_slice_assignment_and_range_indexing() {
         execute_source("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
             .expect("execute");
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
@@ -190,7 +190,7 @@ fn gpu_range_end_indexing() {
         .expect("execute");
 
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
@@ -208,7 +208,7 @@ fn gpu_range_end_assignment() {
         execute_source("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("execute");
 
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,

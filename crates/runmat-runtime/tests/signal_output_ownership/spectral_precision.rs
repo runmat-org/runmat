@@ -64,7 +64,7 @@ fn surplus_slots_remain_host_double_zero_on_direct_and_fallback_routes() {
                     outputs(name) + 2,
                 ))
                 .unwrap();
-                let Value::OutputList(values) = result else {
+                let Value::OutputList(values) = result.value() else {
                     panic!("padded outputs")
                 };
                 assert_eq!(values.len(), outputs(name) + 2);
@@ -83,7 +83,7 @@ fn surplus_slots_remain_host_double_zero_on_direct_and_fallback_routes() {
                         outputs(name)
                     }
                 );
-                drop(values);
+                drop(result);
                 provider.assert_retired();
                 assert_eq!(source.probe.retirements(), 0);
             }
@@ -106,7 +106,7 @@ fn unsupported_spectral_hook_restores_all_native_outputs_and_nonzero_payloads() 
                     outputs(name),
                 ))
                 .unwrap();
-                let Value::OutputList(values) = result else {
+                let Value::OutputList(values) = result.value() else {
                     panic!("all outputs")
                 };
                 for (index, value) in values.iter().enumerate() {
@@ -167,7 +167,7 @@ fn unsupported_spectral_hook_restores_all_native_outputs_and_nonzero_payloads() 
                 assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.uploads.load(Ordering::SeqCst), outputs(name));
-                drop(values);
+                drop(result);
                 provider.assert_retired();
                 assert_eq!(source.probe.retirements(), 0);
             }
@@ -192,7 +192,8 @@ fn restoration_unsupported_respects_explicit_intent_without_replaying_hook() {
                     assert_eq!(result.unwrap_err().gpu_gather_retry, GpuGatherRetry::Never);
                     assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
                 } else {
-                    let Value::OutputList(values) = result.unwrap() else {
+                    let result = result.unwrap();
+                    let Value::OutputList(values) = result.value() else {
                         panic!("all outputs")
                     };
                     for value in values {
@@ -211,6 +212,7 @@ fn restoration_unsupported_respects_explicit_intent_without_replaying_hook() {
                         );
                     }
                     assert_eq!(provider.uploads.load(Ordering::SeqCst), outputs(name));
+                    drop(result);
                 }
                 assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);

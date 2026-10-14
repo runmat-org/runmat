@@ -20,6 +20,7 @@ pub(crate) use inference::empty_options_fact;
 pub(crate) use option_value::runtime_empty_fact;
 
 pub const STATSET_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "statset" },
     category: "stats/options",

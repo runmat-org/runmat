@@ -35,7 +35,7 @@ async fn arrayfun_builtin(
     context: Option<crate::context::RuntimeContext>,
     func: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     execution::execute(context.as_ref(), func, rest).await
 }
 

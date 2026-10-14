@@ -1,4 +1,5 @@
 use runmat_mir::{MirConstant, MirOperand, MirRvalue};
+use runmat_runtime::execution::RootedValueLease;
 use runmat_runtime::native::NativeValueRef;
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
@@ -21,6 +22,10 @@ fn sequence_resolution_context(
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "operand/sequence_read_tests.rs"]
+mod sequence_read_tests;
 
 pub(super) fn evaluate_rvalue(
     state: &mut HostState,
@@ -68,7 +73,7 @@ pub(super) fn evaluate_rvalue(
             row_lengths,
             elements,
         } => super::aggregate::evaluate(state, kind, row_lengths, elements)
-            .map(|value| vec![state.arena.insert(value)]),
+            .map(|reference| vec![reference]),
         MirRvalue::StructLiteral { fields } => {
             super::aggregate::structure(state, fields).map(|value| vec![state.arena.insert(value)])
         }
@@ -97,67 +102,104 @@ pub(super) fn evaluate_rvalue(
             member,
             sequence_use,
         } => {
-            let base = materialize_operand(state, base)?;
-            let values = super::sync::complete(
-                &state.runtime,
-                async {
-                    runmat_runtime::object::resolve::read_member_sequence_with_context(
-                        Some(&state.runtime),
-                        base,
-                        member.0.clone(),
-                        false,
-                        Some(&state.function.name),
-                    )
-                    .await?
+            let stage = super::call_suspension::SequenceReadStage::Member {
+                selection: *sequence_use,
+                requested_outputs,
+            };
+            let values = if let Some(values) =
+                super::call_suspension::take_completed_sequence_read(state, stage)?
+            {
+                values
+            } else {
+                let base = materialize_operand(state, base)?;
+                let roots = RootedValueLease::for_values(std::iter::once(&base))
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                let runtime = state.runtime.clone();
+                let name = state.function.name.clone();
+                let member = member.0.clone();
+                super::call_suspension::begin_sequence_read(
+                    state,
+                    stage,
+                    Box::pin(async move {
+                        let sequence =
+                            runmat_runtime::object::resolve::read_member_sequence_with_context(
+                                Some(&runtime),
+                                base,
+                                member,
+                                false,
+                                Some(&name),
+                            )
+                            .await?;
+                        drop(roots);
+                        Ok(sequence)
+                    }),
+                )?
+            };
+            values.with_owned_sequence(|sequence| {
+                Ok(sequence
                     .resolve(
                         *sequence_use,
                         sequence_resolution_context(*sequence_use, requested_outputs),
-                    )
-                },
-                "member read",
-            )
-            .finish(state)?;
-            Ok(values
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect())
+                    )?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
         }
         MirRvalue::DynamicMember {
             base,
             member,
             sequence_use,
         } => {
-            let base = materialize_operand(state, base)?;
-            let member = materialize_operand(state, member)?;
-            let member = String::try_from(&member).map_err(|error| {
-                NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                    "DynamicFieldName",
-                    error,
-                ))
-            })?;
-            let values = super::sync::complete(
-                &state.runtime,
-                async {
-                    runmat_runtime::object::resolve::read_member_sequence_with_context(
-                        Some(&state.runtime),
-                        base,
-                        member,
-                        false,
-                        Some(&state.function.name),
-                    )
-                    .await?
+            let stage = super::call_suspension::SequenceReadStage::DynamicMember {
+                selection: *sequence_use,
+                requested_outputs,
+            };
+            let values = if let Some(values) =
+                super::call_suspension::take_completed_sequence_read(state, stage)?
+            {
+                values
+            } else {
+                let base = materialize_operand(state, base)?;
+                let member = materialize_operand(state, member)?;
+                let roots = RootedValueLease::for_values([&base, &member].into_iter())
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                let member = String::try_from(&member).map_err(|error| {
+                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
+                        "DynamicFieldName",
+                        error,
+                    ))
+                })?;
+                let runtime = state.runtime.clone();
+                let name = state.function.name.clone();
+                super::call_suspension::begin_sequence_read(
+                    state,
+                    stage,
+                    Box::pin(async move {
+                        let sequence =
+                            runmat_runtime::object::resolve::read_member_sequence_with_context(
+                                Some(&runtime),
+                                base,
+                                member,
+                                false,
+                                Some(&name),
+                            )
+                            .await?;
+                        drop(roots);
+                        Ok(sequence)
+                    }),
+                )?
+            };
+            values.with_owned_sequence(|sequence| {
+                Ok(sequence
                     .resolve(
                         *sequence_use,
                         sequence_resolution_context(*sequence_use, requested_outputs),
-                    )
-                },
-                "dynamic member read",
-            )
-            .finish(state)?;
-            Ok(values
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect())
+                    )?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -229,35 +271,72 @@ pub(super) fn evaluate_rvalue(
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
-            let program = if state.runtime.execution().requires_program_capture() {
-                Some(state.program_capture.clone().ok_or_else(|| {
+            let mut invocation = runmat_runtime::execution::DeferredInvocation::Callable(
+                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                    runmat_hir::CallableIdentity::BoundFunction(*function),
+                    arguments,
+                    requested_outputs.executor_carrier_count().ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "future output cardinality cannot be derived from an assignment destination"
+                                .into(),
+                        )
+                    })?,
+                    runmat_hir::CallableFallbackPolicy::None,
+                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                ),
+            );
+            let program = if !state.runtime.execution().requires_program_capture() {
+                runmat_runtime::execution::DeferredProgram::Local
+            } else if let Some(selected) = state.runtime.selected_graph_program() {
+                let binding = state
+                    .runtime
+                    .selected_graph_function_binding(*function)
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "native async callable has no exact selected definition and source graph"
+                                .into(),
+                        )
+                    })?;
+                let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
+                    &mut invocation
+                else {
+                    unreachable!("native future admission created a callable invocation")
+                };
+                descriptor.target =
+                    runmat_runtime::call::descriptor::CallableTarget::Bound(binding);
+                runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
+            } else {
+                if runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(
+                    &invocation,
+                ) {
+                    return Err(NativeExecutorError::Host(
+                        "native async lexical capture requires selected V3 graph authority".into(),
+                    ));
+                }
+                let bytes = state.program_capture.clone().ok_or_else(|| {
                     NativeExecutorError::Host(
                         "native async execution is missing its exact program".into(),
                     )
-                })?)
-            } else {
+                })?;
+                runmat_runtime::execution::DeferredProgram::InterpreterV2(std::sync::Arc::from(
+                    bytes,
+                ))
+            };
+            let program_revision = if matches!(
+                &program,
+                runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+            ) {
                 None
+            } else {
+                state.runtime.program_revision().cloned()
             };
             let future = state
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
-                    invocation: runmat_runtime::execution::DeferredInvocation::Callable(
-                        runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                            runmat_hir::CallableIdentity::BoundFunction(*function),
-                            arguments,
-                            requested_outputs.executor_carrier_count().ok_or_else(|| {
-                                NativeExecutorError::Host(
-                                    "future output cardinality cannot be derived from an assignment destination"
-                                        .into(),
-                                )
-                            })?,
-                            runmat_hir::CallableFallbackPolicy::None,
-                            runmat_runtime::call::descriptor::CallableCallKind::Direct,
-                        ),
-                    ),
+                    invocation,
                     retry: runmat_execution::RetryPolicy::Never,
-                    program_revision: state.runtime.program_revision().cloned(),
+                    program_revision,
                     capabilities: native_function_capabilities(state, *function)?,
                     program,
                 })
@@ -386,25 +465,36 @@ pub(super) fn evaluate_operand(
                     })?;
                 if let Some(target) = state.program_function(function) {
                     let name = target.name.clone();
+                    let source_role = target.source_role;
+                    let carries_environment = source_role
+                        == runmat_types::FunctionSourceRole::Nested
+                        || (source_role == runmat_types::FunctionSourceRole::Anonymous
+                            && target.lexical_bindings.iter().any(|binding| {
+                                binding.kind
+                                    == runmat_native_codegen::NativeLexicalBindingKind::Transit
+                            }));
                     let captures = state.lexical_captures(function)?.unwrap_or_default();
-                    let value = if captures.is_empty() {
-                        Value::BoundFunctionHandle {
+                    let value = if captures.is_empty()
+                        && source_role != runmat_types::FunctionSourceRole::Nested
+                    {
+                        Value::bound_function_handle(
                             name,
-                            function: function.0 as usize,
-                            authority: runmat_runtime::user_functions::bound_function_authority_for(
+                            function.0 as usize,
+                            runmat_runtime::user_functions::bound_function_authority_for(
                                 function.0 as usize,
                             ),
-                            source_role: target.source_role,
-                            source_file: runmat_runtime::user_functions::source_file_for(
-                                function.0 as usize,
-                            ),
-                        }
+                            source_role,
+                            runmat_runtime::user_functions::source_file_for(function.0 as usize),
+                        )
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(
                             runmat_types::FunctionId(function.0 as usize),
                             name,
                             captures.into_iter().map(|capture| capture.value).collect(),
-                            target.source_role,
+                            source_role,
+                            carries_environment
+                                .then(|| state.lexical_environment.clone())
+                                .flatten(),
                         )
                     };
                     return Ok(state.arena.insert(value));
@@ -412,7 +502,7 @@ pub(super) fn evaluate_operand(
             }
             identity
                 .display_name()
-                .map(Value::FunctionHandle)
+                .map(Value::function_handle)
                 .map(|value| state.arena.insert(value))
                 .ok_or_else(|| {
                     NativeExecutorError::Host(format!(

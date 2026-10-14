@@ -6,12 +6,18 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::channel::{mpsc as async_mpsc, oneshot};
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
 use runmat_mex::{
     MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle,
     MexBoundaryHostServices, MexDiagnostic, MexEngineCompletion, MexLoadError, MexModule,
-    MexNativeInvocation, MxApiMode, MxArray, MxBoundaryInterface,
+    MexModuleRetirement, MexNativeInvocation, MxApiMode, MxArray, MxBoundaryInterface,
 };
+
+mod callback_tasks;
+mod inbox;
+use super::services::OriginMexBoundaryServices;
+use callback_tasks::CallbackTasks;
+use inbox::CallbackInbox;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct NativeModuleMetadata {
@@ -41,9 +47,13 @@ impl std::fmt::Display for NativeModuleLoadError {
 
 pub(super) struct NativeMexLane {
     commands: mpsc::Sender<NativeCommand>,
-    callbacks: futures::lock::Mutex<async_mpsc::UnboundedReceiver<BoundaryEnvelope>>,
+    callback_closer: async_mpsc::UnboundedSender<BoundaryEnvelope>,
+    callbacks: CallbackInbox,
     services: RefCell<HashMap<u64, OriginServiceEntry>>,
+    callback_tasks: CallbackTasks,
     next_service: Cell<u64>,
+    callback_depth: Cell<usize>,
+    abandoned: Cell<bool>,
 }
 
 struct NativeLaneState {
@@ -57,10 +67,11 @@ thread_local! {
 }
 
 struct OriginServiceEntry {
-    services: std::rc::Rc<dyn MexBoundaryHostServices>,
+    services: Rc<dyn OriginMexBoundaryServices>,
     invocation_active: bool,
     native_lease_active: bool,
     async_requests: usize,
+    active_callbacks: usize,
 }
 
 enum NativeCommand {
@@ -84,7 +95,7 @@ enum NativeCommand {
     ShutdownModule {
         path: PathBuf,
         service_id: u64,
-        response: oneshot::Sender<Result<(), MexLoadError>>,
+        response: oneshot::Sender<Result<MexModuleRetirement, MexLoadError>>,
     },
     Shutdown,
 }
@@ -308,18 +319,62 @@ impl MexAsyncResult for NativeAsyncResult {
 }
 
 impl NativeMexLane {
+    pub(super) fn in_callback(&self) -> bool {
+        self.callback_depth.get() != 0
+    }
+
+    pub(super) fn has_pending_services(&self) -> bool {
+        !self.services.borrow().is_empty()
+    }
+
+    /// Explicit host forced-disposal boundary. It must run even if an origin
+    /// service's RuntimeContext keeps the MEX session Rc alive, so Drop alone
+    /// is not an adequate revocation point.
+    pub(super) fn force_abandon(&self) {
+        if self.abandoned.replace(true) {
+            return;
+        }
+        self.callback_closer.close_channel();
+        let pending_services = self.services.borrow().len();
+        self.callback_tasks.cancel_all();
+        let mut rejected_requests = 0usize;
+        for envelope in self.callbacks.close_and_drain() {
+            if let BoundaryEnvelope::Request { request, .. } = envelope {
+                reject_request(*request, "the originating MEX host was disposed");
+                rejected_requests += 1;
+            }
+        }
+        // An already-dispatched callback owns a cloned service Rc until it
+        // returns. Clearing the table drops all other origin registrations.
+        let retired_services = std::mem::take(&mut *self.services.borrow_mut());
+        drop(retired_services);
+        if pending_services != 0 || rejected_requests != 0 {
+            tracing::warn!(
+                pending_services,
+                rejected_requests,
+                "abandoned pending native MEX work during forced host disposal"
+            );
+        }
+        let _ = self.commands.send(NativeCommand::Shutdown);
+    }
+
     pub(super) fn spawn() -> Result<Self, String> {
         let (commands, receiver) = mpsc::channel();
         let (callback_sender, callbacks) = async_mpsc::unbounded();
+        let callback_closer = callback_sender.clone();
         std::thread::Builder::new()
             .name("runmat-mex-native".into())
             .spawn(move || lane_main(receiver, callback_sender))
             .map_err(|error| format!("could not start the MEX native lane: {error}"))?;
         Ok(Self {
             commands,
-            callbacks: futures::lock::Mutex::new(callbacks),
+            callback_closer,
+            callbacks: CallbackInbox::new(callbacks),
             services: RefCell::new(HashMap::new()),
+            callback_tasks: CallbackTasks::new(),
             next_service: Cell::new(1),
+            callback_depth: Cell::new(0),
+            abandoned: Cell::new(false),
         })
     }
 
@@ -335,6 +390,12 @@ impl NativeMexLane {
         path: &Path,
         compatible_isolated: bool,
     ) -> Result<NativeModuleMetadata, NativeModuleLoadError> {
+        if self.abandoned.get() {
+            return Err(NativeModuleLoadError::Failed {
+                message: "the originating MEX host was disposed".into(),
+                dependency: None,
+            });
+        }
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Load {
@@ -357,9 +418,14 @@ impl NativeMexLane {
         path: &Path,
         inputs: Vec<MxArray>,
         requested_outputs: usize,
-        services: std::rc::Rc<dyn MexBoundaryHostServices>,
+        services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<MexNativeInvocation, MexLoadError> {
-        let service_id = self.register_services(services);
+        if self.abandoned.get() {
+            return Err(MexLoadError::NativeLane(
+                "the originating MEX host was disposed".into(),
+            ));
+        }
+        let service_id = self.register_services(services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Invoke {
@@ -377,9 +443,14 @@ impl NativeMexLane {
     pub(super) async fn clear(
         &self,
         path: &Path,
-        services: std::rc::Rc<dyn MexBoundaryHostServices>,
+        services: Rc<dyn OriginMexBoundaryServices>,
     ) -> Result<bool, MexLoadError> {
-        let service_id = self.register_services(services);
+        if self.abandoned.get() {
+            return Err(MexLoadError::NativeLane(
+                "the originating MEX host was disposed".into(),
+            ));
+        }
+        let service_id = self.register_services(services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::Clear {
@@ -394,9 +465,14 @@ impl NativeMexLane {
     pub(super) async fn shutdown_module(
         &self,
         path: &Path,
-        services: std::rc::Rc<dyn MexBoundaryHostServices>,
-    ) -> Result<(), MexLoadError> {
-        let service_id = self.register_services(services);
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<MexModuleRetirement, MexLoadError> {
+        if self.abandoned.get() {
+            return Err(MexLoadError::NativeLane(
+                "the originating MEX host was disposed".into(),
+            ));
+        }
+        let service_id = self.register_services(services)?;
         let (response, receiver) = oneshot::channel();
         self.commands
             .send(NativeCommand::ShutdownModule {
@@ -408,9 +484,15 @@ impl NativeMexLane {
         self.wait_with_callbacks(receiver, "shutdown").await
     }
 
-    fn register_services(&self, services: std::rc::Rc<dyn MexBoundaryHostServices>) -> u64 {
-        let id = self.next_service.get().max(1);
-        self.next_service.set(id.wrapping_add(1).max(1));
+    fn register_services(
+        &self,
+        services: Rc<dyn OriginMexBoundaryServices>,
+    ) -> Result<u64, MexLoadError> {
+        let id = self.next_service.get();
+        let next = id.checked_add(1).ok_or_else(|| {
+            MexLoadError::NativeLane("MEX origin service identity exhausted".into())
+        })?;
+        self.next_service.set(next);
         self.services.borrow_mut().insert(
             id,
             OriginServiceEntry {
@@ -418,9 +500,16 @@ impl NativeMexLane {
                 invocation_active: true,
                 native_lease_active: true,
                 async_requests: 0,
+                active_callbacks: 0,
             },
         );
-        id
+        Ok(id)
+    }
+
+    #[cfg(test)]
+    pub(super) fn hold_test_services(&self, services: Rc<dyn OriginMexBoundaryServices>) {
+        self.register_services(services)
+            .expect("register test origin service");
     }
 
     async fn wait_with_callbacks<T>(
@@ -431,20 +520,23 @@ impl NativeMexLane {
         enum WaitEvent<T> {
             Response(Result<Result<T, MexLoadError>, oneshot::Canceled>),
             Callback(Option<BoundaryEnvelope>),
+            Task(u64),
         }
 
         let mut result = receiver.fuse();
         loop {
             let event = {
-                let callback = async {
-                    let mut callbacks = self.callbacks.lock().await;
-                    callbacks.next().await
-                }
-                .fuse();
+                let callback = self.callbacks.next().fuse();
                 futures::pin_mut!(callback);
+                let task = self
+                    .callback_tasks
+                    .next_completed(&self.callback_depth)
+                    .fuse();
+                futures::pin_mut!(task);
                 futures::select! {
                     response = result => WaitEvent::Response(response),
                     envelope = callback => WaitEvent::Callback(envelope),
+                    service_id = task => WaitEvent::Task(service_id),
                 }
             };
 
@@ -471,30 +563,93 @@ impl NativeMexLane {
                     // re-enter this lane and must be able to receive callbacks.
                     self.service_envelope(envelope);
                 }
+                WaitEvent::Task(service_id) => self.finish_callback_task(service_id),
             }
         }
     }
 
     pub(super) async fn service_background_once(&self) -> bool {
-        let envelope = {
-            let mut callbacks = self.callbacks.lock().await;
-            callbacks.next().await
+        enum BackgroundEvent {
+            Envelope(Option<BoundaryEnvelope>),
+            Task(u64),
+        }
+        let event = {
+            let callback = self.callbacks.next().fuse();
+            futures::pin_mut!(callback);
+            let task = self
+                .callback_tasks
+                .next_completed(&self.callback_depth)
+                .fuse();
+            futures::pin_mut!(task);
+            futures::select! {
+                envelope = callback => BackgroundEvent::Envelope(envelope),
+                service_id = task => BackgroundEvent::Task(service_id),
+            }
         };
-        if let Some(envelope) = envelope {
-            self.service_envelope(envelope);
-            true
-        } else {
-            false
+        match event {
+            BackgroundEvent::Envelope(Some(envelope)) => {
+                self.service_envelope(envelope);
+                true
+            }
+            BackgroundEvent::Envelope(None) => false,
+            BackgroundEvent::Task(service_id) => {
+                self.finish_callback_task(service_id);
+                true
+            }
+        }
+    }
+
+    /// Finish every already-submitted native command and outstanding callback
+    /// lease before the origin session can retire its token-table roots.
+    /// This remains necessary when the foreground future was cancelled after
+    /// command submission. Calling it from within a callback would wait on
+    /// the callback currently on the stack, so that phase is rejected.
+    pub(super) async fn settle_pending(&self) -> Result<(), MexLoadError> {
+        if self.callback_depth.get() != 0 {
+            return Err(MexLoadError::ReentrantModule);
+        }
+        loop {
+            let pending = !self.services.borrow().is_empty();
+            if !pending {
+                break;
+            }
+            if !self.service_background_once().await {
+                return Err(MexLoadError::NativeLane(
+                    "the MEX callback channel closed before operation retirement".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Reach native command completion before module unload. A completed
+    /// async-result handle may intentionally remain in the module's request
+    /// table until mexAtExit or unload drops it, so it is not a pre-unload
+    /// quiescence condition. `settle_pending` remains the post-unload gate.
+    pub(super) async fn settle_commands(&self) -> Result<(), MexLoadError> {
+        if self.callback_depth.get() != 0 {
+            return Err(MexLoadError::ReentrantModule);
+        }
+        loop {
+            let pending_command = self
+                .services
+                .borrow()
+                .values()
+                .any(|entry| entry.invocation_active);
+            if !pending_command {
+                return Ok(());
+            }
+            if !self.service_background_once().await {
+                return Err(MexLoadError::NativeLane(
+                    "the MEX callback channel closed before command completion".into(),
+                ));
+            }
         }
     }
 
     fn drain_ready_callbacks(&self) {
         loop {
-            let Some(mut callbacks) = self.callbacks.try_lock() else {
-                break;
-            };
-            let envelope = callbacks.next().now_or_never().flatten();
-            drop(callbacks);
+            let envelope = self.callbacks.pop_ready();
             match envelope {
                 Some(envelope) => self.service_envelope(envelope),
                 None => break,
@@ -508,13 +663,21 @@ impl NativeMexLane {
                 service_id,
                 request,
             } => {
+                if self.abandoned.get() {
+                    reject_request(*request, "the originating MEX host was disposed");
+                    return;
+                }
                 let services = self
                     .services
                     .borrow()
                     .get(&service_id)
-                    .map(|entry| std::rc::Rc::clone(&entry.services));
+                    .map(|entry| Rc::clone(&entry.services));
                 if let Some(services) = services {
-                    service_request(*request, services.as_ref());
+                    if self.callback_tasks.admit(service_id, *request, services) {
+                        if let Some(entry) = self.services.borrow_mut().get_mut(&service_id) {
+                            entry.active_callbacks += 1;
+                        }
+                    }
                 } else {
                     reject_request(*request, "the originating runtime service has ended");
                 }
@@ -551,17 +714,28 @@ impl NativeMexLane {
             .borrow()
             .get(&service_id)
             .is_some_and(|entry| {
-                !entry.invocation_active && !entry.native_lease_active && entry.async_requests == 0
+                !entry.invocation_active
+                    && !entry.native_lease_active
+                    && entry.async_requests == 0
+                    && entry.active_callbacks == 0
             });
         if remove {
-            self.services.borrow_mut().remove(&service_id);
+            let retired = self.services.borrow_mut().remove(&service_id);
+            drop(retired);
         }
+    }
+
+    fn finish_callback_task(&self, service_id: u64) {
+        if let Some(entry) = self.services.borrow_mut().get_mut(&service_id) {
+            entry.active_callbacks = entry.active_callbacks.saturating_sub(1);
+        }
+        self.remove_completed_service(service_id);
     }
 }
 
 impl Drop for NativeMexLane {
     fn drop(&mut self) {
-        let _ = self.commands.send(NativeCommand::Shutdown);
+        self.force_abandon();
     }
 }
 
@@ -685,15 +859,19 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
                 origin: Arc::clone(&origin),
             });
             let module = lane.modules.borrow().get(&path).cloned();
-            let result = module.as_ref().map_or(Ok(()), |module| {
-                module.shutdown_with_boundary_services(services)
-            });
-            lane.modules.borrow_mut().remove(&path);
+            let outcome = module
+                .as_ref()
+                .map_or(MexModuleRetirement::Retired(Ok(())), |module| {
+                    module.shutdown_with_boundary_services_retirement(services)
+                });
+            if matches!(&outcome, MexModuleRetirement::Retired(_)) {
+                lane.modules.borrow_mut().remove(&path);
+            }
             drop(origin);
             let _ = lane
                 .callbacks
                 .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id });
-            let _ = response.send(result);
+            let _ = response.send(Ok(outcome));
         }
         NativeCommand::Shutdown => return false,
     }
@@ -851,61 +1029,6 @@ impl MexAsyncHostServices for NativeBoundaryProxy {
     }
 }
 
-fn service_request(request: BoundaryRequest, services: &dyn MexBoundaryHostServices) {
-    match request {
-        BoundaryRequest::Eval { command, response } => {
-            let _ = response.send(services.eval(&command));
-        }
-        BoundaryRequest::Call {
-            function,
-            arguments,
-            requested_outputs,
-            response,
-        } => {
-            let _ = response.send(services.call(&function, arguments, requested_outputs));
-        }
-        BoundaryRequest::GetVariable {
-            workspace,
-            name,
-            response,
-        } => {
-            let _ = response.send(services.get_variable(&workspace, &name));
-        }
-        BoundaryRequest::PutVariable {
-            workspace,
-            name,
-            value,
-            response,
-        } => {
-            let _ = response.send(services.put_variable(&workspace, &name, value));
-        }
-        BoundaryRequest::GetObjectProperty {
-            object,
-            index,
-            name,
-            response,
-        } => {
-            let _ = response.send(services.get_object_property(object, index, &name));
-        }
-        BoundaryRequest::SetObjectProperty {
-            object,
-            index,
-            name,
-            value,
-            response,
-        } => {
-            let _ = response.send(services.set_object_property(object, index, &name, value));
-        }
-        BoundaryRequest::Async { operation, result } => {
-            if !result.begin() {
-                return;
-            }
-            let completed = services.execute_async(operation, result.cancellation());
-            result.complete(completed);
-        }
-    }
-}
-
 fn reject_request(request: BoundaryRequest, message: &str) {
     let diagnostic = || lane_diagnostic(message);
     match request {
@@ -941,6 +1064,29 @@ fn lane_diagnostic(message: &str) -> MexDiagnostic {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::future::Future;
+
+    impl<T: MexBoundaryHostServices + 'static> OriginMexBoundaryServices for T {
+        fn prepare(
+            self: Rc<Self>,
+            operation: super::super::services::OriginMexOperation,
+            cancellation: runmat_execution::cancellation::CancellationToken,
+        ) -> Result<super::super::services::OriginMexCompletionFuture, MexDiagnostic> {
+            let completion = match operation {
+                super::super::services::OriginMexOperation::Standard(operation) => {
+                    self.execute_async(*operation, cancellation)
+                }
+                super::super::services::OriginMexOperation::OptionalGetVariable {
+                    workspace,
+                    name,
+                } => MexEngineCompletion::from_result(
+                    self.get_variable(&workspace, &name)
+                        .map(|value| value.into_iter().collect()),
+                ),
+            };
+            Ok(Box::pin(async move { completion }))
+        }
+    }
 
     fn pending_async_result() -> Arc<NativeAsyncResult> {
         let (callbacks, _receiver) = async_mpsc::unbounded();
@@ -948,6 +1094,196 @@ mod tests {
             callbacks,
             service_id: 1,
         })))
+    }
+
+    struct PendingOriginServices {
+        release: RefCell<Option<oneshot::Receiver<()>>>,
+    }
+
+    impl OriginMexBoundaryServices for PendingOriginServices {
+        fn prepare(
+            self: Rc<Self>,
+            operation: super::super::services::OriginMexOperation,
+            _: runmat_execution::cancellation::CancellationToken,
+        ) -> Result<super::super::services::OriginMexCompletionFuture, MexDiagnostic> {
+            let super::super::services::OriginMexOperation::Standard(operation) = operation else {
+                panic!("test only admits Eval callbacks");
+            };
+            let MexAsyncOperation::Eval { command, .. } = *operation else {
+                panic!("test only admits Eval callbacks");
+            };
+            let pending = if command == "pending" {
+                self.release.borrow_mut().take()
+            } else {
+                None
+            };
+            Ok(Box::pin(async move {
+                if let Some(pending) = pending {
+                    pending.await.expect("release first origin callback");
+                }
+                MexEngineCompletion::from_result(Ok(Vec::new()))
+            }))
+        }
+    }
+
+    #[test]
+    fn pending_origin_callback_does_not_starve_following_envelope() {
+        let (commands, _worker_commands) = mpsc::channel();
+        let (sender, callbacks) = async_mpsc::unbounded();
+        let lane = NativeMexLane {
+            commands,
+            callback_closer: sender.clone(),
+            callbacks: CallbackInbox::new(callbacks),
+            services: RefCell::new(HashMap::new()),
+            callback_tasks: CallbackTasks::new(),
+            next_service: Cell::new(1),
+            callback_depth: Cell::new(0),
+            abandoned: Cell::new(false),
+        };
+        let (release, released) = oneshot::channel();
+        let service_id = lane
+            .register_services(Rc::new(PendingOriginServices {
+                release: RefCell::new(Some(released)),
+            }))
+            .expect("register pending origin service");
+        let (first_reply, first_result) = mpsc::sync_channel(1);
+        sender
+            .unbounded_send(BoundaryEnvelope::Request {
+                service_id,
+                request: Box::new(BoundaryRequest::Eval {
+                    command: "pending".into(),
+                    response: first_reply,
+                }),
+            })
+            .expect("queue pending callback");
+        assert!(futures::executor::block_on(lane.service_background_once()));
+
+        let (second_reply, second_result) = mpsc::sync_channel(1);
+        sender
+            .unbounded_send(BoundaryEnvelope::Request {
+                service_id,
+                request: Box::new(BoundaryRequest::Eval {
+                    command: "ready".into(),
+                    response: second_reply,
+                }),
+            })
+            .expect("queue sibling callback");
+        assert!(futures::executor::block_on(lane.service_background_once()));
+        assert!(futures::executor::block_on(lane.service_background_once()));
+        assert!(second_result.recv().expect("sibling settled").is_ok());
+        assert!(matches!(
+            first_result.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        release.send(()).expect("release pending origin callback");
+        assert!(futures::executor::block_on(lane.service_background_once()));
+        assert!(first_result.recv().expect("first settled").is_ok());
+    }
+
+    #[test]
+    fn forced_origin_retirement_rejects_late_native_callback() {
+        let (callbacks, receiver) = async_mpsc::unbounded();
+        let proxy = NativeBoundaryProxy {
+            origin: Arc::new(OriginServiceLease {
+                callbacks,
+                service_id: 1,
+            }),
+        };
+        drop(receiver);
+
+        let error = proxy
+            .eval("late_callback")
+            .expect_err("a retired origin must not dispatch to managed callback services");
+        assert_eq!(error.identifier.as_deref(), Some("RunMat:MEX:NativeLane"));
+    }
+
+    #[test]
+    fn forced_lane_drop_rejects_queued_callback_before_service_retirement() {
+        let (commands, worker_commands) = mpsc::channel();
+        let (sender, callbacks) = async_mpsc::unbounded();
+        let lane = NativeMexLane {
+            commands,
+            callback_closer: sender.clone(),
+            callbacks: CallbackInbox::new(callbacks),
+            services: RefCell::new(HashMap::new()),
+            callback_tasks: CallbackTasks::new(),
+            next_service: Cell::new(1),
+            callback_depth: Cell::new(0),
+            abandoned: Cell::new(false),
+        };
+        let service_id = lane
+            .register_services(Rc::new(NoopServices))
+            .expect("register origin service");
+        let (response, result) = mpsc::sync_channel(1);
+        sender
+            .unbounded_send(BoundaryEnvelope::Request {
+                service_id,
+                request: Box::new(BoundaryRequest::Eval {
+                    command: "queued_after_host_disposal".into(),
+                    response,
+                }),
+            })
+            .unwrap();
+
+        drop(lane);
+
+        let diagnostic = result
+            .recv()
+            .expect("queued request must settle on forced disposal")
+            .expect_err("queued request must not enter a retired origin service");
+        assert_eq!(
+            diagnostic.identifier.as_deref(),
+            Some("RunMat:MEX:NativeLane")
+        );
+        assert!(sender
+            .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id })
+            .is_err());
+        assert!(matches!(
+            worker_commands.try_recv(),
+            Ok(NativeCommand::Shutdown)
+        ));
+    }
+
+    #[test]
+    fn forced_abandon_rejects_queued_request_while_receive_ticket_is_pending() {
+        let (commands, _worker_commands) = mpsc::channel();
+        let (sender, callbacks) = async_mpsc::unbounded();
+        let lane = NativeMexLane {
+            commands,
+            callback_closer: sender.clone(),
+            callbacks: CallbackInbox::new(callbacks),
+            services: RefCell::new(HashMap::new()),
+            callback_tasks: CallbackTasks::new(),
+            next_service: Cell::new(1),
+            callback_depth: Cell::new(0),
+            abandoned: Cell::new(false),
+        };
+        let mut pending = Box::pin(lane.callbacks.next());
+        let waker = futures::task::noop_waker();
+        assert!(matches!(
+            pending
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(&waker)),
+            std::task::Poll::Pending
+        ));
+        let (reply, result) = mpsc::sync_channel(1);
+        sender
+            .unbounded_send(BoundaryEnvelope::Request {
+                service_id: 1,
+                request: Box::new(BoundaryRequest::Eval {
+                    command: "queued_while_receiver_waits".into(),
+                    response: reply,
+                }),
+            })
+            .expect("queue request after receiver went pending");
+        lane.force_abandon();
+        let error = result
+            .try_recv()
+            .expect("forced disposal settles queued request")
+            .expect_err("disposed origin must reject callback");
+        assert_eq!(error.identifier.as_deref(), Some("RunMat:MEX:NativeLane"));
+        drop(pending);
     }
 
     #[test]
@@ -1173,7 +1509,9 @@ mod tests {
     struct ReentrantServices {
         lane: Rc<NativeMexLane>,
         inner: PathBuf,
+        outer: PathBuf,
         calls: Cell<usize>,
+        rejected_shutdown: Cell<bool>,
     }
 
     #[derive(Default)]
@@ -1312,6 +1650,20 @@ mod tests {
                 return Err(lane_diagnostic("unexpected reentrant function callback"));
             }
             self.calls.set(self.calls.get() + 1);
+            let retirement = pollster::block_on(
+                self.lane
+                    .shutdown_module(&self.outer, Rc::new(NoopServices)),
+            )
+            .map_err(|error| lane_diagnostic(&error.to_string()))?;
+            if !matches!(
+                retirement,
+                MexModuleRetirement::Retained(MexLoadError::ReentrantModule)
+            ) {
+                return Err(lane_diagnostic(
+                    "reentrant shutdown retired an active module",
+                ));
+            }
+            self.rejected_shutdown.set(true);
             pollster::block_on(self.lane.invoke(
                 &self.inner,
                 arguments,
@@ -1527,7 +1879,9 @@ public:
         let services = Rc::new(ReentrantServices {
             lane: Rc::clone(&lane),
             inner: inner.module,
+            outer: outer.module.clone(),
             calls: Cell::new(0),
+            rejected_shutdown: Cell::new(false),
         });
         let invocation = futures::executor::block_on(lane.invoke(
             &outer.module,
@@ -1537,6 +1891,7 @@ public:
         ))
         .expect("invoke reentrant fixture");
         assert_eq!(services.calls.get(), 1);
+        assert!(services.rejected_shutdown.get());
         assert_eq!(
             values
                 .decode(&invocation.outputs[0])
@@ -1546,6 +1901,10 @@ public:
                     .expect("expected reentrant tensor")
             )
         );
+        let retirement =
+            futures::executor::block_on(lane.shutdown_module(&outer.module, Rc::new(NoopServices)))
+                .expect("shutdown after outer invocation");
+        assert!(matches!(retirement, MexModuleRetirement::Retired(Ok(()))));
     }
 
     #[test]

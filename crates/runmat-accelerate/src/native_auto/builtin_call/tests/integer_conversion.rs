@@ -50,17 +50,17 @@ fn integer_family_real_provider_preparation_and_execution_use_existing_observer(
                     .await
                     .unwrap();
                 if use_provider {
-                    let Value::GpuTensor(handle) = output else {
+                    let Value::GpuTensor(handle) = output.value() else {
                         panic!("typed resident output")
                     };
                     assert_eq!(handle.shape(), &[1, 2, 2]);
-                    assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
+                    assert!(runmat_accelerate_api::handle_integer_type(handle).is_some());
                     // Hook return proves submission, not device completion. Do not
                     // train a completed provider sample from this elapsed time.
                     assert!(probe.feedback.borrow().is_empty());
-                    drop(handle);
+                    drop(output);
                 } else {
-                    let Value::Tensor(tensor) = output else {
+                    let Value::Tensor(tensor) = output.value() else {
                         panic!("host integer array")
                     };
                     assert_eq!(tensor.shape(), &[1, 2, 2]);

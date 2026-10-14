@@ -56,6 +56,17 @@ impl TestAttemptWorkload {
         &self,
         interop: runmat_types::InteropManifest,
     ) -> Result<ProgramExecutionRequest, String> {
+        self.program_request_with_policy(interop, None)
+    }
+
+    /// Bind a policy descriptor captured by the submitter before a remote
+    /// test attempt is materialized. The caller must place its exact object
+    /// in the authenticated bundle beside this request.
+    pub fn program_request_with_policy(
+        &self,
+        interop: runmat_types::InteropManifest,
+        foreign_policy: Option<runmat_execution_artifact::ObjectDescriptor>,
+    ) -> Result<ProgramExecutionRequest, String> {
         self.validate()?;
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -67,6 +78,7 @@ impl TestAttemptWorkload {
             execution_mode: TEST_ATTEMPT_EXECUTION_MODE.into(),
             target: runmat_execution_artifact::ProgramTarget::portable(TEST_ATTEMPT_TARGET_PROFILE),
             interop,
+            foreign_policy,
             accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),

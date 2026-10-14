@@ -1,6 +1,5 @@
 use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -341,12 +340,14 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
 /// The host interaction consumer owns presentation and whether to ask again.
 #[derive(Debug)]
 pub enum EvalHookOutcome {
-    Value(Value),
+    Value(crate::execution::RootedValue),
     InvalidExpression(RuntimeError),
 }
 
 impl EvalHookOutcome {
-    pub fn from_evaluation(result: Result<Value, RuntimeError>) -> Result<Self, RuntimeError> {
+    pub fn from_evaluation(
+        result: Result<crate::execution::RootedValue, RuntimeError>,
+    ) -> Result<Self, RuntimeError> {
         match result {
             Ok(value) => Ok(Self::Value(value)),
             Err(error)

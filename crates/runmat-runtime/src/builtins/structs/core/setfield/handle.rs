@@ -1,7 +1,9 @@
 use super::assignment::assign_into_value;
+use super::assignment::root;
 use super::errors;
 use super::object::ensure_object_family_enabled;
 use crate::builtins::structs::core::field_path::FieldStep;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_builtins::{
     SETFIELD_ERROR_INVALID_HANDLE, SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT,
@@ -13,7 +15,11 @@ pub(super) async fn assign_into_handle(
     handle: HandleRef,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _receiver_root =
+        RootedValueLease::for_traced(&handle).map_err(|error| error.into_runtime_error())?;
+    let _rhs_root =
+        RootedValueLease::for_traced(&rhs).map_err(|error| error.into_runtime_error())?;
     ensure_object_family_enabled()?;
     if steps.is_empty() {
         return Err(errors::with_message(
@@ -44,12 +50,12 @@ pub(super) async fn assign_into_handle(
                 &SETFIELD_ERROR_OBJECT_PROPERTY,
             ));
         }
-        runmat_gc::gc_record_handle_write(&handle.target, &updated);
-        *target = updated;
+        runmat_gc::gc_record_handle_write(&handle.target, updated.value());
+        *target = updated.value().clone();
         Ok(())
     })
     .map_err(|error| invalid_handle(&handle, Some(error.to_string())))??;
-    Ok(Value::HandleObject(handle))
+    root(Value::HandleObject(handle))
 }
 
 fn invalid_handle(handle: &HandleRef, detail: Option<String>) -> crate::RuntimeError {

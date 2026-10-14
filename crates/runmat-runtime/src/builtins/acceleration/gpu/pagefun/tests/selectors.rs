@@ -76,7 +76,7 @@ fn pagefun_mtimes_external_function_handle() {
     let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
     let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
     let result = pagefun_impl(
-        Value::ExternalFunctionHandle("mtimes".to_string()),
+        Value::ExternalFunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
         vec![Value::Tensor(rhs)],
     );
@@ -95,13 +95,15 @@ fn pagefun_mtimes_semantic_function_handle() {
     let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
     let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
     let result = pagefun_impl(
-        Value::BoundFunctionHandle {
-            name: "mtimes".into(),
-            function: 17,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(17),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        },
+        Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "mtimes".into(),
+                function: 17,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(17),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        )),
         Value::Tensor(lhs),
         vec![Value::Tensor(rhs)],
     );

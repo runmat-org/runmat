@@ -23,6 +23,8 @@ use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, Reduction
 use runmat_accelerate_api::CovNormalization;
 
 mod expression;
+mod scope;
+pub use scope::{scope_fusion_plan, FusionPlanFuture};
 mod reduction_group_nodes;
 mod reduction_shader;
 pub(crate) use reduction_shader::GeneratedReductionShader;

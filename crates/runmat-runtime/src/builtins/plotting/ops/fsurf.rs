@@ -659,7 +659,7 @@ fn is_function_handle(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -883,23 +883,27 @@ async fn call_surface_function(function: &Value, a: f64, b: f64) -> BuiltinResul
     let value = call_function(function, vec![Value::Num(a), Value::Num(b)])
         .await
         .map_err(map_fsurf_eval)?;
-    if matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    if matches!(value.value(), Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &INTEGER_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    if matches!(&value, Value::GpuTensor(_)) {
+    if matches!(value.value(), Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RESIDENT_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value)
+    value
+        .with_owned_async(|value| async move {
+            let value = crate::dispatcher::gather_if_needed_async(&value)
+                .await
+                .map_err(map_fsurf_eval)?;
+            surface_value_to_scalar(value).map_err(map_fsurf_eval)
+        })
         .await
-        .map_err(map_fsurf_eval)?;
-    surface_value_to_scalar(value).map_err(map_fsurf_eval)
 }
 
 fn surface_value_to_scalar(value: Value) -> BuiltinResult<f64> {
@@ -1034,14 +1038,16 @@ pub(crate) fn function_surface_ref(
     builtin: &'static str,
 ) -> BuiltinResult<FunctionSurfaceFunctionRef> {
     Ok(match function {
-        Value::FunctionHandle(name) => FunctionSurfaceFunctionRef::FunctionHandle(name.clone()),
+        Value::FunctionHandle(name) => {
+            FunctionSurfaceFunctionRef::FunctionHandle(name.name().to_owned())
+        }
         Value::ExternalFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.name().to_owned())
         }
         Value::MethodFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.name().to_owned())
         }
-        Value::BoundFunctionHandle { .. } | Value::Closure(_) => {
+        Value::BoundFunctionHandle(_) | Value::Closure(_) => {
             FunctionSurfaceFunctionRef::OwnedCallable(super::state::callbacks::retain(
                 function.clone(),
                 builtin,
@@ -1114,7 +1120,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(a, b))) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f(a, b),
+                    ))
+                })
             },
         )));
         drop(entry);
@@ -1144,13 +1154,15 @@ mod tests {
 
     #[test]
     fn fsurf_gates_integer_forms_independently() {
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         let domain = Value::Tensor(
             runmat_value::Tensor::new_integer(
                 runmat_value::IntegerStorage::I16(vec![-2, 2]),
@@ -1184,13 +1196,15 @@ mod tests {
         );
 
         let padded_mesh_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String(" MeshDensity ".into()),
             Value::Int(IntValue::U8(35)),
         ])
@@ -1201,13 +1215,15 @@ mod tests {
         );
 
         let style_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("FaceAlpha".into()),
             Value::Int(IntValue::U8(1)),
         ])
@@ -1274,13 +1290,15 @@ mod tests {
         let Value::Num(encoded) = axes else {
             panic!("numeric axes representation");
         };
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = preflight_fsurf_extensions(&[
@@ -1306,7 +1324,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, _args, _requested_outputs| {
                 assert_eq!(function, 1);
-                crate::sequence::single_value_future(async {
+                Box::pin(async {
                     let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
                         .allocate_zeroed(
                             vec![1, 1],
@@ -1315,7 +1333,9 @@ mod tests {
                         )
                         .unwrap()
                         .handle;
-                    Ok(Value::GpuTensor(handle))
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::GpuTensor(handle),
+                    )
                 })
             },
         )));
@@ -1487,13 +1507,15 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(match function {
-                        11 => Value::Num(u),
-                        12 => Value::Num(v),
-                        13 => Value::Num(u + v),
-                        other => panic!("unexpected function id {other}"),
-                    })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        match function {
+                            11 => Value::Num(u),
+                            12 => Value::Num(v),
+                            13 => Value::Num(u + v),
+                            other => panic!("unexpected function id {other}"),
+                        },
+                    )
                 })
             },
         )));
@@ -1565,13 +1587,15 @@ mod tests {
         let (fixture, _numeric) = with_test_function(|x, y| x + y);
         let _entry = fixture.runtime.enter();
         let err = block_on(fixture.runtime.scope(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
         ])))

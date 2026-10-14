@@ -5,6 +5,8 @@ use super::*;
 #[path = "core/power_probe.rs"]
 mod power_probe;
 pub(crate) use power_probe::{AnyStageObserved, FrozenAnyPipeline, FrozenAnySnapshot};
+#[path = "core/logical_global.rs"]
+mod logical_global;
 
 struct DimEmissionObserved {
     output_buffer_bytes: u64,
@@ -57,25 +59,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         omit_nan: bool,
     ) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AnyOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AnyInclude
-        };
-        let snapshot = FrozenAnySnapshot::capture();
-        let first = self
-            .reduce_dim_sum_mean_with_snapshot_exec(a, 0, op, snapshot, None)?
-            .0;
-        match self.reduce_dim_sum_mean_with_snapshot_exec(&first, 1, op, snapshot, None) {
-            Ok((handle, _)) => {
-                drop(first);
-                Ok(handle)
-            }
-            Err(err) => {
-                drop(first);
-                Err(err)
-            }
-        }
+        self.reduce_logical_global_exec(a, runmat_builtins::LogicalReductionKind::Any, omit_nan)
     }
 
     /// The POWER probe uses both ordinary stages with one snapshot decision.
@@ -119,40 +103,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         omit_nan: bool,
     ) -> Result<GpuTensorHandle> {
-        let op = if omit_nan {
-            crate::backend::wgpu::types::DimReduceOp::AllOmit
-        } else {
-            crate::backend::wgpu::types::DimReduceOp::AllInclude
-        };
-        let total_elems = if a.shape().is_empty() {
-            1
-        } else {
-            product_checked(a.shape())
-                .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
-        };
-        if total_elems == 0 {
-            return self.fill_exec(&[1usize, 1usize], f64::NAN);
-        }
-        if a.shape().len() <= 2 {
-            let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
-            match self.reduce_dim_sum_mean_exec(&first, 1, op) {
-                Ok(handle) => {
-                    drop(first);
-                    Ok(handle)
-                }
-                Err(err) => {
-                    drop(first);
-                    Err(err)
-                }
-            }
-        } else {
-            let original_shape = a.shape().to_vec();
-            let flattened_shape = vec![total_elems, 1usize];
-            let flattened = self.reshape_exec(a, &flattened_shape)?;
-            let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
-            let _ = self.reshape_exec(a, &original_shape);
-            result
-        }
+        self.reduce_logical_global_exec(a, runmat_builtins::LogicalReductionKind::All, omit_nan)
     }
 
     pub(crate) fn reduce_mean_global_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -267,9 +218,7 @@ impl WgpuProvider {
             if let Some(allocated) = allocated {
                 allocated.set(true);
             }
-            let mut enc =
-                emission.device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            let mut enc = pending.profiled_encoder(emission, &wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-reduce-global-input-snapshot-copy"),
                     });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
@@ -300,9 +249,7 @@ impl WgpuProvider {
                 if let Some(allocated) = allocated {
                     allocated.set(true);
                 }
-                let mut enc =
-                    emission.device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                let mut enc = pending.profiled_encoder(emission, &wgpu::CommandEncoderDescriptor {
                             label: Some("runmat-reduce-pass-input-snapshot-copy"),
                         });
                 enc.copy_buffer_to_buffer(current.as_ref(), 0, snap.as_ref(), 0, size_bytes);
@@ -604,9 +551,7 @@ impl WgpuProvider {
                 snapshot_resource_ticket =
                     self.issue_power_probe_resource_ticket(snap.size())?;
             }
-            let mut enc =
-                emission.device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            let mut enc = pending.profiled_encoder(emission, &wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-reduce-dim-input-snapshot-copy"),
                     });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
@@ -738,7 +683,17 @@ impl WgpuProvider {
         observed.output_resource_ticket = output_resource_ticket;
         Ok((out_buffer, observed))
         })??;
-        let output = self.register_existing_buffer(out_buffer, out_shape, out_len)?;
+        let output = if matches!(
+            op,
+            crate::backend::wgpu::types::DimReduceOp::AnyInclude
+                | crate::backend::wgpu::types::DimReduceOp::AnyOmit
+                | crate::backend::wgpu::types::DimReduceOp::AllInclude
+                | crate::backend::wgpu::types::DimReduceOp::AllOmit
+        ) {
+            self.register_logical_buffer(out_buffer, out_shape, out_len, BufferUsageClass::Generic)?
+        } else {
+            self.register_existing_buffer(out_buffer, out_shape, out_len)?
+        };
         if let Some(ticket) = emitted.output_resource_ticket.take() {
             self.allocations
                 .attach_probe_resource_ticket(&output, ticket)?;

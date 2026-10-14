@@ -9,6 +9,7 @@ mod tests;
 pub use contract::*;
 
 pub const NARGINCHK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "narginchk" },
     category: "introspection",
@@ -50,6 +51,7 @@ pub const NARGINCHK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub const NARGOUTCHK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "nargoutchk" },
     category: "introspection",

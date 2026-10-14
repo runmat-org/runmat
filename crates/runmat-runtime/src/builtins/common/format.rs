@@ -1206,7 +1206,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::Future(_)

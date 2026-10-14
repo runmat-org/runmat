@@ -6,24 +6,45 @@ use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
-use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServiceError};
+use runmat_runtime::execution::{
+    DeferredCall, DeferredInvocation, DeferredProgram, ExecutionServiceError,
+};
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
+
+#[path = "program_execution/dynamic_admission.rs"]
+pub mod dynamic_admission;
 
 #[path = "program_execution/unit_sources.rs"]
 mod unit_sources;
 #[path = "program_execution/unit_admission.rs"]
 mod unit_admission;
+#[path = "program_execution/request_future.rs"]
+mod request_future;
 #[path = "program_execution/region_sources.rs"]
 mod region_sources;
+#[path = "program_execution/graph_materialization.rs"]
+mod graph_materialization;
+#[path = "program_execution/graph_request.rs"]
+mod graph_request;
 pub use crate::bytecode::program::retained_artifacts::{
     prepare_retained_callable_units, PreparedRetainedCallableUnits, RetainedCallableStageError,
     RetainedCallableStageLimits,
 };
+pub use graph_materialization::materialize_deferred_graph_call;
+pub use graph_request::{
+    execute_graph_request, execute_graph_request_with_context,
+    execute_graph_request_with_context_recording,
+    execute_graph_request_with_selected_foreign_ports_recording, execute_prepared_graph_request,
+    prepare_graph_request_with_selected_foreign_ports_recording, GraphFailureSourceRecorder,
+    PreparedSelectedGraph, SelectedGraphCleanupContexts, SelectedGraphForeignPorts,
+};
 pub use region_sources::encode_portable_region_sources_v1;
 pub use unit_admission::{
-    admit_executable_unit, AdmittedExecutableUnit, ExecutableUnitAdmissionError,
-    RuntimeBoundExecutableUnit,
+    admit_executable_unit, selected_graph_callable_facts, selected_graph_callable_facts_for_owner,
+    AdmittedExecutableUnit, ExecutableUnitAdmissionError, GraphCodecAdmission,
+    RetainedExecutableSourceOwner, RuntimeBoundExecutableUnit, SelectedGraphCallableFacts,
+    SelectedUnitInteropReceipt,
 };
 
 pub(crate) fn capture_region_sources(
@@ -88,14 +109,31 @@ pub fn materialize_deferred_call(
             ..
         } => (callable.clone(), context.clone(), arguments.as_slice()),
     };
-    let program = call.program.as_deref().ok_or_else(|| {
-        ExecutionServiceError::Failed("execution is missing its exact program".into())
-    })?;
-    if matches!(
+    let program = match &call.program {
+        DeferredProgram::InterpreterV2(program) | DeferredProgram::RegionSourcesV1(program) => {
+            program.as_ref()
+        }
+        DeferredProgram::Local => {
+            return Err(ExecutionServiceError::Failed(
+                "execution is missing its exact isolated program".into(),
+            ))
+        }
+        DeferredProgram::SelectedGraph(_) => {
+            return Err(ExecutionServiceError::Failed(
+                "selected graph requires V8 graph materialization".into(),
+            ))
+        }
+    };
+    let is_region = matches!(
         &callable,
         ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
-    ) && call.program_revision.is_none()
-    {
+    );
+    if is_region != matches!(&call.program, DeferredProgram::RegionSourcesV1(_)) {
+        return Err(ExecutionServiceError::Failed(
+            "isolated callable differs from its typed program form".into(),
+        ));
+    }
+    if is_region && call.program_revision.is_none() {
         return Err(ExecutionServiceError::Failed(
             "isolated region is missing its compiler-bound program revision".into(),
         ));
@@ -119,15 +157,15 @@ pub fn materialize_deferred_call(
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
-    let executable_form = if matches!(
-        &callable,
-        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
-    ) {
-        ExecutableForm::InterpreterRegionSourcesV1
-    } else {
-        ExecutableForm::InterpreterBytecodeV2
+    let executable_form = match &call.program {
+        DeferredProgram::RegionSourcesV1(_) => ExecutableForm::InterpreterRegionSourcesV1,
+        DeferredProgram::InterpreterV2(_) => ExecutableForm::InterpreterBytecodeV2,
+        DeferredProgram::Local | DeferredProgram::SelectedGraph(_) => {
+            unreachable!("direct materialization selected a validated V2 program above")
+        }
     };
     let artifact = ProgramArtifact::materialize(&recipe, executable_form, program.to_vec())
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
@@ -187,6 +225,9 @@ pub async fn execute_deferred_program_in_context(
         ProgramExecutionResponse::SpmdSuccess { .. } => Err(ExecutionServiceError::Failed(
             "SPMD task response requires the typed gang execution path".into(),
         )),
+        ProgramExecutionResponse::GraphSuccess { .. } => Err(ExecutionServiceError::Failed(
+            "graph result reached the direct V7 execution path".into(),
+        )),
     }
 }
 
@@ -212,10 +253,14 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
     // A worker request is an execution host, not a bare RuntimeContext
-    // embedding. Keep the non-cloneable lifecycle owner outside the context
-    // and drive its existing local-task supervisor through completion.
+    // embedding. Keep the workspace and non-cloneable lifecycle owners outside
+    // the context and drive the local-task supervisor through completion.
     let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let workspace_owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let workspace_service = std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+        workspace_owner.clone(),
     ));
     #[cfg(not(target_arch = "wasm32"))]
     let supervisor = std::rc::Rc::new(runmat_runtime::context::RuntimeLocalTaskSupervisor::new());
@@ -224,15 +269,25 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
     let ports = runtime
         .service_ports()
         .clone()
+        .with_workspace(workspace_service.clone())
+        .with_base_workspace(workspace_service)
         .with_local_tasks(supervisor.submission_port(runtime.local_identity()));
     let runtime = runtime.with_service_ports(ports);
-    let host =
-        match runmat_runtime::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone()) {
-            Ok(host) => host,
-            Err(error) => return runtime_failure_response(error, &runtime),
-        };
+    let host = match runmat_runtime::context::RuntimeLifecycleHost::new(
+        &runtime,
+        supervisor.clone(),
+    ) {
+        Ok(host) => host,
+        Err(error) => {
+            let failure = runtime_failure_response(error, &runtime);
+            if let Err(close_error) = workspace_owner.close() {
+                tracing::warn!(%close_error, "workspace close failed after worker host admission error");
+            }
+            return failure;
+        }
+    };
     let complete = async {
-        let result = execute_program_request_in_context(request, Some(runtime.clone())).await;
+        let result = execute_program_request_in_context(request, Some(runtime.clone()), None).await;
         match host.retire_workspace_and_drain(&runtime).await {
             Ok(()) => result,
             Err(error)
@@ -256,19 +311,69 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
     #[cfg(target_arch = "wasm32")]
     let result = complete.await;
     host.force_close();
-    result
+    match workspace_owner.close() {
+        Ok(_) => result,
+        Err(error)
+            if matches!(
+                &result,
+                ProgramExecutionResponse::Failure { .. }
+                    | ProgramExecutionResponse::RuntimeFailure { .. }
+            ) =>
+        {
+            tracing::warn!(%error, "workspace close failed after worker execution error");
+            result
+        }
+        Err(error) => runtime_failure_response(
+            runmat_runtime::workspace::base_workspace_error_to_runtime(error),
+            &runtime,
+        ),
+    }
 }
 
 pub async fn execute_program_request_with_context(
     request: ProgramExecutionRequest,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
-    execute_program_request_in_context(request, Some(runtime)).await
+    execute_program_request_on_owned_local_task(request, runtime, None).await
+}
+
+/// Execute a Direct V3 request with the exact authenticated foreign closure
+/// selected before adapter effects. The boxed bundle keeps the large archive
+/// owner out of the caller's async frame until VM source binding consumes it.
+pub async fn execute_program_request_with_context_and_bundle(
+    request: ProgramExecutionRequest,
+    runtime: runmat_runtime::context::RuntimeContext,
+    bundle: Box<runmat_execution_artifact::ExecutionBundle>,
+) -> ProgramExecutionResponse {
+    execute_program_request_on_owned_local_task(request, runtime, Some(bundle)).await
+}
+
+/// Keep the deep interpreter poll chain in one host-owned local task instead
+/// of nesting it beneath the host's foreground response/cleanup future. The
+/// existing canonical supervisor owns cancellation and drops the exact request
+/// and bundle before its completion lease settles. A bare runtime without a
+/// supervisor retains the direct path.
+async fn execute_program_request_on_owned_local_task(
+    request: ProgramExecutionRequest,
+    runtime: runmat_runtime::context::RuntimeContext,
+    bundle: Option<Box<runmat_execution_artifact::ExecutionBundle>>,
+) -> ProgramExecutionResponse {
+    let selected_runtime = runtime.clone();
+    let execution = async move {
+        Ok::<_, runmat_runtime::RuntimeError>(
+            execute_program_request_in_context(request, Some(selected_runtime), bundle).await,
+        )
+    };
+    match runmat_runtime::context::run_owned_request_continuation(&runtime, execution).await {
+        Ok(response) => response,
+        Err(error) => runtime_failure_response(error, &runtime),
+    }
 }
 
 async fn execute_program_request_in_context(
     request: ProgramExecutionRequest,
     runtime: Option<runmat_runtime::context::RuntimeContext>,
+    bundle: Option<Box<runmat_execution_artifact::ExecutionBundle>>,
 ) -> ProgramExecutionResponse {
     if request.validate_for_portable_host().is_err() {
         return ProgramExecutionResponse::Failure {
@@ -302,79 +407,10 @@ async fn execute_program_request_in_context(
     });
     let _assignment = runtime.enter_execution_assignment(request.assignment.clone());
     let _job = runtime.enter_execution_job(request.job_id);
-    if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
-        return ProgramExecutionResponse::Failure {
-            message: format!(
-                "worker rejected legacy script bytecode; rebuild the program for bytecode schema {}",
-                crate::BYTECODE_SCHEMA_VERSION
-            ),
-        };
+    match request_future::prepare(request, runtime, bundle) {
+        Ok(execution) => execution.await,
+        Err(error) => error.into_response(),
     }
-    if request.artifact.form == ExecutableForm::InterpreterScriptV2
-        && !matches!(
-            &request.callable,
-            ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
-        )
-    {
-        return execute_script_request(request, runtime).await;
-    }
-    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
-        return execute_unit_request(request, runtime).await;
-    }
-    if matches!(
-        &request.callable,
-        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
-    ) && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
-    {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected source-less region bytecode; rebuild the parallel program"
-                .into(),
-        };
-    }
-    if request.artifact.form == ExecutableForm::InterpreterBytecodeV1 {
-        return ProgramExecutionResponse::Failure {
-            message: format!(
-                "worker rejected legacy interpreter bytecode; expected schema {}. Rebuild the program with this RunMat version",
-                crate::BYTECODE_SCHEMA_VERSION
-            ),
-        };
-    }
-    if request.artifact.form != ExecutableForm::InterpreterBytecodeV2
-        && request.artifact.form != ExecutableForm::InterpreterScriptV2
-        && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
-    {
-        return ProgramExecutionResponse::Failure {
-            message:
-                "worker rejected an unsupported interpreter artifact form; rebuild the program"
-                    .into(),
-        };
-    }
-    if matches!(request.callable, ProgramCallable::ParallelRegion { .. }) {
-        return execute_parallel_region_request(request, runtime).await;
-    }
-    if matches!(request.callable, ProgramCallable::SpmdRegion { .. }) {
-        return execute_spmd_region_request(request, runtime).await;
-    }
-    let registry: crate::FunctionRegistry =
-        match crate::decode_interpreter_program_v2(&request.artifact.executable_bytes) {
-            Ok(registry) => registry,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected an invalid program: {error}"),
-                }
-            }
-        };
-    let capabilities = match callable_capabilities(&registry, &request.callable) {
-        Ok(capabilities) => capabilities,
-        Err(message) => return ProgramExecutionResponse::Failure { message },
-    };
-    if !recipe_supports_capabilities(&request.recipe, &capabilities) {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected a recipe that weakens callable accelerator requirements"
-                .into(),
-        };
-    }
-    execute_function_request(&request, &registry, &runtime, None).await
 }
 
 fn recipe_supports_capabilities(
@@ -410,6 +446,9 @@ fn callable_capabilities(
         }
         ProgramCallable::Builtin { .. } => {
             Err("worker could not resolve builtin requirements".into())
+        }
+        ProgramCallable::GraphTarget { .. } => {
+            Err("graph scheduler labels are not direct executable callables".into())
         }
         ProgramCallable::ParallelRegion { region } => function(region.0.function)
             .and_then(|function| {
@@ -585,17 +624,20 @@ async fn execute_parallel_region_request(
     request: ProgramExecutionRequest,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
-    let ProgramCallable::ParallelRegion { region } = &request.callable else {
+    if !matches!(&request.callable, ProgramCallable::ParallelRegion { .. }) {
         return ProgramExecutionResponse::Failure {
             message: "worker received a non-parallel callable on the parallel execution path"
                 .into(),
         };
-    };
-    let runmat_execution::ProgramInvocationContext::ParallelTask { task } = &request.context else {
+    }
+    if !matches!(
+        &request.context,
+        runmat_execution::ProgramInvocationContext::ParallelTask { .. }
+    ) {
         return ProgramExecutionResponse::Failure {
             message: "parallel region task is missing its typed execution context".into(),
         };
-    };
+    }
     if request.requested_outputs != 1 {
         return ProgramExecutionResponse::Failure {
             message: "parallel region tasks return one typed result envelope".into(),
@@ -613,22 +655,7 @@ async fn execute_parallel_region_request(
             }
         }
     };
-    let Some(executable) = bytecode
-        .parfor_regions
-        .iter()
-        .find(|candidate| candidate.contract.id == *region)
-    else {
-        return ProgramExecutionResponse::Failure {
-            message: "worker could not find the requested parallel region in its exact program"
-                .into(),
-        };
-    };
-    if !recipe_supports_capabilities(&request.recipe, &executable.contract.capabilities) {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected a recipe that weakens parfor accelerator requirements".into(),
-        };
-    }
-    let mut arguments = match request
+    let arguments = match request
         .arguments
         .iter()
         .map(runmat_runtime::execution::value_codec::decode_inline_value)
@@ -641,29 +668,119 @@ async fn execute_parallel_region_request(
             }
         }
     };
+    match execute_parallel_region_values(
+        &request.callable,
+        &request.context,
+        request.requested_outputs,
+        &request.recipe,
+        &bytecode,
+        &runtime,
+        arguments,
+    )
+    .await
+    {
+        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+            value.value(),
+            &runtime,
+        ) {
+            Ok(value) => ProgramExecutionResponse::Success {
+                outputs: vec![value],
+            },
+            Err(error) => ProgramExecutionResponse::Failure {
+                message: format!("worker could not transfer its parallel task result: {error}"),
+            },
+        },
+        Err(ParallelRegionError::Contract(response)) => response,
+        Err(ParallelRegionError::Runtime(error)) => runtime_failure_response(error, &runtime),
+    }
+}
+
+/// One typed region/task engine shared by inline V1 captures and admitted V3
+/// graph captures. Both callers must bind their own executable sources before
+/// supplying values; this function never interprets transport identities.
+enum ParallelRegionError {
+    Contract(ProgramExecutionResponse),
+    Runtime(runmat_runtime::RuntimeError),
+}
+
+async fn execute_parallel_region_values(
+    callable: &ProgramCallable,
+    context: &runmat_execution::ProgramInvocationContext,
+    requested_outputs: u16,
+    recipe: &ProgramBuildRecipe,
+    bytecode: &crate::Bytecode,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    mut arguments: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValue, ParallelRegionError> {
+    let ProgramCallable::ParallelRegion { region } = callable else {
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "worker received a non-parallel callable on the parallel execution path"
+                    .into(),
+            },
+        ));
+    };
+    let runmat_execution::ProgramInvocationContext::ParallelTask { task } = context else {
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "parallel region task is missing its typed execution context".into(),
+            },
+        ));
+    };
+    if requested_outputs != 1 {
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "parallel region tasks return one typed result envelope".into(),
+            },
+        ));
+    }
+    let Some(executable) = bytecode
+        .parfor_regions
+        .iter()
+        .find(|candidate| candidate.contract.id == *region)
+    else {
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "worker could not find the requested parallel region in its exact program"
+                    .into(),
+            },
+        ));
+    };
+    if !recipe_supports_capabilities(recipe, &executable.contract.capabilities) {
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "worker rejected a recipe that weakens parfor accelerator requirements"
+                    .into(),
+            },
+        ));
+    }
     let expected_arguments = executable.input_variables().count() + 1;
     if arguments.len() != expected_arguments {
-        return ProgramExecutionResponse::Failure {
+        return Err(ParallelRegionError::Contract(ProgramExecutionResponse::Failure {
             message: format!(
                 "parallel task received {} arguments; its executable contract requires {expected_arguments}",
                 arguments.len()
             ),
-        };
+        }));
     }
     let Value::Cell(iterations) = arguments.remove(0) else {
-        return ProgramExecutionResponse::Failure {
-            message: "parallel task iteration input must be a cell vector".into(),
-        };
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "parallel task iteration input must be a cell vector".into(),
+            },
+        ));
     };
     if iterations.data.len() != task.chunk.len {
-        return ProgramExecutionResponse::Failure {
-            message: "parallel task iteration payload differs from its declared chunk".into(),
-        };
+        return Err(ParallelRegionError::Contract(
+            ProgramExecutionResponse::Failure {
+                message: "parallel task iteration payload differs from its declared chunk".into(),
+            },
+        ));
     }
-    let callable_name = request.callable.display_name();
+    let callable_name = callable.display_name();
     let result = crate::interpreter::runner::interpret_parfor_task_in_context(
         crate::interpreter::runner::ParforTaskExecution {
-            bytecode: &bytecode,
+            bytecode,
             region: executable,
             inputs: arguments,
             iterations: iterations.data,
@@ -675,82 +792,22 @@ async fn execute_parallel_region_request(
     )
     .await
     .and_then(|outputs| {
-        runmat_value::CellArray::new(outputs, 1, executable.output_variables().count())
-            .map(Value::Cell)
-            .map_err(|error| {
-                runmat_runtime::runtime_error::semantic_error(
-                    "ParallelTaskOutput",
-                    error.to_string(),
-                )
-            })
+        outputs.with_owned_values(|outputs| {
+            runmat_value::CellArray::new(outputs, 1, executable.output_variables().count())
+                .map(Value::Cell)
+                .map_err(|error| {
+                    runmat_runtime::runtime_error::semantic_error(
+                        "ParallelTaskOutput",
+                        error.to_string(),
+                    )
+                })
+                .and_then(|value| {
+                    runmat_runtime::execution::RootedValue::new(value)
+                        .map_err(|error| error.into_runtime_error())
+                })
+        })
     });
-    match result {
-        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
-            &value, &runtime,
-        ) {
-            Ok(value) => ProgramExecutionResponse::Success {
-                outputs: vec![value],
-            },
-            Err(error) => ProgramExecutionResponse::Failure {
-                message: format!("worker could not transfer its parallel task result: {error}"),
-            },
-        },
-        Err(error) => runtime_failure_response(error, &runtime),
-    }
-}
-
-async fn execute_unit_request(
-    request: ProgramExecutionRequest,
-    runtime: runmat_runtime::context::RuntimeContext,
-) -> ProgramExecutionResponse {
-    let admitted = match unit_admission::admit_executable_unit(&request.artifact.executable_bytes) {
-        Ok(admitted) => admitted,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: error.worker_message(),
-            }
-        }
-    };
-    // An executable unit names one exact semantic entrypoint. In particular,
-    // a structured region sharing its numeric function ordinal is not that
-    // entrypoint and must not reach the script or function body by accident.
-    if !matches!(
-        &request.callable,
-        ProgramCallable::Semantic { function, .. }
-            if *function == admitted.envelope().manifest.identity.entrypoint_function
-    ) {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected executable callable outside its admitted entrypoint".into(),
-        };
-    }
-    let entrypoint_kind = admitted.envelope().manifest.identity.entrypoint_kind;
-    let bound = match admitted.bind_runtime_sources(runtime) {
-        Ok(bound) => bound,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: error.worker_message(),
-            }
-        }
-    };
-    let selected_function = bound.entrypoint_function();
-    let (bytecode, registry, _layout, runtime) = bound.into_parts();
-
-    match entrypoint_kind {
-        runmat_execution::ExecutableEntrypointKind::Script => {
-            execute_unit_script(bytecode, runtime).await
-        }
-        runmat_execution::ExecutableEntrypointKind::Function => {
-            // Admission resolved the portable ordinal and immutable origin to
-            // this unit's local registry key. Never use the wire ordinal as a
-            // registry key: Core may remap local identities during publication.
-            let Some(selected_function) = selected_function else {
-                return ProgramExecutionResponse::Failure {
-                    message: "worker rejected function entrypoint without a selected body".into(),
-                };
-            };
-            execute_function_request(&request, &registry, &runtime, Some(selected_function)).await
-        }
-    }
+    result.map_err(ParallelRegionError::Runtime)
 }
 
 fn unsupported_executable_revisions(
@@ -787,9 +844,9 @@ fn unsupported_executable_revisions(
 }
 
 async fn execute_function_request(
-    request: &ProgramExecutionRequest,
-    registry: &crate::FunctionRegistry,
-    runtime: &runmat_runtime::context::RuntimeContext,
+    request: ProgramExecutionRequest,
+    registry: crate::FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
     selected_function: Option<runmat_hir::FunctionId>,
 ) -> ProgramExecutionResponse {
     let arguments = match request
@@ -814,7 +871,7 @@ async fn execute_function_request(
                     .unwrap_or(function.0 as usize),
                 &arguments,
                 requested_outputs,
-                registry,
+                &registry,
                 runtime.clone(),
             )
             .await
@@ -829,12 +886,13 @@ async fn execute_function_request(
             );
             runtime
                 .scope(crate::call::execute_callable_descriptor(
-                    runtime, descriptor,
+                    &runtime, descriptor,
                 ))
                 .await
         }
         runmat_execution::ProgramCallable::ParallelRegion { .. }
-        | runmat_execution::ProgramCallable::SpmdRegion { .. } => {
+        | runmat_execution::ProgramCallable::SpmdRegion { .. }
+        | runmat_execution::ProgramCallable::GraphTarget { .. } => {
             return ProgramExecutionResponse::Failure {
                 message:
                     "structured parallel callable reached the semantic function execution path"
@@ -847,7 +905,7 @@ async fn execute_function_request(
             .iter()
             .map(|value| {
                 runmat_runtime::execution::value_codec::encode_inline_value_in_context(
-                    value, runtime,
+                    value, &runtime,
                 )
             })
             .collect::<Result<Vec<_>, _>>()
@@ -857,7 +915,7 @@ async fn execute_function_request(
                 message: format!("worker could not transfer its result: {error}"),
             },
         },
-        Err(error) => runtime_failure_response(error, runtime),
+        Err(error) => runtime_failure_response(error, &runtime),
     }
 }
 
@@ -876,14 +934,11 @@ async fn execute_unit_script(
         Some("<main>"),
         runtime.clone(),
     )
-    .await
-    .map(|outcome| match outcome {
-        crate::InterpreterOutcome::Completed(completion) => completion.values,
-    });
+    .await;
     match result {
-        Ok(values) => {
+        Ok(crate::InterpreterOutcome::Completed(completion)) => {
             let value = result_slot
-                .and_then(|slot| values.get(slot).cloned())
+                .and_then(|slot| completion.values.get(slot).cloned())
                 .unwrap_or(runmat_value::Value::Num(0.0));
             match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
                 &value, &runtime,
@@ -974,6 +1029,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(&recipe, form, executable_bytes).unwrap();
@@ -1007,6 +1063,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact =
@@ -1023,6 +1080,14 @@ mod tests {
             arguments: Vec::new(),
             requested_outputs: 1,
         }
+    }
+
+    fn with_current_envelope_schema(frozen: &[u8]) -> Vec<u8> {
+        let mut envelope: runmat_execution::ExecutableUnitEnvelope =
+            serde_json::from_slice(frozen).expect("frozen envelope shape");
+        envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+        envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+        envelope.canonical_bytes().expect("schema-lifted envelope")
     }
 
     #[test]
@@ -1059,6 +1124,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(
@@ -1080,7 +1146,7 @@ mod tests {
                 requested_outputs: 1,
             }));
         let ProgramExecutionResponse::Success { outputs } = response else {
-            panic!("expected exact script execution to succeed");
+            panic!("standalone worker must execute and retire its workspace: {response:?}");
         };
         assert_eq!(outputs.len(), 1);
         let output = runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
@@ -1141,10 +1207,15 @@ mod tests {
         );
         assert!(matches!(
             admit_executable_unit(stale_components),
+            Err(ExecutableUnitAdmissionError::InvalidHeader(_))
+        ));
+        let stale_components = with_current_envelope_schema(stale_components);
+        assert!(matches!(
+            admit_executable_unit(&stale_components),
             Err(ExecutableUnitAdmissionError::ComponentRevisions(_))
         ));
         let response = futures::executor::block_on(execute_program_request(
-            executable_unit_request(stale_components),
+            executable_unit_request(&stale_components),
         ));
         assert!(matches!(
             response,
@@ -1161,10 +1232,15 @@ mod tests {
             include_bytes!("../../runmat-execution/tests/fixtures/executable-unit-compiler-1.json");
         assert!(matches!(
             admit_executable_unit(compiler_one),
+            Err(ExecutableUnitAdmissionError::InvalidHeader(_))
+        ));
+        let compiler_one = with_current_envelope_schema(compiler_one);
+        assert!(matches!(
+            admit_executable_unit(&compiler_one),
             Err(ExecutableUnitAdmissionError::CompilerRevision(_))
         ));
         let response = futures::executor::block_on(execute_program_request(
-            executable_unit_request(compiler_one),
+            executable_unit_request(&compiler_one),
         ));
         assert!(matches!(
             response,
@@ -1202,6 +1278,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(
@@ -1259,6 +1336,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let capabilities = runmat_types::CapabilitySet(std::collections::BTreeSet::from([

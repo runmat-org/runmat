@@ -4,6 +4,7 @@ mod documentation;
 mod inference;
 
 pub const WINTER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "winter" },
     category: "plotting",

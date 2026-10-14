@@ -8,7 +8,7 @@ pub(super) async fn dlupdate_learnables_struct(
     values: &[Value],
     requested_outputs: usize,
     depth: usize,
-) -> BuiltinResult<Vec<Value>> {
+) -> BuiltinResult<RootedValues> {
     let structs = values
         .iter()
         .map(|value| match value {
@@ -31,14 +31,17 @@ pub(super) async fn dlupdate_learnables_struct(
         .collect::<BuiltinResult<Vec<_>>>()?;
     let updated_values =
         dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
-    updated_values
-        .into_iter()
-        .map(|value_column| {
+    updated_values.with_owned_values(|updated_values| {
+        let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
+        for value_column in updated_values {
             let mut out = reference.clone();
             out.insert("Value", value_column);
-            Ok(Value::Struct(out))
-        })
-        .collect()
+            rebuilt
+                .push(Value::Struct(out))
+                .map_err(|error| error.into_runtime_error())?;
+        }
+        rebuilt.finish().map_err(|error| error.into_runtime_error())
+    })
 }
 
 pub(super) async fn dlupdate_table(
@@ -48,7 +51,7 @@ pub(super) async fn dlupdate_table(
     values: &[Value],
     requested_outputs: usize,
     depth: usize,
-) -> BuiltinResult<Vec<Value>> {
+) -> BuiltinResult<RootedValues> {
     let variable_names = crate::builtins::table::table_variable_names_from_object(reference)
         .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
     require_learnables_table(&variable_names)?;
@@ -117,15 +120,19 @@ pub(super) async fn dlupdate_table(
     let updated_values =
         dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
 
-    updated_values
-        .into_iter()
-        .map(|value_column| {
+    updated_values.with_owned_values(|updated_values| {
+        let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
+        for value_column in updated_values {
             let mut variables = table_variables[0].clone();
             variables.insert("Value", value_column);
-            crate::builtins::table::table_replace_variables_like(reference, variables)
-                .map_err(|err| deep_learning_error("dlupdate", err.to_string()))
-        })
-        .collect()
+            let table = crate::builtins::table::table_replace_variables_like(reference, variables)
+                .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
+            rebuilt
+                .push(table)
+                .map_err(|error| error.into_runtime_error())?;
+        }
+        rebuilt.finish().map_err(|error| error.into_runtime_error())
+    })
 }
 
 pub(super) async fn dlupdate_network(
@@ -135,7 +142,7 @@ pub(super) async fn dlupdate_network(
     values: &[Value],
     requested_outputs: usize,
     depth: usize,
-) -> BuiltinResult<Vec<Value>> {
+) -> BuiltinResult<RootedValues> {
     let networks = values
         .iter()
         .map(|value| match value {
@@ -155,15 +162,34 @@ pub(super) async fn dlupdate_network(
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     model::validate_matching_networks(&networks, "dlupdate")?;
-    let learnables = networks
-        .iter()
-        .map(|object| model::project_learnables(object, "dlupdate"))
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    let updated = dlupdate_node(runtime, function, &learnables, requested_outputs, depth).await?;
-    updated
-        .into_iter()
-        .map(|learnables| model::apply_learnables(reference.clone(), learnables, "dlupdate"))
-        .collect()
+    let mut projected = RootedValuesBuilder::with_capacity(networks.len());
+    for object in &networks {
+        let learnables = model::project_learnables(object, "dlupdate")?;
+        projected
+            .push(learnables)
+            .map_err(|error| error.into_runtime_error())?;
+    }
+    let learnables = projected
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+    let updated = dlupdate_node(
+        runtime,
+        function,
+        learnables.values(),
+        requested_outputs,
+        depth,
+    )
+    .await?;
+    updated.with_owned_values(|updated| {
+        let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
+        for learnables in updated {
+            let network = model::apply_learnables(reference.clone(), learnables, "dlupdate")?;
+            rebuilt
+                .push(network)
+                .map_err(|error| error.into_runtime_error())?;
+        }
+        rebuilt.finish().map_err(|error| error.into_runtime_error())
+    })
 }
 
 fn require_learnables_table(variable_names: &[String]) -> BuiltinResult<()> {

@@ -10,6 +10,7 @@ mod tests;
 pub use contract::*;
 
 pub const FGETS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fgets" },
     category: "io/filetext",

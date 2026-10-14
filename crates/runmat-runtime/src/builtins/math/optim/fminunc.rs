@@ -799,14 +799,17 @@ impl<'a> ObjectiveEvaluator<'a> {
         let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
         let value = call_function(self.function, vec![arg]).await?;
         self.func_count += 1;
-        crate::builtins::math::optim::common::value_to_scalar_with_extensions(
-            NAME,
-            value,
-            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-            &FMINUNC_RESIDENT_EXTENSION,
-            "objective value",
-        )
-        .await
+        value
+            .with_owned_async(|value| {
+                crate::builtins::math::optim::common::value_to_scalar_with_extensions(
+                    NAME,
+                    value,
+                    &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+                    &FMINUNC_RESIDENT_EXTENSION,
+                    "objective value",
+                )
+            })
+            .await
     }
 
     async fn evaluate_with_gradient(&mut self, x: &[f64]) -> BuiltinResult<ObjectiveState> {
@@ -815,34 +818,42 @@ impl<'a> ObjectiveEvaluator<'a> {
         let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
         let value = crate::call_feval_async_with_outputs(callback, &[arg], 2).await?;
         self.func_count += 1;
-        let Value::OutputList(outputs) = value else {
-            return Err(fminunc_error_with_detail(
-                &FMINUNC_ERROR_INVALID_INPUT,
-                "objective must return [f, g] when SpecifyObjectiveGradient is true",
-            ));
-        };
-        if outputs.len() < 2 {
-            return Err(fminunc_error_with_detail(
-                &FMINUNC_ERROR_INVALID_INPUT,
-                "objective must return both objective value and gradient",
-            ));
-        }
-        let f = crate::builtins::math::optim::common::value_to_scalar_with_extensions(
-            NAME,
-            outputs[0].clone(),
-            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-            &FMINUNC_RESIDENT_EXTENSION,
-            "objective value",
-        )
-        .await?;
-        let grad = crate::builtins::math::optim::common::value_to_real_vector_with_extensions(
-            NAME,
-            outputs[1].clone(),
-            &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
-            &FMINUNC_RESIDENT_EXTENSION,
-            "objective gradient",
-        )
-        .await?;
+        let (f, grad) = value
+            .with_owned_async(|value| async move {
+                let Value::OutputList(mut outputs) = value else {
+                    return Err(fminunc_error_with_detail(
+                        &FMINUNC_ERROR_INVALID_INPUT,
+                        "objective must return [f, g] when SpecifyObjectiveGradient is true",
+                    ));
+                };
+                if outputs.len() < 2 {
+                    return Err(fminunc_error_with_detail(
+                        &FMINUNC_ERROR_INVALID_INPUT,
+                        "objective must return both objective value and gradient",
+                    ));
+                }
+                let objective = outputs.remove(0);
+                let gradient = outputs.remove(0);
+                let f = crate::builtins::math::optim::common::value_to_scalar_with_extensions(
+                    NAME,
+                    objective,
+                    &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+                    &FMINUNC_RESIDENT_EXTENSION,
+                    "objective value",
+                )
+                .await?;
+                let grad =
+                    crate::builtins::math::optim::common::value_to_real_vector_with_extensions(
+                        NAME,
+                        gradient,
+                        &FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+                        &FMINUNC_RESIDENT_EXTENSION,
+                        "objective gradient",
+                    )
+                    .await?;
+                Ok::<_, crate::RuntimeError>((f, grad))
+            })
+            .await?;
         if grad.len() != x.len() {
             return Err(fminunc_error_with_detail(
                 &FMINUNC_ERROR_INVALID_INPUT,
@@ -1422,14 +1433,14 @@ mod tests {
                 assert_eq!(function, 101);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                crate::sequence::single_value_future(async move {
+                Box::pin(async move {
                     let target = [1.0, 2.0, 3.0];
                     let f = x
                         .iter()
                         .zip(target.iter())
                         .map(|(xi, ti)| (xi - ti).powi(2))
                         .sum::<f64>();
-                    Ok(Value::Num(f))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(f))
                 })
             },
         )));
@@ -1452,10 +1463,12 @@ mod tests {
                 assert_eq!(function, 102);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                crate::sequence::single_value_future(async move {
+                Box::pin(async move {
                     let a = x[0];
                     let b = x[1];
-                    Ok(Value::Num(100.0 * (b - a * a).powi(2) + (1.0 - a).powi(2)))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        100.0 * (b - a * a).powi(2) + (1.0 - a).powi(2),
+                    ))
                 })
             },
         )));
@@ -1475,7 +1488,7 @@ mod tests {
                 assert_eq!(function, 103);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                crate::sequence::single_value_future(async move {
+                Box::pin(async move {
                     let f = x
                         .iter()
                         .enumerate()
@@ -1484,7 +1497,7 @@ mod tests {
                             (xi - target).powi(2)
                         })
                         .sum::<f64>();
-                    Ok(Value::Num(f))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(f))
                 })
             },
         )));
@@ -1520,11 +1533,13 @@ mod tests {
                         .zip(target.iter())
                         .map(|(xi, ti)| (xi - ti).powi(2))
                         .sum::<f64>();
-                    crate::sequence::ValueSequence::comma_separated(vec![
+                    let sequence = crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(f),
                         Value::Tensor(Tensor::new(grad, vec![3, 1]).unwrap()),
                     ])
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                    .map_err(crate::sequence::sequence_error_to_runtime)?;
+                    crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
                 })
             },
         )));
@@ -1591,11 +1606,13 @@ mod tests {
                 assert_eq!(function, 105);
                 assert_eq!(requested_outputs, 2);
                 Box::pin(async {
-                    crate::sequence::ValueSequence::comma_separated(vec![
+                    let sequence = crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(1.0),
                         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
                     ])
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                    .map_err(crate::sequence::sequence_error_to_runtime)?;
+                    crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
                 })
             },
         )));
@@ -1624,7 +1641,9 @@ mod tests {
                     other => panic!("expected scalar, got {other:?}"),
                 };
                 Box::pin(async move {
-                    crate::sequence::single_value_sequence(Value::Num((x - 4.0).powi(2)))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        (x - 4.0).powi(2),
+                    ))
                 })
             },
         )));

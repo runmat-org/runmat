@@ -121,7 +121,7 @@ impl SearchControlCase {
         }
     }
 
-    fn assert_output(self, outputs: Vec<Value>) {
+    fn assert_output(self, outputs: &[Value]) {
         assert_eq!(outputs.len(), 1);
         match self {
             Self::Strfind => {
@@ -135,7 +135,7 @@ impl SearchControlCase {
                 assert_eq!(indices.shape(), &[1, 1]);
                 assert_eq!(indices.materialize_f64(), vec![4.0]);
             }
-            Self::EndsWith | Self::StartsWith => assert_eq!(outputs, vec![Value::Bool(true)]),
+            Self::EndsWith | Self::StartsWith => assert_eq!(outputs, &[Value::Bool(true)]),
         }
     }
 }
@@ -278,7 +278,7 @@ fn compiled_search_resident_controls_suspend_resume_fail_and_drop_without_replay
         let NativeInvocationStep::Completed(execution) = success.advance().unwrap() else {
             panic!("native continuation must complete the exact selected search call");
         };
-        case.assert_output(execution.outputs);
+        case.assert_output(&execution.outputs);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
         drop(success);
 

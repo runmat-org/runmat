@@ -2,12 +2,15 @@ use super::*;
 use crate::context::physical_test_support::OwnedPhysicalProvider;
 use crate::context::{RuntimePlacementService, RuntimeServicePorts, RuntimeWholeWorkProbeLease};
 use crate::RuntimeError;
-use runmat_accelerate_api::observation::ProviderOperationReceipt;
+use runmat_accelerate_api::observation::{ProviderOperationReceipt, WgpuSubmissionMeasurement};
 use runmat_accelerate_api::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
     ProviderStorage, ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::profiling::{
+    CommandProfilingReceipt, CommandProfilingRoot, ProviderObservationCounts,
+};
 use runmat_execution::{
     CancellationReason, Digest, ExecutionCandidateKind, PlacementDecision, PlacementInvalidation,
     PlacementPlanRequest, PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
@@ -125,9 +128,22 @@ fn receipt_owner(
     probe_count: Arc<AtomicUsize>,
     receipt: ProviderOperationReceipt,
 ) -> HostPresentationReceipt {
+    receipt_owner_with_command(witness, cancellation, probe_count, receipt, None)
+}
+
+fn receipt_owner_with_command(
+    witness: Option<&Rc<Witness>>,
+    cancellation: &CancellationSource,
+    probe_count: Arc<AtomicUsize>,
+    receipt: ProviderOperationReceipt,
+    command: Option<CommandProfilingReceipt>,
+) -> HostPresentationReceipt {
     let mut runtime =
         RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
             .with_cancellation_token(cancellation.token());
+    if let Some(command) = command {
+        runtime = runtime.with_command_profiling(command);
+    }
     if let Some(witness) = witness {
         runtime = runtime
             .with_service_ports(RuntimeServicePorts::default().with_placement(witness.clone()));
@@ -167,6 +183,95 @@ fn receipt_owner(
 }
 
 #[test]
+fn command_receipt_settles_only_after_the_unique_provider_completion() {
+    let witness = Rc::new(Witness::default());
+    let cancellation = CancellationSource::new();
+    let command = CommandProfilingRoot::new();
+    let borrowed = command.receipt();
+    let owner = receipt_owner_with_command(
+        Some(&witness),
+        &cancellation,
+        Arc::new(AtomicUsize::new(0)),
+        ProviderOperationReceipt::new(),
+        Some(borrowed.clone()),
+    );
+    let submission = owner.recorder().submission().expect("physical submission");
+    owner.finish(Ok(true));
+    witness.drain();
+    assert_eq!(
+        command.seal().observations,
+        Some(ProviderObservationCounts {
+            pending: 1,
+            ..ProviderObservationCounts::default()
+        })
+    );
+    submission.complete();
+    witness.drain();
+    assert!(borrowed.begin_provider_operation().is_none());
+}
+
+#[test]
+fn command_receipt_observes_immediate_completion_without_device_claim() {
+    let witness = Rc::new(Witness::default());
+    let cancellation = CancellationSource::new();
+    let command = CommandProfilingRoot::new();
+    let owner = receipt_owner_with_command(
+        Some(&witness),
+        &cancellation,
+        Arc::new(AtomicUsize::new(0)),
+        ProviderOperationReceipt::new(),
+        Some(command.receipt()),
+    );
+    owner.finish(Ok(true));
+    assert_eq!(witness.feedback().len(), 1);
+    assert_eq!(
+        command.seal().observations,
+        Some(ProviderObservationCounts {
+            incomplete: 1,
+            ..ProviderObservationCounts::default()
+        })
+    );
+}
+
+#[test]
+fn deferred_verified_dispatch_count_does_not_invent_device_time_or_command_coverage() {
+    let witness = Rc::new(Witness::default());
+    let cancellation = CancellationSource::new();
+    let command = CommandProfilingRoot::new();
+    let owner = receipt_owner_with_command(
+        Some(&witness),
+        &cancellation,
+        Arc::new(AtomicUsize::new(0)),
+        ProviderOperationReceipt::new(),
+        Some(command.receipt()),
+    );
+    let submission = owner.recorder().submission().expect("physical submission");
+    owner.finish(Ok(true));
+    assert!(witness.feedback().is_empty());
+    submission
+        .capture_completion()
+        .complete_with_wgpu(WgpuSubmissionMeasurement {
+            compute_elapsed: None,
+            device_elapsed: None,
+            dispatches: Some(2),
+            query_allocation: None,
+        });
+    witness.drain();
+    assert_eq!(witness.feedback().len(), 1);
+    let snapshot = command.seal();
+    assert_eq!(snapshot.observations.expect("valid").incomplete, 1);
+    assert_eq!(
+        snapshot.observed_metric_coverage,
+        Some(runmat_execution::profiling::ObservedMetricCoverage {
+            gpu_execution: false,
+            kernel_count: true,
+        })
+    );
+    assert_eq!(snapshot.kernel_count, None);
+    assert_eq!(snapshot.gpu_execution, None);
+}
+
+#[test]
 fn publication_waits_for_actual_submission_completion_and_holds_probe() {
     let witness = Rc::new(Witness::default());
     let cancellation = CancellationSource::new();
@@ -191,8 +296,15 @@ fn revoked_selection_discards_late_provider_completion_without_feedback() {
     let witness = Rc::new(Witness::default());
     let cancellation = CancellationSource::new();
     let probes = Arc::new(AtomicUsize::new(0));
+    let command = CommandProfilingRoot::new();
     let receipt = ProviderOperationReceipt::new();
-    let mut owner = receipt_owner(Some(&witness), &cancellation, probes.clone(), receipt);
+    let mut owner = receipt_owner_with_command(
+        Some(&witness),
+        &cancellation,
+        probes.clone(),
+        receipt,
+        Some(command.receipt()),
+    );
     let permit = Arc::new(TestObservationPermit(std::sync::atomic::AtomicBool::new(
         true,
     )));
@@ -208,6 +320,7 @@ fn revoked_selection_discards_late_provider_completion_without_feedback() {
     assert!(witness.feedback.borrow().is_empty());
     assert!(witness.pending.borrow().is_empty());
     assert_eq!(probes.load(Ordering::SeqCst), 0);
+    assert_eq!(command.seal().observations.expect("valid").missing, 1);
 }
 
 #[test]

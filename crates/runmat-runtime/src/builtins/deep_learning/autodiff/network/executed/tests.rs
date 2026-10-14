@@ -63,7 +63,7 @@ fn filled(value: f64, shape: &[usize], dtype: NumericDType) -> Value {
     values(vec![value; shape.iter().product()], shape.to_vec(), dtype)
 }
 
-fn network(kind: K, dtype: NumericDType) -> Value {
+fn network(kind: K, dtype: NumericDType) -> crate::execution::RootedValue {
     let fields = match kind {
         K::FullyConnected => vec![
             ("OutputSize", Value::Num(2.0)),
@@ -156,7 +156,7 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
             let gradient = {
                 let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
                 let x = annotate_dlarray_value(input(data.clone(), dtype)).unwrap();
-                let y = block_on(forward_builtin(net.clone(), x.clone(), vec![])).unwrap();
+                let y = block_on(forward_builtin(net.value().clone(), x.clone(), vec![])).unwrap();
                 assert_eq!(tensor(&y).numeric_dtype(), dtype, "{kind:?}");
                 let loss = dlarray_sum_builtin(
                     dlarray_times_builtin(y.clone(), y).unwrap(),
@@ -185,8 +185,8 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
                 upper[index] += step;
                 let mut lower = data.clone();
                 lower[index] -= step;
-                let expected = (squared_output(&net, upper, dtype)
-                    - squared_output(&net, lower, dtype))
+                let expected = (squared_output(net.value(), upper, dtype)
+                    - squared_output(net.value(), lower, dtype))
                     / (2.0 * step);
                 assert!(
                     (gradient[index] - expected).abs() < tolerance,
@@ -222,7 +222,7 @@ fn feature_input_and_both_output_layers_preserve_the_public_tape() {
             ],
         ))
         .unwrap();
-        let y = block_on(forward_builtin(net, x.clone(), vec![])).unwrap();
+        let y = block_on(forward_builtin(net.value().clone(), x.clone(), vec![])).unwrap();
         assert_eq!(tensor(&y).as_f32_slice().unwrap(), &[1.0, -2.0]);
         let loss = dlarray_sum_builtin(
             dlarray_times_builtin(y.clone(), y).unwrap(),
@@ -265,7 +265,7 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
             let tape = Rc::new(RefCell::new(Tape::new()));
             let _activation = TapeActivation::enter(tape.clone());
             let x = annotate_dlarray_value(input(data.clone(), NumericDType::F64)).unwrap();
-            let hidden = hidden_state(&net, x.clone());
+            let hidden = hidden_state(net.value(), x.clone());
             let hidden_node = dlarray_node_id(&hidden).expect("State is not a disconnected leaf");
             {
                 let nodes = &tape.borrow().nodes;
@@ -298,7 +298,7 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
             let mut lower = data.clone();
             lower[index] -= 0.00001;
             let sum = |data| {
-                tensor(&hidden_state(&net, input(data, NumericDType::F64)))
+                tensor(&hidden_state(net.value(), input(data, NumericDType::F64)))
                     .materialize_f64()
                     .into_iter()
                     .sum::<f64>()
@@ -346,7 +346,7 @@ fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
                 let tape = Rc::new(RefCell::new(Tape::new()));
                 let _activation = TapeActivation::enter(tape.clone());
                 let x = annotate_dlarray_value(input(data.clone(), dtype)).unwrap();
-                let outputs = prediction_and_states(&net, x.clone());
+                let outputs = prediction_and_states(net.value(), x.clone());
                 let execution = {
                     let graph = tape.borrow();
                     let id = dlarray_node_id(&outputs[0]).unwrap();
@@ -386,7 +386,7 @@ fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
                 0.00001
             };
             let objective = |values| {
-                prediction_and_states(&net, input(values, dtype))
+                prediction_and_states(net.value(), input(values, dtype))
                     .iter()
                     .flat_map(|output| tensor(output).materialize_f64())
                     .map(|value| value * value)

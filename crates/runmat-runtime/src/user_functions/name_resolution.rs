@@ -19,7 +19,7 @@ use crate::user_functions::{
     resolve_semantic_function_by_name, source_function_for, SemanticNameCandidate,
 };
 
-use super::{NativeNameFact, SourceFunctionInfo};
+use super::{NativeNameFact, NativeResolutionScope, SourceFunctionInfo};
 
 #[derive(Debug)]
 pub enum RuntimeNameResolutionError {
@@ -105,7 +105,7 @@ pub struct RuntimeNameResolution {
     pub name: String,
     pub query: RuntimeNameQuery,
     pub captured_path_revision: Option<u64>,
-    pub captured_class_revision: u64,
+    pub captured_class_revision: crate::class_registry::ClassRegistryRevision,
     /// The first candidate is selected; later candidates are shadowed.
     pub candidates: Vec<RuntimeNameCandidate>,
 }
@@ -220,13 +220,25 @@ pub async fn observe_runtime_name(
         query.filter,
         RuntimeNameFilter::Any | RuntimeNameFilter::File
     ) {
-        if let Some(observer) = context
+        let native = match context
             .as_ref()
-            .and_then(|context| context.state().call.borrow().native_name_observer.clone())
+            .map(|context| context.native_resolution_scope())
         {
-            if let Some(native) = observer(name.to_owned()).await? {
-                candidates.push(RuntimeNameCandidate::Native(native));
+            Some(NativeResolutionScope::Selected(route)) => route.observe(name.to_owned()).await?,
+            Some(NativeResolutionScope::SelectedClosed) => None,
+            Some(NativeResolutionScope::Session) | None => {
+                if let Some(observer) = context
+                    .as_ref()
+                    .and_then(|context| context.state().call.borrow().native_name_observer.clone())
+                {
+                    observer(name.to_owned()).await?
+                } else {
+                    None
+                }
             }
+        };
+        if let Some(native) = native {
+            candidates.push(RuntimeNameCandidate::Native(native));
         }
         if !query.all && !candidates.is_empty() {
             return finish(candidates);

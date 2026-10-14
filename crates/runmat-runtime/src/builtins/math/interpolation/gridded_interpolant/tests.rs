@@ -7,7 +7,7 @@ async fn gridded_interpolant_subsref(
     obj: Value,
     kind: String,
     payload: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::gridded_interpolant_subsref(obj, subscript).await
 }
@@ -61,7 +61,7 @@ fn constructor_preserves_rank_one_and_full_rank_grid_geometry() {
     assert!(error.message().contains("at least two points"));
 }
 
-fn subsref(obj: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+fn subsref(obj: Value, args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
     let len = args.len();
     let payload = Value::Cell(CellArray::new_with_shape(args, vec![1, len]).unwrap());
@@ -119,6 +119,7 @@ fn gridded_integer_query_syntaxes_are_consistent() {
         .expect("one-dimensional interpolant");
     match subsref(one_d, vec![int_col(IntegerStorage::I16(vec![0, 2]))])
         .expect("integer vector query")
+        .value()
     {
         Value::Tensor(output) => assert_eq!(output.materialize_f64(), vec![0.0, 20.0]),
         other => panic!("expected tensor, got {other:?}"),
@@ -137,6 +138,7 @@ fn gridded_integer_query_syntaxes_are_consistent() {
         ],
     )
     .expect("per-dimension integer query")
+    .value()
     {
         Value::Tensor(output) => assert_eq!(output.materialize_f64(), vec![0.0, 30.0]),
         other => panic!("expected tensor, got {other:?}"),
@@ -169,7 +171,10 @@ fn one_dimensional_linear_interpolation_and_none_extrapolation() {
         Value::String("none".to_string()),
     ])
     .unwrap();
-    match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])]).unwrap() {
+    match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])])
+        .unwrap()
+        .value()
+    {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[1, 4]);
             assert!(tensor.materialize_f64()[0].is_nan());
@@ -195,11 +200,12 @@ fn one_dimensional_queries_preserve_rank_zero_and_rank_one_projection() {
     .expect("rank-zero query");
     assert_eq!(scalar, Value::Num(5.0));
 
-    let Value::Tensor(vector) = subsref(
+    let result = subsref(
         interpolant(),
         vec![Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![2]).unwrap())],
     )
-    .expect("rank-one query") else {
+    .expect("rank-one query");
+    let Value::Tensor(vector) = result.value() else {
         panic!("expected rank-one tensor");
     };
     assert_eq!(vector.shape(), &[2]);
@@ -213,7 +219,7 @@ fn default_grid_and_nearest_method_work() {
         Value::String("nearest".to_string()),
     ])
     .unwrap();
-    match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap() {
+    match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap().value() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -223,16 +229,18 @@ fn default_grid_and_nearest_method_work() {
 fn single_values_reshape_and_interpolate_in_native_class() {
     let values = Tensor::from_f32(vec![0.0, 10.0, 40.0], vec![1, 3]).unwrap();
     let obj = call(vec![Value::Tensor(values)]).unwrap();
-    match subsref(obj, vec![row(&[1.5, 2.5])]).unwrap() {
-        Value::Tensor(tensor) => {
+    subsref(obj, vec![row(&[1.5, 2.5])])
+        .unwrap()
+        .with_owned(|value| {
+            let Value::Tensor(tensor) = value else {
+                panic!("expected single tensor, got {value:?}");
+            };
             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
             assert_eq!(
                 tensor.into_numeric_storage().unwrap(),
                 NumericStorage::F32(vec![5.0, 25.0])
             );
-        }
-        other => panic!("expected single tensor, got {other:?}"),
-    }
+        });
 }
 
 #[test]
@@ -241,8 +249,11 @@ fn two_dimensional_grid_vectors_interpolate() {
         CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
     let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
     let obj = call(vec![Value::Cell(grid), Value::Tensor(values)]).unwrap();
-    match subsref(obj, vec![Value::Num(0.5), Value::Num(1.0)]).unwrap() {
-        Value::Num(value) => assert_eq!(value, 15.0),
+    match subsref(obj, vec![Value::Num(0.5), Value::Num(1.0)])
+        .unwrap()
+        .value()
+    {
+        Value::Num(value) => assert_eq!(*value, 15.0),
         other => panic!("expected scalar, got {other:?}"),
     }
 }
@@ -256,7 +267,7 @@ fn full_query_grid_visits_column_major_points_without_changing_shape() {
     let queries =
         CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
     let result = subsref(obj, vec![Value::Cell(queries)]).unwrap();
-    let Value::Tensor(tensor) = result else {
+    let Value::Tensor(tensor) = result.value() else {
         panic!("expected array result");
     };
     assert_eq!(tensor.shape(), &[2, 2]);
@@ -276,7 +287,7 @@ fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
     let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
     let obj = call(vec![Value::Cell(grid), values]).unwrap();
     let query = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), vec![2, 2]);
-    match subsref(obj, vec![query]).unwrap() {
+    match subsref(obj, vec![query]).unwrap().value() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![0.0, 30.0]);
@@ -288,8 +299,11 @@ fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
     let y_grid = int_tensor(IntegerStorage::U16(vec![0, 0, 2, 2]), vec![2, 2]);
     let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
     let obj = call(vec![x_grid, y_grid, values]).unwrap();
-    match subsref(obj, vec![Value::Num(1.0), Value::Num(2.0)]).unwrap() {
-        Value::Num(value) => assert_eq!(value, 30.0),
+    match subsref(obj, vec![Value::Num(1.0), Value::Num(2.0)])
+        .unwrap()
+        .value()
+    {
+        Value::Num(value) => assert_eq!(*value, 30.0),
         other => panic!("expected scalar, got {other:?}"),
     }
 }
@@ -302,7 +316,7 @@ fn one_dimensional_spline_uses_piecewise_polynomial_path() {
         Value::String("spline".to_string()),
     ])
     .unwrap();
-    match subsref(obj, vec![Value::Num(1.5)]).unwrap() {
+    match subsref(obj, vec![Value::Num(1.5)]).unwrap().value() {
         Value::Num(value) => assert!((value - 2.25).abs() < 1.0e-10),
         other => panic!("expected scalar, got {other:?}"),
     }
@@ -317,7 +331,7 @@ fn one_dimensional_pchip_preserves_samples_and_nearest_extrapolates() {
         Value::String("nearest".to_string()),
     ])
     .unwrap();
-    match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap() {
+    match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap().value() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.materialize_f64()[0], 0.0);
             assert_eq!(tensor.materialize_f64()[1], 15.0);
@@ -336,7 +350,7 @@ fn extrapolation_method_is_independent_from_interpolation_method() {
         Value::String("linear".to_string()),
     ])
     .unwrap();
-    match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap() {
+    match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap().value() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.materialize_f64()[0], -10.0);
             assert_eq!(tensor.materialize_f64()[1], 0.0);
@@ -449,7 +463,7 @@ fn member_subsref_returns_public_properties() {
         Value::String(VALUES.to_string()),
     ))
     .unwrap();
-    assert!(matches!(value, Value::Tensor(_)));
+    assert!(matches!(value.value(), Value::Tensor(_)));
 }
 
 #[test]

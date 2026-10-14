@@ -33,6 +33,7 @@ pub(super) async fn dispatch(
                 calls::WorkspaceFirstCallContext {
                     stack,
                     runtime: &context.runtime,
+                    process_driver: context.process_driver.clone(),
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -56,7 +57,7 @@ pub(super) async fn dispatch(
             .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                    calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
@@ -83,6 +84,7 @@ pub(super) async fn dispatch(
                 calls::WorkspaceFirstCallContext {
                     stack,
                     runtime: &context.runtime,
+                    process_driver: context.process_driver.clone(),
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -106,7 +108,7 @@ pub(super) async fn dispatch(
             .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                    sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(

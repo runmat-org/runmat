@@ -1,5 +1,6 @@
 use super::*;
 use crate::context::{RuntimeContext, RuntimeServiceFuture};
+use crate::execution::RootedValueSequence;
 use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
     RuntimeExecutionServices,
@@ -9,7 +10,6 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::ValueSequence;
 use std::cell::Cell;
 use std::error::Error;
 use std::future::Future;
@@ -89,7 +89,7 @@ impl RuntimeExecutionServices for PendingDateService {
     fn complete_future(
         &self,
         _: &FutureHandle,
-        _: Result<ValueSequence, ExecutionServiceError>,
+        _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }

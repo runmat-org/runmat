@@ -106,11 +106,10 @@ pub fn try_assign(name: &str, value: Value) -> Result<(), crate::RuntimeError> {
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {
                 let assign = resolver.assign.ok_or_else(|| {
-                    "workspace assignment is unavailable in this invocation".to_string()
+                    operation_unavailable("workspace assignment is unavailable in this invocation")
                 })?;
                 assign(name, value)
-            })
-            .map_err(legacy_workspace_error);
+            });
         }
     }
     resolver_storage::with(|resolver| {
@@ -118,7 +117,7 @@ pub fn try_assign(name: &str, value: Value) -> Result<(), crate::RuntimeError> {
         let assign = resolver.assign.ok_or_else(|| {
             operation_unavailable("workspace assignment is unavailable in this invocation")
         })?;
-        assign(name, value).map_err(legacy_workspace_error)
+        assign(name, value)
     })
 }
 
@@ -130,11 +129,10 @@ pub fn try_clear() -> Result<(), crate::RuntimeError> {
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {
                 let clear = resolver.clear.ok_or_else(|| {
-                    "workspace clearing is unavailable in this invocation".to_string()
+                    operation_unavailable("workspace clearing is unavailable in this invocation")
                 })?;
                 clear()
-            })
-            .map_err(legacy_workspace_error);
+            });
         }
     }
     resolver_storage::with(|resolver| {
@@ -142,7 +140,7 @@ pub fn try_clear() -> Result<(), crate::RuntimeError> {
         let clear = resolver.clear.ok_or_else(|| {
             operation_unavailable("workspace clearing is unavailable in this invocation")
         })?;
-        clear().map_err(legacy_workspace_error)
+        clear()
     })
 }
 
@@ -154,11 +152,10 @@ pub fn try_remove(name: &str) -> Result<(), crate::RuntimeError> {
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {
                 let remove = resolver.remove.ok_or_else(|| {
-                    "workspace removal is unavailable in this invocation".to_string()
+                    operation_unavailable("workspace removal is unavailable in this invocation")
                 })?;
                 remove(name)
-            })
-            .map_err(legacy_workspace_error);
+            });
         }
     }
     resolver_storage::with(|resolver| {
@@ -166,7 +163,7 @@ pub fn try_remove(name: &str) -> Result<(), crate::RuntimeError> {
         let remove = resolver.remove.ok_or_else(|| {
             operation_unavailable("workspace removal is unavailable in this invocation")
         })?;
-        remove(name).map_err(legacy_workspace_error)
+        remove(name)
     })
 }
 
@@ -180,8 +177,4 @@ fn workspace_capability_error() -> crate::RuntimeError {
 
 fn operation_unavailable(message: &'static str) -> crate::RuntimeError {
     crate::runtime_error::semantic_error("RunMat:Workspace:OperationUnavailable", message)
-}
-
-fn legacy_workspace_error(message: String) -> crate::RuntimeError {
-    crate::runtime_error::semantic_error("RunMat:Workspace:OperationFailed", message)
 }

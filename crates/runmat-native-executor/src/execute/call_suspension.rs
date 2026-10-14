@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use futures::FutureExt;
+use runmat_runtime::execution::{RootedValueSequence, RootedValues};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
 use runmat_value::Value;
 
@@ -9,17 +9,42 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod argument_stage_tests;
+mod arguments;
+#[cfg(test)]
+mod catch_scope_tests;
 mod prepared;
 mod publication;
-mod subscript;
+mod rooted;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod roots_tests;
 mod sequence;
+mod sequence_read;
+mod short_circuit_truth;
+mod subscript;
+mod terminator;
+pub(super) use arguments::{begin_expanded_call_arguments, take_completed_expanded_call_arguments};
 pub(super) use prepared::{begin_prepared_receiver, take_completed_prepared_receiver};
 pub(super) use publication::publish;
+use rooted::{adopt_rooted_arguments, adopt_rooted_sequence};
+pub(super) use rooted::{
+    begin_rooted_arguments, begin_rooted_sequence, begin_rooted_sequence_with_roots,
+};
 pub(super) use sequence::{begin_sequence_stage, take_completed_sequence_stage, SequenceStage};
+pub(super) use sequence_read::{
+    begin_sequence_read, take_completed_sequence_read, SequenceReadStage,
+};
+pub(super) use short_circuit_truth::{
+    begin_short_circuit_truth, take_completed_short_circuit_truth, ShortCircuitTruthReady,
+    ShortCircuitTruthStage,
+};
 pub(super) use subscript::take_completed_subscript_path;
-
-pub(super) type CallFuture =
-    Pin<Box<dyn Future<Output = NativeExecutorResult<Vec<Value>>> + 'static>>;
+pub(super) use terminator::{
+    begin_branch_truth, begin_for_capture, begin_for_next, begin_switch_equality,
+    begin_switch_truth, take_completed_terminator, TerminatorCompletion, TerminatorReady,
+    TerminatorReadyStage,
+};
 
 pub(super) type CompletionFuture =
     Pin<Box<dyn Future<Output = NativeExecutorResult<CallCompletion>> + 'static>>;
@@ -33,9 +58,20 @@ pub(super) fn scope_completion(state: &HostState, future: CompletionFuture) -> C
 }
 
 pub(super) enum CallCompletion {
-    Values(Vec<Value>),
+    RootedSequence {
+        sequence: RootedValueSequence,
+        requested_outputs: usize,
+    },
+    RootedArguments(RootedValues),
+    RootedExpandedCallArguments(RootedValues),
+    SequenceRead {
+        stage: SequenceReadStage,
+        sequence: RootedValueSequence,
+    },
     PreparedReceiver(Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>),
     SequenceStage(Box<SequenceStage>),
+    ShortCircuitTruth(ShortCircuitTruthReady),
+    Terminator(Box<TerminatorCompletion>),
 }
 
 pub(super) struct PendingCall {
@@ -51,10 +87,15 @@ pub(super) struct CompletedCall {
     request: NativeSiteRequest,
     embedded: Option<super::state::EmbeddedOperationIdentity>,
     payload: CompletedPayload,
+    // This root-bearing value is kept outside the tagged payload so ordinary
+    // completions do not inherit its large inline enum representation.
+    sequence_read: Option<RootedValueSequence>,
 }
 
 pub(super) enum CompletedPayload {
     Values(Vec<NativeValueRef>),
+    ExpandedCallArguments(Vec<NativeValueRef>),
+    SequenceRead(SequenceReadStage),
     PreparedReceiver {
         prepared: Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
         receiver: NativeValueRef,
@@ -63,6 +104,38 @@ pub(super) enum CompletedPayload {
         stage: Box<SequenceStage>,
         roots: Vec<NativeValueRef>,
     },
+    ShortCircuitTruth(ShortCircuitTruthReady),
+    Terminator(Box<TerminatorReady>),
+}
+
+impl CompletedCall {
+    fn new(
+        request: NativeSiteRequest,
+        embedded: Option<super::state::EmbeddedOperationIdentity>,
+        payload: CompletedPayload,
+        sequence_read: Option<RootedValueSequence>,
+    ) -> NativeExecutorResult<Self> {
+        if matches!(&payload, CompletedPayload::SequenceRead(_)) != sequence_read.is_some() {
+            return Err(NativeExecutorError::Host(
+                "completed sequence read has no exact rooted value".into(),
+            ));
+        }
+        Ok(Self {
+            request,
+            embedded,
+            payload,
+            sequence_read,
+        })
+    }
+
+    fn into_sequence_read(self) -> NativeExecutorResult<RootedValueSequence> {
+        match (self.payload, self.sequence_read) {
+            (CompletedPayload::SequenceRead(_), Some(sequence)) => Ok(sequence),
+            _ => Err(NativeExecutorError::Host(
+                "completed sequence read lost its rooted value".into(),
+            )),
+        }
+    }
 }
 
 pub(super) fn take_completed(
@@ -96,6 +169,16 @@ pub(super) fn take_completed(
             "completed native call does not match the exact resumed operation".into(),
         ));
     }
+    if matches!(
+        &completed.payload,
+        CompletedPayload::ExpandedCallArguments(_)
+    ) {
+        // The enclosing call and its argument expansion may both have no
+        // contextual-region identity. The typed payload, not an optional
+        // embedded identity, prevents arguments from becoming call outputs.
+        state.completed_call = Some(completed);
+        return Ok(None);
+    }
     let CompletedPayload::Values(outputs) = &completed.payload else {
         state.completed_call = Some(completed);
         return Err(NativeExecutorError::Host(
@@ -118,53 +201,13 @@ pub(super) fn completed_roots(state: &HostState) -> impl Iterator<Item = NativeV
         .iter()
         .flat_map(|completed| match &completed.payload {
             CompletedPayload::Values(outputs) => outputs.clone(),
+            CompletedPayload::ExpandedCallArguments(arguments) => arguments.clone(),
+            CompletedPayload::SequenceRead(_) => Vec::new(),
             CompletedPayload::PreparedReceiver { receiver, .. } => vec![*receiver],
             CompletedPayload::SequenceStage { roots, .. } => roots.clone(),
+            CompletedPayload::ShortCircuitTruth(_) => Vec::new(),
+            CompletedPayload::Terminator(stage) => stage.arena_roots(),
         })
-}
-
-pub(super) fn begin(
-    state: &mut HostState,
-    embedded: Option<super::state::EmbeddedOperationIdentity>,
-    future: CallFuture,
-) -> NativeExecutorResult<Vec<Value>> {
-    begin_with_roots(state, embedded, Vec::new(), future)
-}
-
-pub(super) fn begin_with_roots(
-    state: &mut HostState,
-    embedded: Option<super::state::EmbeddedOperationIdentity>,
-    retained_roots: Vec<NativeValueRef>,
-    future: CallFuture,
-) -> NativeExecutorResult<Vec<Value>> {
-    let future: CompletionFuture =
-        Box::pin(async move { future.await.map(CallCompletion::Values) });
-    let mut future = scope_completion(state, future);
-    if let Some(result) = future.as_mut().now_or_never() {
-        drop(future);
-        let CallCompletion::Values(values) =
-            super::sync::CompletedOperation::new(result).finish(state)?
-        else {
-            unreachable!("ordinary call future has a value-sequence completion")
-        };
-        return Ok(values);
-    }
-    let request = state.current_request.ok_or_else(|| {
-        NativeExecutorError::Host("pending native call has no active site".into())
-    })?;
-    let (continuation, generation) = state.next_suspension_identity()?;
-    // Existing arena references become continuation roots only if the call
-    // actually suspends. Synchronous-ready arithmetic adds no duplicate
-    // operand entries to the arena.
-    state.pending_call = Some(PendingCall {
-        continuation,
-        generation,
-        request,
-        embedded,
-        retained_roots,
-        future,
-    });
-    Err(NativeExecutorError::CallSuspended)
 }
 
 pub(super) async fn complete(
@@ -173,37 +216,100 @@ pub(super) async fn complete(
     generation: u64,
 ) -> NativeExecutorResult<NativeSiteRequest> {
     validate_pending(state, continuation, generation)?;
+    let retained = state
+        .pending_call
+        .as_ref()
+        .expect("validated pending call")
+        .retained_roots
+        .iter()
+        .map(|reference| state.arena.get(*reference))
+        .collect::<NativeExecutorResult<Vec<_>>>()?;
+    let retained_lease =
+        runmat_runtime::execution::RootedValueLease::for_values(retained.into_iter())
+            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
     let pending = state
         .pending_call
         .take()
         .ok_or_else(|| NativeExecutorError::Host("native invocation has no pending call".into()))?;
-    let completion = pending.future.await;
-    let completion = super::sync::CompletedOperation::new(completion).finish(state)?;
-    let request = pending.request;
+    let PendingCall {
+        request,
+        embedded,
+        future,
+        ..
+    } = pending;
+    let runtime = state.runtime.clone();
+    let completion =
+        match runmat_runtime::context::run_selected_callback_continuation(&runtime, async move {
+            let _retained_lease = retained_lease;
+            Ok::<_, runmat_runtime::RuntimeError>(future.await)
+        })
+        .await
+        {
+            Ok(completion) => completion,
+            Err(error) => Err(NativeExecutorError::from(error)),
+        };
+    // A For iterator is moved into the owned future to avoid borrowing
+    // HostState across await. Restore that exact record even if workspace
+    // reconciliation or column materialization fails.
+    let mut sequence_read = None;
     let payload = match completion {
-        CallCompletion::Values(values) => CompletedPayload::Values(
-            values
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect(),
-        ),
-        CallCompletion::PreparedReceiver(prepared) => {
-            let receiver = state.arena.insert(prepared.receiver().clone());
-            CompletedPayload::PreparedReceiver { prepared, receiver }
+        Ok(CallCompletion::Terminator(stage)) if stage.is_for_next() => {
+            let reconciliation = state.reconcile_external_workspace();
+            let restored = stage.restore_for_next(state);
+            reconciliation?;
+            let next = restored?.map_err(NativeExecutorError::from)?;
+            let next = next.map(|value| value.with_owned(|value| state.arena.insert(value)));
+            CompletedPayload::Terminator(Box::new(TerminatorReady::for_next(next)))
         }
-        CallCompletion::SequenceStage(stage) => {
-            let mut roots = Vec::new();
-            stage.visit_retained_values(&mut |value| {
-                roots.push(state.arena.insert(value.clone()));
-            });
-            CompletedPayload::SequenceStage { stage, roots }
+        completion => {
+            let completion = super::sync::CompletedOperation::new(completion).finish(state)?;
+            match completion {
+                CallCompletion::RootedSequence {
+                    sequence,
+                    requested_outputs,
+                } => CompletedPayload::Values(adopt_rooted_sequence(
+                    state,
+                    sequence,
+                    requested_outputs,
+                )?),
+                CallCompletion::RootedArguments(arguments) => {
+                    CompletedPayload::Values(adopt_rooted_arguments(state, arguments))
+                }
+                CallCompletion::RootedExpandedCallArguments(arguments) => {
+                    CompletedPayload::ExpandedCallArguments(adopt_rooted_arguments(
+                        state, arguments,
+                    ))
+                }
+                CallCompletion::SequenceRead { stage, sequence } => {
+                    sequence_read = Some(sequence);
+                    CompletedPayload::SequenceRead(stage)
+                }
+                CallCompletion::PreparedReceiver(prepared) => {
+                    let receiver = state.arena.insert(prepared.receiver().clone());
+                    CompletedPayload::PreparedReceiver { prepared, receiver }
+                }
+                CallCompletion::SequenceStage(stage) => {
+                    let mut roots = Vec::new();
+                    stage.visit_retained_values(&mut |value| {
+                        roots.push(state.arena.insert(value.clone()));
+                    });
+                    CompletedPayload::SequenceStage { stage, roots }
+                }
+                CallCompletion::ShortCircuitTruth(truth) => {
+                    CompletedPayload::ShortCircuitTruth(truth)
+                }
+                CallCompletion::Terminator(stage) => {
+                    CompletedPayload::Terminator(Box::new(stage.finish()?))
+                }
+            }
         }
     };
-    state.completed_call = Some(CompletedCall {
+    state.completed_call = Some(CompletedCall::new(
         request,
-        embedded: pending.embedded,
+        embedded,
         payload,
-    });
+        sequence_read,
+    )?);
     Ok(request)
 }
 
@@ -222,80 +328,4 @@ pub(super) fn validate_pending(
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod catch_scope_tests {
-    use super::*;
-    use crate::execute::region::observation::test_support::observed_state;
-    use crate::region::placement_test_support::Probe;
-    use runmat_value::MException;
-    use std::cell::Cell;
-    use std::rc::Rc;
-    use std::task::{Context, Poll};
-
-    struct PendingCatchProbe {
-        runtime: runmat_runtime::context::RuntimeContext,
-        polls: Rc<Cell<usize>>,
-        drops: Rc<Cell<usize>>,
-    }
-
-    impl Future for PendingCatchProbe {
-        type Output = NativeExecutorResult<CallCompletion>;
-
-        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-            assert_eq!(
-                self.runtime.active_catch_exception().unwrap().identifier,
-                "RunMat:native"
-            );
-            self.polls.set(self.polls.get() + 1);
-            Poll::Pending
-        }
-    }
-
-    impl Drop for PendingCatchProbe {
-        fn drop(&mut self) {
-            assert_eq!(
-                self.runtime.active_catch_exception().unwrap().identifier,
-                "RunMat:native"
-            );
-            self.drops.set(self.drops.get() + 1);
-        }
-    }
-
-    #[test]
-    fn pending_native_call_scopes_each_poll_and_drop() {
-        runmat_gc::gc_test_context(|| {
-            let mut state = observed_state(&Rc::new(Probe::default()));
-            state.function.blocks[0].catch_scopes = vec![runmat_mir::CatchScopeId(0)];
-            let entry = state.function.entry;
-            state
-                .bind_catch_exception(
-                    entry,
-                    MException::new("RunMat:native".into(), "native".into()),
-                )
-                .unwrap();
-            state.enter_site_block(entry);
-            assert_eq!(
-                state.active_catch_exception().unwrap().identifier,
-                "RunMat:native"
-            );
-            let polls = Rc::new(Cell::new(0));
-            let drops = Rc::new(Cell::new(0));
-            let future: CompletionFuture = Box::pin(PendingCatchProbe {
-                runtime: state.runtime.clone(),
-                polls: polls.clone(),
-                drops: drops.clone(),
-            });
-            let mut future = scope_completion(&state, future);
-            let waker = futures::task::noop_waker();
-            let mut context = Context::from_waker(&waker);
-            assert!(future.as_mut().poll(&mut context).is_pending());
-            assert!(state.runtime.active_catch_exception().is_none());
-            drop(future);
-            assert_eq!(polls.get(), 1);
-            assert_eq!(drops.get(), 1);
-            assert!(state.runtime.active_catch_exception().is_none());
-        });
-    }
 }

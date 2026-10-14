@@ -5,6 +5,7 @@
 
 use super::RuntimeContextLocalId;
 use crate::RuntimeError;
+use runmat_execution::profiling::{CommandDeferredWork, DeferredWorkTerminal};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
@@ -15,7 +16,7 @@ mod driver;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::RuntimeLocalTaskSupervisor;
+pub use native::{RuntimeLocalTaskChildFactory, RuntimeLocalTaskSupervisor};
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
@@ -23,6 +24,45 @@ mod browser;
 pub use browser::BrowserLocalTaskSupervisor;
 
 pub type RuntimeLocalTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
+
+/// An opaque submission authority created only by RunMat's native/browser
+/// supervisors. A custom task service may forward this capability, but
+/// cannot use a copied owner token to certify its own scheduling.
+#[derive(Clone)]
+pub struct CanonicalLocalTaskAdmission {
+    #[cfg(not(target_arch = "wasm32"))]
+    port: native::SubmissionPort,
+    #[cfg(target_arch = "wasm32")]
+    port: browser::BrowserPort,
+}
+
+impl CanonicalLocalTaskAdmission {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn is_active_driver(&self) -> bool {
+        self.port.is_active_driver()
+    }
+
+    pub(crate) fn spawn_admitted(
+        &self,
+        owner: RuntimeContextLocalId,
+        future: RuntimeLocalTaskFuture,
+        deferred: Option<CommandDeferredWork>,
+    ) -> Result<RuntimeLocalTaskLease, RuntimeError> {
+        self.port.submit(owner, future, deferred)
+    }
+}
+
+fn reject_admitted(
+    error: RuntimeError,
+    future: RuntimeLocalTaskFuture,
+    deferred: Option<CommandDeferredWork>,
+) -> Result<RuntimeLocalTaskLease, RuntimeError> {
+    drop(future);
+    if let Some(deferred) = deferred {
+        deferred.complete(DeferredWorkTerminal::Failed);
+    }
+    Err(error)
+}
 
 /// Opaque identity shared by one host supervisor and only its submission
 /// ports; context clones cannot manufacture ownership of a foreign driver.
@@ -34,7 +74,8 @@ impl LocalTaskOwnerToken {
         Self(Rc::new(()))
     }
 
-    pub(crate) fn same(&self, other: &Self) -> bool {
+    /// Whether two host guards bind the same local-task supervisor authority.
+    pub fn same(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
@@ -82,9 +123,15 @@ impl LocalTaskFailure {
 }
 
 pub trait RuntimeLocalTaskService {
-    /// Existing embedding ports remain source-compatible but cannot claim
-    /// canonical lifecycle-host ownership without an exact supervisor token.
+    /// Existing embedding ports remain source-compatible. This token is a
+    /// lifecycle identity, not proof of canonical task scheduling.
     fn owner_token(&self) -> Option<LocalTaskOwnerToken> {
+        None
+    }
+
+    /// Only a real supervisor port can construct the returned capability.
+    /// Callers submit through it, never through the implementer's raw method.
+    fn canonical_admission(&self) -> Option<CanonicalLocalTaskAdmission> {
         None
     }
 

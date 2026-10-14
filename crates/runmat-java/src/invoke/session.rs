@@ -9,6 +9,7 @@ use crate::{
     JavaObjectRegistry, JvmProcess, SessionClasspath,
 };
 use jni::objects::GlobalRef;
+use runmat_process_host::private_bytes::PrivateByteLease;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -17,6 +18,9 @@ pub struct JavaSession {
     pub(super) objects: RefCell<JavaObjectRegistry<GlobalRef>>,
     pub(super) classpath: RefCell<SessionClasspath>,
     pub(super) class_loader: RefCell<Option<GlobalRef>>,
+    // Exact selected archive bytes stay owned for as long as this JVM
+    // classloader may perform a delayed load.
+    _classloader_bytes: Option<PrivateByteLease>,
     pub(super) callback_ids: RefCell<Vec<u64>>,
     pub(super) callback_proxies: RefCell<BTreeMap<(u64, String), GlobalRef>>,
 }
@@ -37,11 +41,20 @@ impl JavaSession {
     }
 
     pub fn with_classpath(process: JvmProcess, classpath: SessionClasspath) -> Self {
+        Self::with_classpath_and_lease(process, classpath, None)
+    }
+
+    pub fn with_classpath_and_lease(
+        process: JvmProcess,
+        classpath: SessionClasspath,
+        classloader_bytes: Option<PrivateByteLease>,
+    ) -> Self {
         Self {
             process,
             objects: RefCell::new(JavaObjectRegistry::default()),
             classpath: RefCell::new(classpath),
             class_loader: RefCell::new(None),
+            _classloader_bytes: classloader_bytes,
             callback_ids: RefCell::new(Vec::new()),
             callback_proxies: RefCell::new(BTreeMap::new()),
         }
@@ -440,12 +453,18 @@ impl JavaSession {
     }
 
     pub fn restart_session(&self) -> Result<(), JavaInvocationError> {
-        self.process.with_attached(|_| {
+        self.retire_classloader()
+    }
+
+    /// Retire this session's loader without shutting down the process-wide
+    /// JVM. A caller may release its selected archive root only on success.
+    pub fn retire_classloader(&self) -> Result<(), JavaInvocationError> {
+        self.process.with_attached(|environment| {
+            self.close_classloader(environment)?;
             let callback_ids = std::mem::take(&mut *self.callback_ids.borrow_mut());
             super::callback::remove_callbacks(&callback_ids);
             self.callback_proxies.borrow_mut().clear();
             self.objects.borrow_mut().restart();
-            self.class_loader.borrow_mut().take();
             Ok(())
         })
     }
@@ -460,13 +479,18 @@ impl JavaSession {
 
 impl Drop for JavaSession {
     fn drop(&mut self) {
-        super::callback::remove_callbacks(self.callback_ids.get_mut());
-        let _ = self.process.with_attached::<_, crate::JvmError>(|_| {
+        if let Err(error) = self.retire_classloader() {
+            if let Some(bytes) = &self._classloader_bytes {
+                if let Err(marker_error) = bytes
+                    .persist_unverified(None, "Java URLClassLoader retirement was not verified")
+                {
+                    eprintln!("Java classloader retirement failed ({error}); selected archive bytes remained owned but recovery marker failed: {marker_error}");
+                }
+            }
+            super::callback::remove_callbacks(self.callback_ids.get_mut());
             self.callback_proxies.get_mut().clear();
             self.objects.get_mut().restart();
-            self.class_loader.get_mut().take();
-            Ok(())
-        });
+        }
     }
 }
 

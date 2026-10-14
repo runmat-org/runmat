@@ -15,27 +15,29 @@ pub enum FsMappedWriteDisposition {
 }
 
 #[derive(Debug)]
-pub struct FsMappedWriteFailure {
+/// A write disposition with its original cause. Providers use the default
+/// I/O cause; invocation interruption can retain a platform-local cause.
+pub struct FsMappedWriteFailure<E = io::Error> {
     disposition: FsMappedWriteDisposition,
-    source: io::Error,
+    source: E,
 }
 
-impl FsMappedWriteFailure {
-    pub fn before_effect(source: io::Error) -> Self {
+impl<E> FsMappedWriteFailure<E> {
+    pub fn before_effect(source: E) -> Self {
         Self {
             disposition: FsMappedWriteDisposition::BeforeEffect,
             source,
         }
     }
 
-    pub fn committed(accepted_bytes: usize, source: io::Error) -> Self {
+    pub fn committed(accepted_bytes: usize, source: E) -> Self {
         Self {
             disposition: FsMappedWriteDisposition::Committed { accepted_bytes },
             source,
         }
     }
 
-    pub fn indeterminate(attempted_bytes: usize, source: io::Error) -> Self {
+    pub fn indeterminate(attempted_bytes: usize, source: E) -> Self {
         Self {
             disposition: FsMappedWriteDisposition::Indeterminate { attempted_bytes },
             source,
@@ -44,10 +46,6 @@ impl FsMappedWriteFailure {
 
     pub fn disposition(&self) -> FsMappedWriteDisposition {
         self.disposition
-    }
-
-    pub fn io_error(&self) -> &io::Error {
-        &self.source
     }
 
     pub(crate) fn validate_for_request(self, requested_bytes: usize) -> Self {
@@ -69,7 +67,13 @@ impl FsMappedWriteFailure {
     }
 }
 
-impl Display for FsMappedWriteFailure {
+impl FsMappedWriteFailure {
+    pub fn io_error(&self) -> &io::Error {
+        &self.source
+    }
+}
+
+impl<E: Display> Display for FsMappedWriteFailure<E> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
@@ -79,7 +83,7 @@ impl Display for FsMappedWriteFailure {
     }
 }
 
-impl Error for FsMappedWriteFailure {
+impl<E: Error + 'static> Error for FsMappedWriteFailure<E> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }

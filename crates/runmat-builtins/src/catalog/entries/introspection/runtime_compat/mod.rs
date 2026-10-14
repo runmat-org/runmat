@@ -9,6 +9,7 @@ mod tests;
 pub use contract::*;
 
 pub const ISDEPLOYED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "isdeployed" },
     category: "introspection",
@@ -50,6 +51,7 @@ pub const ISDEPLOYED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub const VER_LESS_THAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "verLessThan",
@@ -93,6 +95,7 @@ pub const VER_LESS_THAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
 };
 
 pub const VERSION_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "version" },
     category: "introspection",

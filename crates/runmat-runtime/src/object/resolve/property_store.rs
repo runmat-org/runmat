@@ -10,9 +10,19 @@ enum Store {
 }
 
 fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Store, RuntimeError> {
-    if let Some((property, owner)) =
-        crate::class_registry::lookup_property(&obj.class_name, &field.into())
-    {
+    let selected = crate::class_registry::checked_receiver_projection(obj)?;
+    let property = match &selected {
+        Some(projection) => projection.receiver_property(&obj.class_name, &field.into()),
+        None => crate::class_registry::lookup_property(&obj.class_name, &field.into()).map(
+            |(property, owner)| {
+                (
+                    crate::class_registry::receiver_property_declaration(property),
+                    owner,
+                )
+            },
+        ),
+    };
+    if let Some((property, owner)) = property {
         if property.is_static {
             return Err(mex(
                 "RunMat:PropertyStaticAccess",
@@ -28,19 +38,31 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
                 &format!("Property '{field}' is constant"),
             ));
         }
-        if !access_permitted(&owner, &property.set_access, caller) {
+        let permitted = match &selected {
+            Some(projection) => projection.receiver_member_accessible(
+                &owner,
+                property.set_access,
+                caller_class_for_function(caller).as_ref(),
+            ),
+            None => access_permitted(&owner, &property.set_access, caller),
+        };
+        if !permitted {
             return Err(mex(
                 IDENT_PROPERTY_PRIVATE_ACCESS,
                 &format!("Property '{field}' is private"),
             ));
         }
         if property.is_dependent {
-            if crate::class_registry::lookup_method(
-                &obj.class_name,
-                &crate::object_property_setter_name(field).as_str().into(),
-            )
-            .is_some()
-            {
+            let setter = crate::object_property_setter_name(field);
+            if selected.as_ref().map_or_else(
+                || {
+                    crate::class_registry::lookup_method(&obj.class_name, &setter.as_str().into())
+                        .is_some()
+                },
+                |projection| {
+                    projection.receiver_declares_method(&obj.class_name, &setter.as_str().into())
+                },
+            ) {
                 return Ok(Store::Dependent);
             }
             return Err(mex(
@@ -50,11 +72,18 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
         }
         return Ok(Store::Stored);
     }
-    if let Some(permitted) = dynamicprops::dynamic_property_assignment_access(
-        obj,
-        field,
-        caller_class_for_function(caller).as_ref(),
-    ) {
+    let caller_class = caller_class_for_function(caller);
+    let dynamic_access = match &selected {
+        Some(projection) => obj.dynamic_property(field).map(|definition| {
+            projection.receiver_member_accessible(
+                &definition.defining_class,
+                definition.set_access,
+                caller_class.as_ref(),
+            )
+        }),
+        None => dynamicprops::dynamic_property_assignment_access(obj, field, caller_class.as_ref()),
+    };
+    if let Some(permitted) = dynamic_access {
         if !permitted {
             return Err(mex(
                 IDENT_PROPERTY_PRIVATE_ACCESS,
@@ -63,7 +92,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
         }
         return Ok(Store::Stored);
     }
-    if crate::class_registry::get_class(&obj.class_name).is_some() {
+    if selected.is_some() || crate::class_registry::get_class(&obj.class_name).is_some() {
         Err(format!("Undefined property '{field}' for class {}", obj.class_name).into())
     } else {
         Err(format!("Unknown class {}", obj.class_name).into())
@@ -77,7 +106,7 @@ pub(super) async fn store_value(
     rhs: Value,
     caller: Option<&str>,
     on_write: &mut impl FnMut(&Value, &Value),
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match admit(&obj, &field, caller)? {
         Store::Dependent => {
             let outputs = match context {
@@ -96,14 +125,14 @@ pub(super) async fn store_value(
                         .await
                 }
             }?;
-            require_single_sequence(outputs)
+            require_single_rooted_sequence(outputs)
         }
         Store::Stored => {
             if let Some(old) = obj.properties.get(&field) {
                 on_write(old, &rhs);
             }
             obj.properties.insert(field, rhs);
-            Ok(Value::Object(obj))
+            RootedValue::new(Value::Object(obj)).map_err(|error| error.into_runtime_error())
         }
     }
 }
@@ -137,7 +166,7 @@ pub(super) async fn store_handle(
     field: String,
     rhs: Value,
     caller: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     if handle
         .class_name
         .is(crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS)
@@ -165,7 +194,8 @@ pub(super) async fn store_handle(
         .map_err(|_| invalid_handle())??;
         // Destruction can reenter GC and other owners.
         drop(old);
-        return Ok(Value::HandleObject(handle));
+        return RootedValue::new(Value::HandleObject(handle))
+            .map_err(|error| error.into_runtime_error());
     }
     let action = runmat_gc::gc_with_value(&handle.target, |target| {
         admit(target_object(&handle, target)?, &field, caller)
@@ -216,7 +246,10 @@ pub(super) async fn store_handle(
                 target_object(&handle, target).map(|_| ())
             })
             .map_err(|_| invalid_handle())??;
+            let result = RootedValue::new(Value::HandleObject(handle))
+                .map_err(|error| error.into_runtime_error())?;
             drop(roots);
+            return Ok(result);
         }
         Store::Stored => {
             let old = runmat_gc::gc_with_value_mut(&handle.target, |target| {
@@ -243,5 +276,5 @@ pub(super) async fn store_handle(
             drop(old);
         }
     }
-    Ok(Value::HandleObject(handle))
+    RootedValue::new(Value::HandleObject(handle)).map_err(|error| error.into_runtime_error())
 }

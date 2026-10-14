@@ -29,6 +29,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const BSXFUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "bsxfun" },
     category: "math/elementwise",

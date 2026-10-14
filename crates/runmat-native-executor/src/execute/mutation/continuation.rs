@@ -1,5 +1,7 @@
 use runmat_mir::{MirLocalId, MirPlace};
+use runmat_runtime::execution::{RootedValue, RootedValueSequence};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
+use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -252,7 +254,9 @@ fn field_name(state: &mut HostState, segment: &PlaceSegment) -> NativeExecutorRe
 
 fn member_call(
     state: &mut HostState,
-    future: super::super::call_suspension::CallFuture,
+    future: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static>,
+    >,
 ) -> NativeExecutorResult<Value> {
     let embedded = state.enter_embedded_call();
     let result = (|| {
@@ -266,7 +270,12 @@ fn member_call(
             }
             return Ok(values.remove(0));
         }
-        let mut values = super::super::call_suspension::begin(state, embedded.clone(), future)?;
+        let mut values = super::super::call_suspension::begin_rooted_sequence(
+            state,
+            embedded.clone(),
+            future,
+            1,
+        )?;
         if values.len() != 1 {
             return Err(NativeExecutorError::Host(
                 "member operation did not produce one value".into(),
@@ -283,6 +292,17 @@ fn member_call(
         (Ok(_), Err(error)) => Err(error),
         (Ok(value), Ok(())) => Ok(value),
     }
+}
+
+fn single_member_sequence(value: RootedValue) -> Result<RootedValueSequence, Box<RuntimeError>> {
+    value.try_map_owned(
+        |value| {
+            runmat_value::ValueSequence::single(value)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                .map_err(Box::new)
+        },
+        |error| Box::new(error.into_runtime_error()),
+    )
 }
 
 fn read_step(
@@ -312,7 +332,7 @@ fn read_step(
                     Some(&caller),
                 ))
                 .await?;
-            Ok(vec![value])
+            single_member_sequence(value).map_err(|error| *error)
         }),
     )
 }
@@ -346,7 +366,7 @@ fn write_step(
                     ),
                 )
                 .await?;
-            Ok(vec![value])
+            single_member_sequence(value).map_err(|error| *error)
         }),
     )
 }

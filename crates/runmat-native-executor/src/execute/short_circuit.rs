@@ -4,8 +4,12 @@ use runmat_mir::{MirOperand, MirPlace, MirShortCircuitOp, MirStmt, MirStmtKind};
 use runmat_runtime::native::NativeValueRef;
 use runmat_value::Value;
 
-use super::{operand, state::HostState};
+use super::{call_suspension, operand, state::HostState};
 use crate::{NativeExecutorError, NativeExecutorResult};
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "short_circuit/tests.rs"]
+mod tests;
 
 pub(super) fn evaluate(
     state: &mut HostState,
@@ -22,8 +26,7 @@ pub(super) fn evaluate(
     // cancellation. Suspension retains both until the exact site is resumed.
     if next_step == 0 {
         state.enter_contextual_step(region, 0);
-        let left = operand::materialize_operand(state, left)?;
-        let truth = logical_truth(state, &left, "short-circuit left operand")?;
+        let truth = logical_truth(state, left, call_suspension::ShortCircuitTruthStage::Left)?;
         state.finish_contextual_step(region, 0, 1)?;
         let skipped = match operator {
             MirShortCircuitOp::And => !truth,
@@ -49,8 +52,11 @@ pub(super) fn evaluate(
     }
     let step = statements.len() + 1;
     state.enter_contextual_step(region, step);
-    let right = operand::materialize_operand(state, right)?;
-    let truth = logical_truth(state, &right, "short-circuit right operand")?;
+    let truth = logical_truth(
+        state,
+        right,
+        call_suspension::ShortCircuitTruthStage::Right { step },
+    )?;
     state.finish_contextual_step(region, step, step + 1)?;
     let result = state.arena.insert(Value::Bool(truth));
     state.finish_contextual_region(region, vec![result]);
@@ -90,11 +96,14 @@ fn execute_statement(state: &mut HostState, statement: &MirStmtKind) -> NativeEx
     }
 }
 
-fn logical_truth(state: &mut HostState, value: &Value, label: &str) -> NativeExecutorResult<bool> {
-    super::sync::complete(
-        &state.runtime,
-        runmat_runtime::condition::logical_truth_from_value(value, label),
-        "logical truth evaluation",
-    )
-    .finish(state)
+fn logical_truth(
+    state: &mut HostState,
+    operand: &MirOperand,
+    stage: call_suspension::ShortCircuitTruthStage,
+) -> NativeExecutorResult<bool> {
+    if let Some(truth) = call_suspension::take_completed_short_circuit_truth(state, stage)? {
+        return Ok(truth);
+    }
+    let value = operand::materialize_operand(state, operand)?;
+    call_suspension::begin_short_circuit_truth(state, stage, value)
 }

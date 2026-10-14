@@ -11,6 +11,7 @@ use crate::context::{
 };
 use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
+use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_value::Value;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -24,6 +25,9 @@ mod transaction;
 use transaction::{worker, TransactionError};
 #[path = "native/lazy_defaults.rs"]
 mod lazy_defaults;
+#[path = "native/retirement.rs"]
+mod retirement;
+use retirement::BlockingWork;
 
 #[derive(Clone)]
 pub struct NativePreferenceService {
@@ -49,6 +53,7 @@ impl NativePreferenceService {
     async fn read(
         &self,
         budget: &mut CpuCooperationBudget,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<PreferenceDocument, PreferenceServiceError> {
         let permit = budget
             .await_cancellable(self.gate.clone().acquire_owned())
@@ -56,10 +61,14 @@ impl NativePreferenceService {
             .map_err(cancelled)?
             .map_err(|source| operational("preference read gate closed", source))?;
         let store = self.store.clone();
-        let task = self.driver.spawn_blocking(move || {
-            let _permit = permit;
-            store.read()
-        });
+        let work = BlockingWork::new(
+            move || {
+                let _permit = permit;
+                store.read()
+            },
+            profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+        );
+        let task = self.driver.spawn_blocking(move || work.run());
         budget
             .await_cancellable(task)
             .await
@@ -72,6 +81,7 @@ impl NativePreferenceService {
         &self,
         mut budget: CpuCooperationBudget,
         mutation: Mutation,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<(Vec<Value>, Option<UserPathSnapshot>), PreferenceServiceError> {
         checkpoint(&mut budget, 0).await?;
         let permit = budget
@@ -82,24 +92,33 @@ impl NativePreferenceService {
         let (prepared_tx, prepared_rx) = oneshot::channel();
         let (authorized_tx, authorized_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = oneshot::channel();
-        let write = self.acquire_write(&mut budget).await?;
+        let write = self.acquire_write(&mut budget, profiling).await?;
         // The blocking transaction owns its permit, lock, stage and completion
         // after submission. The caller owns only the authorization sender.
-        self.driver.spawn_blocking(move || {
-            let _permit = permit;
-            worker(write, mutation, prepared_tx, authorized_rx, finished_tx);
-        });
+        let work = BlockingWork::new(
+            move || {
+                let _permit = permit;
+                worker(write, mutation, prepared_tx, authorized_rx, finished_tx);
+            },
+            profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+        );
+        self.driver.spawn_blocking(move || work.run());
         observe_mutation(&mut budget, prepared_rx, authorized_tx, finished_rx).await
     }
 
     async fn acquire_write(
         &self,
         budget: &mut CpuCooperationBudget,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<NativeWrite, PreferenceServiceError> {
         loop {
             checkpoint(budget, 0).await?;
             let store = self.store.clone();
-            let attempt = self.driver.spawn_blocking(move || store.try_begin_write());
+            let work = BlockingWork::new(
+                move || store.try_begin_write(),
+                profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+            );
+            let attempt = self.driver.spawn_blocking(move || work.run());
             let maybe_write = budget
                 .await_cancellable(attempt)
                 .await
@@ -168,10 +187,11 @@ impl RuntimePreferenceService for NativePreferenceService {
         runtime: RuntimeContext,
     ) -> RuntimeServiceFuture<Result<PreferenceGroups, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            let document = service.read(&mut budget).await?;
+            let document = service.read(&mut budget, profiling.as_ref()).await?;
             let mut output = PreferenceGroups::new();
             for (group, values) in document.groups {
                 let mut decoded = PreferenceValues::new();
@@ -192,10 +212,11 @@ impl RuntimePreferenceService for NativePreferenceService {
         group: String,
     ) -> RuntimeServiceFuture<Result<Option<PreferenceValues>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            let document = service.read(&mut budget).await?;
+            let document = service.read(&mut budget, profiling.as_ref()).await?;
             let Some(values) = document.groups.get(&group) else {
                 return Ok(None);
             };
@@ -215,10 +236,11 @@ impl RuntimePreferenceService for NativePreferenceService {
         names: Vec<String>,
     ) -> RuntimeServiceFuture<Result<Vec<bool>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            let document = service.read(&mut budget).await?;
+            let document = service.read(&mut budget, profiling.as_ref()).await?;
             let values = document.groups.get(&group);
             let mut output = Vec::with_capacity(names.len());
             for name in &names {
@@ -237,6 +259,7 @@ impl RuntimePreferenceService for NativePreferenceService {
         defaults: Option<Vec<Value>>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         let roots = defaults
             .as_ref()
             .map(|defaults| super::input_roots::PreferenceInputRoots::for_values(defaults))
@@ -257,7 +280,7 @@ impl RuntimePreferenceService for NativePreferenceService {
                 return Ok(Vec::new());
             }
             let Some(defaults) = defaults else {
-                let document = service.read(&mut budget).await?;
+                let document = service.read(&mut budget, profiling.as_ref()).await?;
                 let mut output = Vec::with_capacity(names.len());
                 for name in &names {
                     let payload = document
@@ -273,7 +296,15 @@ impl RuntimePreferenceService for NativePreferenceService {
                 }
                 return Ok(output);
             };
-            lazy_defaults::read_or_create(service, budget, group, names, defaults).await
+            lazy_defaults::read_or_create(
+                service,
+                budget,
+                group,
+                names,
+                defaults,
+                profiling.as_ref(),
+            )
+            .await
         })
     }
 
@@ -284,6 +315,7 @@ impl RuntimePreferenceService for NativePreferenceService {
         entries: Vec<(String, Value)>,
     ) -> RuntimeServiceFuture<Result<(), PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         let roots = super::input_roots::PreferenceInputRoots::for_entries(&entries);
         Box::pin(async move {
             let _roots = roots?;
@@ -304,6 +336,7 @@ impl RuntimePreferenceService for NativePreferenceService {
                         group,
                         entries: encoded,
                     },
+                    profiling.as_ref(),
                 )
                 .await?;
             Ok(())
@@ -317,10 +350,11 @@ impl RuntimeUserPathService for NativePreferenceService {
         runtime: RuntimeContext,
     ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            let document = service.read(&mut budget).await?;
+            let document = service.read(&mut budget, profiling.as_ref()).await?;
             checkpoint(&mut budget, 1).await?;
             Ok(UserPathSnapshot {
                 setting: document.user_path,
@@ -335,11 +369,14 @@ impl RuntimeUserPathService for NativePreferenceService {
         mutation: UserPathMutation,
     ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let setting = mutation.into_setting()?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            let (_, snapshot) = service.mutate(budget, Mutation::UserPath(setting)).await?;
+            let (_, snapshot) = service
+                .mutate(budget, Mutation::UserPath(setting), profiling.as_ref())
+                .await?;
             Ok(snapshot.expect("user-path mutation prepares a setting snapshot"))
         })
     }

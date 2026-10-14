@@ -31,7 +31,7 @@ fn setfield_assigns_object_property() {
     let updated = run_setfield(Value::Object(obj), vec![Value::from("x"), Value::Num(5.0)])
         .expect("setfield");
 
-    match updated {
+    match updated.value() {
         Value::Object(o) => {
             assert_eq!(o.properties.get("x"), Some(&Value::Num(5.0)));
         }

@@ -9,7 +9,7 @@ fn empty_known_callback_preserves_logical_output_class() {
         vec![Value::Tensor(empty), Value::Tensor(comparison)],
     )
     .expect("arrayfun");
-    let Value::LogicalArray(result) = result else {
+    let Value::LogicalArray(result) = result.value() else {
         panic!("expected logical output");
     };
     assert_eq!(result.shape, vec![0, 3]);
@@ -27,7 +27,7 @@ fn empty_known_callback_preserves_integer_output_class() {
         vec![Value::Tensor(empty), Value::Tensor(addend)],
     )
     .expect("arrayfun");
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("expected numeric output");
     };
     assert_eq!(result.shape(), &[0, 2]);

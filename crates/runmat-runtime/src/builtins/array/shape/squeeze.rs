@@ -216,7 +216,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => "function handle",
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",

@@ -13,7 +13,7 @@ use runmat_value::{
 };
 
 fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::single_builtin(value, rest))
+    block_on(super::single_builtin(None, value, rest)).map(|owned| owned.value().clone())
 }
 
 mod host;

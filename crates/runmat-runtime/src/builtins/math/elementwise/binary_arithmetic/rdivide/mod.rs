@@ -13,6 +13,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::elementwise::integer_arithmetic::reject_integer_logical_operands;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -74,9 +76,17 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "rdivide",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::rdivide"
 )]
-async fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rdivide_builtin(
+    runtime: Option<RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter().chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::RDIVIDE_DESCRIPTOR,
         &runmat_builtins::RDIVIDE_ERROR_TOO_MANY_OUTPUTS,
@@ -102,13 +112,18 @@ async fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
     super::preparation::execute(
+        runtime.as_ref(),
         RDIVIDE_CATALOG_ENTRY.identity,
         2 + rest.len(),
         lhs,
         rhs,
         |lhs, rhs| async move {
             let base = super::division::execute(DIVISION_CONTEXT, lhs, rhs).await?;
-            apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+            let base = RootedValue::new(base).map_err(|cause| cause.into_runtime_error())?;
+            let value =
+                apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)
+                    .await?;
+            RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
         },
     )
     .await

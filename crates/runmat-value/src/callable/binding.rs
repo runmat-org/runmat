@@ -1,13 +1,67 @@
+use runmat_execution::value::GraphStaticReferenceSite;
+use runmat_execution::Digest;
 use runmat_execution::FunctionBindingOrigin;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
+
+use crate::SelectedReceiverDeclarations;
 
 /// The executable registry owns the definition; values hold only a counted
 /// lease on its opaque identity. No value points back to the registry.
 #[derive(Debug, Default)]
 pub struct FunctionDefinitionOwner {
     handles: AtomicUsize,
+    selected_receiver_seal: OnceLock<Arc<SelectedReceiverDeclarationSeal>>,
+}
+
+/// A constructor-owned slot for pure receiver metadata. The slot is installed
+/// before a selected constructor becomes callable; only its selected class
+/// product keeps the corresponding fill key. This permits cold ancestry to be
+/// completed at invocation without letting a public value factory substitute
+/// metadata for an already-issued constructor.
+#[derive(Debug)]
+pub struct SelectedReceiverDeclarationSeal {
+    key: Arc<()>,
+    declarations: OnceLock<Arc<SelectedReceiverDeclarations>>,
+}
+
+#[derive(Debug)]
+pub struct SelectedReceiverDeclarationKey(Arc<()>);
+
+impl SelectedReceiverDeclarationSeal {
+    pub fn issue() -> (Arc<Self>, SelectedReceiverDeclarationKey) {
+        let key = Arc::new(());
+        (
+            Arc::new(Self {
+                key: Arc::clone(&key),
+                declarations: OnceLock::new(),
+            }),
+            SelectedReceiverDeclarationKey(key),
+        )
+    }
+
+    pub fn fill(
+        &self,
+        key: &SelectedReceiverDeclarationKey,
+        declarations: Arc<SelectedReceiverDeclarations>,
+    ) -> bool {
+        if !Arc::ptr_eq(&self.key, &key.0) {
+            return false;
+        }
+        if let Some(admitted) = self.declarations.get() {
+            return Arc::ptr_eq(admitted, &declarations);
+        }
+        self.declarations.set(Arc::clone(&declarations)).is_ok()
+            || self
+                .declarations
+                .get()
+                .is_some_and(|admitted| Arc::ptr_eq(admitted, &declarations))
+    }
+
+    pub fn declarations(&self) -> Option<&Arc<SelectedReceiverDeclarations>> {
+        self.declarations.get()
+    }
 }
 
 impl FunctionDefinitionOwner {
@@ -22,6 +76,30 @@ impl FunctionDefinitionOwner {
     pub fn has_handles(&self) -> bool {
         self.handles.load(Ordering::Acquire) != 0
     }
+
+    /// The exact constructor product installs its unfilled seal before a
+    /// handle can escape. Reattachment of another selected product, even with
+    /// equal class text and code, cannot replace its owner's seal.
+    pub fn admit_selected_receiver_seal(&self, seal: Arc<SelectedReceiverDeclarationSeal>) -> bool {
+        if let Some(admitted) = self.selected_receiver_seal.get() {
+            return Arc::ptr_eq(admitted, &seal);
+        }
+        self.selected_receiver_seal.set(Arc::clone(&seal)).is_ok()
+            || self
+                .selected_receiver_seal
+                .get()
+                .is_some_and(|admitted| Arc::ptr_eq(admitted, &seal))
+    }
+
+    pub fn selected_receiver_declarations(&self) -> Option<&Arc<SelectedReceiverDeclarations>> {
+        self.selected_receiver_seal.get()?.declarations()
+    }
+
+    pub fn owns_selected_receiver_seal(&self, seal: &Arc<SelectedReceiverDeclarationSeal>) -> bool {
+        self.selected_receiver_seal
+            .get()
+            .is_some_and(|admitted| Arc::ptr_eq(admitted, seal))
+    }
 }
 
 #[derive(Debug)]
@@ -31,6 +109,10 @@ pub struct FunctionDefinitionLease {
 }
 
 impl FunctionDefinitionLease {
+    pub fn owner_arc(&self) -> &Arc<FunctionDefinitionOwner> {
+        &self.owner
+    }
+
     pub fn matches(&self, owner: &Arc<FunctionDefinitionOwner>) -> bool {
         Arc::ptr_eq(&self.owner, owner)
     }
@@ -60,6 +142,33 @@ impl PartialEq for FunctionDefinitionLease {
 
 impl Eq for FunctionDefinitionLease {}
 
+/// A counted local target selected by a sealed call site. The site includes
+/// its unit digest, so two revisions may use the same numeric FunctionId
+/// without entering the flat numeric definition overlay.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaticSiteDefinitionLease {
+    pub caller_unit: Digest,
+    pub caller: Option<FunctionBindingOrigin>,
+    pub site: GraphStaticReferenceSite,
+    pub target_unit: Digest,
+    pub target: FunctionBindingOrigin,
+    pub definition: FunctionDefinitionLease,
+    pub dependencies: Arc<[FunctionDefinitionLease]>,
+}
+
+/// A fresh counted target binding issued from one exact sealed call site.
+/// The caller/target unit and origin fields remain explicit so consumers never
+/// infer authority from a colliding numeric function ID or tuple position.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SelectedStaticSiteBinding {
+    pub caller_unit: Digest,
+    pub caller: Option<FunctionBindingOrigin>,
+    pub site: GraphStaticReferenceSite,
+    pub target_binding: BoundFunctionBinding,
+    pub target_unit: Digest,
+    pub target: FunctionBindingOrigin,
+}
+
 /// A bound callable has exactly one authority: a live local issuer or a
 /// relocatable immutable program/function origin. Its numeric function ID is
 /// only a cache within the currently selected runtime registry.
@@ -69,6 +178,7 @@ pub enum BoundFunctionAuthority {
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
         dependencies: Arc<[FunctionDefinitionLease]>,
+        static_sites: Arc<[StaticSiteDefinitionLease]>,
         indices: Arc<HashMap<usize, Option<usize>>>,
         export: LocalExport,
     },
@@ -124,6 +234,13 @@ impl BoundFunctionBinding {
 }
 
 impl BoundFunctionAuthority {
+    pub fn local_dependencies(&self) -> Option<&[FunctionDefinitionLease]> {
+        match self {
+            Self::Local { dependencies, .. } => Some(dependencies),
+            Self::Portable { .. } => None,
+        }
+    }
+
     /// Represents an unregistered bound ID without granting execution or
     /// transport authority. This preserves value inspection without turning a
     /// numeric ID into an executable capability.
@@ -145,7 +262,27 @@ impl BoundFunctionAuthority {
         dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     ) -> Self {
-        let mut indices = HashMap::with_capacity(dependencies.len() + 1);
+        Self::local_with_static_sites(issuer, definition, dependencies, Vec::new(), export)
+    }
+
+    pub fn local_with_static_sites(
+        issuer: Weak<()>,
+        definition: FunctionDefinitionLease,
+        mut dependencies: Vec<FunctionDefinitionLease>,
+        static_sites: Vec<StaticSiteDefinitionLease>,
+        export: LocalExport,
+    ) -> Self {
+        // A selected static graph is a set of exact function/owner leases.
+        // Registry traversal order depends on the rooted entrypoint, but it
+        // must not change authority equality. The owner pointer is used only
+        // as a local tie-breaker for duplicate function IDs; the lookup index
+        // below still marks those IDs ambiguous.
+        dependencies.sort_unstable_by(|left, right| {
+            left.function
+                .cmp(&right.function)
+                .then_with(|| Arc::as_ptr(&left.owner).cmp(&Arc::as_ptr(&right.owner)))
+        });
+        let mut indices = HashMap::<usize, Option<usize>>::with_capacity(dependencies.len() + 1);
         for (index, lease) in std::iter::once(&definition)
             .chain(dependencies.iter())
             .enumerate()
@@ -159,6 +296,7 @@ impl BoundFunctionAuthority {
             issuer,
             definition,
             dependencies: dependencies.into(),
+            static_sites: static_sites.into(),
             indices: Arc::new(indices),
             export,
         }
@@ -209,6 +347,66 @@ impl BoundFunctionAuthority {
         }
     }
 
+    pub fn static_sites(&self) -> &[StaticSiteDefinitionLease] {
+        match self {
+            Self::Local { static_sites, .. } => static_sites,
+            Self::Portable { .. } => &[],
+        }
+    }
+
+    /// Derive every exact target once at invocation admission. The shared site
+    /// and dependency lease arrays survive an escaped child binding, while
+    /// dispatch uses a prebuilt site map rather than rescanning per call.
+    pub fn selected_site_bindings(&self) -> Result<Vec<SelectedStaticSiteBinding>, &'static str> {
+        let Self::Local {
+            issuer,
+            static_sites,
+            ..
+        } = self
+        else {
+            return Ok(Vec::new());
+        };
+        if issuer.strong_count() == 0 {
+            return Err("selected static site issuer has retired");
+        }
+        Ok(static_sites
+            .iter()
+            .map(|selected| {
+                let function = selected.definition.function();
+                let mut indices =
+                    HashMap::<usize, Option<usize>>::with_capacity(selected.dependencies.len() + 1);
+                for (index, lease) in std::iter::once(&selected.definition)
+                    .chain(selected.dependencies.iter())
+                    .enumerate()
+                {
+                    indices
+                        .entry(lease.function())
+                        .and_modify(|known| *known = None)
+                        .or_insert(Some(index));
+                }
+                let authority = Self::Local {
+                    issuer: issuer.clone(),
+                    definition: selected.definition.clone(),
+                    dependencies: Arc::clone(&selected.dependencies),
+                    static_sites: Arc::clone(static_sites),
+                    indices: Arc::new(indices),
+                    export: LocalExport::Exact(selected.target),
+                };
+                SelectedStaticSiteBinding {
+                    caller_unit: selected.caller_unit,
+                    caller: selected.caller,
+                    site: selected.site,
+                    target_binding: BoundFunctionBinding {
+                        function,
+                        authority,
+                    },
+                    target_unit: selected.target_unit,
+                    target: selected.target,
+                }
+            })
+            .collect())
+    }
+
     /// Two derived static bindings share one immutable issued dependency
     /// graph. This is not an authority check by itself; the selected lease is
     /// still validated against the executable registry at the call boundary.
@@ -220,6 +418,7 @@ impl BoundFunctionAuthority {
                     issuer: left_issuer,
                     definition: left_definition,
                     dependencies: left_dependencies,
+                    static_sites: left_static_sites,
                     indices: left_indices,
                     export: left_export,
                 },
@@ -227,12 +426,14 @@ impl BoundFunctionAuthority {
                     issuer: right_issuer,
                     definition: right_definition,
                     dependencies: right_dependencies,
+                    static_sites: right_static_sites,
                     indices: right_indices,
                     export: right_export,
                 }
             ) if Weak::ptr_eq(left_issuer, right_issuer)
                 && left_definition == right_definition
                 && Arc::ptr_eq(left_dependencies, right_dependencies)
+                && Arc::ptr_eq(left_static_sites, right_static_sites)
                 && Arc::ptr_eq(left_indices, right_indices)
                 && left_export == right_export
         )
@@ -258,6 +459,7 @@ impl PartialEq for BoundFunctionAuthority {
                     issuer: left,
                     definition: left_definition,
                     dependencies: left_dependencies,
+                    static_sites: left_static_sites,
                     export: left_export,
                     ..
                 },
@@ -265,6 +467,7 @@ impl PartialEq for BoundFunctionAuthority {
                     issuer: right,
                     definition: right_definition,
                     dependencies: right_dependencies,
+                    static_sites: right_static_sites,
                     export: right_export,
                     ..
                 },
@@ -272,6 +475,7 @@ impl PartialEq for BoundFunctionAuthority {
                 Weak::ptr_eq(left, right)
                     && left_definition == right_definition
                     && left_dependencies == right_dependencies
+                    && left_static_sites == right_static_sites
                     && left_export == right_export
             }
             (Self::Portable { origin: left }, Self::Portable { origin: right }) => left == right,
@@ -350,5 +554,32 @@ mod tests {
             LocalExport::Ephemeral,
         );
         assert!(binding.authority.local_lease(11).is_none());
+    }
+
+    #[test]
+    fn local_graph_order_is_canonical_but_owner_and_duplicate_ambiguity_remain_exact() {
+        let issuer = Arc::new(());
+        let definition = Arc::new(FunctionDefinitionOwner::default());
+        let first = Arc::new(FunctionDefinitionOwner::default());
+        let second = Arc::new(FunctionDefinitionOwner::default());
+        let different = Arc::new(FunctionDefinitionOwner::default());
+        let make = |dependencies: Vec<(usize, &Arc<FunctionDefinitionOwner>)>| {
+            BoundFunctionAuthority::local(
+                Arc::downgrade(&issuer),
+                FunctionDefinitionOwner::issue(&definition, 1),
+                dependencies
+                    .into_iter()
+                    .map(|(function, owner)| FunctionDefinitionOwner::issue(owner, function))
+                    .collect(),
+                LocalExport::Ephemeral,
+            )
+        };
+        let selected = make(vec![(3, &second), (2, &first)]);
+        assert_eq!(selected, make(vec![(2, &first), (3, &second)]));
+        assert_ne!(selected, make(vec![(2, &first), (3, &different)]));
+
+        let duplicate = make(vec![(2, &second), (2, &first)]);
+        assert_eq!(duplicate, make(vec![(2, &first), (2, &second)]));
+        assert!(duplicate.local_lease(2).is_none());
     }
 }

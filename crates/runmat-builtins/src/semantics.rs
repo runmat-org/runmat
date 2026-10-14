@@ -56,6 +56,7 @@ pub enum BuiltinWorkspaceEffect {
     ClearsFunctionCache,
     LoadsExternalBindings,
     DynamicEval,
+    DynamicEvalCurrentWorkspace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,7 +314,14 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "eval" | "evalin" => BuiltinSemantics {
+        "eval" | "evalc" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Workspace,
+            ..BuiltinSemantics::unknown()
+        },
+        "evalin" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEval),
             purity: BuiltinPurity::Impure,

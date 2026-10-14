@@ -445,7 +445,7 @@ fn visit_rvalue_operands_mut(value: &mut MirRvalue, visitor: &mut dyn FnMut(&mut
     }
 }
 
-fn visit_stmt_operands(
+pub(crate) fn visit_stmt_operands(
     statement: &MirStmt,
     visitor: &mut dyn FnMut(&MirOperand),
     descend_expression_regions: bool,

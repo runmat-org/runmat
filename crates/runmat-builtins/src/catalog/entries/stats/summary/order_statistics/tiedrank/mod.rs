@@ -11,6 +11,7 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 pub use extensions::DATA_EXTENSION as TIEDRANK_DATA_EXTENSION;
 
 pub const TIEDRANK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tiedrank" },
     category: "stats/summary",

@@ -255,7 +255,9 @@ mod tests {
         });
     }
 
-    fn cleanup_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
+    fn cleanup_invoker(
+        counter: Arc<Mutex<usize>>,
+    ) -> Arc<crate::user_functions::UnscopedFunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {
             assert!(
                 args.is_empty(),
@@ -263,9 +265,11 @@ mod tests {
             );
             assert_eq!(requested_outputs, 0);
             let counter = Arc::clone(&counter);
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 *counter.lock().unwrap() += 1;
-                Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Tensor(
+                    runmat_value::Tensor::zeros(vec![0, 0]),
+                ))
             })
         })
     }
@@ -363,7 +367,11 @@ mod tests {
             )
             .await
             .expect("create kept cleanup");
-            set_workspace(&[("removed", removed), ("kept", kept)]);
+            removed.with_owned(|removed_value| {
+                kept.with_owned(|kept_value| {
+                    set_workspace(&[("removed", removed_value), ("kept", kept_value)]);
+                });
+            });
 
             clearvars_builtin_async(vec![Value::from("-except"), Value::from("kept")])
                 .await
@@ -412,9 +420,11 @@ mod tests {
                 crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_function, _, _| {
-                    crate::sequence::single_value_future(async {
+                    Box::pin(async {
                         crate::workspace::try_assign("y", Value::Num(2.0))?;
-                        Ok(Value::Num(0.0))
+                        let output = crate::sequence::single_value_sequence(Value::Num(0.0))?;
+                        crate::execution::RootedValueSequence::new(output)
+                            .map_err(|error| error.into_runtime_error())
                     })
                 }),
             ));
@@ -423,7 +433,9 @@ mod tests {
             )
             .await
             .expect("create cleanup");
-            set_workspace(&[("x", cleanup), ("y", Value::Num(1.0))]);
+            cleanup.with_owned(|value| {
+                set_workspace(&[("x", value), ("y", Value::Num(1.0))]);
+            });
 
             clearvars_builtin_async(vec![Value::from("x"), Value::from("y")])
                 .await

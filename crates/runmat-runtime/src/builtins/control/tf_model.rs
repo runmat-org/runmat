@@ -156,6 +156,7 @@ pub fn ensure_tf_class_registered() {
                     access: MemberAccess::Public,
                     function_name: format!("{TF_CLASS}.{method_name}"),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }

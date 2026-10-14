@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 use super::ExecutableUnit;
 
+#[path = "native/class_retention.rs"]
+mod class_retention;
+
 /// Owned canonical frontend product used by both background JIT compilation
 /// and ahead-of-time object emission.
 ///
@@ -22,6 +25,7 @@ pub struct NativeCompilationInput {
 pub struct AotObjectDataOptions {
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
     pub builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
     pub native_interfaces: Vec<u8>,
     pub mex_artifacts: Vec<u8>,
     pub java_artifacts: Vec<u8>,
@@ -55,6 +59,13 @@ impl NativeCompilationInput {
     }
 
     fn validate_entrypoint(&self) -> Result<(), runmat_runtime::RuntimeError> {
+        if self.manifest.identity.entrypoint_kind
+            == runmat_execution::ExecutableEntrypointKind::DeclarationOnly
+        {
+            return Err(native_product_error(
+                "declaration-only executable has no native entrypoint".into(),
+            ));
+        }
         if self.manifest.identity.entrypoint_kind
             == runmat_execution::ExecutableEntrypointKind::Script
         {
@@ -105,6 +116,7 @@ impl NativeCompilationInput {
                 "native retention set omits the executable entrypoint".into(),
             ));
         }
+        let retained = class_retention::close(&self, retained)?;
         let retained_local = retained
             .iter()
             .map(|function| {
@@ -211,6 +223,7 @@ impl NativeCompilationInput {
         let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             assembly,
             runmat_execution::Digest::sha256(&native_ir),
+            options.foreign_policy,
             self.source_map.clone(),
             options.runtime_binding_mode,
             options.builtin_bindings,
@@ -298,33 +311,44 @@ impl ExecutableUnit {
             .map_err(native_product_error)?;
         let selected = super::portable_entrypoint::resolve(self, preferred_function)
             .map_err(native_product_error)?;
-        if selected.kind == runmat_execution::ExecutableEntrypointKind::Function {
-            let body = self
-                .functions()
-                .get(selected.compiled_function)
-                .ok_or_else(|| {
-                    native_product_error(
-                        "native entrypoint has no exact selected function body".into(),
+        let (compiled_entrypoint, portable_function) = match selected {
+            super::portable_entrypoint::PortableEntrypoint::Callable {
+                compiled_function,
+                function,
+                kind,
+                ..
+            } => {
+                if kind == runmat_execution::ExecutableEntrypointKind::Function {
+                    let body = self.functions().get(compiled_function).ok_or_else(|| {
+                        native_product_error(
+                            "native entrypoint has no exact selected function body".into(),
+                        )
+                    })?;
+                    let expected = runmat_execution::FunctionBindingOrigin::from_revision(
+                        &envelope.manifest.identity.program,
+                        function,
                     )
-                })?;
-            let expected = runmat_execution::FunctionBindingOrigin::from_revision(
-                &envelope.manifest.identity.program,
-                selected.function,
-            )
-            .map_err(|error| native_product_error(error.to_string()))?;
-            if body.portable_function != selected.function
-                || body.binding_origin.is_some_and(|origin| origin != expected)
-            {
+                    .map_err(|error| native_product_error(error.to_string()))?;
+                    if body.portable_function != function
+                        || body.binding_origin.is_some_and(|origin| origin != expected)
+                    {
+                        return Err(native_product_error(
+                            "native entrypoint lies outside its portable executable origin".into(),
+                        ));
+                    }
+                }
+                (compiled_function, function)
+            }
+            super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(_) => {
                 return Err(native_product_error(
-                    "native entrypoint lies outside its portable executable origin".into(),
+                    "declaration-only executable has no native callable entrypoint".into(),
                 ));
             }
-        }
-        let compiled_entrypoint = selected.compiled_function;
+        };
         let entrypoint = runmat_native_codegen::NativeEntrypointBinding::new(
             self.mir(),
             compiled_entrypoint,
-            selected.function,
+            portable_function,
         )
         .map_err(|error| native_product_error(error.to_string()))?;
         let mut captured_functions = self.functions().clone();
@@ -478,18 +502,22 @@ mod tests {
             .prepare_native_compilation_for(Some("nativeIdentityProbe"))
             .expect("prepare native input");
         assert_eq!(input.entrypoint(), compiled);
-        assert_eq!(input.manifest.identity.entrypoint_function, portable);
+        assert_eq!(input.manifest.identity.entrypoint_function, Some(portable));
         let assembly = input
             .lower(runmat_native_codegen::NativeTarget::current())
             .expect("lower remapped native entrypoint");
         assert!(assembly.entrypoints.contains(&compiled));
         assert_eq!(assembly.selected_entrypoint, compiled);
         assert_eq!(assembly.selected_portable_entrypoint, portable);
-        assert_eq!(assembly.executable_identity.entrypoint_function, portable);
+        assert_eq!(
+            assembly.executable_identity.entrypoint_function,
+            Some(portable)
+        );
 
         let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             &assembly,
             runmat_execution::Digest::sha256(b"native identity fixture"),
+            None,
             unit.source_map()
                 .portable_v2()
                 .expect("portable source map"),
@@ -498,7 +526,7 @@ mod tests {
         )
         .expect("project AOT program identity");
         assert_eq!(program.entrypoint, compiled);
-        assert_eq!(program.executable.entrypoint_function, portable);
+        assert_eq!(program.executable.entrypoint_function, Some(portable));
 
         let decoy = unit
             .functions()
@@ -537,9 +565,10 @@ end
         ))
         .expect("compile nonfinite capture fixture");
         let retained = unit
-            .reachability_report()
-            .retained_function_ids()
-            .map(|function| runmat_types::ProgramFunctionId(u32::try_from(function).unwrap()))
+            .reachability_analysis()
+            .1
+            .into_iter()
+            .map(|function| runmat_types::ProgramFunctionId(u32::try_from(function.0).unwrap()))
             .collect::<BTreeSet<_>>();
         let input = unit
             .prepare_native_compilation()
@@ -605,10 +634,12 @@ end
             .nodes
             .iter()
             .all(|node| node.symbol != "unused_nested"));
-        let retained = report
-            .retained_function_ids()
+        let retained = unit
+            .reachability_analysis()
+            .1
+            .into_iter()
             .map(|function| {
-                u32::try_from(function)
+                u32::try_from(function.0)
                     .map(runmat_types::ProgramFunctionId)
                     .expect("portable function identity")
             })
@@ -663,6 +694,7 @@ end
                     runtime_binding_mode:
                         runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
                     builtin_bindings: Vec::new(),
+                    foreign_policy: None,
                     native_interfaces: br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
                     mex_artifacts: br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
                     java_artifacts: br#"{"schema_version":1,"environment":null,"artifacts":[]}"#

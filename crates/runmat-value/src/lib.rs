@@ -27,10 +27,16 @@ pub use array::{
     ValidatedComplexTensorParts, ValidatedNumericTensorParts, ValidatedSparseCscParts,
 };
 pub use callable::{
-    BoundFunctionAuthority, BoundFunctionBinding, Closure, FunctionDefinitionLease,
-    FunctionDefinitionOwner, LocalExport,
+    BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,
+    CallableInstanceId, CallableInstanceKey, Closure, ClosureData, FunctionDefinitionLease,
+    FunctionDefinitionOwner, LexicalEnvironment, LocalExport, NamedFunctionHandle,
+    SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding,
+    StaticSiteDefinitionLease,
 };
-pub use display::{format_number, get_display_format, set_display_format, FormatMode};
+pub use display::{
+    format_number, get_display_format, select_display_format_owner, set_display_format,
+    DisplayFormatOwner, DisplayFormatSelectionGuard, FormatMode,
+};
 pub use exception::{MException, MExceptionParts};
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
 pub use numeric::{
@@ -44,7 +50,10 @@ pub use object::{
     GraphicsCallbackKind, GraphicsCallbackResult, GraphicsReceiverKind, GraphicsReceiverRef,
     GraphicsSceneLease, HandleRef, Listener, MemmapElementType, MemmapFieldState,
     MemmapFormatPresentationState, MemmapReceiverAuthority, MemmapReceiverState, ObjectArray,
-    ObjectArrayAdmission, ObjectInstance, ObjectPersistencePayloadKind, ValidatedObjectArrayParts,
+    ObjectArrayAdmission, ObjectInstance, ObjectPersistencePayloadKind, SelectedObjectClassFacts,
+    SelectedObjectMethod, SelectedReceiverClassDeclaration, SelectedReceiverDeclarations,
+    SelectedReceiverMethodDeclaration, SelectedReceiverPropertyDeclaration,
+    ValidatedObjectArrayParts,
 };
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{

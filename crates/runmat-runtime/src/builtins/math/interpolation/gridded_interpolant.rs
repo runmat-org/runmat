@@ -231,6 +231,7 @@ fn ensure_gridded_interpolant_class_registered() {
                 access: MemberAccess::Public,
                 function_name: BUILTIN_SUBSREF.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -261,7 +262,10 @@ async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
-async fn gridded_interpolant_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
+async fn gridded_interpolant_subsref(
+    obj: Value,
+    subscript: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(obj, path, gridded_interpolant_read_step, None)
         .await
@@ -270,9 +274,9 @@ async fn gridded_interpolant_subsref(obj: Value, subscript: Value) -> BuiltinRes
 async fn gridded_interpolant_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
-    match step.kind() {
+    let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => gridded_member(obj, payload),
         crate::object::indexing::ObjectIndexKind::Paren => {
             let spec = object_to_spec(&obj)?;
@@ -284,5 +288,6 @@ async fn gridded_interpolant_read_step(
         crate::object::indexing::ObjectIndexKind::Brace => {
             Err(invalid("brace indexing is not supported"))
         }
-    }
+    }?;
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }

@@ -78,12 +78,12 @@ impl WgpuProvider {
 
             let pipeline = self.pipelines.eye.get(emission)?;
             {
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-eye-noop"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-eye-noop"),
+                    },
+                );
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-eye-noop-pass"),
                     timestamp_writes: None,
@@ -335,12 +335,12 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("zeros_like: word count overflow"))?;
         let buffer = self.with_emission(|emission, pending| -> Result<_> {
             let buffer = self.create_integer_word_buffer(emission, words, "runmat-zeros-like")?;
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-zeros-like-clear"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-zeros-like-clear"),
+                },
+            );
             encoder.clear_buffer(&buffer, 0, None);
             self.submit(emission, pending, encoder)?;
             Ok(buffer)
@@ -384,9 +384,7 @@ impl WgpuProvider {
             if size_bytes > 0 {
                 // Write zeros across the entire buffer
                 let zero_bytes = vec![0u8; size_bytes as usize];
-                emission
-                    .queue()
-                    .write_buffer(buffer.as_ref(), 0, &zero_bytes);
+                emission.write_buffer(buffer.as_ref(), 0, &zero_bytes);
             }
             Ok(buffer)
         })??;
@@ -626,13 +624,12 @@ impl WgpuProvider {
                             _pad1: 0,
                             _pad2: 0,
                         };
-                        let params_buffer = emission.device().create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
+                        let params_buffer =
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-ndgrid-params"),
                                 contents: bytes_of(&params),
                                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            },
-                        );
+                            });
                         let bind_group =
                             emission
                                 .device()
@@ -1023,12 +1020,12 @@ impl WgpuProvider {
             }
 
             {
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-linspace-noop"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-linspace-noop"),
+                    },
+                );
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-linspace-noop-pass"),
                     timestamp_writes: None,
@@ -1194,12 +1191,12 @@ impl WgpuProvider {
                 return Ok(out_buffer);
             }
             {
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-diag-vec-noop"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-diag-vec-noop"),
+                    },
+                );
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-diag-vec-noop-pass"),
                     timestamp_writes: None,
@@ -1312,12 +1309,12 @@ impl WgpuProvider {
             let out_buffer =
                 self.create_storage_buffer(emission, diag_len, "runmat-diag-extract-out")?;
             {
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-diag-extract-noop"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-diag-extract-noop"),
+                    },
+                );
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-diag-extract-noop-pass"),
                     timestamp_writes: None,

@@ -18,6 +18,8 @@ use crate::builtins::common::{binary as common_binary, gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{
     reject_integer_logical_operands, try_integer_remainder, IntegerRemainderOp,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::rem")]
@@ -101,30 +103,58 @@ fn rem_error_with_message(
 #[runtime_builtin(
     name = "rem",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::rounding::rem"
+    builtin_path = "crate::builtins::math::rounding::rem",
+    context = true
 )]
-async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn rem_builtin(
+    runtime: Option<RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     super::unary::reject_excess_outputs(BUILTIN_NAME, &REM_ERROR_TOO_MANY_OUTPUTS)?;
     match crate::builtins::table::plan_binary(lhs, rhs)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
     {
         common_binary::BinaryInputPlan::Values(values) => {
             let (left, right) = *values;
-            rem_non_tabular(left, right).await
+            rem_non_tabular(runtime.as_ref(), left, right).await
         }
         common_binary::BinaryInputPlan::Structured(plan) => {
-            let (source, variables) = plan.variables();
-            let mut output = Vec::with_capacity(variables.len());
-            for (name, left, right) in variables {
-                output.push((name, rem_non_tabular(left, right).await?));
-            }
-            crate::builtins::table::finish_binary(&source, output)
-                .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error.to_string()))
+            let crate::builtins::table::TabularBinaryPlan {
+                source,
+                variables,
+                right_values,
+            } = plan;
+            right_values
+                .with_owned_values_async(|rights| async move {
+                    let mut names = Vec::with_capacity(variables.len());
+                    let mut output = RootedValuesBuilder::with_capacity(variables.len());
+                    for ((name, left), right) in variables.into_iter().zip(rights) {
+                        let column = rem_non_tabular(runtime.as_ref(), left, right).await?;
+                        names.push(name);
+                        output.push_owned(column);
+                    }
+                    let output = output
+                        .finish()
+                        .map_err(|error| error.into_runtime_error())?;
+                    crate::builtins::table::finish_binary_owned(&source, names, output).map_err(
+                        |error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error.to_string()),
+                    )
+                })
+                .await
         }
     }
 }
 
-async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn rem_non_tabular(
+    runtime: Option<&RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     super::binary::admit_real_resident(&lhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
     super::binary::admit_real_resident(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
     if crate::builtins::duration::is_duration_object(&lhs)
@@ -134,7 +164,7 @@ async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
         let lhs = gather_value(lhs).await?;
         let rhs = gather_value(rhs).await?;
-        return match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME)
+        let published = match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME)
             .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
         {
             common_binary::BinaryInputPlan::Values(values) => {
@@ -146,7 +176,8 @@ async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
                 super::binary::finish_duration(plan, result, BUILTIN_NAME)
                     .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error.to_string()))
             }
-        };
+        }?;
+        return super::unary::root_output(published);
     }
     if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
         || matches!(&rhs, Value::Complex(_, _) | Value::ComplexTensor(_))
@@ -163,12 +194,13 @@ async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     super::binary::require_resident_provider(&lhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
     super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
     super::preparation::remainder(
+        runtime,
         &runmat_builtins::REM_CATALOG_ENTRY,
         runmat_types::FloatingRemainderKind::Remainder,
         lhs,
         rhs,
         |error| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, error),
-        rem_values,
+        |left, right| async move { super::unary::root_output(rem_values(left, right).await?) },
     )
     .await
 }

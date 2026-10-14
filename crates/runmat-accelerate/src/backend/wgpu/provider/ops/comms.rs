@@ -1,7 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{cast_slice, Pod, Zeroable};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
-use wgpu::util::DeviceExt;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
 use super::backend_types::WgpuProvider;
@@ -43,28 +42,24 @@ impl WgpuProvider {
             } else {
                 match self.precision {
                     NumericPrecision::F64 => runmat_accelerate_api::WgpuBufferOwner::new(
-                        emission
-                            .device()
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(label),
-                                contents: cast_slice(data),
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            }),
+                        emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                            label: Some(label),
+                            contents: cast_slice(data),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        }),
                     ),
                     NumericPrecision::F32 => {
                         let data_f32: Vec<f32> = data.iter().map(|value| *value as f32).collect();
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some(label),
-                                    contents: cast_slice(&data_f32),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some(label),
+                                contents: cast_slice(&data_f32),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     }
                 }
@@ -199,15 +194,13 @@ impl WgpuProvider {
                 let error_words = [u32::MAX, 0, 0, 0];
                 let error_bytes = cast_slice(&error_words);
                 let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-modulate-constellation-error"),
-                            contents: error_bytes,
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_SRC
-                                | wgpu::BufferUsages::COPY_DST,
-                        }),
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-modulate-constellation-error"),
+                        contents: error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    }),
                 );
 
                 let bgl = validated.layout.clone();
@@ -265,12 +258,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-modulate-constellation-encoder"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-modulate-constellation-encoder"),
+                    },
+                );
                 {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("runmat-modulate-constellation-pass"),
@@ -467,15 +460,13 @@ impl WgpuProvider {
                 let error_words = [u32::MAX, 0, 0, 0];
                 let error_bytes = cast_slice(&error_words);
                 let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-modulate-bits-constellation-error"),
-                            contents: error_bytes,
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_SRC
-                                | wgpu::BufferUsages::COPY_DST,
-                        }),
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-modulate-bits-constellation-error"),
+                        contents: error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    }),
                 );
 
                 let bgl = validated.layout.clone();
@@ -536,12 +527,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-modulate-bits-constellation-encoder"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-modulate-bits-constellation-encoder"),
+                    },
+                );
                 {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("runmat-modulate-bits-constellation-pass"),

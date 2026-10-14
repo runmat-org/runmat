@@ -16,6 +16,7 @@ fn discarded_outputs_still_invoke_each_callback_once() {
             Box::pin(async {
                 crate::sequence::ValueSequence::comma_separated(Vec::new())
                     .map_err(crate::sequence::sequence_error_to_runtime)
+                    .and_then(rooted_sequence)
             })
         },
     )));
@@ -26,7 +27,7 @@ fn discarded_outputs_still_invoke_each_callback_once() {
         Vec::new(),
     )
     .unwrap();
-    assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+    assert!(matches!(result.value(), Value::OutputList(values) if values.is_empty()));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
@@ -48,6 +49,7 @@ fn passes_requested_output_count_to_bound_callbacks() {
                     Value::Num(value + 10.0),
                 ])
                 .map_err(crate::sequence::sequence_error_to_runtime)
+                .and_then(rooted_sequence)
             })
         },
     )));
@@ -58,7 +60,7 @@ fn passes_requested_output_count_to_bound_callbacks() {
         Vec::new(),
     )
     .unwrap();
-    let Value::OutputList(outputs) = result else {
+    let Value::OutputList(outputs) = result.value() else {
         panic!("expected output list")
     };
     assert_eq!(outputs.len(), 2);
@@ -101,7 +103,7 @@ fn error_handler_receives_the_original_callback_identity() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             let context = arguments.first().cloned();
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 match function {
                     101 => Err(crate::build_runtime_error("field callback failed")
                         .with_identifier("RunMat:Test:OriginalCallback")
@@ -122,6 +124,8 @@ fn error_handler_receives_the_original_callback_identity() {
                     }
                     _ => panic!("unexpected semantic callback"),
                 }
+                .and_then(crate::sequence::single_value_sequence)
+                .and_then(rooted_sequence)
             })
         },
     )));
@@ -136,7 +140,7 @@ fn error_handler_receives_the_original_callback_identity() {
         ],
     )
     .unwrap();
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("expected uniform output")
     };
     assert_eq!(result.materialize_f64(), vec![7.0]);

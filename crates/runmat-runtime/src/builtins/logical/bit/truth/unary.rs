@@ -1,17 +1,24 @@
 use runmat_builtins::LogicalUnaryOperator;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::BuiltinResult;
 
 use super::{contract, operand, provider};
 
-pub(crate) async fn execute(value: Value, operation: LogicalUnaryOperator) -> BuiltinResult<Value> {
+pub(crate) async fn execute(
+    value: Value,
+    operation: LogicalUnaryOperator,
+) -> BuiltinResult<RootedValue> {
+    let _input =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     let (name, invalid) = contract::unary(operation);
     if let Value::Object(object) = value {
         if crate::builtins::table::is_tabular_object(&object) {
             let variables = crate::builtins::table::table_variables(&object)
                 .map_err(|error| operand::error_with_detail(name, invalid, error))?;
-            let mut output = StructValue::new();
+            let mut names = Vec::with_capacity(variables.fields.len());
+            let mut output = RootedValuesBuilder::with_capacity(variables.fields.len());
             for (variable_name, value) in variables.fields {
                 let result = scalar_or_array(value, operation, name, invalid)
                     .await
@@ -22,10 +29,16 @@ pub(crate) async fn execute(value: Value, operation: LogicalUnaryOperator) -> Bu
                             format!("table variable {variable_name}: {}", error.message()),
                         )
                     })?;
-                output.insert(variable_name, result);
+                output.push_owned(result);
+                names.push(variable_name);
             }
-            return crate::builtins::table::table_replace_variables_like(&object, output)
-                .map_err(|error| operand::error_with_detail(name, invalid, error));
+            let output = output
+                .finish()
+                .map_err(|error| error.into_runtime_error())?;
+            return crate::builtins::table::table_replace_variables_like_owned(
+                &object, names, output,
+            )
+            .map_err(|error| operand::error_with_detail(name, invalid, error));
         }
         return Err(operand::error_with_detail(
             name,
@@ -41,11 +54,11 @@ async fn scalar_or_array(
     operation: LogicalUnaryOperator,
     name: &'static str,
     invalid: &'static runmat_builtins::BuiltinErrorDescriptor,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let output_source = provider::select_unary_source(&value, name)?;
     if let Value::GpuTensor(handle) = &value {
         if let Some(output) = provider::unary_hook(handle, name)? {
-            return Ok(output);
+            return RootedValue::new(output).map_err(|error| error.into_runtime_error());
         }
     }
     let buffer = operand::from_value(name, value, invalid).await?;
@@ -57,5 +70,6 @@ async fn scalar_or_array(
             .collect(),
     };
     let value = operand::into_value(name, data, buffer.shape, invalid)?;
-    provider::restore_explicit(value, output_source.as_ref(), name)
+    let output = provider::restore_explicit(value, output_source.as_ref(), name)?;
+    RootedValue::new(output).map_err(|error| error.into_runtime_error())
 }

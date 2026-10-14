@@ -11,14 +11,22 @@ pub(crate) enum MemberPresence {
 fn declared_or_stored(
     obj: &runmat_value::ObjectInstance,
     field: &runmat_types::MemberName,
-) -> MemberPresence {
+) -> Result<MemberPresence, RuntimeError> {
+    let selected = crate::class_registry::checked_receiver_projection(obj)?;
     if obj.properties.contains_key(&field.0)
         || obj.has_dynamic_property(&field.0)
-        || crate::class_registry::lookup_property(&obj.class_name, field).is_some()
+        || selected.as_ref().map_or_else(
+            || crate::class_registry::lookup_property(&obj.class_name, field).is_some(),
+            |projection| {
+                projection
+                    .receiver_property(&obj.class_name, field)
+                    .is_some()
+            },
+        )
     {
-        MemberPresence::Present
+        Ok(MemberPresence::Present)
     } else {
-        MemberPresence::Absent
+        Ok(MemberPresence::Absent)
     }
 }
 
@@ -29,7 +37,7 @@ pub(crate) fn has_stored_member(
     field: &runmat_types::MemberName,
 ) -> Result<MemberPresence, RuntimeError> {
     match base {
-        Value::Object(obj) => Ok(declared_or_stored(obj, field)),
+        Value::Object(obj) => declared_or_stored(obj, field),
         Value::HandleObject(handle) => runmat_gc::gc_with_value(&handle.target, |value| {
             let Value::Object(obj) = value else {
                 return Err(invalid_handle());
@@ -40,7 +48,7 @@ pub(crate) fn has_stored_member(
             {
                 return Err(invalid_handle());
             }
-            Ok(declared_or_stored(obj, field))
+            declared_or_stored(obj, field)
         })
         .map_err(|_| invalid_handle())?,
         Value::ClassRef(class) => Ok(
@@ -63,7 +71,9 @@ pub(crate) fn has_stored_member(
             MemberPresence::Absent
         }),
         Value::ObjectArray(array) => {
-            if crate::class_registry::lookup_property(array.class_name(), field).is_some() {
+            if array.is_empty()
+                && crate::class_registry::lookup_property(array.class_name(), field).is_some()
+            {
                 return Ok(MemberPresence::Present);
             }
             for element in array.data() {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueSequence, RootedValues};
 use crate::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
 use crate::sequence::ResolveValueSequence;
 use crate::{runtime_error::semantic_error, RuntimeError};
@@ -78,7 +79,7 @@ pub enum MaterializedExpansionSource {
 pub async fn expand_arguments(
     runtime: &RuntimeContext,
     arguments: Vec<MaterializedArgument>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<RootedValues, RuntimeError> {
     let roots = roots::ExpansionRoots::new()?;
     roots.retain_arguments(&arguments);
     let mut expanded_arguments = Vec::new();
@@ -86,12 +87,17 @@ pub async fn expand_arguments(
         match argument {
             MaterializedArgument::Single(value) => expanded_arguments.push(value),
             MaterializedArgument::Expansion(source) => {
-                let values = materialize_expansion(runtime, source).await?.resolve(
-                    runmat_types::SequenceUse::ExpandAll,
-                    crate::sequence::SequenceResolutionContext::default(),
-                )?;
-                roots.retain_values(&values);
-                expanded_arguments.extend(values);
+                materialize_expansion(runtime, source)
+                    .await?
+                    .with_owned_sequence(|sequence| {
+                        let values = sequence.resolve(
+                            runmat_types::SequenceUse::ExpandAll,
+                            crate::sequence::SequenceResolutionContext::default(),
+                        )?;
+                        roots.retain_values(&values);
+                        expanded_arguments.extend(values);
+                        Ok::<_, RuntimeError>(())
+                    })?;
             }
             MaterializedArgument::Sequence(sequence) => {
                 let values = sequence.resolve(
@@ -103,13 +109,15 @@ pub async fn expand_arguments(
             }
         }
     }
-    Ok(expanded_arguments)
+    RootedValues::new(expanded_arguments).map_err(|error| error.into_runtime_error())
 }
 
 pub async fn materialize_expansion(
     runtime: &RuntimeContext,
     source: MaterializedExpansionSource,
-) -> Result<crate::sequence::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
+    let source_roots = roots::ExpansionRoots::new()?;
+    source_roots.retain_source(&source);
     let values = match source {
         MaterializedExpansionSource::CellContents {
             base,
@@ -120,10 +128,14 @@ pub async fn materialize_expansion(
                 match base {
                     Value::Cell(cell) => crate::object::cell::expand_all_cell_values(&cell)?,
                     Value::Composite(handle) => {
-                        expand_composite_values(runtime, *handle, &[], true).await?
+                        return expand_composite_values(runtime, *handle, &[], true)
+                            .await?
+                            .with_owned_values(rooted_sequence_from_values);
                     }
                     base @ (Value::Object(_) | Value::HandleObject(_)) => {
-                        expand_brace_values(base, &[], None).await?
+                        return expand_brace_values(base, &[], None)
+                            .await?
+                            .with_owned_values(rooted_sequence_from_values);
                     }
                     _ => {
                         return Err(semantic_error(
@@ -138,10 +150,14 @@ pub async fn materialize_expansion(
                         crate::object::cell::expand_cell_indices(&cell, &indices)?
                     }
                     (Value::Composite(handle), _) => {
-                        expand_composite_values(runtime, *handle, &indices, false).await?
+                        return expand_composite_values(runtime, *handle, &indices, false)
+                            .await?
+                            .with_owned_values(rooted_sequence_from_values);
                     }
                     (base @ (Value::Object(_) | Value::HandleObject(_)), _) => {
-                        expand_brace_values(base, &indices, None).await?
+                        return expand_brace_values(base, &indices, None)
+                            .await?
+                            .with_owned_values(rooted_sequence_from_values);
                     }
                     _ => {
                         return Err(semantic_error(
@@ -152,7 +168,9 @@ pub async fn materialize_expansion(
                 }
             }
         }
-        MaterializedExpansionSource::ReturnedOutputs(sequence) => return Ok(sequence),
+        MaterializedExpansionSource::ReturnedOutputs(sequence) => {
+            return RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error());
+        }
         MaterializedExpansionSource::Member { base, member } => {
             return crate::object::resolve::read_member_sequence_with_context(
                 Some(runtime),
@@ -176,8 +194,15 @@ pub async fn materialize_expansion(
             .await;
         }
     };
-    crate::sequence::ValueSequence::comma_separated(values)
-        .map_err(crate::sequence::sequence_error_to_runtime)
+    rooted_sequence_from_values(values)
+}
+
+fn rooted_sequence_from_values(values: Vec<Value>) -> Result<RootedValueSequence, RuntimeError> {
+    RootedValueSequence::new(
+        crate::sequence::ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?,
+    )
+    .map_err(|error| error.into_runtime_error())
 }
 
 /// The sole executor bridge from legacy builtin multi-output values into the
@@ -191,9 +216,9 @@ pub fn adapt_legacy_builtin_result(value: Value) -> Result<ValueSequence, Runtim
     }
 }
 
-/// Projects typed execution outputs only where an unmigrated public builtin
-/// ABI still requires one `Value`. Callers must return that value immediately;
-/// executor, session, and service state must retain `ValueSequence`.
+/// Raw projection for the legacy builtin `Value` shape. Managed outputs may
+/// pass through this function only while a rooted source owner remains live and
+/// a rooted replacement is registered before that owner retires.
 pub(crate) fn project_legacy_builtin_value_abi(sequence: ValueSequence) -> Value {
     let kind = sequence.kind();
     let mut values = sequence.into_values();
@@ -203,12 +228,23 @@ pub(crate) fn project_legacy_builtin_value_abi(sequence: ValueSequence) -> Value
     }
 }
 
+/// Project an owning sequence at the legacy scalar ABI boundary without
+/// retiring its managed roots before the replacement value is registered.
+pub(crate) fn project_rooted_legacy_builtin_value_abi(
+    sequence: RootedValueSequence,
+) -> Result<RootedValue, RuntimeError> {
+    sequence.try_map_owned(
+        |sequence| Ok(project_legacy_builtin_value_abi(sequence)),
+        |error| error.into_runtime_error(),
+    )
+}
+
 async fn expand_composite_values(
     runtime: &RuntimeContext,
     handle: runmat_execution::CompositeHandle,
     indices: &[Value],
     expand_all: bool,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<RootedValues, RuntimeError> {
     crate::parallel::lease::validate_composite(runtime, &handle)?;
     if !expand_all && indices.len() != 1 {
         return Err(semantic_error(
@@ -237,8 +273,7 @@ async fn expand_composite_values(
         .service_ports()
         .require_distributed("Composite comma-separated-list expansion")
         .map_err(|error| semantic_error("RuntimeCapabilityUnavailable", error.to_string()))?;
-    let roots = roots::ExpansionRoots::new()?;
-    let mut values = Vec::with_capacity(selected_ranks.len());
+    let mut values = crate::execution::RootedValuesBuilder::with_capacity(selected_ranks.len());
     for selected_rank in selected_ranks {
         let Value::Int(IntValue::U32(rank)) = selected_rank else {
             return Err(semantic_error(
@@ -255,17 +290,18 @@ async fn expand_composite_values(
                     "the selected lab did not assign this Composite value",
                 )
             })?;
-        roots.retain_values(std::slice::from_ref(&value));
-        values.push(value);
+        values.push_owned(value);
     }
-    Ok(values)
+    values.finish().map_err(|error| error.into_runtime_error())
 }
 
 pub async fn expand_brace_values(
     base: Value,
     indices: &[Value],
     pad_to_outputs: Option<usize>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<RootedValues, RuntimeError> {
+    let input_roots = roots::ExpansionRoots::new()?;
+    input_roots.retain_iter(std::iter::once(&base).chain(indices.iter()));
     let mut values = match base {
         Value::Cell(cell) => {
             if indices.is_empty() {
@@ -296,7 +332,11 @@ pub async fn expand_brace_values(
                 pad_to_outputs.unwrap_or(1),
             )
             .await?;
-            value.into_values()
+            return value.with_owned_sequence(|sequence| {
+                let mut values = sequence.into_values();
+                pad_brace_values(&mut values, pad_to_outputs);
+                RootedValues::new(values).map_err(|error| error.into_runtime_error())
+            });
         }
         _ => {
             return Err(semantic_error(
@@ -305,6 +345,11 @@ pub async fn expand_brace_values(
             ));
         }
     };
+    pad_brace_values(&mut values, pad_to_outputs);
+    RootedValues::new(values).map_err(|error| error.into_runtime_error())
+}
+
+fn pad_brace_values(values: &mut Vec<Value>, pad_to_outputs: Option<usize>) {
     if let Some(output_count) = pad_to_outputs {
         if values.len() > output_count {
             values.truncate(output_count);
@@ -312,13 +357,12 @@ pub async fn expand_brace_values(
             values.resize(output_count, Value::Num(0.0));
         }
     }
-    Ok(values)
 }
 
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_value::{CellArray, Value, ValueSequence};
+    use runmat_value::{CellArray, HandleRef, Value, ValueSequence};
 
     use super::{expand_arguments, MaterializedArgument, MaterializedExpansionSource};
 
@@ -406,6 +450,60 @@ mod tests {
         let sequence = ValueSequence::comma_separated(Vec::new()).expect("empty output sequence");
         let projected = super::project_legacy_builtin_value_abi(sequence);
         assert!(matches!(projected, Value::OutputList(values) if values.is_empty()));
+    }
+
+    #[test]
+    fn rooted_legacy_projector_preserves_zero_single_and_multiple_managed_outputs() {
+        runmat_gc::gc_test_context(|| {
+            for count in 0..=2 {
+                let mut initial_roots = Vec::new();
+                let mut handles = Vec::new();
+                let mut values = Vec::new();
+                for index in 0..count {
+                    let initial = runmat_gc::gc_allocate_rooted(Value::String(
+                        format!("projected output {index}").into(),
+                    ))
+                    .expect("allocate managed output");
+                    let handle = initial.handle();
+                    values.push(Value::HandleObject(HandleRef {
+                        class_name: "ProjectedOutput".into(),
+                        target: handle,
+                        valid: true,
+                    }));
+                    handles.push(handle);
+                    initial_roots.push(initial);
+                }
+                let sequence = if count == 1 {
+                    ValueSequence::single(values.remove(0)).expect("single output")
+                } else {
+                    ValueSequence::comma_separated(values).expect("comma-separated outputs")
+                };
+                let source =
+                    crate::execution::RootedValueSequence::new(sequence).expect("source roots");
+                for initial in initial_roots {
+                    initial.unroot().expect("transfer source roots");
+                }
+                let projected = super::project_rooted_legacy_builtin_value_abi(source)
+                    .expect("project under the original roots");
+                runmat_gc::gc_collect_major().expect("collect with projected owner");
+                for handle in &handles {
+                    assert!(runmat_gc::gc_clone_value(handle).is_ok());
+                }
+                match count {
+                    1 => assert!(matches!(projected.value(), Value::HandleObject(_))),
+                    0 | 2 => assert!(matches!(
+                        projected.value(),
+                        Value::OutputList(outputs) if outputs.len() == count
+                    )),
+                    _ => unreachable!(),
+                }
+                drop(projected);
+                runmat_gc::gc_collect_major().expect("collect after projected owner");
+                for handle in &handles {
+                    assert!(runmat_gc::gc_clone_value(handle).is_err());
+                }
+            }
+        });
     }
 
     #[test]

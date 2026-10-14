@@ -4,7 +4,11 @@ use crate::OBJECT_INDEX_MEMBER;
 use futures::executor::block_on;
 use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericScalar};
 
-async fn decomposition_subsref(obj: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
+async fn decomposition_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     validate_output_count()?;
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::decomposition_subsref(obj, subscript).await
@@ -78,6 +82,10 @@ pub(super) fn approx_vec(value: Value) -> Vec<f64> {
             .materialize_f64(),
         other => panic!("expected real tensor, got {other:?}"),
     }
+}
+
+pub(super) fn approx_vec_rooted(value: crate::execution::RootedValue) -> Vec<f64> {
+    value.with_owned(approx_vec)
 }
 
 mod compatibility;

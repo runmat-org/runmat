@@ -13,7 +13,7 @@ pub async fn feval_builtin_registered(
     requested_outputs: Option<usize>,
     f: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<runmat_value::ValueSequence> {
+) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
     let input_callsite = crate::callsite::current_callsite().and_then(|mut callsite| {
         (!callsite.arg_spans.is_empty()).then(|| {
             callsite.arg_spans.remove(0);

@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// In-process execution uses CPython's process-wide main interpreter. Managed
+/// wheel imports are tracked for project replacement and their byte roots are
+/// retained for process-lifetime recovery, but arbitrary imports, callbacks,
+/// and native extension global state remain shared with trusted code. Use
+/// OutOfProcess for independent environments and reclaimable host byte roots.
 pub enum PythonExecutionMode {
     InProcess,
     OutOfProcess,

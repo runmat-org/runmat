@@ -1,5 +1,6 @@
 //! Parsed representation controls for the trigonometric `like` extension.
 use crate::builtins::common::gpu_helpers;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
@@ -96,13 +97,15 @@ pub(crate) async fn evaluate<C, CF, A, AF>(
     template: &Template,
     compute: C,
     adapt: A,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     C: FnOnce(Value, Vec<GpuTensorHandle>) -> CF,
-    CF: Future<Output = BuiltinResult<Value>>,
+    CF: Future<Output = BuiltinResult<RootedValue>>,
     A: FnOnce(Value, Vec<GpuTensorHandle>) -> AF,
-    AF: Future<Output = BuiltinResult<Value>>,
+    AF: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     let prepared = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -113,11 +116,13 @@ where
         .chain(template.resident())
         .cloned()
         .collect();
+    let protected_values: Vec<_> = protected.iter().cloned().map(Value::GpuTensor).collect();
+    let _protected_roots = RootedValueLease::for_values(protected_values.iter())
+        .map_err(|cause| cause.into_runtime_error())?;
     let result = compute(value, protected.clone()).await?;
     let mut adaptation_protected = protected.clone();
-    if let Value::GpuTensor(handle) = &result {
+    if let Value::GpuTensor(handle) = result.value() {
         adaptation_protected.push(handle.clone());
     }
-    let output = adapt(result, adaptation_protected).await?;
-    Ok(output)
+    adapt(result.value().clone(), adaptation_protected).await
 }

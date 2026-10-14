@@ -59,7 +59,7 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Err(CastError::Unsupported(UnsupportedValueKind::FunctionHandle)),
         Value::ClassRef(_) => Err(CastError::Unsupported(UnsupportedValueKind::ClassReference)),
         Value::MException(_)

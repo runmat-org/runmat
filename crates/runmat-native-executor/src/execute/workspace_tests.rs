@@ -74,13 +74,17 @@ fn exact_native_detach_keeps_old_value_and_does_not_erase_rebinding() {
     );
 }
 
-fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
+pub(super) fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
     let binding = BindingId(0);
     let function = NativeFunction {
+        lexical_bindings: Vec::new(),
+        inherited_storage_bindings: Vec::new(),
+        creates_lexical_environment: false,
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "snapshot".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        lexical_parent: None,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {

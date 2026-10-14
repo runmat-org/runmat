@@ -92,15 +92,6 @@ impl ReachabilityReport {
     pub fn node(&self, id: &str) -> Option<&ReachabilityNode> {
         self.nodes.iter().find(|node| node.id == id)
     }
-
-    pub fn retained_function_ids(&self) -> impl Iterator<Item = usize> + '_ {
-        self.nodes.iter().filter_map(|node| {
-            (node.kind == ReachabilityNodeKind::Function)
-                .then(|| node.id.strip_prefix("function:"))
-                .flatten()
-                .and_then(|id| id.parse().ok())
-        })
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

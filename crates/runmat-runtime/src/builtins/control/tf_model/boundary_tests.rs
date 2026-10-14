@@ -28,7 +28,7 @@ fn state_matrix_properties_preserve_dense_rank_boundaries() {
     assert!(error.message().contains("must be square"));
 }
 
-fn assign_public_property(model: Value, name: &str, value: Value) -> Value {
+fn assign_public_property(model: Value, name: &str, value: Value) -> crate::execution::RootedValue {
     futures::executor::block_on(crate::object::resolve::store_member(
         model,
         name.into(),
@@ -53,7 +53,10 @@ fn mutated_tf_delays_require_exact_integer_to_double_conversion() {
             name,
             Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
         );
-        let error = futures::executor::block_on(TfModel::from_value_async(inexact, "feedback"))
+        let error = inexact
+            .with_owned(|inexact| {
+                futures::executor::block_on(TfModel::from_value_async(inexact, "feedback"))
+            })
             .expect_err("inexact delay must not round");
         assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
 
@@ -62,7 +65,10 @@ fn mutated_tf_delays_require_exact_integer_to_double_conversion() {
             name,
             Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
         );
-        let admitted = futures::executor::block_on(TfModel::from_value_async(exact, "feedback"))
+        let admitted = exact
+            .with_owned(|exact| {
+                futures::executor::block_on(TfModel::from_value_async(exact, "feedback"))
+            })
             .expect("exact integer delay has no invented compatibility gate");
         let delay = if name == "InputDelay" {
             admitted.input_delay
@@ -95,7 +101,9 @@ fn mutated_tf_resident_delay_is_checked_after_one_gather() {
                 .unwrap();
             let model = assign_public_property(model, "InputDelay", Value::GpuTensor(resident));
             provider.reset_telemetry();
-            let result = futures::executor::block_on(TfModel::from_value_async(model, "feedback"));
+            let result = model.with_owned(|model| {
+                futures::executor::block_on(TfModel::from_value_async(model, "feedback"))
+            });
             if valid {
                 assert_eq!(result.unwrap().input_delay, value as f64);
             } else {
@@ -117,13 +125,18 @@ fn mutated_tf_resident_delay_is_checked_after_one_gather() {
             .to_value("tf")
             .unwrap();
         let model = assign_public_property(model, "Numerator", Value::GpuTensor(resident));
-        let model = assign_public_property(
-            model,
-            "OutputDelay",
-            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
-        );
+        let model = model.with_owned(|model| {
+            assign_public_property(
+                model,
+                "OutputDelay",
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            )
+        });
         provider.reset_telemetry();
-        let error = futures::executor::block_on(TfModel::from_value_async(model, "feedback"))
+        let error = model
+            .with_owned(|model| {
+                futures::executor::block_on(TfModel::from_value_async(model, "feedback"))
+            })
             .expect_err("host delay must preflight before resident coefficient");
         assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);

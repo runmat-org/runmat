@@ -17,10 +17,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    SIGNAL_WORK_CHUNK, SignalCooperation, keyword, parse_nonnegative_integer,
-    real_vector_to_row_value, value_to_complex_vector,
+    keyword, parse_nonnegative_integer, real_vector_to_row_value, value_to_complex_vector,
+    SignalCooperation, SIGNAL_WORK_CHUNK,
 };
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "fir1";
 const EPS: f64 = 1.0e-12;
@@ -438,7 +438,11 @@ fn sinc(x: f64) -> f64 {
 }
 
 fn delta(m: f64) -> f64 {
-    if m.abs() <= EPS { 1.0 } else { 0.0 }
+    if m.abs() <= EPS {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 async fn scale_coefficients(
@@ -497,7 +501,7 @@ fn frequency_response(coeffs: &[f64], omega: f64) -> Complex<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{REQUIRED_DEFAULT_BINDING, builtin_function_by_name};
+    use runmat_builtins::{builtin_function_by_name, REQUIRED_DEFAULT_BINDING};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn call(n: Value, wn: Value, rest: &[Value]) -> BuiltinResult<Value> {
@@ -524,19 +528,15 @@ mod tests {
             builtin.binding_identity(&builtin.bindings[0])
         );
         let descriptor = builtin.descriptor;
-        assert!(
-            descriptor
-                .signatures
-                .iter()
-                .any(|sig| sig.label == "b = fir1(n, Wn)")
-        );
+        assert!(descriptor
+            .signatures
+            .iter()
+            .any(|sig| sig.label == "b = fir1(n, Wn)"));
         assert_eq!(builtin.integer_capabilities.len(), 3);
-        assert!(
-            builtin
-                .extensions
-                .iter()
-                .any(|extension| extension.id == "fir1-integer-window")
-        );
+        assert!(builtin
+            .extensions
+            .iter()
+            .any(|extension| extension.id == "fir1-integer-window"));
     }
 
     #[test]
@@ -553,8 +553,8 @@ mod tests {
     #[test]
     fn long_design_observes_invocation_cancellation() {
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-        use runmat_execution::CancellationReason;
         use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
         use std::num::NonZeroU64;
         use std::rc::Rc;
 

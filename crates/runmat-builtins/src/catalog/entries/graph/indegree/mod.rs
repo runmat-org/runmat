@@ -8,6 +8,7 @@ pub use contract::INDEGREE_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&INDEGREE_CATALOG_ENTRY];
 
 pub const INDEGREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "indegree" },
     category: "graph",

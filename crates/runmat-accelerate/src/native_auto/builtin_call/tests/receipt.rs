@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
     GpuTensorStorage, NumericElementType,
 };
+use runmat_execution::profiling::{CommandProfilingRoot, ProviderObservationCounts};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -71,10 +72,16 @@ fn query() -> runmat_accelerate_api::ProviderFeasibilityQuery {
 #[test]
 fn direct_receipt_preserves_query_and_includes_staging_before_body() {
     let probe = Rc::new(Probe::default());
+    let command = CommandProfilingRoot::new();
     let provider = provider();
     let query = query();
     let mut prepared = observed(&probe, true, vec![]);
     let observation = prepared.observation.as_mut().unwrap();
+    let feedback = observation.feedback.as_mut().expect("selected feedback");
+    feedback.runtime = feedback
+        .runtime
+        .clone()
+        .with_command_profiling(command.receipt());
     observation.prepare_provider(&provider, Some(&query));
     observation
         .recorder()
@@ -88,7 +95,7 @@ fn direct_receipt_preserves_query_and_includes_staging_before_body() {
         recorder.submission().unwrap().complete();
         recorder.confirm_provider_execution(provider.device_id(), &query.operation);
         provider.clock.0.store(180, Ordering::SeqCst);
-        Ok(Value::Num(1.0)) // residency is deliberately not evidence
+        Ok(rooted(Value::Num(1.0))) // residency is deliberately not evidence
     }))
     .unwrap();
     assert_eq!(*provider.queries.lock().unwrap(), [query]);
@@ -96,6 +103,16 @@ fn direct_receipt_preserves_query_and_includes_staging_before_body() {
     assert_eq!(feedback.len(), 1);
     assert!(feedback[0].succeeded);
     assert_eq!(feedback[0].total_elapsed_ns, 80);
+    let snapshot = command.seal();
+    assert_eq!(
+        snapshot.observations,
+        Some(ProviderObservationCounts {
+            incomplete: 1,
+            ..ProviderObservationCounts::default()
+        })
+    );
+    assert_eq!(snapshot.gpu_execution, None);
+    assert_eq!(snapshot.kernel_count, None);
 }
 
 #[test]
@@ -121,7 +138,7 @@ fn direct_unproven_or_fallback_execution_never_becomes_positive() {
             let allocation = TestAllocationOwner::new()
                 .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
                 .unwrap();
-            Ok(Value::GpuTensor(allocation.handle))
+            Ok(rooted(Value::GpuTensor(allocation.handle)))
         }))
         .unwrap();
         let feedback = probe.feedback.borrow();
@@ -240,7 +257,7 @@ fn failed_cleanup_returns_error_and_retires_each_owned_reference_once() {
         current_provider_observation()
             .unwrap()
             .confirm_provider_execution(provider.device_id(), &query().operation);
-        Ok(retained)
+        Ok(rooted(retained))
     }))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:AccelerationCleanupFailed"));

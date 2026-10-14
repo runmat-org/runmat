@@ -200,7 +200,7 @@ fn exercise(name: &str, mode: Mode) {
         }
         Mode::Success => {
             let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
-            let Value::GpuTensor(output) = result else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("{name}: native result lost residency")
             };
             assert_eq!(output.shape(), &[4, 1]);
@@ -211,7 +211,7 @@ fn exercise(name: &str, mode: Mode) {
                 .unwrap()
                 .last()
                 .unwrap()
-                .with_data(&output, |data| {
+                .with_data(output, |data| {
                     let HostNumericDataView::F64(values) = data else {
                         panic!("fixture result is F64")
                     };
@@ -305,12 +305,12 @@ fn unavailable_circshift_preserves_native_floating_integer_logical_and_complex_c
         let descriptor = input.handle.descriptor();
         let args = [Value::GpuTensor(input.handle.clone()), Value::Num(1.0)];
         let result = block_on(runmat_runtime::call_builtin_async("circshift", &args)).unwrap();
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("exact class lost residency")
         };
         assert_eq!(output.shape(), &[4, 1]);
-        assert_eq!(handle_storage(&output), storage);
-        assert_eq!(handle_is_logical(&output), logical);
+        assert_eq!(handle_storage(output), storage);
+        assert_eq!(handle_is_logical(output), logical);
         assert!(!output.shares_allocation_with(&input.handle));
         let actual = provider
             .probes
@@ -318,7 +318,7 @@ fn unavailable_circshift_preserves_native_floating_integer_logical_and_complex_c
             .unwrap()
             .last()
             .unwrap()
-            .with_data(&output, owned_numeric)
+            .with_data(output, owned_numeric)
             .unwrap();
         assert_eq!(actual, expected);
         assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
@@ -384,7 +384,7 @@ fn assert_native_noop(provider: &'static dyn AccelProvider) {
                 args.push(Value::Num(shift));
             }
             let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
-            let Value::GpuTensor(output) = result else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("{name}: no-op lost residency")
             };
             assert!(
@@ -430,22 +430,22 @@ fn actual_simple_complex_shifts_use_exact_owned_fallback_for_all_three_consumers
             args.push(Value::Num(1.0));
         }
         let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("{name}: complex class lost residency")
         };
         assert_eq!(output.shape(), &[4, 1], "{name}");
         assert_eq!(
-            handle_storage(&output),
+            handle_storage(output),
             GpuTensorStorage::ComplexInterleaved,
             "{name}"
         );
         assert!(!output.shares_allocation_with(&input), "{name}");
         assert!(
-            provider_for_handle(&output)
+            provider_for_handle(output)
                 .is_some_and(|owner| same_provider_instance(owner, provider)),
             "{name}"
         );
-        let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+        let downloaded = block_on(provider.download_numeric(output)).unwrap();
         let HostNumericDataOwned::F64(actual) = downloaded.data else {
             panic!("{name}: complex precision changed")
         };

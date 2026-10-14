@@ -38,6 +38,8 @@ impl NativeFfiAdapter {
             )));
         }
         let call_arguments = arguments[2..].to_vec();
+        let _argument_roots = crate::execution::RootedValueLease::for_values(call_arguments.iter())
+            .map_err(|error| error.into_runtime_error())?;
 
         let mut pointer_entries = Vec::new();
         let mut callback_entries = Vec::new();
@@ -68,25 +70,39 @@ impl NativeFfiAdapter {
             }
         }
 
+        let callback_results = Rc::new(RefCell::new(Vec::<crate::execution::RootedValue>::new()));
         let callback_dispatches = callback_entries
             .iter()
             .map(|(_, callable)| {
                 let context = context.clone();
                 let callable = callable.clone();
                 let callback_router = self.callback_router.clone();
+                let callback_results = Rc::clone(&callback_results);
                 Box::new(move |callback_arguments: &[Value]| {
-                    if let (Some(router), Some(callback_id)) =
+                    let rooted = if let (Some(router), Some(callback_id)) =
                         (callback_router.as_ref(), isolated_callback_id(&callable))
                     {
-                        return router.dispatch(callback_id, callback_arguments);
-                    }
-                    pollster::block_on(crate::call_feval_async_with_outputs_in_context(
-                        &context,
-                        callable.clone(),
-                        callback_arguments,
-                        1,
-                    ))
-                    .map_err(|error| error.to_string())
+                        router.dispatch(callback_id, callback_arguments)?
+                    } else {
+                        pollster::block_on(crate::call_feval_async_with_outputs_in_context(
+                            &context,
+                            callable.clone(),
+                            callback_arguments,
+                            1,
+                        ))
+                        .map_err(|error| error.to_string())?
+                    };
+                    let value = match rooted.value() {
+                        value @ (Value::Num(_)
+                        | Value::Int(_)
+                        | Value::Bool(_)
+                        | Value::Tensor(_)) => value.clone(),
+                        _ => return Err("native callback requires a real numeric scalar".into()),
+                    };
+                    // The C callback ABI consumes the returned numeric Value
+                    // before invocation ends; keep its producer lease alive.
+                    callback_results.borrow_mut().push(rooted);
+                    Ok(value)
                 }) as Box<dyn runmat_native_ffi::CallbackDispatch>
             })
             .collect::<Vec<_>>();
@@ -186,13 +202,13 @@ pub(crate) fn is_callable(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
 
 pub(crate) fn isolated_callback_value(callback_id: u64) -> Value {
-    Value::FunctionHandle(format!(
+    Value::function_handle(format!(
         "__runmat_native_ffi_isolated_callback_{callback_id}"
     ))
 }

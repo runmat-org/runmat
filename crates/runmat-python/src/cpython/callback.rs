@@ -1,10 +1,12 @@
 use std::ffi::c_void;
-use std::sync::mpsc;
 
 use super::api::{capsule_pointer, PyMethodDef, PyObject};
 use super::interpreter::Interpreter;
 use super::support::{c_string, checked};
-use crate::object::{PythonCallbackCommand, PythonLaneEvent};
+use crate::session::protocol::{
+    PythonCallbackCommand, PythonCallbackEvent, PythonCallbackMailbox, PythonCallbackMessage,
+    PythonLaneEvent, PythonLaneReply,
+};
 use crate::{PythonCallbackInvocation, PythonError};
 
 const METH_VARARGS: i32 = 0x0001;
@@ -81,15 +83,15 @@ unsafe extern "C" fn invoke_callback(
             ),
         );
     };
-    let (commands, command_receiver) = mpsc::sync_channel(1);
+    let mailbox = PythonCallbackMailbox::new();
     if events
-        .send(PythonLaneEvent::Callback {
-            invocation: PythonCallbackInvocation {
+        .send(PythonLaneEvent::Callback(PythonCallbackEvent::new(
+            PythonCallbackInvocation {
                 callback: capsule.callback,
                 arguments,
             },
-            commands,
-        })
+            mailbox.clone(),
+        )))
         .is_err()
     {
         return callback_error(
@@ -101,28 +103,51 @@ unsafe extern "C" fn invoke_callback(
         );
     }
     loop {
-        match command_receiver.recv() {
-            Ok(PythonCallbackCommand::Return(Ok(value))) => {
-                return match Interpreter::to_owned(interpreter.as_ref(), value) {
-                    Ok(value) => value,
-                    Err(error) => callback_error(&interpreter, error),
-                };
+        match mailbox.recv() {
+            PythonCallbackMessage::Complete(result) => match result {
+                Ok(value) => {
+                    return match Interpreter::to_owned(interpreter.as_ref(), value) {
+                        Ok(value) => value,
+                        Err(error) => callback_error(&interpreter, error),
+                    };
+                }
+                Err(error) => return callback_error(&interpreter, error),
+            },
+            PythonCallbackMessage::Command(PythonCallbackCommand::Reenter {
+                call,
+                reply,
+                observer,
+            }) => {
+                let result = crate::session::observation::observe(observer, || {
+                    with_reply_events(&interpreter, &reply, || interpreter.invoke_with_gil(call))
+                });
+                reply.send(result);
             }
-            Ok(PythonCallbackCommand::Return(Err(error))) => {
-                return callback_error(&interpreter, error);
+            PythonCallbackMessage::Command(PythonCallbackCommand::Metadata {
+                handle,
+                reply,
+                observer,
+            }) => {
+                let result = crate::session::observation::observe(observer, || {
+                    with_reply_events(&interpreter, &reply, || {
+                        interpreter.metadata_with_gil(handle)
+                    })
+                });
+                reply.send(result);
             }
-            Ok(PythonCallbackCommand::Reenter { call, reply }) => {
-                let _ = reply.send(interpreter.invoke_with_gil(call));
-            }
-            Err(_) => {
-                return callback_error(
-                    &interpreter,
-                    PythonError::host(
-                        "PythonCallbackError",
-                        "Python callback response channel closed",
-                    ),
-                );
-            }
+        }
+    }
+}
+
+fn with_reply_events<T, R>(
+    interpreter: &Interpreter,
+    reply: &PythonLaneReply<T>,
+    operation: impl FnOnce() -> R,
+) -> R {
+    match reply {
+        PythonLaneReply::Sync(_) => interpreter.without_callback_events(operation),
+        PythonLaneReply::Events { sink, .. } => {
+            interpreter.with_callback_events(sink.clone(), operation)
         }
     }
 }

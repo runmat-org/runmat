@@ -15,6 +15,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+fn rooted_empty_sequence() -> BuiltinResult<crate::execution::RootedValueSequence> {
+    crate::execution::RootedValueSequence::new(crate::sequence::ValueSequence::empty())
+        .map_err(|error| error.into_runtime_error())
+}
+
 mod absolute_startat;
 mod catalog;
 mod fixture;

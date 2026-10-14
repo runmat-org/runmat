@@ -17,7 +17,7 @@ impl BuiltinPreparationObservation for Observer {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -46,17 +46,17 @@ impl RuntimeAccelerationService for Service {
         assert_eq!(request.form().data_arguments, &[0]);
         assert_eq!(request.admission().signature, 0);
         self.events.borrow_mut().push("prepare");
-        let operands = if self.replace_invalid {
-            vec![Value::String("invalid service replacement".into())]
-        } else {
-            request.into_operands()
-        };
+        let replace_invalid = self.replace_invalid;
         let observer = Observer(self.events.clone());
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                operands,
-                Some(Box::new(observer)),
-            ))
+            request.into_operands().with_owned_values(|operands| {
+                let operands = if replace_invalid {
+                    vec![Value::String("invalid service replacement".into())]
+                } else {
+                    operands
+                };
+                PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
+            })
         })
     }
 }

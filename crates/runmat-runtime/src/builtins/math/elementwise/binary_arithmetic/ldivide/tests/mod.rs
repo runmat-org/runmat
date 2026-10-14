@@ -13,7 +13,7 @@ const EPS: f64 = 1e-12;
 const GPU_EPS: f64 = 1e-6;
 
 fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::ldivide_builtin(lhs, rhs, rest))
+    block_on(super::ldivide_builtin(None, lhs, rhs, rest)).map(|owned| owned.value().clone())
 }
 
 mod contract;

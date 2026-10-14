@@ -12,7 +12,7 @@ fn call(
     name: &str,
     args: &[Value],
     outputs: usize,
-) -> Result<ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     futures::executor::block_on(crate::call_builtin_sequence_async_with_outputs_in_context(
         runtime, name, args, outputs,
     ))
@@ -22,7 +22,7 @@ fn call_implicit(
     runtime: &RuntimeContext,
     name: &str,
     args: &[Value],
-) -> Result<ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     futures::executor::block_on(crate::call_builtin_sequence_async_in_context(
         runtime, name, args,
     ))

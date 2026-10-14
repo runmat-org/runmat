@@ -442,23 +442,51 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { runmat_builtins::BuiltinFuture }
     };
     let wrapper_args = if binding_variant_lit.is_some() {
-        quote! { let args = invocation.args.to_vec(); }
+        // Register the original argument graph before returning the future:
+        // a caller may retire its roots before this future is first polled.
+        quote! {
+            let args = crate::execution::RootedValues::new(invocation.args.to_vec());
+        }
     } else {
         quote! { let args = args.to_vec(); }
     };
 
-    let result_adaptation = if output_sequence {
+    let result_adaptation = if binding_variant_lit.is_some() {
+        quote! { crate::builtin::CanonicalBuiltinOutput::into_rooted_sequence(value) }
+    } else if output_sequence {
         quote! { Ok(value) }
-    } else if binding_variant_lit.is_some() {
-        // Existing handlers retain their Value-returning ABI until migrated.
-        // Adapt once here; the canonical binding and executors carry sequences.
-        quote! {
-            crate::call::arguments::adapt_legacy_builtin_result(
-                runmat_value::Value::from(value),
-            )
-        }
     } else {
         quote! { Ok(runmat_value::Value::from(value)) }
+    };
+    let invocation_body = quote! {
+        if #is_last_variadic {
+            if args.len() < #param_len - 1 {
+                return Err(std::convert::From::from(format!(
+                    "expected at least {} args, got {}",
+                    #param_len - 1,
+                    args.len()
+                )));
+            }
+        } else if args.len() != #param_len {
+            return Err(std::convert::From::from(format!(
+                "expected {} args, got {}",
+                #param_len,
+                args.len()
+            )));
+        }
+        #(#conv_stmts)*
+        let value = #call_expr;
+        #result_adaptation
+    };
+    let wrapper_body = if binding_variant_lit.is_some() {
+        quote! {
+            let args = args.map_err(|error| error.into_runtime_error())?;
+            args.with_owned_values_async(|args| async move {
+                #invocation_body
+            }).await
+        }
+    } else {
+        invocation_body
     };
     let wrapper = quote! {
         fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
@@ -468,24 +496,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #requested_outputs_binding
             #call_observation_binding
             Box::pin(async move {
-                if #is_last_variadic {
-                    if args.len() < #param_len - 1 {
-                        return Err(std::convert::From::from(format!(
-                            "expected at least {} args, got {}",
-                            #param_len - 1,
-                            args.len()
-                        )));
-                    }
-                } else if args.len() != #param_len {
-                    return Err(std::convert::From::from(format!(
-                        "expected {} args, got {}",
-                        #param_len,
-                        args.len()
-                    )));
-                }
-                #(#conv_stmts)*
-                let value = #call_expr;
-                #result_adaptation
+                #wrapper_body
             })
         }
     };

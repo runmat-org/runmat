@@ -16,6 +16,7 @@ pub enum ObjectNamespace {
     Log,
     Checkpoint,
     ForeignArtifact,
+    ForeignPolicy,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -62,7 +63,8 @@ impl ObjectDescriptor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LogicalObject {
     pub descriptor: ObjectDescriptor,
     pub bytes: Vec<u8>,

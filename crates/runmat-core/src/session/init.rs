@@ -1,4 +1,5 @@
 use super::*;
+mod child_settings;
 
 impl RunMatSession {
     /// Create a new session
@@ -8,10 +9,45 @@ impl RunMatSession {
 
     /// Create a new session with specific options
     pub fn with_options(enable_jit: bool, verbose: bool) -> Result<Self> {
-        Self::initialize(enable_jit, verbose)
+        Self::initialize(
+            enable_jit,
+            verbose,
+            #[cfg(not(target_arch = "wasm32"))]
+            std::rc::Rc::new(SessionLocalTaskSupervisor::new()),
+            None,
+        )
     }
 
-    fn initialize(enable_jit: bool, verbose: bool) -> Result<Self> {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_options_on_parent_driver(
+        enable_jit: bool,
+        verbose: bool,
+        parent: &runmat_runtime::context::RuntimeLocalTaskChildFactory,
+        parent_context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self> {
+        Self::initialize(
+            enable_jit,
+            verbose,
+            std::rc::Rc::new(parent.create()?),
+            Some(parent_context),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn with_options_for_test_child(
+        enable_jit: bool,
+        verbose: bool,
+        parent_context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self> {
+        Self::initialize(enable_jit, verbose, Some(parent_context))
+    }
+
+    fn initialize(
+        enable_jit: bool,
+        verbose: bool,
+        #[cfg(not(target_arch = "wasm32"))] local_tasks: std::rc::Rc<SessionLocalTaskSupervisor>,
+        parent_context: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> Result<Self> {
         #[cfg(not(target_arch = "wasm32"))]
         let native_tiering_enabled = enable_jit && cfg!(feature = "jit");
         #[cfg(all(not(target_arch = "wasm32"), not(feature = "jit")))]
@@ -33,15 +69,35 @@ impl RunMatSession {
             cancellation.handle().token(),
         )
         .with_search_path(search_path);
+        let inherited_command_profiling = parent_context
+            .and_then(runmat_runtime::context::RuntimeContext::command_profiling)
+            .cloned();
+        let runtime_context = if let Some(origin) = inherited_command_profiling.as_ref() {
+            runtime_context.with_command_profiling(origin.clone())
+        } else {
+            runtime_context
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let runtime_context = if let Some(parent) = parent_context {
+            runtime_context
+                .try_inherit_foreign_callback_lineage_for_child(parent)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "child session callback lineage requires independent Runtime owners"
+                    )
+                })?
+        } else {
+            runtime_context
+        };
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
+        #[cfg(target_arch = "wasm32")]
         let local_tasks = std::rc::Rc::new(SessionLocalTaskSupervisor::new());
         let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
-        let source_evaluator =
-            std::rc::Rc::new(super::source_evaluation::SessionSourceEvaluator::new(
-                base_workspace.clone(),
-                runtime_context.local_identity(),
-            ));
+        let source_evaluator = super::source_evaluation::SessionSourceEvaluator::new(
+            base_workspace.clone(),
+            runtime_context.local_identity(),
+        );
         let base_workspace_service = std::rc::Rc::new(
             runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace.clone()),
         );
@@ -65,7 +121,9 @@ impl RunMatSession {
         let runtime_services =
             runtime_services.with_process(super::process_host::default_process_service());
         #[cfg(not(target_arch = "wasm32"))]
-        let runtime_services = if let Some(directory) =
+        let runtime_services = if let Some(parent) = parent_context {
+            child_settings::inherit_caller_settings(runtime_services, parent)
+        } else if let Some(directory) =
             runmat_config::runtime::ApplicationSettingsDirectory::discover()
         {
             let driver = super::host_driver::host_driver()?;
@@ -83,14 +141,18 @@ impl RunMatSession {
         };
         #[cfg(target_arch = "wasm32")]
         let runtime_services = {
-            // IndexedDB is origin-scoped and the explicit browser host can
-            // replace this namespace with an application-specific one.
-            let settings = std::rc::Rc::new(
-                runmat_runtime::context::BrowserPreferenceService::anonymous_origin_local(),
-            );
-            runtime_services
-                .with_preferences(settings.clone())
-                .with_user_path(settings)
+            if let Some(parent) = parent_context {
+                child_settings::inherit_caller_settings(runtime_services, parent)
+            } else {
+                // IndexedDB is origin-scoped and the explicit browser host can
+                // replace this namespace with an application-specific one.
+                let settings = std::rc::Rc::new(
+                    runmat_runtime::context::BrowserPreferenceService::anonymous_origin_local(),
+                );
+                runtime_services
+                    .with_preferences(settings.clone())
+                    .with_user_path(settings)
+            }
         };
         #[cfg(not(target_arch = "wasm32"))]
         let runtime_services = runtime_services.with_tcp(super::tcp_host::default_tcp_service());
@@ -126,16 +188,18 @@ impl RunMatSession {
                 mex,
             )
         };
+        let canonical_device_route_ports = runtime_services.clone();
         let runtime_context = runtime_context.with_service_ports(runtime_services);
         let lifecycle_host = runmat_runtime::context::RuntimeLifecycleHost::new(
             &runtime_context,
             local_tasks.clone(),
-        )?;
+        )
+        .map_err(super::error_conversion::into_anyhow)?;
         super::source_evaluation::install_bound_invoker(&runtime_context, &source_evaluator);
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),
-            workspace_bindings: HashMap::new(),
+            workspace_bindings: Rc::new(RefCell::new(HashMap::new())),
             base_workspace,
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             active_source_identity: None,
@@ -160,10 +224,27 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             native_tiering_enabled,
             project_handoff: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            private_project_root: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_project_foreign: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_selected_foreign_input: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            selected_foreign_config: Some(Arc::new({
+                let mut config = runmat_config::runtime::RunMatRuntimeConfig::default();
+                // Embedding sessions retain the native adapter's in-process
+                // default. Application configuration may choose isolation.
+                config.foreign.native.isolation =
+                    runmat_config::runtime::NativeFfiIsolation::InProcess;
+                config
+            })),
             source_pool: SourcePool::default(),
             source_evaluator,
             cancellation: cancellation.clone(),
             runtime_context,
+            canonical_device_route_ports,
+            inherited_command_profiling,
             graphics_callbacks: None,
             local_tasks,
             lifecycle_host,
@@ -183,7 +264,6 @@ impl RunMatSession {
             compat_mode: CompatMode::Matlab,
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
-            format_mode: runmat_value::FormatMode::default(),
             pending_companion_source_discovery: None,
         };
 

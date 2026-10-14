@@ -1,4 +1,5 @@
 mod assembly;
+mod super_constructor;
 mod context;
 mod function;
 mod inventory;

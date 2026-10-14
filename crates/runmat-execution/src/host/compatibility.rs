@@ -43,6 +43,15 @@ pub enum ExecutionHostTarget {
     BrowserWasm,
 }
 
+/// Placement facts from one additional, independently admitted executable
+/// unit. This never merges foreign names or changes the primary recipe.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectedUnitHostRequirement {
+    pub environment: ProgramEnvironment,
+    pub interop: InteropManifest,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionHostRequirement {
@@ -51,6 +60,11 @@ pub struct ExecutionHostRequirement {
     pub native_target: Option<NativeTargetIdentity>,
     pub capabilities: CapabilitySet,
     pub interop: InteropManifest,
+    /// Placement facts for additional selected executable units. The primary
+    /// environment and interop remain the build recipe's identity; each
+    /// retained unit is checked independently without merging foreign names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_units: Vec<SelectedUnitHostRequirement>,
     pub execution_stack: ExecutionStackRequirement,
     pub permitted_trust_tiers: BTreeSet<ExecutionTrustTier>,
 }
@@ -74,11 +88,37 @@ impl ExecutionHostRequirement {
             native_target: None,
             capabilities,
             interop,
+            additional_units: Vec::new(),
             execution_stack,
             permitted_trust_tiers,
         };
         requirement.validate()?;
         Ok(requirement)
+    }
+
+    pub fn with_selected_unit_requirements(
+        mut self,
+        additional: Vec<SelectedUnitHostRequirement>,
+    ) -> Result<Self, ContractError> {
+        self.additional_units = additional;
+        let selected_stack = self
+            .interop_manifests()
+            .flat_map(|manifest| manifest.adapters.iter())
+            .map(|adapter| adapter.execution_stack)
+            .max()
+            .unwrap_or_default();
+        self.execution_stack = self.execution_stack.max(selected_stack);
+        self.validate()?;
+        Ok(self)
+    }
+
+    fn interop_manifests(&self) -> impl Iterator<Item = &InteropManifest> {
+        std::iter::once(&self.interop).chain(self.additional_units.iter().map(|unit| &unit.interop))
+    }
+
+    fn environments(&self) -> impl Iterator<Item = &ProgramEnvironment> {
+        std::iter::once(&self.environment)
+            .chain(self.additional_units.iter().map(|unit| &unit.environment))
     }
 
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -88,17 +128,43 @@ impl ExecutionHostRequirement {
                 supported: EXECUTION_HOST_SCHEMA_VERSION,
             });
         }
-        self.environment.validate()?;
+        for environment in self.environments() {
+            environment.validate()?;
+        }
         if let Some(target) = &self.native_target {
             target.validate()?;
         }
-        self.interop
-            .validate()
-            .map_err(|error| ContractError::invalid("interop manifest", error.to_string()))?;
-        let adapter_stack = self
-            .interop
-            .adapters
+        for manifest in self.interop_manifests() {
+            manifest
+                .validate()
+                .map_err(|error| ContractError::invalid("interop manifest", error.to_string()))?;
+        }
+        if self.additional_units.len() >= crate::value::GRAPH_MAX_SELECTED_UNITS {
+            return Err(ContractError::invalid(
+                "selected unit placement",
+                "additional unit count exceeds selected graph-unit bound",
+            ));
+        }
+        let additional_bytes = self
+            .additional_units
             .iter()
+            .try_fold(0usize, |total, unit| {
+                let bytes = serde_json::to_vec(unit).map_err(|error| {
+                    ContractError::invalid("selected unit placement", error.to_string())
+                })?;
+                total.checked_add(bytes.len()).ok_or_else(|| {
+                    ContractError::invalid("selected unit placement", "serialized size overflows")
+                })
+            })?;
+        if additional_bytes > crate::EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES {
+            return Err(ContractError::invalid(
+                "selected unit placement",
+                "additional unit facts exceed selected executable bytes bound",
+            ));
+        }
+        let adapter_stack = self
+            .interop_manifests()
+            .flat_map(|manifest| manifest.adapters.iter())
             .map(|adapter| adapter.execution_stack)
             .max()
             .unwrap_or_default();
@@ -120,13 +186,15 @@ impl ExecutionHostRequirement {
     pub fn is_satisfied_by(&self, host: &ExecutionHostInventory) -> Result<(), ContractError> {
         self.validate()?;
         host.validate()?;
-        let environment_matches = self.environment.semantic_schema == host.semantic_schema
-            && self.environment.compiler_schema == host.compiler_schema
-            && self.environment.runtime_fingerprint == host.runtime_fingerprint
-            && self.environment.catalog_fingerprint == host.catalog_fingerprint
-            && host
-                .compatibility_modes
-                .contains(&self.environment.compatibility_mode);
+        let environment_matches = self.environments().all(|environment| {
+            environment.semantic_schema == host.semantic_schema
+                && environment.compiler_schema == host.compiler_schema
+                && environment.runtime_fingerprint == host.runtime_fingerprint
+                && environment.catalog_fingerprint == host.catalog_fingerprint
+                && host
+                    .compatibility_modes
+                    .contains(&environment.compatibility_mode)
+        });
         if !environment_matches {
             return Err(ContractError::invalid(
                 "execution host",
@@ -140,7 +208,7 @@ impl ExecutionHostRequirement {
                 return Err(ContractError::invalid(
                     "execution host",
                     "native target identity differs",
-                ))
+                ));
             }
         }
         if !self.capabilities.0.is_subset(&host.capabilities.0)
@@ -153,33 +221,35 @@ impl ExecutionHostRequirement {
                 "capability, trust, or execution-stack requirements are not satisfied",
             ));
         }
-        for requirement in &self.interop.foreign_types {
-            let adapter = host.adapter_for_family(&requirement.type_identity.family)?;
-            if !requirement
-                .capabilities
-                .iter()
-                .all(|capability| adapter.foreign_capabilities.contains(capability))
-                || !host.supports_wasm_policy(requirement.wasm, adapter)
-            {
-                return Err(ContractError::invalid(
-                    "execution host",
-                    "foreign type capability or WebAssembly policy is not satisfied",
-                ));
-            }
-        }
-        for requirement in &self.interop.adapters {
-            let adapter = host.adapter(requirement.adapter.as_str())?;
-            if adapter.version < requirement.minimum_version
-                || !requirement
+        for manifest in self.interop_manifests() {
+            for requirement in &manifest.foreign_types {
+                let adapter = host.adapter_for_family(&requirement.type_identity.family)?;
+                if !requirement
                     .capabilities
-                    .0
-                    .is_subset(&adapter.capabilities.0)
-                || adapter.execution_stack < requirement.execution_stack
-            {
-                return Err(ContractError::invalid(
-                    "execution host",
-                    "foreign adapter version, capability, or execution-stack requirements are not satisfied",
-                ));
+                    .iter()
+                    .all(|capability| adapter.foreign_capabilities.contains(capability))
+                    || !host.supports_wasm_policy(requirement.wasm, adapter)
+                {
+                    return Err(ContractError::invalid(
+                        "execution host",
+                        "foreign type capability or WebAssembly policy is not satisfied",
+                    ));
+                }
+            }
+            for requirement in &manifest.adapters {
+                let adapter = host.adapter(requirement.adapter.as_str())?;
+                if adapter.version < requirement.minimum_version
+                    || !requirement
+                        .capabilities
+                        .0
+                        .is_subset(&adapter.capabilities.0)
+                    || adapter.execution_stack < requirement.execution_stack
+                {
+                    return Err(ContractError::invalid(
+                        "execution host",
+                        "foreign adapter version, capability, or execution-stack requirements are not satisfied",
+                    ));
+                }
             }
         }
         Ok(())
@@ -192,7 +262,8 @@ mod tests {
 
     use runmat_types::{
         CapabilitySet, ExecutionStackRequirement, ForeignAdapterId, ForeignAdapterRequirement,
-        InteropManifest, INTEROP_MANIFEST_SCHEMA_VERSION,
+        ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRequirement,
+        ForeignTypeIdentity, InteropManifest, INTEROP_MANIFEST_SCHEMA_VERSION,
     };
 
     use super::*;
@@ -229,6 +300,7 @@ mod tests {
                 adapters: vec![adapter_requirement(ExecutionStackRequirement::Process)],
                 adapter_contracts: Vec::new(),
             },
+            additional_units: Vec::new(),
             execution_stack: stack,
             permitted_trust_tiers: BTreeSet::from([ExecutionTrustTier::CustomerTrusted]),
         }
@@ -277,6 +349,56 @@ mod tests {
         requirement
             .is_satisfied_by(&host(ExecutionStackRequirement::Process))
             .unwrap();
+    }
+
+    #[test]
+    fn selected_unit_placement_keeps_conflicting_logical_names_separate() {
+        let mut primary = InteropManifest::empty();
+        primary.foreign_types.push(ForeignRequirement {
+            type_identity: ForeignTypeIdentity {
+                family: "native".into(),
+                name: "same_name".into(),
+                version: 1,
+            },
+            ownership: ForeignOwnership::Owned,
+            affinity: ForeignAffinity::AnyThread,
+            lifetime: ForeignLifetime::Call,
+            capabilities: Vec::new(),
+            wasm: runmat_types::WasmInteropPolicy::Portable,
+        });
+        let mut retained = primary.clone();
+        retained.foreign_types[0].ownership = ForeignOwnership::Borrowed;
+        assert!(InteropManifest::merge([primary.clone(), retained.clone()]).is_err());
+
+        let selected_requirement = ExecutionHostRequirement::portable(
+            environment(),
+            CapabilitySet::default(),
+            primary,
+            BTreeSet::from([ExecutionTrustTier::CustomerTrusted]),
+        )
+        .unwrap()
+        .with_selected_unit_requirements(vec![SelectedUnitHostRequirement {
+            environment: environment(),
+            interop: retained,
+        }])
+        .unwrap();
+        assert_eq!(selected_requirement.additional_units.len(), 1);
+        selected_requirement
+            .is_satisfied_by(&host(ExecutionStackRequirement::Process))
+            .unwrap();
+        let wire = serde_json::to_value(&selected_requirement).unwrap();
+        assert_eq!(wire["additional_units"].as_array().unwrap().len(), 1);
+        let mut stale = selected_requirement.clone();
+        stale.additional_units[0].environment.catalog_fingerprint = crate::Digest::sha256(b"stale");
+        assert!(stale
+            .is_satisfied_by(&host(ExecutionStackRequirement::Process))
+            .is_err());
+        assert!(
+            serde_json::to_value(requirement(ExecutionStackRequirement::Process))
+                .unwrap()
+                .get("additional_units")
+                .is_none()
+        );
     }
 }
 

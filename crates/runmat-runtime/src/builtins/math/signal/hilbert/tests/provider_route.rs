@@ -3,16 +3,16 @@ use crate::builtins::common::test_support;
 use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
-    NumericElementType, ProviderExecutionFuture, ProviderHilbertRequest, ThreadProviderGuard,
     test_support::{RetirementProbe, TestAllocationOwner},
-    unsupported_provider_operation,
+    unsupported_provider_operation, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+    GpuTensorStorage, HostTensorView, NumericElementType, ProviderExecutionFuture,
+    ProviderHilbertRequest, ThreadProviderGuard,
 };
-use runmat_execution::CancellationReason;
 use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use std::sync::{
-    Mutex,
     atomic::{AtomicUsize, Ordering},
+    Mutex,
 };
 
 struct NoHookProvider {

@@ -31,6 +31,7 @@ const TRAINING_LINK: BuiltinLinkContract = BuiltinLinkContract {
 };
 
 pub const TRAIN_NETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "trainNetwork",
@@ -62,6 +63,7 @@ pub const TRAIN_NETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
 };
 
 pub const TRAINNET_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "trainnet" },
     category: "deep_learning",

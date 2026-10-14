@@ -261,7 +261,8 @@ fn workspace_effect_from_builtin(
         runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings => {
             WorkspaceEffect::LoadsExternalBindings
         }
-        runmat_builtins::BuiltinWorkspaceEffect::DynamicEval => WorkspaceEffect::DynamicEval,
+        runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEval => WorkspaceEffect::DynamicEval,
     }
 }
 

@@ -354,6 +354,7 @@ mod tests {
                 requested_peak_buffer_bytes: 16,
                 clear_commands: 2,
                 map_callbacks: 2,
+                wgpu_compute_query: None,
             },
         );
         assert_ne!(without_fences, digest(&prepared));

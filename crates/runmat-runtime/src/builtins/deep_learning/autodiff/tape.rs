@@ -218,7 +218,11 @@ pub(in crate::builtins::deep_learning) async fn with_tape_context(
     function: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _input_roots = crate::execution::RootedValueLease::for_values(
+        std::iter::once(&function).chain(args.iter()),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     let tape = Rc::new(RefCell::new(Tape::new()));
     TapeFuture {
         tape,

@@ -20,18 +20,45 @@ impl DynamicFunctionCache {
         self.entries.borrow().get(path).cloned()
     }
 
+    pub(super) fn declares_super_class(
+        entry: &DynamicFunctionCacheEntry,
+        parent: &runmat_types::ClassIdentity,
+    ) -> bool {
+        let declares = |instruction: &runmat_vm::Instr| matches!(instruction, runmat_vm::Instr::RegisterClass { name, .. } if name == parent);
+        entry.admitted.bytecode().instructions.iter().any(declares)
+            || entry.admitted.registry().functions.values().any(|body| {
+                body.binding_origin.map(|origin| origin.program)
+                    == Some(entry.entrypoint_origin.program)
+                    && (body.class_method_owner.as_ref().is_some_and(|owner| {
+                        owner.declaring_class == *parent
+                            && owner.role == runmat_types::ClassMethodRole::Constructor
+                            && !owner.is_static
+                    }) || body.instructions.iter().any(declares))
+            })
+    }
+
     pub(super) fn insert(&self, path: PathBuf, entry: DynamicFunctionCacheEntry) {
         let retired = self.entries.borrow_mut().insert(path, entry);
         drop(retired);
     }
 
-    pub(super) fn replace_binding(&self, path: &Path, binding: BoundFunctionBinding) {
+    pub(super) fn replace_binding(
+        &self,
+        path: &Path,
+        binding: BoundFunctionBinding,
+        super_constructors: Vec<runmat_runtime::context::RetainedSuperConstructorBinding>,
+        super_dependency_origins: std::collections::HashSet<super::DynamicDependencyIdentity>,
+    ) {
         let retired = {
             let mut entries = self.entries.borrow_mut();
             if let Some(entry) = entries.get_mut(path) {
-                std::mem::replace(&mut entry.binding, binding)
+                let old_binding = std::mem::replace(&mut entry.binding, binding);
+                let old_super_constructors =
+                    std::mem::replace(&mut entry.super_constructors, super_constructors);
+                entry.super_dependency_origins = super_dependency_origins;
+                (old_binding, old_super_constructors)
             } else {
-                binding
+                (binding, super_constructors)
             }
         };
         drop(retired);

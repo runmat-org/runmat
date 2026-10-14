@@ -1,5 +1,3 @@
-use crate::interpreter::errors::mex;
-use runmat_runtime::RuntimeError;
 use runmat_types::{ClassIdentity, MemberAccess};
 use runmat_value::Value;
 
@@ -39,9 +37,9 @@ impl<P> ClassRegistration<P> {
     }
 }
 
-pub fn register_class(
+pub(crate) fn checked_class_registration(
     registration: ClassRegistration<RuntimeClassPropertyRegistration>,
-) -> Result<(), RuntimeError> {
+) -> runmat_runtime::class_registry::CheckedClassRegistration {
     let ClassRegistration {
         name,
         super_class,
@@ -52,14 +50,6 @@ pub fn register_class(
         events,
         enumerations,
     } = registration;
-    if let Some(parent) = super_class.as_ref() {
-        if runmat_runtime::class_registry::is_class_sealed(parent) {
-            return Err(mex(
-                "RunMat:ClassSealed",
-                &format!("Cannot subclass sealed class '{}'.", parent),
-            ));
-        }
-    }
     let mut prop_map = std::collections::HashMap::new();
     for property in properties {
         prop_map.insert(
@@ -81,6 +71,7 @@ pub fn register_class(
             method.name.clone(),
             runmat_runtime::class_registry::RuntimeMethod {
                 name: method.name,
+                role: method.role,
                 is_static: method.is_static,
                 is_abstract: method.is_abstract,
                 is_sealed: method.is_sealed,
@@ -91,39 +82,6 @@ pub fn register_class(
         );
     }
 
-    let inherited_sealed = collect_inherited_sealed_methods(super_class.as_ref());
-    if let Some(conflict) = method_map
-        .keys()
-        .find(|method_name| inherited_sealed.contains(*method_name))
-    {
-        return Err(mex(
-            "RunMat:MethodSealed",
-            &format!(
-                "Class '{}' cannot override sealed method '{}'.",
-                name, conflict
-            ),
-        ));
-    }
-
-    if !is_abstract {
-        let mut required_abstract = collect_required_abstract_methods(super_class.as_ref());
-        for (method_name, method) in &method_map {
-            if method.is_abstract {
-                required_abstract.insert(method_name.clone());
-            } else {
-                required_abstract.remove(method_name);
-            }
-        }
-        if let Some(missing) = required_abstract.into_iter().next() {
-            return Err(mex(
-                "RunMat:AbstractMethodMissing",
-                &format!(
-                    "Class '{}' must implement abstract method '{}'.",
-                    name, missing
-                ),
-            ));
-        }
-    }
     let def = runmat_runtime::class_registry::RuntimeClass {
         events: events
             .into_iter()
@@ -134,60 +92,10 @@ pub fn register_class(
         properties: prop_map,
         methods: method_map,
     };
-    runmat_runtime::class_registry::register_class_with_modifiers(def, is_sealed, is_abstract);
-    runmat_runtime::class_registry::register_class_enumerations(&name, enumerations);
-    Ok(())
-}
-
-fn collect_required_abstract_methods(
-    super_class: Option<&ClassIdentity>,
-) -> std::collections::HashSet<runmat_types::MethodName> {
-    let mut lineage = Vec::new();
-    let mut visited = std::collections::HashSet::new();
-    let mut cursor = super_class.cloned();
-    while let Some(class_name) = cursor {
-        if !visited.insert(class_name.clone()) {
-            break;
-        }
-        let Some(class_def) = runmat_runtime::class_registry::get_class(&class_name) else {
-            break;
-        };
-        cursor = class_def.parent.clone();
-        lineage.push(class_def);
+    runmat_runtime::class_registry::CheckedClassRegistration {
+        class: def,
+        is_sealed,
+        is_abstract,
+        enumerations,
     }
-    lineage.reverse();
-    let mut required = std::collections::HashSet::new();
-    for class_def in lineage {
-        for (method_name, method) in class_def.methods {
-            if method.is_abstract {
-                required.insert(method_name);
-            } else {
-                required.remove(&method_name);
-            }
-        }
-    }
-    required
-}
-
-fn collect_inherited_sealed_methods(
-    super_class: Option<&ClassIdentity>,
-) -> std::collections::HashSet<runmat_types::MethodName> {
-    let mut sealed = std::collections::HashSet::new();
-    let mut visited = std::collections::HashSet::new();
-    let mut cursor = super_class.cloned();
-    while let Some(class_name) = cursor {
-        if !visited.insert(class_name.clone()) {
-            break;
-        }
-        let Some(class_def) = runmat_runtime::class_registry::get_class(&class_name) else {
-            break;
-        };
-        for (method_name, method) in &class_def.methods {
-            if method.is_sealed {
-                sealed.insert(method_name.clone());
-            }
-        }
-        cursor = class_def.parent;
-    }
-    sealed
 }

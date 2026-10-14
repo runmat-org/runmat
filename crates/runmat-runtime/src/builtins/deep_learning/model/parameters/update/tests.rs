@@ -5,7 +5,7 @@ use crate::builtins::deep_learning::layers::{
 use crate::builtins::deep_learning::model::dlnetwork_builtin;
 use futures::executor::block_on;
 
-fn network() -> ObjectInstance {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(2.0),
@@ -17,19 +17,24 @@ fn network() -> ObjectInstance {
         ],
     ))
     .unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, dense], 2, 1).unwrap(),
     )]))
-    .unwrap() else {
+    .unwrap()
+}
+
+fn network_object(owner: &crate::execution::RootedValue) -> ObjectInstance {
+    let Value::Object(network) = owner.value() else {
         panic!("network expected")
     };
-    network
+    network.clone()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn empty_native_update_rejects_before_parameter_publication() {
-    let input = network();
+    let network_owner = network();
+    let input = network_object(&network_owner);
     let key = view(&input, "test").unwrap()[0].key.clone();
     let error = apply_updates(
         input.clone(),
@@ -53,7 +58,8 @@ fn empty_native_update_rejects_before_parameter_publication() {
 
 #[test]
 fn selected_native_updates_preserve_canonical_store_metadata_and_input_alias() {
-    let mut input = network();
+    let network_owner = network();
+    let mut input = network_object(&network_owner);
     input
         .properties
         .insert("UserMarker".into(), Value::String("keep".into()));
@@ -101,7 +107,8 @@ fn selected_native_updates_preserve_canonical_store_metadata_and_input_alias() {
 
 #[test]
 fn selected_updates_reject_entire_malformed_batch_before_install() {
-    let input = network();
+    let network_owner = network();
+    let input = network_object(&network_owner);
     let rows = view(&input, "test").unwrap();
     let updates = vec![
         ParameterUpdate {
@@ -124,7 +131,8 @@ fn selected_updates_reject_entire_malformed_batch_before_install() {
 
 #[test]
 fn selected_updates_reject_duplicate_foreign_and_precision_changing_keys() {
-    let input = network();
+    let network_owner = network();
+    let input = network_object(&network_owner);
     let key = view(&input, "test").unwrap()[0].key.clone();
     let value = Tensor::from_f32(vec![5.; 4], vec![2, 2]).unwrap();
     assert!(apply_updates(
@@ -166,7 +174,8 @@ fn selected_updates_reject_duplicate_foreign_and_precision_changing_keys() {
 
 #[test]
 fn selected_updates_preserve_dlarray_format_without_reusing_wrapper_identity() {
-    let mut input = network();
+    let network_owner = network();
+    let mut input = network_object(&network_owner);
     let Value::Cell(layers) = input.properties.get_mut("Layers").unwrap() else {
         panic!("Layers cell expected")
     };

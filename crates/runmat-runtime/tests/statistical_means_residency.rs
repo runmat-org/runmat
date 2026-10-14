@@ -72,9 +72,9 @@ fn verify_mean_residency(name: &str, paired: bool, single: bool, omitnan: bool, 
     if omitnan {
         arguments.push(Value::from("omitnan"));
     }
-    let Value::GpuTensor(result) = block_on(runmat_runtime::call_builtin_async(name, &arguments))
-        .unwrap_or_else(|error| panic!("{name} failed: {error}"))
-    else {
+    let result = block_on(runmat_runtime::call_builtin_async(name, &arguments))
+        .unwrap_or_else(|error| panic!("{name} failed: {error}"));
+    let Value::GpuTensor(result) = result.value() else {
         panic!("{name} should preserve same-owner floating input residency");
     };
     assert_eq!(result.shape(), &[1, 1], "{name}");
@@ -82,12 +82,12 @@ fn verify_mean_residency(name: &str, paired: bool, single: bool, omitnan: bool, 
     assert!(!result.shares_allocation_with(&input), "{name}");
     assert!(input.allocation_lease().validate_live().is_ok());
     assert!(result.allocation_lease().validate_live().is_ok());
-    let owner = runmat_accelerate_api::provider_for_handle(&result)
+    let owner = runmat_accelerate_api::provider_for_handle(result)
         .expect("result must retain its exact provider owner");
     assert!(runmat_accelerate_api::same_provider_instance(
         owner, provider
     ));
-    let host = block_on(provider.download_numeric(&result)).unwrap();
+    let host = block_on(provider.download_numeric(result)).unwrap();
     let actual = match host.data {
         HostNumericDataOwned::F32(values) if single => f64::from(values[0]),
         HostNumericDataOwned::F64(values) if !single => values[0],
@@ -228,17 +228,18 @@ fn geometric_negative_domain_is_local_to_each_resident_slice() {
     let provider = Box::leak(Box::new(InProcessProvider::new()));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = upload(provider, &[1.0, 4.0, -4.0, 9.0], &[2, 2]);
-    let Value::GpuTensor(result) = block_on(runmat_runtime::call_builtin_async(
+    let result = block_on(runmat_runtime::call_builtin_async(
         "geomean",
         &[Value::GpuTensor(input.clone())],
     ))
-    .unwrap() else {
+    .unwrap();
+    let Value::GpuTensor(result) = result.value() else {
         panic!("supported real geomean should remain resident");
     };
     assert_eq!(result.shape(), &[1, 2]);
     assert!(!result.shares_allocation_with(&input));
     assert!(input.allocation_lease().validate_live().is_ok());
-    let host = block_on(provider.download_numeric(&result)).unwrap();
+    let host = block_on(provider.download_numeric(result)).unwrap();
     let HostNumericDataOwned::F64(values) = host.data else {
         panic!("geomean must preserve double precision");
     };

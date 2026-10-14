@@ -38,13 +38,16 @@ pub fn load_static_member(
                 &format!("Method '{}' is not static", field),
             ));
         }
-        Ok(Value::Closure(Closure {
-            function_name: m.function_name,
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Method,
-            source_file: None,
-            captures: vec![],
-        }))
+        Ok(Value::Closure(Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: m.function_name,
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Method,
+                source_file: None,
+                captures: vec![],
+            },
+        )))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
         let mut value = runmat_value::ObjectInstance::new(cls.clone());
         value.properties.insert(
@@ -58,13 +61,16 @@ pub fn load_static_member(
             .iter()
             .any(|b| b.name == qualified)
         {
-            Ok(Value::Closure(Closure {
-                function_name: qualified,
-                binding: None,
-                source_role: runmat_types::FunctionSourceRole::Method,
-                source_file: None,
-                captures: vec![],
-            }))
+            Ok(Value::Closure(Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: qualified,
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Method,
+                    source_file: None,
+                    captures: vec![],
+                },
+            )))
         } else {
             Err(format!("Unknown property '{}' on class {}", field, cls).into())
         }

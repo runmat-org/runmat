@@ -2,7 +2,7 @@ use super::*;
 
 impl HostState {
     pub fn lexical_captures(
-        &self,
+        &mut self,
         function: runmat_types::ProgramFunctionId,
     ) -> NativeExecutorResult<Option<Vec<runmat_runtime::call::lexical::LexicalCapture>>> {
         let target = self
@@ -12,13 +12,21 @@ impl HostState {
         let Some(target) = target else {
             return Ok(None);
         };
-        let mut captures = Vec::new();
-        for target_local in target
+        let nested = target.source_role == runmat_types::FunctionSourceRole::Nested;
+        if nested && !self.nested_function_is_visible(target.lexical_parent) {
+            return Err(NativeExecutorError::Host(
+                "native nested target is outside the caller's lexical scope".into(),
+            ));
+        }
+        let capture_bindings = target
             .locals
             .iter()
             .filter(|local| local.kind == NativeLocalKind::Capture)
-        {
-            let binding = target_local.binding.ok_or_else(|| {
+            .map(|local| local.binding)
+            .collect::<Vec<_>>();
+        let mut captures = Vec::new();
+        for target_binding in capture_bindings {
+            let binding = target_binding.ok_or_else(|| {
                 NativeExecutorError::Host("native capture local has no semantic binding".into())
             })?;
             let source = self
@@ -31,19 +39,41 @@ impl HostState {
                         "nested native capture is not visible in its caller".into(),
                     )
                 })?;
-            let value = self
-                .locals
-                .get(source.id.0 as usize)
-                .copied()
-                .ok_or_else(|| {
-                    NativeExecutorError::Host("native capture local is out of bounds".into())
-                })?;
-            captures.push(runmat_runtime::call::lexical::LexicalCapture {
-                binding,
-                value: self.arena.get(value)?.clone(),
-            });
+            let slot = source.id.0 as usize;
+            let value = self.local_reference(slot)?;
+            // The binding-keyed activation, not this transport snapshot, owns
+            // nested semantics. An unassigned capture may be initialized by
+            // the callee before its first read.
+            let value = if value.is_null() && self.lexical_environment.is_some() {
+                runmat_value::Value::Num(0.0)
+            } else {
+                self.arena.get(value)?.clone()
+            };
+            captures.push(runmat_runtime::call::lexical::LexicalCapture { binding, value });
         }
-        Ok((!captures.is_empty()).then_some(captures))
+        Ok((nested || !captures.is_empty()).then_some(captures))
+    }
+
+    fn nested_function_is_visible(
+        &self,
+        target_parent: Option<runmat_types::ProgramFunctionId>,
+    ) -> bool {
+        let Some(target_parent) = target_parent else {
+            return false;
+        };
+        let mut frame = Some(self.function.id);
+        for _ in 0..self.functions.len() {
+            let Some(current) = frame else {
+                return false;
+            };
+            if current == target_parent {
+                return true;
+            }
+            frame = self
+                .program_function(current)
+                .and_then(|body| body.lexical_parent);
+        }
+        false
     }
 
     pub fn program_function(
@@ -60,6 +90,18 @@ impl HostState {
         captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     ) -> NativeExecutorResult<()> {
         for capture in captures {
+            if self.lexical_environment.is_some()
+                && self
+                    .function
+                    .lexical_bindings
+                    .iter()
+                    .any(|binding| binding.binding == capture.binding)
+            {
+                // A shared cell owns nested state; an anonymous transit
+                // binding is a snapshot here but its ancestor cell is still
+                // authoritative for the nested descendant.
+                continue;
+            }
             let slot = self
                 .function
                 .locals
@@ -70,6 +112,14 @@ impl HostState {
                 })?
                 .id
                 .0 as usize;
+            if self.global_bindings.binding_for_slot(slot).is_some()
+                || self.persistent_bindings.contains_key(&slot)
+            {
+                // The callee already published its mutation through the
+                // canonical session binding. Replaying a returned capture
+                // snapshot could overwrite a newer global/persistent value.
+                continue;
+            }
             let value = self.arena.insert(capture.value);
             self.set_local(slot, value)?;
         }
@@ -87,6 +137,22 @@ impl HostState {
                 let binding = local.binding.ok_or_else(|| {
                     NativeExecutorError::Host("native capture local has no semantic binding".into())
                 })?;
+                if let Some(environment) = self.lexical_environment.as_ref().filter(|_| {
+                    self.function.lexical_bindings.iter().any(|entry| {
+                        entry.binding == binding
+                            && entry.kind
+                                != runmat_native_codegen::NativeLexicalBindingKind::Transit
+                    })
+                }) {
+                    if let Some(value) =
+                        runmat_runtime::call::lexical::read_binding(environment, binding)?
+                    {
+                        return Ok(runmat_runtime::call::lexical::LexicalCapture {
+                            binding,
+                            value,
+                        });
+                    }
+                }
                 let value = self.locals[local.id.0 as usize];
                 Ok(runmat_runtime::call::lexical::LexicalCapture {
                     binding,

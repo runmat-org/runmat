@@ -1,6 +1,7 @@
 //! Session-owned asynchronous timer lifecycle.
 
 use super::*;
+use crate::context::LocalTaskCommandOrigin;
 use crate::context::RuntimeLocalTaskOutcome;
 use crate::context::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
 use runmat_async::RuntimeErrorOwner;
@@ -135,7 +136,7 @@ pub(super) async fn start_one_timer(
         return Err(admission_error(TimerAdmissionError::ForeignOrDeleted));
     }
     let config = TimerRunConfig::admit(runtime, &handle, override_delay)?;
-    let tasks = runtime
+    runtime
         .service_ports()
         .require_local_tasks("timer")
         .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
@@ -165,13 +166,20 @@ pub(super) async fn start_one_timer(
         let _ = set_property(&handle, "Running", Value::String("off".into()));
         return Err(error);
     }
-    let scoped_runtime = task_runtime.clone();
     let task_handle = handle.clone();
-    let future = scoped_runtime.scope(async move {
-        let _task_root = task_root;
-        run_timer_task(task_runtime, task_handle, generation, config, failure).await;
-    });
-    let lease = match tasks.spawn_local(runtime.local_identity(), Box::pin(future)) {
+    let lease = match runtime.spawn_local_with_command_origin(
+        "timer",
+        LocalTaskCommandOrigin::CurrentSelected,
+        move |selected| {
+            let task_runtime =
+                task_runtime.with_cleanup_command_origin(selected.command_profiling().cloned());
+            let scoped_runtime = task_runtime.clone();
+            Box::pin(scoped_runtime.scope(async move {
+                let _task_root = task_root;
+                run_timer_task(task_runtime, task_handle, generation, config, failure).await;
+            }))
+        },
+    ) {
         Ok(lease) => lease,
         Err(error) => {
             runtime.timer_session().borrow_mut().stop(&handle);

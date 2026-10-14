@@ -84,6 +84,7 @@ pub(super) const fn entry(
     behavior: Behavior,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "io/data",

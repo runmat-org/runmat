@@ -22,7 +22,8 @@ pub const IFFT_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntege
     classes: &crate::catalog::integer::INTEGER_CLASSES_THROUGH_32_BITS,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Documented integer data enters the floating inverse-FFT domain and produces double output.",
+    notes:
+        "Documented integer data enters the floating inverse-FFT domain and produces double output.",
 }];
 
 pub const IFFT_WIDE_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [
@@ -303,7 +304,8 @@ pub const IFFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 pub const IFFT_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IFFT.PROVIDER_INTEGRITY",
     identifier: Some("RunMat:ifft:ProviderIntegrity"),
-    when: "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
     message: "ifft: provider integrity error",
 };
 

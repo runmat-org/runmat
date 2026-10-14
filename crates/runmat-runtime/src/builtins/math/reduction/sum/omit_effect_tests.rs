@@ -158,10 +158,12 @@ async fn selected_sum(
     };
     sum_builtin(
         None,
+        None,
         Value::GpuTensor(source),
         vec![selector, Value::from("omitnan")],
     )
     .await
+    .map(|owned| owned.value().clone())
 }
 
 fn original_unsupported(error: &RuntimeError) {

@@ -72,7 +72,7 @@ fn cell(values: Vec<Value>, rows: usize, cols: usize) -> Value {
     Value::Cell(CellArray::new(values, rows, cols).expect("cell array"))
 }
 
-fn output_list(value: Value) -> Vec<Value> {
+fn output_list(value: &Value) -> &[Value] {
     let Value::OutputList(outputs) = value else {
         panic!("expected output list, got {value:?}");
     };
@@ -466,7 +466,7 @@ fn xlswrite_returns_status_and_message_outputs() {
         Vec::new(),
     ))
     .expect("xlswrite captures failure");
-    let outputs = output_list(result);
+    let outputs = output_list(&result);
     assert_eq!(outputs[0], Value::Bool(false));
     let Value::Struct(message) = &outputs[1] else {
         panic!("expected message struct");

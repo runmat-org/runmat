@@ -155,5 +155,9 @@ pub(crate) fn observation_capability(
             * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
         clear_commands: submissions,
         map_callbacks: submissions,
+        wgpu_compute_query: crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+            submissions,
+            submissions,
+        ),
     })
 }

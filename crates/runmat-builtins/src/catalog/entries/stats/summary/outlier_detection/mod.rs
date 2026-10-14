@@ -59,6 +59,7 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
 };
 
 pub const ISOUTLIER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "isoutlier" },
     category: "stats/summary",
@@ -86,6 +87,7 @@ pub const ISOUTLIER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub const FILLOUTLIERS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "filloutliers",

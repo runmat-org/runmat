@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::math::interpolation::pp::{
-    Extrapolation, NumericSeries, PpOutputLayout, QueryPoints, SampleAxis, build_spline_pp,
-    evaluate_pp,
+    build_spline_pp, evaluate_pp, Extrapolation, NumericSeries, PpOutputLayout, QueryPoints,
+    SampleAxis,
 };
 use num_complex::Complex;
 use rustfft::FftPlanner;

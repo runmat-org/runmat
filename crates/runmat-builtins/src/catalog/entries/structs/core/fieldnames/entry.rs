@@ -15,6 +15,7 @@ use super::{
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const FIELDNAMES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fieldnames" },
     category: "structs/core",

@@ -96,8 +96,9 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
             program,
             root_package: "r12-fixture@1.0.0".into(),
             entrypoint: "main".into(),
-            entrypoint_function: ProgramFunctionId(0),
+            entrypoint_function: Some(ProgramFunctionId(0)),
             entrypoint_kind: ExecutableEntrypointKind::Function,
+            declaration_class: None,
             source_digest: Digest::sha256(b"r12-main.m"),
         },
         revisions,
@@ -156,6 +157,7 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
         bodies: [(function, body)].into_iter().collect(),
         functions: [(function, metadata)].into_iter().collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     }
 }
@@ -510,11 +512,182 @@ fn lower_with_bindings(
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )?,
         binding_names,
         target: NativeTarget::current(),
     })
+}
+
+#[test]
+fn native_class_declarations_reject_forged_parent_default_and_constructor_owner() {
+    let mir = function(vec![assignment(1)]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let original = lower_with(&mir, &analysis, &manifest).expect("valid classless Native IR");
+    let identity = runmat_types::ClassIdentity::new("AotClass").expect("typed class");
+    let mut forged = original.clone();
+    forged
+        .class_declarations
+        .push(runmat_native_codegen::NativeClassDeclaration {
+            class: identity.clone(),
+            parent: Some(identity.clone()),
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            enumerations: Vec::new(),
+            constructor: None,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].parent = None;
+    forged.class_declarations[0]
+        .properties
+        .push(runmat_native_codegen::NativeClassProperty {
+            name: runmat_types::MemberName::from("count"),
+            attributes: runmat_types::PropertyAttributes::default(),
+            has_default: false,
+            default_literal: Some(runmat_native_codegen::NativeClassDefaultLiteral::Num(1.0)),
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].properties.clear();
+    forged.class_declarations[0].constructor =
+        Some(runmat_native_codegen::NativeConstructorMethod {
+            function: original.functions[0].id,
+            access: runmat_types::MemberAccess::Public,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].constructor = None;
+    forged
+        .verify()
+        .expect("well-formed extra class is structurally valid");
+    assert_eq!(
+        verify_against_mir(&forged, &mir, None).unwrap_err().code,
+        "native.ir.mir_class_declarations"
+    );
+    let parent = runmat_types::ClassIdentity::new("AotParent").expect("parent");
+    forged.class_declarations[0].parent = Some(parent.clone());
+    forged
+        .verify()
+        .expect("unused open companion is structurally valid in generic native");
+    forged
+        .class_declarations
+        .push(runmat_native_codegen::NativeClassDeclaration {
+            class: parent,
+            parent: Some(identity),
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            enumerations: Vec::new(),
+            constructor: None,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+}
+
+#[test]
+fn generic_native_retains_unused_super_call_without_closing_external_parent() {
+    let mut mir = function(vec![assignment(1)]);
+    let class = runmat_types::ClassIdentity::new("UnusedCompanion").expect("class");
+    let parent = runmat_types::ClassIdentity::new("AbsentCompanionBase").expect("parent");
+    let constructor = FunctionId(1);
+    let method = runmat_types::MethodName::from("UnusedCompanion");
+    let mut body = mir.bodies[&FunctionId(0)].clone();
+    body.function = constructor;
+    body.blocks[0].statements[0].kind = MirStmtKind::Assign {
+        place: MirPlace::Local(MirLocalId(0)),
+        value: MirRvalue::Call(runmat_mir::MirCall {
+            callee: runmat_mir::MirCallee::SuperConstructor {
+                current_class: class.clone(),
+                super_class: parent.clone(),
+            },
+            args: Vec::new(),
+            arg_spans: Vec::new(),
+            syntax: runmat_hir::CallSyntax::Plain,
+            requested_outputs: runmat_hir::RequestedOutputCount::One,
+            fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+            workspace_first_name: None,
+            bare_identifier: false,
+            async_behavior: runmat_mir::AsyncBehaviorFact::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Pure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        }),
+    };
+    mir.bodies.insert(constructor, body);
+    let mut metadata = mir.functions[&FunctionId(0)].clone();
+    metadata.name = FunctionName("UnusedCompanion".into());
+    metadata.enclosing_class = Some(runmat_types::ClassId(0));
+    metadata.class_method_owner = Some(runmat_types::ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: method.clone(),
+        is_static: false,
+        role: runmat_types::ClassMethodRole::Constructor,
+    });
+    metadata.kind = FunctionKind::ClassMethod {
+        is_static: false,
+        role: runmat_types::ClassMethodRole::Constructor,
+    };
+    metadata.source_role = runmat_types::FunctionSourceRole::Method;
+    mir.functions.insert(constructor, metadata);
+    mir.classes.push(runmat_types::ClassDeclaration {
+        id: runmat_types::ClassId(0),
+        name: runmat_types::QualifiedName(vec![runmat_types::SymbolName("UnusedCompanion".into())]),
+        inheritance: runmat_types::InheritanceDeclaration {
+            declared_super_class: Some("AbsentCompanionBase".into()),
+            ..Default::default()
+        },
+        kind: runmat_types::ClassKind::Value,
+        is_sealed: false,
+        is_abstract: false,
+        declared_attributes: Vec::new(),
+        properties: Vec::new(),
+        methods: vec![runmat_types::MethodDeclaration {
+            role: runmat_types::ClassMethodRole::Constructor,
+            function: constructor,
+            name: method,
+            is_static: false,
+            attributes: Default::default(),
+            declared_attributes: Vec::new(),
+            span: Span { start: 0, end: 8 },
+        }],
+        events: Vec::new(),
+        enumerations: Vec::new(),
+        span: Span { start: 0, end: 8 },
+    });
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut executable = manifest(analysis.revision.schema_version);
+    for function in &analysis.functions {
+        executable
+            .capabilities
+            .0
+            .extend(function.capabilities.0.iter().cloned());
+    }
+    let assembly = lower_with(&mir, &analysis, &executable)
+        .expect("unused class does not close an external parent in generic native");
+    assert_eq!(assembly.functions.len(), 2);
+    assert!(assembly.functions.iter().any(|function| {
+        function.class_method_owner.as_ref().is_some_and(|owner| {
+            owner.declaring_class == class
+                && owner.role == runmat_types::ClassMethodRole::Constructor
+        }) && function.super_constructor_calls() == vec![(class.clone(), parent.clone())]
+    }));
 }
 
 #[test]
@@ -600,7 +773,7 @@ fn selected_entrypoint_preserves_the_complete_mir_entrypoint_inventory() {
     assert_eq!(assembly.selected_entrypoint, ProgramFunctionId(0));
     assert_eq!(
         assembly.selected_portable_entrypoint,
-        manifest.identity.entrypoint_function
+        manifest.identity.entrypoint_function.unwrap()
     );
 }
 

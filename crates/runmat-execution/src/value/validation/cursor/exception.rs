@@ -37,18 +37,41 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         let runtime = value.runtime.as_ref().expect("metadata task");
         if let Some(frame) = runtime.call_frames.get(index) {
             self.budget.add_text(&frame.function)?;
-            if let Some(id) = frame.program_source_id {
-                let absent = match self.budget.sources {
-                    Sources::Local => false,
-                    Sources::Missing => true,
-                    Sources::Map(map) => !map.contains_source(id),
-                };
-                if absent {
-                    return Err(invalid(
-                        "portable exception source",
-                        "source ordinal is absent from the selected artifact map",
-                    ));
+            match &frame.source {
+                ExceptionFrameSource::Admitted(id) => {
+                    let absent = match self.budget.sources {
+                        Sources::Local => false,
+                        Sources::Missing => true,
+                        Sources::Map(map) => !map.contains_source(*id),
+                    };
+                    if absent {
+                        return Err(invalid(
+                            "portable exception source",
+                            "source ordinal is absent from the selected artifact map",
+                        ));
+                    }
                 }
+                ExceptionFrameSource::Detached(presentation) => {
+                    if !self.budget.detached_frames {
+                        return Err(invalid(
+                            "detached exception source",
+                            "Direct program transport does not admit detached diagnostic frames",
+                        ));
+                    }
+                    self.budget.add_text(&presentation.display_name)?;
+                    if presentation.display_name.is_empty()
+                        || presentation.line.is_some() != presentation.column.is_some()
+                        || presentation.line == Some(0)
+                        || presentation.column == Some(0)
+                        || presentation.line.is_some() != frame.span.is_some()
+                    {
+                        return Err(invalid(
+                            "detached exception source",
+                            "diagnostic frame has invalid presentation coordinates",
+                        ));
+                    }
+                }
+                ExceptionFrameSource::Unknown => {}
             }
             self.tasks
                 .push(Task::ExceptionFrames(value, index + 1, depth));

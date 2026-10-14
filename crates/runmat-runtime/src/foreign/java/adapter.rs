@@ -1,13 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 
 use runmat_java::{
     discover_jvm, ClasspathSnapshot, JavaArtifactIdentity, JavaCallbackInvocation,
-    JavaDiscoveryRequest, JavaInvocationError, JavaObjectHandle, JavaSession, JavaValue, JvmConfig,
-    JvmProcess, SessionClasspath, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
+    JavaDiscoveryRequest, JavaInvocationError, JavaLane, JavaObjectHandle, JavaValue, JvmConfig,
+    JvmInstallation, JvmProcess, SessionClasspath, JAVA_ADAPTER_ID, JAVA_ADAPTER_VERSION,
 };
+use runmat_process_host::private_bytes::PrivateByteLease;
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
@@ -17,10 +18,11 @@ use runmat_value::{
     WeakForeignRef,
 };
 
+use super::super::project_retirement::ProjectRetirementAuthority;
 use super::super::{
-    foreign_error, invoke_foreign_callback, ForeignAdapter, ForeignAdapterDescriptor,
-    ForeignAdapterFuture, ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry,
-    ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
+    foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
+    ForeignAdapterDescriptor, ForeignAdapterFuture, ForeignErrorKind, ForeignExecutionPolicy,
+    ForeignHandleRegistry, ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
 use crate::builtins::common::validation::value_text_scalar_string;
@@ -40,16 +42,32 @@ impl ForeignHostRelease for ReleaseQueue {
 
 pub struct JavaAdapter {
     handles: ForeignHandleRegistry,
+    self_weak: Weak<JavaAdapter>,
     host_identity: String,
-    session: RefCell<Option<Rc<JavaSession>>>,
+    session: RefCell<Option<Rc<JavaLane>>>,
+    selected_byte_lease: RefCell<Option<PrivateByteLease>>,
+    retirement_requested: Cell<bool>,
+    project_retirement: ProjectRetirementAuthority,
     discovery: RefCell<JavaDiscoveryRequest>,
     config: RefCell<JvmConfig>,
     initial_classpath: RefCell<SessionClasspath>,
+    configured_classpath: RefCell<Vec<std::path::PathBuf>>,
+    configured_classpath_revision: Cell<u64>,
     released: Arc<ReleaseQueue>,
     resources: Rc<RefCell<BTreeMap<u64, JavaObjectHandle>>>,
     java_to_foreign: Rc<RefCell<BTreeMap<JavaObjectHandle, WeakForeignRef>>>,
-    artifact_identities: RefCell<BTreeSet<String>>,
+    callbacks: RefCell<BTreeMap<u64, Rc<JavaCallbackRegistration>>>,
+    next_callback: Cell<u64>,
+    artifact_identities: RefCell<BTreeSet<JavaArtifactIdentity>>,
     desktop_available: Cell<bool>,
+}
+
+struct JavaCallbackRegistration {
+    callable: Value,
+    _roots: crate::execution::RootedValueLease,
+    origin: crate::context::RuntimeContextLocalId,
+    context: RuntimeContext,
+    foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +78,15 @@ pub struct JavaRuntimeConfiguration {
     pub classpath: Vec<std::path::PathBuf>,
     pub options: Vec<String>,
 }
+
+mod project_replacement;
+mod project_retirement;
+mod in_process;
+mod lane_call;
+mod prepare;
+use project_replacement::prepare_configuration;
+pub use project_replacement::{PreparedJavaProjectReplacement, ReadyJavaProjectReplacement};
+pub use project_retirement::VerifiedJavaProjectRetirement;
 
 impl Default for JavaRuntimeConfiguration {
     fn default() -> Self {
@@ -115,16 +142,24 @@ impl JavaAdapter {
             policy: ForeignExecutionPolicy::trusted_in_process(),
             release: released.clone(),
         })?;
-        Ok(Rc::new(Self {
+        Ok(Rc::new_cyclic(|self_weak| Self {
             handles,
+            self_weak: self_weak.clone(),
             host_identity,
             session: RefCell::new(None),
+            selected_byte_lease: RefCell::new(None),
+            retirement_requested: Cell::new(false),
+            project_retirement: ProjectRetirementAuthority::default(),
             discovery: RefCell::new(discovery),
             config: RefCell::new(config),
             initial_classpath: RefCell::new(initial_classpath),
+            configured_classpath: RefCell::new(Vec::new()),
+            configured_classpath_revision: Cell::new(1),
             released,
             resources: Rc::new(RefCell::new(BTreeMap::new())),
             java_to_foreign: Rc::new(RefCell::new(BTreeMap::new())),
+            callbacks: RefCell::new(BTreeMap::new()),
+            next_callback: Cell::new(1),
             artifact_identities: RefCell::new(BTreeSet::new()),
             desktop_available: Cell::new(false),
         }))
@@ -139,26 +174,47 @@ impl JavaAdapter {
     }
 
     pub fn configure(&self, configuration: JavaRuntimeConfiguration) -> Result<(), RuntimeError> {
-        if self.is_running() {
+        if self.project_retirement.is_pending() {
+            return Err(invalid_conversion("Java project classloader is retiring"));
+        }
+        let session = self
+            .session
+            .try_borrow()
+            .map_err(|_| invalid_conversion("Java session is busy during configuration"))?;
+        if session.is_some() {
             return Err(invalid_conversion(
                 "Java runtime configuration is immutable after JVM startup",
             ));
         }
-        let mut discovery = JavaDiscoveryRequest::from_process();
-        discovery.explicit_home = configuration.home;
-        let config = JvmConfig {
-            minimum_major: configuration.minimum_version,
-            maximum_major: configuration.maximum_version,
-            bootstrap_classpath: Vec::new(),
-            options: configuration.options,
-        };
-        config.validate().map_err(java_runtime_error)?;
-        let classpath =
-            SessionClasspath::new(config.bootstrap_classpath.clone(), configuration.classpath)
-                .map_err(|error| invalid_conversion(error.to_string()))?;
-        *self.discovery.borrow_mut() = discovery;
-        *self.config.borrow_mut() = config;
-        *self.initial_classpath.borrow_mut() = classpath;
+        drop(session);
+        let prepared =
+            prepare_configuration(configuration, self.configured_classpath_revision.get())?;
+        let mut classpath_slot = self
+            .initial_classpath
+            .try_borrow_mut()
+            .map_err(|_| invalid_conversion("Java classpath is busy during configuration"))?;
+        let mut identities = self
+            .artifact_identities
+            .try_borrow_mut()
+            .map_err(|_| invalid_conversion("Java artifacts are busy during configuration"))?;
+        let mut configured_slot = self.configured_classpath.try_borrow_mut().map_err(|_| {
+            invalid_conversion("configured Java paths are busy during configuration")
+        })?;
+        let mut discovery_slot = self
+            .discovery
+            .try_borrow_mut()
+            .map_err(|_| invalid_conversion("Java discovery is busy during configuration"))?;
+        let mut config_slot = self
+            .config
+            .try_borrow_mut()
+            .map_err(|_| invalid_conversion("Java runtime policy is busy during configuration"))?;
+        *discovery_slot = prepared.discovery;
+        *config_slot = prepared.config;
+        *classpath_slot = prepared.classpath;
+        *configured_slot = prepared.configured_classpath;
+        self.configured_classpath_revision
+            .set(prepared.next_revision);
+        identities.clear();
         Ok(())
     }
 
@@ -166,293 +222,78 @@ impl JavaAdapter {
         &self,
         artifacts: &[(JavaArtifactIdentity, std::path::PathBuf)],
     ) -> Result<(), RuntimeError> {
-        if self.is_running() {
+        self.prepare_project_replacement(artifacts)?
+            .admit_commit()?
+            .commit();
+        Ok(())
+    }
+
+    pub fn attach_selected_byte_lease(&self, lease: PrivateByteLease) -> Result<(), RuntimeError> {
+        if self.session.borrow().is_some() || self.selected_byte_lease.borrow().is_some() {
             return Err(invalid_conversion(
-                "Java project artifacts must be installed before JVM startup",
+                "Java selected byte owner may be attached only once before session startup",
             ));
         }
-        let mut identities = BTreeSet::new();
-        let mut paths = self.initial_classpath.borrow().snapshot().project;
-        for (identity, path) in artifacts {
-            identity
-                .validate_file(path)
-                .map_err(|error| invalid_conversion(error.to_string()))?;
-            if !identities.insert(identity.to_string()) {
-                return Err(invalid_conversion(format!(
-                    "Java artifact identity `{identity}` appears more than once"
-                )));
-            }
-            if !paths.contains(path) {
-                paths.push(path.clone());
-            }
-        }
-        self.initial_classpath
-            .borrow_mut()
-            .replace_project(paths)
-            .map_err(|error| invalid_conversion(error.to_string()))?;
-        *self.artifact_identities.borrow_mut() = identities;
+        *self.selected_byte_lease.borrow_mut() = Some(lease);
+        Ok(())
+    }
+
+    /// Closes only this adapter's classloader. A failed close leaves the
+    /// exact session and private-byte owner available for retirement retry.
+    pub fn shutdown_selected_retirement(&self) -> Result<(), RuntimeError> {
+        self.retirement_requested.set(true);
+        let session = self.session.borrow().as_ref().cloned();
+        let Some(session) = session else {
+            self.selected_byte_lease.borrow_mut().take();
+            self.callbacks.borrow_mut().clear();
+            return Ok(());
+        };
+        session
+            .retire_classloader()
+            .map_err(java_invocation_error)?;
+        self.session.borrow_mut().take();
+        self.selected_byte_lease.borrow_mut().take();
+        self.callbacks.borrow_mut().clear();
         Ok(())
     }
 
     fn ensure_session(&self) -> Result<(), RuntimeError> {
+        if self.project_retirement.is_pending() {
+            return Err(invalid_conversion("Java project classloader is retiring"));
+        }
         if self.session.borrow().is_some() {
             return Ok(());
         }
         let installation = discover_jvm(&self.discovery.borrow()).map_err(java_runtime_error)?;
         let process =
             JvmProcess::launch(installation, &self.config.borrow()).map_err(java_runtime_error)?;
-        *self.session.borrow_mut() = Some(Rc::new(JavaSession::with_classpath(
-            process,
-            self.initial_classpath.borrow().clone(),
-        )));
+        *self.session.borrow_mut() = Some(Rc::new(
+            JavaLane::start(
+                process,
+                self.initial_classpath.borrow().clone(),
+                self.selected_byte_lease.borrow().clone(),
+            )
+            .map_err(java_invocation_error)?,
+        ));
         Ok(())
     }
 
-    fn drain_releases(&self) -> Result<(), RuntimeError> {
-        let handles = {
-            let mut queue = self.released.0.lock().map_err(|_| {
-                foreign_error(
-                    ForeignErrorKind::HostUnavailable,
-                    "Java release queue lock was poisoned",
-                )
-            })?;
-            std::mem::take(&mut *queue)
-        };
-        let session = self.session.borrow();
-        let Some(session) = session.as_ref() else {
-            return Ok(());
-        };
-        for foreign_handle in handles {
-            if let Some(java_handle) = self.resources.borrow_mut().remove(&foreign_handle) {
-                self.java_to_foreign.borrow_mut().remove(&java_handle);
-                let _ = session.release(java_handle);
-            }
-        }
-        Ok(())
-    }
-
-    fn invoke_now(
+    fn invoke_control_now(
         &self,
-        context: &RuntimeContext,
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
-        if call.symbol == "classpath" {
-            return self
-                .classpath_value(call.arguments)
-                .and_then(super::super::single_output_sequence);
-        }
-        if call.symbol == "has_classpath" {
-            let snapshot = self
-                .session
-                .borrow()
-                .as_ref()
-                .map(|session| session.classpath())
-                .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
-            return super::super::single_output_sequence(Value::Bool(
-                !snapshot.bootstrap.is_empty()
-                    || !snapshot.project.is_empty()
-                    || !snapshot.dynamic.is_empty(),
-            ));
-        }
-        if call.symbol == "status" {
-            return self
+        match call.symbol.as_str() {
+            "status" => self
                 .status_value()
-                .and_then(super::super::single_output_sequence);
-        }
-        if call.symbol == "usejava" {
-            return self
-                .usejava_value(call.arguments)
-                .and_then(super::super::single_output_sequence);
-        }
-        if call.symbol == "configure" {
-            return self
+                .and_then(super::super::single_output_sequence),
+            "configure" => self
                 .configure_value(call.arguments)
-                .and_then(super::super::single_output_sequence);
+                .and_then(super::super::single_output_sequence),
+            _ => Err(invalid_conversion(
+                "unsupported synchronous Java control operation",
+            )),
         }
-        if matches!(
-            call.symbol.as_str(),
-            "construct_edt" | "call_static_edt" | "invoke_member_edt"
-        ) && !self.desktop_available.get()
-        {
-            return Err(build_runtime_error(
-                "Java EDT execution requires a Desktop host with Java UI support",
-            )
-            .with_builtin("java")
-            .with_identifier("RunMat:Java:EdtUnavailable")
-            .build());
-        }
-        self.ensure_session()?;
-        self.drain_releases()?;
-        let mut arguments = call.arguments.into_iter();
-        let result = match call.symbol.as_str() {
-            "construct" => {
-                let class = string_argument(arguments.next(), "Java class")?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| session.construct_resolved(&class, &values))?
-            }
-            "construct_edt" => {
-                let class = string_argument(arguments.next(), "Java class")?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| session.construct_resolved_on_edt(&class, &values))?
-            }
-            "call_static" => {
-                let class = string_argument(arguments.next(), "Java class")?;
-                let method = string_argument(arguments.next(), "Java method")?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| session.call_static_resolved(&class, &method, &values))?
-            }
-            "call_static_edt" => {
-                let class = string_argument(arguments.next(), "Java class")?;
-                let method = string_argument(arguments.next(), "Java method")?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| {
-                    session.call_static_resolved_on_edt(&class, &method, &values)
-                })?
-            }
-            "invoke_qualified" => {
-                let name = string_argument(arguments.next(), "qualified Java name")?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if self.with_session(|session| session.class_exists(&name))? {
-                    self.with_session(|session| session.construct_resolved(&name, &values))?
-                } else {
-                    let (class, method) = name.rsplit_once('.').ok_or_else(|| {
-                        invalid_conversion("qualified Java call requires a dotted class name")
-                    })?;
-                    if !self.with_session(|session| session.class_exists(class))? {
-                        return Err(build_runtime_error(format!(
-                            "Java class {class} was not found"
-                        ))
-                        .with_builtin("java")
-                        .with_identifier("RunMat:Java:ClassNotFound")
-                        .build());
-                    }
-                    self.with_session(|session| {
-                        session.call_static_resolved(class, method, &values)
-                    })?
-                }
-            }
-            "invoke_member" => {
-                let reference = foreign_argument(arguments.next())?;
-                let method = string_argument(arguments.next(), "Java method")?;
-                let java_handle = self.resolve_java_handle(&reference)?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| {
-                    session.call_method_resolved(java_handle, &method, &values)
-                })?
-            }
-            "invoke_member_edt" => {
-                let reference = foreign_argument(arguments.next())?;
-                let method = string_argument(arguments.next(), "Java method")?;
-                let java_handle = self.resolve_java_handle(&reference)?;
-                let values = arguments
-                    .map(|value| self.argument_to_java(context, value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| {
-                    session.call_method_resolved_on_edt(java_handle, &method, &values)
-                })?
-            }
-            "get_member" => {
-                let reference = foreign_argument(arguments.next())?;
-                let field = string_argument(arguments.next(), "Java field")?;
-                let java_handle = self.resolve_java_handle(&reference)?;
-                self.with_session(|session| session.get_field_resolved(java_handle, &field))?
-            }
-            "set_member" => {
-                let reference = foreign_argument(arguments.next())?;
-                let field = string_argument(arguments.next(), "Java field")?;
-                let value = self.argument_to_java(
-                    context,
-                    arguments.next().ok_or_else(|| {
-                        invalid_conversion("Java field assignment requires a value")
-                    })?,
-                )?;
-                let java_handle = self.resolve_java_handle(&reference)?;
-                self.with_session(|session| {
-                    session.set_field_resolved(java_handle, &field, &value)
-                })?;
-                return super::super::single_output_sequence(Value::Foreign(reference));
-            }
-            "add_classpath" => {
-                let entry = string_argument(arguments.next(), "Java classpath entry")?;
-                let position = arguments
-                    .next()
-                    .map(|value| string_argument(Some(value), "Java classpath position"))
-                    .transpose()?;
-                let position = match position.as_deref() {
-                    None => runmat_builtins::JavaInsertionPosition::Begin,
-                    Some(name) => runmat_builtins::JavaInsertionPosition::parse_wire(name)
-                        .ok_or_else(|| {
-                            invalid_conversion("Java classpath position must be 'begin' or 'end'")
-                        })?,
-                };
-                let at_end = position == runmat_builtins::JavaInsertionPosition::End;
-                self.with_session(|session| session.add_dynamic_classpath_at(entry, at_end))?;
-                return Ok(runmat_value::ValueSequence::empty());
-            }
-            "remove_classpath" => {
-                let entry = string_argument(arguments.next(), "Java classpath entry")?;
-                self.with_session(|session| {
-                    session.remove_dynamic_classpath(std::path::Path::new(&entry))
-                })?;
-                return Ok(runmat_value::ValueSequence::empty());
-            }
-            "set_classpath" => {
-                let entries = arguments
-                    .map(|value| string_argument(Some(value), "Java classpath entry"))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| {
-                    session.replace_dynamic_classpath(
-                        entries.into_iter().map(std::path::PathBuf::from),
-                    )
-                })?;
-                return Ok(runmat_value::ValueSequence::empty());
-            }
-            "new_array" => {
-                let class = string_argument(arguments.next(), "Java array class")?;
-                let dimensions = arguments
-                    .map(java_dimension)
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.with_session(|session| session.new_object_array(&class, &dimensions))?
-            }
-            operation => {
-                return Err(foreign_error(
-                    ForeignErrorKind::InvalidCall,
-                    format!("unsupported Java operation {operation}"),
-                ))
-            }
-        };
-        self.value_from_java(result)
-            .and_then(super::super::single_output_sequence)
     }
-
-    fn with_session<T>(
-        &self,
-        operation: impl FnOnce(&JavaSession) -> Result<T, JavaInvocationError>,
-    ) -> Result<T, RuntimeError> {
-        let session = self.session.borrow();
-        operation(session.as_deref().expect("session initialized")).map_err(java_invocation_error)
-    }
-
-    fn with_session_rc<T>(
-        &self,
-        operation: impl FnOnce(&Rc<JavaSession>) -> Result<T, JavaInvocationError>,
-    ) -> Result<T, RuntimeError> {
-        let session = self.session.borrow();
-        operation(session.as_ref().expect("session initialized")).map_err(java_invocation_error)
-    }
-
     fn value_from_java(&self, value: JavaValue) -> Result<Value, RuntimeError> {
         value_from_java_parts(
             &self.handles,
@@ -487,71 +328,42 @@ impl JavaAdapter {
         value: Value,
     ) -> Result<JavaValue, RuntimeError> {
         if super::super::is_callable(&value) {
-            let callback = value;
+            let instance = value
+                .callable_instance_key()
+                .expect("every callable value has a physical instance");
+            if let Some((token, _)) = self.callbacks.borrow().iter().find(|(_, registration)| {
+                registration.origin == context.local_identity()
+                    && registration.callable.callable_instance_key() == Some(instance)
+            }) {
+                return Ok(JavaValue::Callback(*token));
+            }
             let foreign = context
                 .service_ports()
                 .foreign()
                 .map(Rc::downgrade)
                 .ok_or_else(|| invalid_conversion("Java callback requires a foreign runtime"))?;
+            let token = self.next_callback.get();
+            self.next_callback.set(
+                token.checked_add(1).ok_or_else(|| {
+                    invalid_conversion("Java callback identity space is exhausted")
+                })?,
+            );
+            let roots = crate::execution::RootedValueLease::for_values(std::iter::once(&value))
+                .map_err(|error| error.into_runtime_error())?;
             let callback_context = context
                 .clone()
                 .with_service_ports(context.service_ports().clone().without_foreign());
-            let handles = self.handles.clone();
-            let host_identity = self.host_identity.clone();
-            let resources = Rc::clone(&self.resources);
-            let java_to_foreign = Rc::clone(&self.java_to_foreign);
-            return self.with_session_rc(|session| {
-                session.register_callback(move |invocation: JavaCallbackInvocation| {
-                    let foreign = foreign.upgrade().ok_or_else(|| {
-                        JavaInvocationError::Callback(
-                            "callback's originating foreign runtime has ended".into(),
-                        )
-                    })?;
-                    let context = callback_context.clone().with_service_ports(
-                        callback_context
-                            .service_ports()
-                            .clone()
-                            .with_foreign(foreign),
-                    );
-                    let arguments = invocation
-                        .arguments
-                        .into_iter()
-                        .map(|value| {
-                            value_from_java_parts(
-                                &handles,
-                                &host_identity,
-                                &resources,
-                                &java_to_foreign,
-                                value,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
-                    let requested_outputs = usize::from(invocation.returns_value);
-                    let request = super::super::foreign_callback_request(
-                        &callback,
-                        arguments,
-                        requested_outputs,
-                    )
-                    .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
-                    let sequence = pollster::block_on(invoke_foreign_callback(context, request))
-                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
-                    let mut values = crate::sequence::ResolveValueSequence::resolve(
-                        sequence,
-                        runmat_types::SequenceUse::SelectPrefix {
-                            count: requested_outputs,
-                        },
-                        crate::sequence::SequenceResolutionContext::default(),
-                    )
-                    .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
-                    if !invocation.returns_value {
-                        return Ok(JavaValue::Null);
-                    }
-                    let result = values.pop().expect("one Java callback output was selected");
-                    value_to_java(result)
-                        .map_err(|error| JavaInvocationError::Callback(error.to_string()))
-                })
-            });
+            self.callbacks.borrow_mut().insert(
+                token,
+                Rc::new(JavaCallbackRegistration {
+                    callable: value,
+                    _roots: roots,
+                    origin: context.local_identity(),
+                    context: callback_context,
+                    foreign,
+                }),
+            );
+            return Ok(JavaValue::Callback(token));
         }
         let Value::Foreign(reference) = value else {
             return value_to_java(value);
@@ -566,7 +378,11 @@ impl JavaAdapter {
         })
     }
 
-    fn classpath_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+    fn classpath_value(
+        &self,
+        arguments: Vec<Value>,
+        snapshot: ClasspathSnapshot,
+    ) -> Result<Value, RuntimeError> {
         let layer = arguments
             .into_iter()
             .next()
@@ -579,12 +395,6 @@ impl JavaAdapter {
             .ok_or_else(|| {
                 invalid_conversion("Java classpath layer must be 'all', 'static', or 'dynamic'")
             })?;
-        let snapshot = self
-            .session
-            .borrow()
-            .as_ref()
-            .map(|session| session.classpath())
-            .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
         let paths = classpath_paths(&snapshot, layer);
         let length = paths.len();
         CellArray::new(
@@ -664,18 +474,9 @@ impl JavaAdapter {
                 self.session.borrow().is_some() || discover_jvm(&self.discovery.borrow()).is_ok(),
             )),
             runmat_builtins::JavaFeature::Desktop => Ok(Value::Bool(self.desktop_available.get())),
-            runmat_builtins::JavaFeature::Awt | runmat_builtins::JavaFeature::Swing => {
-                self.ensure_session()?;
-                let headless = self.with_session(|session| {
-                    session.call_static_resolved("java.awt.GraphicsEnvironment", "isHeadless", &[])
-                })?;
-                let JavaValue::Boolean(headless) = headless else {
-                    return Err(invalid_conversion(
-                        "Java graphics environment returned an invalid capability value",
-                    ));
-                };
-                Ok(Value::Bool(!headless))
-            }
+            runmat_builtins::JavaFeature::Awt | runmat_builtins::JavaFeature::Swing => Err(
+                invalid_conversion("Java AWT capability requires asynchronous admission"),
+            ),
         }
     }
 
@@ -751,24 +552,26 @@ fn value_from_java_parts(
             runmat_java::JavaParameterType::Object(_) | runmat_java::JavaParameterType::Array(_)
         ) {
             let length = elements.len();
-            return CellArray::new(
-                elements
-                    .into_iter()
-                    .map(|value| {
-                        value_from_java_parts(
-                            handles,
-                            host_identity,
-                            resources,
-                            java_to_foreign,
-                            value,
-                        )
-                    })
-                    .collect::<Result<_, _>>()?,
-                length,
-                1,
-            )
-            .map(Value::Cell)
-            .map_err(invalid_conversion);
+            let mut converted = crate::execution::RootedValuesBuilder::with_capacity(length);
+            for value in elements {
+                converted
+                    .push(value_from_java_parts(
+                        handles,
+                        host_identity,
+                        resources,
+                        java_to_foreign,
+                        value,
+                    )?)
+                    .map_err(|error| error.into_runtime_error())?;
+            }
+            return converted
+                .finish()
+                .map_err(|error| error.into_runtime_error())?
+                .with_owned_values(|values| {
+                    CellArray::new(values, length, 1)
+                        .map(Value::Cell)
+                        .map_err(invalid_conversion)
+                });
         }
         return array_from_java(component, elements);
     }
@@ -846,7 +649,7 @@ impl ForeignAdapter for JavaAdapter {
                 .borrow()
                 .iter()
                 .map(|identity| {
-                    runmat_types::ForeignArtifactIdentity::new(identity.clone())
+                    runmat_types::ForeignArtifactIdentity::new(identity.as_str())
                         .expect("installed Java artifact identities are canonical")
                 })
                 .collect(),
@@ -857,8 +660,20 @@ impl ForeignAdapter for JavaAdapter {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
-        let result = self.invoke_now(&context, call);
-        Box::pin(async move { result })
+        if self.retirement_requested.get() || self.project_retirement.is_pending() {
+            let error = invalid_conversion("Java selected adapter is retiring");
+            return Box::pin(async move { Err(error) });
+        }
+        if matches!(call.symbol.as_str(), "status" | "configure") {
+            let result =
+                crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
+            return Box::pin(async move { result });
+        }
+        let Some(owner) = self.self_weak.upgrade() else {
+            let error = invalid_conversion("Java adapter owner has ended");
+            return Box::pin(async move { Err(error) });
+        };
+        Box::pin(async move { owner.invoke_in_process(context, call).await })
     }
 }
 
@@ -917,10 +732,13 @@ fn java_runtime_error(error: runmat_java::JvmError) -> RuntimeError {
 }
 
 fn java_invocation_error(error: JavaInvocationError) -> RuntimeError {
-    let identifier = if matches!(error, JavaInvocationError::Exception(_)) {
-        "RunMat:Java:Exception"
-    } else {
-        "RunMat:Java:InvocationFailed"
+    if matches!(&error, JavaInvocationError::InvalidQualifiedName) {
+        return invalid_conversion(error.to_string());
+    }
+    let identifier = match &error {
+        JavaInvocationError::Exception(_) => "RunMat:Java:Exception",
+        JavaInvocationError::ClassNotFound(_) => "RunMat:Java:ClassNotFound",
+        _ => "RunMat:Java:InvocationFailed",
     };
     build_runtime_error(error.to_string())
         .with_builtin("java")

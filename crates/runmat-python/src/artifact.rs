@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_process_host::private_bytes::PrivateByteLease;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -18,7 +20,9 @@ const CANONICAL_HEADER_BYTES: usize = CANONICAL_MAGIC.len() + std::mem::size_of:
 const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTIFACTS: usize = 4_096;
 const MAX_TOTAL_BYTES: usize = 1024 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FILES: usize = 262_144;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_EXPANDED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +195,12 @@ impl PythonArtifactBundle {
                     .map(|artifact| artifact.identity.to_string()),
             )
             .collect()
+    }
+
+    /// Wheel identities alone are the authority for installed import roots;
+    /// the optional environment identity pins the host, not another root.
+    pub fn wheel_identities(&self) -> impl Iterator<Item = &PythonArtifactIdentity> {
+        self.artifacts.iter().map(|artifact| &artifact.identity)
     }
 
     pub fn validate(&self) -> Result<(), PythonArtifactError> {
@@ -438,24 +448,43 @@ impl PythonArtifactBundle {
         Ok(bundle)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn install(&self) -> Result<InstalledPythonArtifacts, PythonArtifactError> {
         self.validate()?;
-        let root = tempfile::Builder::new()
-            .prefix("runmat-python-")
-            .tempdir()
-            .map_err(|error| PythonArtifactError::Io {
+        let root = PrivateByteLease::new_private("runmat-python-").map_err(|error| {
+            PythonArtifactError::Io {
                 operation: "create Python artifact root",
-                error: error.to_string(),
-            })?;
-        let module_paths = self.install_into(root.path())?;
-        Ok(InstalledPythonArtifacts { root, module_paths })
+                error,
+            }
+        })?;
+        let (module_paths, top_level_modules) = self.install_into(root.path())?;
+        Ok(InstalledPythonArtifacts {
+            root,
+            module_paths,
+            top_level_modules,
+            artifact_identities: self.artifact_identities(),
+            wheel_identities: self.wheel_identities().cloned().collect(),
+        })
     }
 
-    fn install_into(&self, root: &Path) -> Result<Vec<PathBuf>, PythonArtifactError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn install_into(
+        &self,
+        root: &Path,
+    ) -> Result<(Vec<PathBuf>, BTreeSet<String>), PythonArtifactError> {
         let mut module_paths = Vec::with_capacity(self.artifacts.len());
+        let mut top_level_modules = BTreeSet::new();
         let mut expanded = 0u64;
         let mut files = 0usize;
         for artifact in &self.artifacts {
+            top_level_modules.insert(
+                artifact
+                    .module
+                    .split('.')
+                    .next()
+                    .expect("validated Python module has a top-level name")
+                    .to_owned(),
+            );
             let destination = root.join(&artifact.logical_name);
             std::fs::create_dir(&destination).map_err(|error| PythonArtifactError::Io {
                 operation: "create Python wheel directory",
@@ -486,6 +515,9 @@ impl PythonArtifactBundle {
                     )));
                 }
                 let relative = wheel_install_path(file.name())?;
+                if let Some(name) = top_level_import_name(&relative) {
+                    top_level_modules.insert(name);
+                }
                 let output = destination.join(relative);
                 if file.is_dir() {
                     std::fs::create_dir_all(&output).map_err(io_error)?;
@@ -499,8 +531,31 @@ impl PythonArtifactBundle {
             }
             module_paths.push(destination);
         }
-        Ok(module_paths)
+        Ok((module_paths, top_level_modules))
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn top_level_import_name(relative: &Path) -> Option<String> {
+    let mut components = relative.components();
+    let first = match components.next()? {
+        Component::Normal(name) => name.to_str()?,
+        _ => return None,
+    };
+    if first.ends_with(".dist-info") || first.ends_with(".data") {
+        return None;
+    }
+    let name = if components.next().is_some() {
+        first
+    } else {
+        first.strip_suffix(".py").or_else(|| {
+            [".so", ".pyd", ".dll", ".dylib"]
+                .iter()
+                .find_map(|suffix| first.strip_suffix(suffix))
+                .and_then(|stem| stem.split('.').next())
+        })?
+    };
+    (!name.is_empty() && name != "__pycache__").then(|| name.to_owned())
 }
 
 impl Default for PythonArtifactBundle {
@@ -509,19 +564,49 @@ impl Default for PythonArtifactBundle {
     }
 }
 
-#[derive(Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct InstalledPythonArtifacts {
-    root: tempfile::TempDir,
+    root: PrivateByteLease,
     module_paths: Vec<PathBuf>,
+    top_level_modules: BTreeSet<String>,
+    artifact_identities: BTreeSet<String>,
+    wheel_identities: BTreeSet<PythonArtifactIdentity>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for InstalledPythonArtifacts {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InstalledPythonArtifacts")
+            .field("module_count", &self.module_paths.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl InstalledPythonArtifacts {
     pub fn module_paths(&self) -> &[PathBuf] {
         &self.module_paths
     }
 
+    pub fn top_level_modules(&self) -> &BTreeSet<String> {
+        &self.top_level_modules
+    }
+
+    pub fn artifact_identities(&self) -> &BTreeSet<String> {
+        &self.artifact_identities
+    }
+
+    pub fn wheel_identities(&self) -> &BTreeSet<PythonArtifactIdentity> {
+        &self.wheel_identities
+    }
+
     pub fn root(&self) -> &Path {
         self.root.path()
+    }
+
+    pub fn byte_lease(&self) -> PrivateByteLease {
+        self.root.clone()
     }
 }
 
@@ -651,6 +736,7 @@ fn wheel_install_path(name: &str) -> Result<PathBuf, PythonArtifactError> {
     Ok(path)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn io_error(error: std::io::Error) -> PythonArtifactError {
     PythonArtifactError::Io {
         operation: "materialize Python wheel",

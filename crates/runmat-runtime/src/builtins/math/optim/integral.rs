@@ -924,7 +924,7 @@ mod tests {
         };
         let (lower, upper) = bounds();
         let error = block_on(integral_builtin(
-            Value::FunctionHandle("__integral_square".to_string()),
+            Value::FunctionHandle("__integral_square".into()),
             Value::Tensor(lower),
             Value::Tensor(upper),
             Vec::new(),
@@ -938,7 +938,7 @@ mod tests {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let (lower, upper) = bounds();
         let result = block_on(integral_builtin(
-            Value::FunctionHandle("__integral_square".to_string()),
+            Value::FunctionHandle("__integral_square".into()),
             Value::Tensor(lower),
             Value::Tensor(upper),
             Vec::new(),
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn integral_integrand_reads_typed_integer_scalar_storage_exactly() {
         let result = run(
-            Value::FunctionHandle("__integral_integer_tensor".to_string()),
+            Value::FunctionHandle("__integral_integer_tensor".into()),
             0.0,
             2.0,
         )

@@ -1,8 +1,9 @@
 //! Automatic preparation after the owning rounding form has admitted its inputs.
 use crate::context::preparation::{
-    execute_current_invocation, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_invocation, execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinPreparationFormId};
@@ -10,17 +11,20 @@ use runmat_value::{NumericDType, Value};
 use std::future::Future;
 
 pub(super) async fn remainder<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     entry: &'static BuiltinCatalogEntry,
     kind: runmat_types::FloatingRemainderKind,
     left: Value,
     right: Value,
     shape_error: impl FnOnce(String) -> crate::RuntimeError,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value, Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     let eligible = matches!((&left, &right), (Value::Tensor(a), Value::Tensor(b))
         if matches!(a.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
             && a.numeric_dtype() == b.numeric_dtype());
@@ -64,7 +68,7 @@ where
         vec![left, right],
     )?
     .with_numerical_domain(|_| Ok(NumericalDomainEvidence::FloatingRemainder(kind)))?;
-    execute_current_request(request, |mut values| {
+    execute_request(runtime, request, |mut values| {
         let right = values.remove(1);
         body(values.remove(0), right)
     })
@@ -72,16 +76,19 @@ where
 }
 
 pub(super) async fn digits<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     digits: i32,
     mode: RoundDigitsMode,
     control_count: usize,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _input =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     if !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
         return body(value).await;
@@ -102,25 +109,29 @@ where
         vec![value],
     )?
     .with_numerical_domain(|_| Ok(NumericalDomainEvidence::RoundDigits { digits, mode }))?;
-    execute_current_request(request, |mut values| body(values.remove(0))).await
+    execute_request(runtime, request, |mut values| body(values.remove(0))).await
 }
 
 pub(super) async fn unary<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     entry: &'static BuiltinCatalogEntry,
     value: Value,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _input =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     // These are the real dense forms served by the unary provider hooks.
     // Integer identity, complex, tabular and resident forms keep their own body.
     if !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
         return body(value).await;
     }
-    execute_current_invocation(
+    execute_invocation(
+        runtime,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: entry.identity,

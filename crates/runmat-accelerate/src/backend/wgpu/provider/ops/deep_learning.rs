@@ -269,13 +269,11 @@ impl WgpuProvider {
                     "runmat-crossentropy-out",
                 )?;
                 let error_buffer =
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-crossentropy-error"),
-                            contents: bytes_of(&0u32),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                        });
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-crossentropy-error"),
+                        contents: bytes_of(&0u32),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    });
                 let bind_layout =
                     emission
                         .device()
@@ -411,12 +409,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-crossentropy-error-copy"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-crossentropy-error-copy"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
                 self.submit(emission, pending, encoder)?;
                 Ok((out_losses, staging, error_size))
@@ -590,13 +588,11 @@ impl WgpuProvider {
             let (staging, error_size) =
                 self.with_emission(|emission, pending| -> Result<_> {
                     let error_buffer =
-                        emission
-                            .device()
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-adamupdate-error"),
-                                contents: bytes_of(&0u32),
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                            });
+                        emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-adamupdate-error"),
+                            contents: bytes_of(&0u32),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        });
                     let shader = adam_update_shader(self.precision);
                     let shader_module =
                         emission
@@ -742,12 +738,12 @@ impl WgpuProvider {
                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     });
-                    let mut encoder =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-adamupdate-error-copy"),
-                            });
+                    let mut encoder = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-adamupdate-error-copy"),
+                        },
+                    );
                     encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
                     self.submit(emission, pending, encoder)?;
                     Ok((staging, error_size))
@@ -827,17 +823,20 @@ fn create_crossentropy_pipeline(
     label: &str,
     shader: String,
 ) -> wgpu::ComputePipeline {
-    let device = emission.device();
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(label),
-        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-    });
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(label),
-        bind_group_layouts: &[bind_layout],
-        push_constant_ranges: &[],
-    });
-    device.create_compute_pipeline(
+    let module = emission
+        .device()
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+        });
+    let layout = emission
+        .device()
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[bind_layout],
+            push_constant_ranges: &[],
+        });
+    emission.device().create_compute_pipeline(
         &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
             label: Some(label),
             layout: Some(&layout),

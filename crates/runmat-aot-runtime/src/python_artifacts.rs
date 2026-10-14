@@ -1,16 +1,24 @@
 use runmat_python::PythonArtifactBundle;
 
+#[cfg(test)]
 pub(crate) fn install(
     bytes: &[u8],
     adapter: &runmat_runtime::foreign::PythonAdapter,
 ) -> Result<(), String> {
     let bundle = PythonArtifactBundle::from_canonical_bytes(bytes)
         .map_err(|error| format!("standalone Python artifact bundle is invalid: {error}"))?;
+    install_admitted(&bundle, adapter)
+}
+
+pub(crate) fn install_admitted(
+    bundle: &PythonArtifactBundle,
+    adapter: &runmat_runtime::foreign::PythonAdapter,
+) -> Result<(), String> {
     if bundle.environment.is_none() && bundle.artifacts.is_empty() {
         return Ok(());
     }
     adapter
-        .install_portable_artifact_bundle(&bundle)
+        .install_portable_artifact_bundle(bundle)
         .map_err(|error| format!("standalone Python artifacts failed to install: {error}"))
 }
 

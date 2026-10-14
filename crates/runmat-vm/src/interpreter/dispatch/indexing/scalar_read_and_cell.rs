@@ -27,7 +27,9 @@ pub(super) async fn dispatch(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            stack.push(paren_index_value(runtime, base, raw_indices, 1, function_registry).await?);
+            paren_index_value(runtime, base, raw_indices, 1, function_registry)
+                .await?
+                .with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell { num_indices } => {
@@ -79,7 +81,7 @@ pub(super) async fn dispatch(
                     "IndexCellList expected a transient value sequence",
                 ));
             };
-            super::super::object::write_sequence_register(stack, sequence_register, values)?;
+            super::super::object::write_rooted_sequence_register(stack, sequence_register, values)?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell { num_indices }

@@ -104,13 +104,16 @@ fn initializer_closure_captures_keep_their_resident_lease_without_invocation() {
                 shape: &[2, 1],
             })
             .unwrap();
-        let callback = Value::Closure(runmat_value::Closure {
-            function_name: "not_invoked_during_construction".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::GpuTensor(source.clone())],
-        });
+        let callback = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "not_invoked_during_construction".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: vec![Value::GpuTensor(source.clone())],
+            },
+        ));
         provider.reset_telemetry();
         let Value::Object(layer) = construct(
             DeepLearningLayerKind::FullyConnected,

@@ -1,14 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption,
 };
-use runmat_execution_artifact::{
-    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
-    ProgramExecutionResponse,
-};
+use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverControlPlane,
     DriverRunTarget, DriverRunTransition, HttpDriverControlPlane, StoreDriverArtifact,
@@ -16,8 +12,13 @@ use runmat_execution_transport_native::control::{
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
 use super::config::RemoteDriverConfig;
-use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
+use super::crypto::{ciphertext_digest, open_object, seal_object};
 use crate::{NativeExecutionError, NativeExecutionResult};
+
+pub(super) mod program;
+pub(super) use program::AdmittedRemoteProgram;
+#[path = "local_graph.rs"]
+pub(super) mod local_graph;
 
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
 const RETAIN_FOR_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -77,67 +78,16 @@ pub(super) async fn run_remote_driver(
         return Ok(());
     }
 
-    let bundle = required_artifact(&bootstrap.artifacts, "bundle")?;
-    let program = required_artifact(&bootstrap.artifacts, "program")?;
-    let input = required_artifact(&bootstrap.artifacts, "input")?;
-    let bundle_archive = open_download(
+    let admitted = program::admit(
         control.as_ref(),
         &run_key,
-        bundle,
+        &bootstrap.artifacts,
         &config.authority.run_id,
-        EncryptionPurpose::Bundle,
+        &bootstrap.project_revision,
+        bootstrap.desired_worker_count,
+        bootstrap.driver_resources.scratch_bytes,
     )
     .await?;
-    let bundle =
-        read_bundle(bundle_archive.as_slice(), ArchiveLimits::default()).map_err(protocol)?;
-    let descriptor: ProgramExecutionDescriptor = serde_json::from_slice(
-        &open_download(
-            control.as_ref(),
-            &run_key,
-            program,
-            &config.authority.run_id,
-            EncryptionPurpose::Program,
-        )
-        .await?,
-    )
-    .map_err(protocol)?;
-    let inputs: ProgramExecutionInputs = serde_json::from_slice(
-        &open_download(
-            control.as_ref(),
-            &run_key,
-            input,
-            &config.authority.run_id,
-            EncryptionPurpose::Input,
-        )
-        .await?,
-    )
-    .map_err(protocol)?;
-    descriptor.validate().map_err(protocol)?;
-    inputs.validate().map_err(protocol)?;
-    bundle.validate().map_err(protocol)?;
-    if bundle.manifest.program_revision != descriptor.recipe.program_revision
-        || !bundle
-            .manifest
-            .recipes
-            .iter()
-            .any(|recipe| recipe == &descriptor.recipe)
-        || !bundle
-            .manifest
-            .artifacts
-            .iter()
-            .any(|artifact| artifact == &descriptor.artifact)
-        || project_revision_identity(&bundle.manifest.program_revision)
-            != bootstrap.project_revision
-    {
-        return Err(protocol(
-            "bundle, program, and admitted project revision do not converge",
-        ));
-    }
-    let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
-    let materialized_project = (bootstrap.desired_worker_count == 0
-        && bundle.requires_materialization())
-    .then(|| crate::materialized_project::MaterializedProject::from_bundle(&bundle))
-    .transpose()?;
 
     store_checkpoint(
         control.as_ref(),
@@ -169,28 +119,52 @@ pub(super) async fn run_remote_driver(
 
     let mut usage_sequence = 0_u64;
     let (cancellation_sender, cancellation_receiver) = tokio::sync::watch::channel(false);
-    let uses_remote_pool = bootstrap.desired_worker_count > 0;
+    let supports_owned_cancellation =
+        bootstrap.desired_worker_count > 0 || matches!(&admitted, AdmittedRemoteProgram::Graph(_));
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
-            Ok(
-                super::pool_execution::RemotePoolExecutionOutcome::Completed(
-                    crate::test_workload::execute_host_program_request_with_project(
+            let response = match admitted {
+                AdmittedRemoteProgram::Direct(admitted) => {
+                    let program::AdmittedDirectProgram {
                         request,
-                        materialized_project.as_ref(),
+                        materialized,
+                        bundle,
+                        ..
+                    } = *admitted;
+                    crate::test_workload::execute_host_program_request_with_validated_bundle(
+                        request,
+                        materialized.as_ref(),
+                        None,
+                        Some(bundle),
                     )
-                    .await,
-                ),
-            )
+                    .await
+                }
+                AdmittedRemoteProgram::Graph(admitted) => {
+                    let program::AdmittedGraphProgram {
+                        request, _staged, ..
+                    } = *admitted;
+                    return local_graph::execute(
+                        &config.authority.run_id,
+                        request,
+                        _staged,
+                        &bootstrap.driver_resources,
+                        &bootstrap.driver_accelerator_devices,
+                        cancellation_receiver,
+                    )
+                    .await;
+                }
+            };
+            Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
         } else {
             super::pool_execution::execute(super::pool_execution::RemotePoolExecution {
                 control: control.as_ref(),
                 authority: &config.authority,
                 run_key: &run_key,
-                bundle_archive,
-                request,
+                program: admitted,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
+                ready_v1: config.ready_v1,
             })
             .await
         }
@@ -258,7 +232,7 @@ pub(super) async fn run_remote_driver(
                     .await
                     .map_err(protocol)?;
                 if heartbeat.cancellation_requested {
-                    if uses_remote_pool {
+                    if supports_owned_cancellation {
                         cancellation_sender.send_replace(true);
                         continue;
                     }
@@ -306,9 +280,9 @@ async fn commit_response(
     response: ProgramExecutionResponse,
 ) -> NativeExecutionResult<()> {
     match response {
-        ProgramExecutionResponse::Success { outputs } => {
-            let plaintext = serde_json::to_vec(&ProgramExecutionResponse::Success { outputs })
-                .map_err(protocol)?;
+        response @ (ProgramExecutionResponse::Success { .. }
+        | ProgramExecutionResponse::GraphSuccess { .. }) => {
+            let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
             let result = store_encrypted(
                 control,
                 config,

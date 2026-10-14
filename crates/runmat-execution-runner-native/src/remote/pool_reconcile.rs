@@ -19,19 +19,26 @@ use super::worker_env::session_id;
 use super::{RelayRemoteWorkerChannel, RemotePoolDriver};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+pub(super) struct WorkerAuthorizationContext<'a> {
+    pub(super) authority: &'a DriverAuthority,
+    pub(super) run_key: &'a RunKeyMaterial,
+    pub(super) ready_v1: bool,
+}
+
 pub(super) async fn reconcile_workers(
     control: &dyn DriverControlPlane,
-    authority: &DriverAuthority,
-    run_key: &RunKeyMaterial,
+    authorization: &WorkerAuthorizationContext<'_>,
     pool_id: PoolId,
     pool: &std::sync::Arc<RemotePoolDriver>,
     worker_pool: &DriverWorkerPool,
     registered: &mut HashMap<String, WorkerId>,
 ) -> NativeExecutionResult<()> {
+    let authority = authorization.authority;
+    let run_key = authorization.run_key;
     let live_allocations = worker_pool
         .workers
         .iter()
-        .filter(|worker| matches!(worker.state.as_str(), "offered" | "active"))
+        .filter(|worker| worker.state == "active")
         .map(|worker| worker.allocation_lease_id.as_str())
         .collect::<HashSet<_>>();
     let lost = registered
@@ -47,7 +54,10 @@ pub(super) async fn reconcile_workers(
     for worker in worker_pool
         .workers
         .iter()
-        .filter(|worker| live_allocations.contains(worker.allocation_lease_id.as_str()))
+        // Offered allocations can publish endpoint evidence before their
+        // executable has joined the relay. Readiness is issued only by an
+        // active worker binary, never by the offer itself.
+        .filter(|worker| worker.state == "active")
     {
         if registered.contains_key(&worker.allocation_lease_id) {
             continue;
@@ -57,7 +67,7 @@ pub(super) async fn reconcile_workers(
         };
         verify_evidence(authority, worker)?;
         if !worker.run_key_envelope_authorized {
-            authorize_worker(control, authority, run_key, worker).await?;
+            authorize_worker(control, authorization, worker).await?;
         }
         let worker_id = WorkerId::derive(&[
             authority.run_id.as_bytes(),
@@ -94,15 +104,16 @@ pub(super) async fn reconcile_workers(
         pool.add_worker(channel).await?;
         registered.insert(worker.allocation_lease_id.clone(), worker_id);
     }
+    pool.refresh_worker_software_capabilities().await?;
     Ok(())
 }
 
 async fn authorize_worker(
     control: &dyn DriverControlPlane,
-    authority: &DriverAuthority,
-    run_key: &RunKeyMaterial,
+    authorization: &WorkerAuthorizationContext<'_>,
     worker: &DriverWorkerAllocation,
 ) -> NativeExecutionResult<()> {
+    let authority = authorization.authority;
     let evidence = worker
         .endpoint_identity
         .as_ref()
@@ -118,7 +129,13 @@ async fn authorize_worker(
     let mut entropy = [0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut entropy);
     let envelope = PortableExecutionEncryption
-        .seal_run_key_with_entropy(entropy, &recipient, run_key, authority.run_id.clone(), 1)
+        .seal_run_key_with_entropy(
+            entropy,
+            &recipient,
+            authorization.run_key,
+            authority.run_id.clone(),
+            1,
+        )
         .map_err(protocol)?;
     control
         .authorize_worker(
@@ -126,6 +143,7 @@ async fn authorize_worker(
             &worker.allocation_lease_id,
             &recipient.fingerprint,
             &encode_run_key_envelope(&envelope).map_err(protocol)?,
+            authorization.ready_v1,
         )
         .await
         .map_err(protocol)

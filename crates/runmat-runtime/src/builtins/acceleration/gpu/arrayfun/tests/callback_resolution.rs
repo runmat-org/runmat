@@ -17,9 +17,7 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(
-                async move { crate::sequence::single_value_sequence(Value::Num(value + 40.0)) },
-            )
+            Box::pin(async move { rooted_single(Value::Num(value + 40.0)) })
         },
     )));
     drop(entry);
@@ -27,14 +25,14 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
 
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
-        Value::ExternalFunctionHandle("callback".to_string()),
+        Value::ExternalFunctionHandle("callback".into()),
         vec![Value::Tensor(tensor)],
     )))
     .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), &[1, 2]);
-            assert_eq!(values(&out), vec![41.0, 42.0]);
+            assert_eq!(values(out), vec![41.0, 42.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -53,7 +51,7 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
         |function, arguments, _| {
             assert_eq!(function, 87);
             assert_eq!(arguments, &[Value::Num(4.0)]);
-            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(8.0)) })
+            Box::pin(async { rooted_single(Value::Num(8.0)) })
         },
     )));
     let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
@@ -78,16 +76,19 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
         |function, arguments, _| {
             assert_eq!(function, 187);
             assert_eq!(arguments, &[Value::Num(5.0), Value::Num(4.0)]);
-            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
+            Box::pin(async { rooted_single(Value::Num(9.0)) })
         },
     )));
-    let callable = Callable::from_function(Value::Closure(Closure {
-        function_name: "pkg.callback".into(),
-        binding: None,
-        source_role: runmat_types::FunctionSourceRole::Unknown,
-        source_file: None,
-        captures: vec![Value::Num(5.0)],
-    }))
+    let callable = Callable::from_function(Value::Closure(Closure::from_data(
+        runmat_value::ClosureData {
+            lexical_environment: None,
+            function_name: "pkg.callback".into(),
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
+            captures: vec![Value::Num(5.0)],
+        },
+    )))
     .expect("closure callback should parse");
     drop(entry);
     assert_eq!(
@@ -110,16 +111,19 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             assert_eq!(function, 287);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(5.0), Value::Num(4.0)]);
-            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
+            Box::pin(async { rooted_single(Value::Num(9.0)) })
         },
     )));
-    let callable = Callable::from_function(Value::Closure(Closure {
-        function_name: "pkg.callback".into(),
-        binding: None,
-        source_role: runmat_types::FunctionSourceRole::Unknown,
-        source_file: None,
-        captures: vec![Value::Num(5.0)],
-    }))
+    let callable = Callable::from_function(Value::Closure(Closure::from_data(
+        runmat_value::ClosureData {
+            lexical_environment: None,
+            function_name: "pkg.callback".into(),
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
+            captures: vec![Value::Num(5.0)],
+        },
+    )))
     .expect("closure callback should parse");
     drop(entry);
     let value = block_on(runtime.scope(callable.call(Some(&runtime), &[Value::Num(4.0)])))
@@ -134,7 +138,7 @@ fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
 
     let err = call(
-        Value::ExternalFunctionHandle("pkg.callback".to_string()),
+        Value::ExternalFunctionHandle("pkg.callback".into()),
         vec![Value::Tensor(tensor)],
     )
     .expect_err("unresolved external callback should error");
@@ -161,7 +165,7 @@ fn arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved() {
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
 
     let err = call(
-        Value::ExternalFunctionHandle("pkg..callback".to_string()),
+        Value::ExternalFunctionHandle("pkg..callback".into()),
         vec![Value::Tensor(tensor)],
     )
     .expect_err("malformed unresolved external callback should error");

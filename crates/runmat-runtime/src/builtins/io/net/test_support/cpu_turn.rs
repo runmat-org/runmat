@@ -1,4 +1,5 @@
 use crate::context::RuntimeServiceFuture;
+use crate::execution::RootedValueSequence;
 use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
     RuntimeExecutionServices,
@@ -7,7 +8,7 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::cell::Cell;
 use std::num::NonZeroU64;
 use std::rc::Rc;
@@ -97,7 +98,7 @@ impl RuntimeExecutionServices for CodecTurnService {
     fn complete_future(
         &self,
         _: &FutureHandle,
-        _: Result<ValueSequence, ExecutionServiceError>,
+        _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }

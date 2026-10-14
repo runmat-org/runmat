@@ -331,8 +331,8 @@ fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime
             1,
         ))
         .unwrap();
-        let output = match result {
-            Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        let output = match result.value() {
+            Value::OutputList(values) if values.len() == 1 => &values[0],
             value => value,
         };
         assert_eq!(provider.casts.load(Ordering::SeqCst), 1);
@@ -352,16 +352,15 @@ fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime
         match (builtin, output) {
             ("cov", Value::GpuTensor(output)) => {
                 assert_eq!(output.shape(), &[2, 2]);
-                assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
+                assert_eq!(handle_precision(output), Some(ProviderPrecision::F32));
                 assert!(!output.shares_allocation_with(&input.handle));
                 assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
-                let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+                let downloaded = block_on(provider.download_numeric(output)).unwrap();
                 let HostNumericDataOwned::F32(values) = downloaded.data else {
                     panic!("cov restoration changed numeric precision");
                 };
                 assert_eq!(downloaded.shape, vec![2, 2]);
                 assert!(values.iter().all(|&value| (value - 0.5).abs() < 1e-6));
-                drop(output);
             }
             ("corrcoef", Value::Tensor(output)) => {
                 // This builtin may finish on host, but never recomputes the
@@ -376,6 +375,7 @@ fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime
             }
             _ => panic!("{builtin} fallback returned the wrong output carrier"),
         }
+        drop(result);
         assert!(input.handle.allocation_lease().validate_live().is_ok());
         assert_eq!(input.probe.retirements(), 0);
         assert!(provider
@@ -415,20 +415,21 @@ fn covariance_family_validates_raw_results_before_conversion_and_converted_resul
                 1,
             ));
             if matches!(mode, Mode::Valid) {
-                let output = match result.unwrap() {
+                let rooted = result.unwrap();
+                let output = match rooted.value() {
                     Value::GpuTensor(output) => output,
                     Value::OutputList(values) if values.len() == 1 => {
-                        let Value::GpuTensor(output) = values.into_iter().next().unwrap() else {
+                        let Value::GpuTensor(output) = &values[0] else {
                             panic!("{builtin} should preserve resident output");
                         };
                         output
                     }
                     _ => panic!("{builtin} should preserve resident output"),
                 };
-                assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
+                assert_eq!(handle_precision(output), Some(ProviderPrecision::F32));
                 assert_eq!(output.shape(), &[2, 2]);
                 assert!(!output.shares_allocation_with(&input.handle));
-                drop(output);
+                drop(rooted);
             } else {
                 let error = result.unwrap_err();
                 assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);

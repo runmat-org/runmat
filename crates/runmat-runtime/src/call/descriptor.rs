@@ -4,7 +4,7 @@ use crate::RuntimeError;
 use runmat_types::{
     BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
 };
-use runmat_value::{Closure, Value, ValueSequence};
+use runmat_value::{Closure, Value};
 
 /// Executor adapter used only to map stable source names to semantic functions.
 pub trait FunctionNameResolver {
@@ -61,14 +61,63 @@ impl CallableMetadata {
     }
 }
 
+/// One closure stored in its canonical Value representation so root scans can
+/// borrow the complete capture and lexical-activation graph without cloning it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetainedClosureValue(Box<Value>);
+
+impl RetainedClosureValue {
+    pub fn new(closure: Closure) -> Self {
+        Self(Box::new(Value::Closure(closure)))
+    }
+
+    pub fn as_value(&self) -> &Value {
+        self.0.as_ref()
+    }
+
+    pub fn as_closure(&self) -> &Closure {
+        match self.0.as_ref() {
+            Value::Closure(closure) => closure,
+            _ => unreachable!("retained closure is constructed only from Closure"),
+        }
+    }
+
+    pub fn into_closure(self) -> Closure {
+        match *self.0 {
+            Value::Closure(closure) => closure,
+            _ => unreachable!("retained closure is constructed only from Closure"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallableTarget {
     Bound(runmat_value::BoundFunctionBinding),
+    /// Preserve the traceable closure and its ancestor environment through
+    /// queued callback admission; flattened captures alone are insufficient.
+    BoundLexical {
+        binding: runmat_value::BoundFunctionBinding,
+        closure: RetainedClosureValue,
+    },
     Resolved {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
     },
     FevalForward(Value),
+}
+
+impl CallableTarget {
+    /// Expose every value graph retained by a deferred callable target.
+    pub(crate) fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        match self {
+            Self::BoundLexical { closure, .. } => visitor(closure.as_value()),
+            Self::FevalForward(value) => visitor(value),
+            Self::Bound(_) | Self::Resolved { .. } => Some(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +129,17 @@ pub struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
+    /// Visit arguments and the callable target as one retained graph.
+    pub(crate) fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        for value in &self.args {
+            visitor(value)?;
+        }
+        self.target.visit_retained_values(visitor)
+    }
+
     pub fn bound(
         binding: runmat_value::BoundFunctionBinding,
         args: Vec<Value>,
@@ -344,34 +404,44 @@ impl CallableDescriptor {
             Value::FunctionHandle(name) => {
                 let (identity, fallback_policy) =
                     Self::resolve_named_target(&name, function_resolver);
-                Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
+                Self::feval_resolved_name(
+                    identity,
+                    name.into_name(),
+                    fallback_policy,
+                    args,
+                    requested_outputs,
+                )
             }
             Value::ExternalFunctionHandle(name) => {
                 let (identity, fallback_policy) =
                     Self::resolve_named_target(&name, function_resolver);
-                Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
+                Self::feval_resolved_name(
+                    identity,
+                    name.into_name(),
+                    fallback_policy,
+                    args,
+                    requested_outputs,
+                )
             }
             Value::MethodFunctionHandle(name) => Self::feval_resolved_name(
-                CallableIdentity::Method(runmat_types::MethodId(name.clone())),
-                name,
+                CallableIdentity::Method(runmat_types::MethodId(name.name().to_owned())),
+                name.into_name(),
                 CallableFallbackPolicy::RuntimeNameResolution,
                 args,
                 requested_outputs,
             ),
-            Value::BoundFunctionHandle {
-                name,
-                function,
-                authority,
-                ..
-            } => Self::feval_bound(
-                runmat_value::BoundFunctionBinding {
-                    function,
-                    authority,
-                },
-                name,
-                args,
-                requested_outputs,
-            ),
+            Value::BoundFunctionHandle(handle) => {
+                let data = handle.into_data();
+                Self::feval_bound(
+                    runmat_value::BoundFunctionBinding {
+                        function: data.function,
+                        authority: data.authority,
+                    },
+                    data.name,
+                    args,
+                    requested_outputs,
+                )
+            }
             other => Self::feval_forward(other, args, requested_outputs),
         }
     }
@@ -382,10 +452,21 @@ impl CallableDescriptor {
         requested_outputs: usize,
         function_resolver: &impl FunctionNameResolver,
     ) -> Self {
-        let name = closure.function_name;
-        let mut call_args = closure.captures;
+        let name = closure.function_name.clone();
+        let mut call_args = closure.captures.clone();
         call_args.extend(args);
-        if let Some(binding) = closure.binding {
+        if let Some(binding) = closure.binding.clone() {
+            if closure.lexical_environment.is_some() {
+                return Self {
+                    target: CallableTarget::BoundLexical {
+                        binding,
+                        closure: RetainedClosureValue::new(closure),
+                    },
+                    args: call_args,
+                    requested_outputs,
+                    metadata: CallableMetadata::feval(Some(name)),
+                };
+            }
             return Self::feval_bound(binding, name, call_args, requested_outputs);
         }
         if let Some(function) = function_resolver.resolve_function(&name) {
@@ -465,7 +546,7 @@ async fn call_builtin_with_requested_outputs(
     args: &[Value],
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     match runtime {
         Some(runtime) => {
             runtime
@@ -496,7 +577,7 @@ async fn forward_named_fallback(
     args: Vec<Value>,
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let invoke = crate::callsite::with_callsite(
         callsite,
         crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
@@ -524,36 +605,43 @@ mod execution;
 #[path = "descriptor/resolved_execution.rs"]
 mod resolved_execution;
 
-pub async fn execute_callable_descriptor(
+pub fn execute_callable_descriptor(
     descriptor: CallableDescriptor,
-) -> Result<ValueSequence, RuntimeError> {
-    execution::execute(None, descriptor).await
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>
+{
+    // Construct the selected execution future now: a bound lexical target
+    // roots its closure before an unpolled caller can enqueue or discard it.
+    execution::execute(None, descriptor)
 }
 
-pub async fn execute_callable_descriptor_in_context(
-    runtime: &crate::context::RuntimeContext,
+pub fn execute_callable_descriptor_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
     descriptor: CallableDescriptor,
-) -> Result<ValueSequence, RuntimeError> {
-    runtime
-        .scope(execution::execute(Some(runtime), descriptor))
-        .await
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
+{
+    runtime.scope(execution::execute(Some(runtime), descriptor))
 }
 
 #[cfg(test)]
 #[path = "descriptor/tests.rs"]
 mod tests;
 
-pub async fn try_execute_callable_descriptor(
+#[cfg(test)]
+#[path = "descriptor/lexical_roots_tests.rs"]
+mod lexical_roots_tests;
+
+pub fn try_execute_callable_descriptor(
     descriptor: CallableDescriptor,
-) -> Result<Option<ValueSequence>, RuntimeError> {
-    execution::try_execute(None, descriptor).await
+) -> impl std::future::Future<Output = Result<Option<crate::execution::RootedValueSequence>, RuntimeError>>
+{
+    execution::try_execute(None, descriptor)
 }
 
-pub async fn try_execute_callable_descriptor_in_context(
-    runtime: &crate::context::RuntimeContext,
+pub fn try_execute_callable_descriptor_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
     descriptor: CallableDescriptor,
-) -> Result<Option<ValueSequence>, RuntimeError> {
-    runtime
-        .scope(execution::try_execute(Some(runtime), descriptor))
-        .await
+) -> impl std::future::Future<
+    Output = Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+> + 'a {
+    runtime.scope(execution::try_execute(Some(runtime), descriptor))
 }

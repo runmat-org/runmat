@@ -80,6 +80,7 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
         access: runmat_types::MemberAccess::Public,
         function_name: function_name.into(),
         implicit_class_argument: None,
+        role: runmat_types::ClassMethodRole::Ordinary,
     };
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
         events: Default::default(),
@@ -122,7 +123,7 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
                     14 => Value::Num(1.0),
                     _ => unreachable!(),
                 };
-                Ok(ValueSequence::single(value).unwrap())
+                rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
     ));

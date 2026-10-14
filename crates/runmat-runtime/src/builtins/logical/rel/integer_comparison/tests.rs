@@ -76,9 +76,9 @@ fn builtin_equality_preserves_rank_and_exact_integer_float_complex_comparisons()
     let integers = || array(IntegerStorage::U64(vec![(1_u64 << 53) + 1, 2]), vec![2]);
     let floats =
         Value::Tensor(Tensor::new(vec![(1_u64 << 53) as f64, 2.0], vec![2]).expect("float tensor"));
-    let Value::LogicalArray(float_result) =
-        crate::call_builtin("eq", &[integers(), floats]).expect("rank-one integer/float equality")
-    else {
+    let float_result =
+        crate::call_builtin("eq", &[integers(), floats]).expect("rank-one integer/float equality");
+    let Value::LogicalArray(float_result) = float_result.value() else {
         panic!("expected logical array");
     };
     assert_eq!(float_result.shape, vec![2]);
@@ -88,9 +88,9 @@ fn builtin_equality_preserves_rank_and_exact_integer_float_complex_comparisons()
         ComplexTensor::new(vec![((1_u64 << 53) as f64, 0.0), (2.0, 1.0)], vec![2])
             .expect("complex tensor"),
     );
-    let Value::LogicalArray(complex_result) = crate::call_builtin("eq", &[integers(), complex])
-        .expect("rank-one integer/complex equality")
-    else {
+    let complex_result = crate::call_builtin("eq", &[integers(), complex])
+        .expect("rank-one integer/complex equality");
+    let Value::LogicalArray(complex_result) = complex_result.value() else {
         panic!("expected logical array");
     };
     assert_eq!(complex_result.shape, vec![2]);
@@ -382,11 +382,11 @@ fn assert_resident_complex_ordering(provider: &dyn runmat_accelerate_api::AccelP
             )
             .expect("resident complex ordering");
             assert!(
-                matches!(&result, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)),
+                matches!(result.value(), Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)),
                 "{builtin} did not preserve logical residency for rhs storage {:?}: {result:?}",
                 runmat_accelerate_api::handle_storage(rhs)
             );
-            let gathered = test_support::gather(result).expect("gather logical result");
+            let gathered = test_support::gather_rooted(result).expect("gather logical result");
             assert_eq!(gathered.shape(), &[1, 2]);
             assert_eq!(gathered.materialize_f64(), expected);
         }
@@ -398,7 +398,7 @@ fn assert_resident_complex_ordering(provider: &dyn runmat_accelerate_api::AccelP
             ],
         )
         .expect("reverse resident complex ordering");
-        let gathered = test_support::gather(result).expect("gather reverse logical result");
+        let gathered = test_support::gather_rooted(result).expect("gather reverse logical result");
         assert_eq!(gathered.materialize_f64(), reverse_expected);
     }
     let _ = complex_handle.release();

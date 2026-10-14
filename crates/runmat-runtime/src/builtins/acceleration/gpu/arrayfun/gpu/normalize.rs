@@ -1,22 +1,23 @@
 use super::super::error::arrayfun_flow;
 use super::super::input::ArrayData;
 use super::super::output::{maybe_upload_uniform, UniformCollector};
+use crate::execution::RootedValue;
 use crate::{gather_if_needed_async, BuiltinResult};
 use runmat_value::Value;
 
 pub(super) async fn uniform(
-    result: Value,
+    result: RootedValue,
     shape: &[usize],
     inputs: &[Value],
-) -> BuiltinResult<Value> {
-    if let Value::GpuTensor(handle) = &result {
+) -> BuiltinResult<RootedValue> {
+    if let Value::GpuTensor(handle) = result.value() {
         if handle.shape() == shape {
             return Ok(result);
         }
     }
     // Normalize canonical scalar collapse/host fallback with the ordinary
     // mapping collector, preserving integer widths and complex single storage.
-    let data = ArrayData::from_value(gather_if_needed_async(&result).await?)?;
+    let data = ArrayData::from_value(gather_if_needed_async(result.value()).await?)?;
     let len = shape
         .iter()
         .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
@@ -41,7 +42,8 @@ pub(super) async fn uniform(
             _ => None,
         })
         .collect::<Vec<_>>();
-    maybe_upload_uniform(collector.finish(shape)?, &resident)
+    RootedValue::new(maybe_upload_uniform(collector.finish(shape)?, &resident)?)
+        .map_err(|error| error.into_runtime_error())
 }
 
 #[cfg(test)]
@@ -51,9 +53,13 @@ mod tests {
 
     #[test]
     fn singleton_keeps_full_uniform_array_shape() {
-        let result =
-            futures::executor::block_on(uniform(Value::Num(3.0), &[1, 1, 1], &[])).unwrap();
-        let Value::Tensor(value) = result else {
+        let result = futures::executor::block_on(uniform(
+            RootedValue::new(Value::Num(3.0)).unwrap(),
+            &[1, 1, 1],
+            &[],
+        ))
+        .unwrap();
+        let Value::Tensor(value) = result.value() else {
             panic!("uniform numeric array")
         };
         assert_eq!(value.shape(), &[1, 1, 1]);
@@ -67,16 +73,20 @@ mod tests {
     fn normalization_preserves_wide_integer_and_complex_single() {
         let storage = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
         let input = Value::Tensor(Tensor::new_integer(storage.clone(), vec![1, 2]).unwrap());
-        let result = futures::executor::block_on(uniform(input, &[2, 1], &[])).unwrap();
-        let Value::Tensor(value) = result else {
+        let result =
+            futures::executor::block_on(uniform(RootedValue::new(input).unwrap(), &[2, 1], &[]))
+                .unwrap();
+        let Value::Tensor(value) = result.value() else {
             panic!("integer array")
         };
         assert_eq!(value.integer_storage(), Some(&storage));
         assert_eq!(value.shape(), &[2, 1]);
         let input =
             Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap());
-        let result = futures::executor::block_on(uniform(input, &[1, 1, 1], &[])).unwrap();
-        let Value::ComplexTensor(value) = result else {
+        let result =
+            futures::executor::block_on(uniform(RootedValue::new(input).unwrap(), &[1, 1, 1], &[]))
+                .unwrap();
+        let Value::ComplexTensor(value) = result.value() else {
             panic!("complex array")
         };
         assert_eq!(value.numeric_dtype(), runmat_value::NumericDType::F32);

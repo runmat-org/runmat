@@ -5,6 +5,7 @@ mod inference;
 pub use contract::*;
 
 pub const ERASE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "erase" },
     category: "strings/transform",

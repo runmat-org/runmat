@@ -105,10 +105,12 @@ fn resolved_family_selection_is_cold_until_the_selected_future_is_polled() {
     let calls = Rc::new(Cell::new(0));
     let observed = Rc::clone(&calls);
     let _invoker = crate::user_functions::install_local_semantic_function_invoker(Rc::new(
-        move |function, _, _| {
+        move |_runtime, function, _, _| {
             assert_eq!(function, 41);
             observed.set(observed.get() + 1);
-            Box::pin(async { Ok(ValueSequence::single(Value::Num(41.0)).unwrap()) })
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(41.0))
+            })
         },
     ));
     let descriptor = || {
@@ -128,6 +130,6 @@ fn resolved_family_selection_is_cold_until_the_selected_future_is_polled() {
 
     let result = futures::executor::block_on(super::execution::execute(None, descriptor()))
         .expect("selected semantic function");
-    assert_eq!(result.into_values(), vec![Value::Num(41.0)]);
+    assert_eq!(result.as_slice(), &[Value::Num(41.0)]);
     assert_eq!(calls.get(), 1);
 }

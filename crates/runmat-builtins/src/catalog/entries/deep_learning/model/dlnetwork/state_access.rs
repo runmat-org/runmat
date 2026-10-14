@@ -190,6 +190,7 @@ fn set_inference(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 macro_rules! state_entry {
     ($name:literal, $descriptor:ident, $documentation:ident, $inference:ident) => {
         BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "deep_learning",

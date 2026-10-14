@@ -362,7 +362,8 @@ pub const BUTTER_OPTION_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
 pub const BUTTER_LARGE_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "butter-order-above-500",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "butter with a filter order above the documented limit of 500 is a RunMat extension",
+    description:
+        "butter with a filter order above the documented limit of 500 is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:ButterLargeOrderExtension"),
 };
 

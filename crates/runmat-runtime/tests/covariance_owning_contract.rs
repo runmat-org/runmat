@@ -210,7 +210,7 @@ fn conversion_public_arity_retains_only_returned_physical_allocations() {
                     name == "corrcov" || count == 2
                 );
                 assert_eq!(sigma.acquire().is_some(), name == "cov2corr" || count == 2);
-                let Value::OutputList(values) = &result else {
+                let Value::OutputList(values) = result.value() else {
                     panic!("requested outputs")
                 };
                 assert_eq!(values.len(), count);

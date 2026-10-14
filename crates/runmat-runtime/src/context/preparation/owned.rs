@@ -1,3 +1,4 @@
+use crate::execution::RootedValueLease;
 use crate::RuntimeError;
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_value::Value;
@@ -29,7 +30,7 @@ pub trait BuiltinPreparationObservation {
         None
     }
     fn begin_execution(&mut self) {}
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError>;
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError>;
     fn abort(self: Box<Self>);
 }
 
@@ -40,20 +41,31 @@ pub trait BuiltinPreparationObservation {
 pub struct PreparedBuiltinOperands {
     operands: Vec<Value>,
     observation: Option<Box<dyn BuiltinPreparationObservation>>,
+    _operands_root: RootedValueLease,
 }
 
 impl PreparedBuiltinOperands {
     pub fn new(
         operands: Vec<Value>,
         observation: Option<Box<dyn BuiltinPreparationObservation>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, RuntimeError> {
+        let operands_root = match RootedValueLease::for_values(operands.iter()) {
+            Ok(root) => root,
+            Err(error) => {
+                if let Some(observation) = observation {
+                    observation.abort();
+                }
+                return Err(error.into_runtime_error());
+            }
+        };
+        Ok(Self {
             operands,
             observation,
-        }
+            _operands_root: operands_root,
+        })
     }
 
-    pub fn passthrough(operands: Vec<Value>) -> Self {
+    pub fn passthrough(operands: Vec<Value>) -> Result<Self, RuntimeError> {
         Self::new(operands, None)
     }
 
@@ -81,7 +93,7 @@ impl PreparedBuiltinOperands {
 
     pub(super) fn finish(
         &mut self,
-        result: &Result<Value, RuntimeError>,
+        result: Result<&Value, &RuntimeError>,
     ) -> Result<(), RuntimeError> {
         if let Some(observation) = self.observation.take() {
             observation.finish(result)?;

@@ -269,7 +269,9 @@ fn decode_pulse_selection(pulse: &Value) -> PulseSelection {
         return PulseSelection::Prototype;
     }
     let name = text_scalar(pulse).or_else(|| match pulse {
-        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => Some(name.clone()),
+        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
+            Some(name.name().to_owned())
+        }
         _ => None,
     });
     if let Some(name) = name {
@@ -285,7 +287,7 @@ fn decode_pulse_selection(pulse: &Value) -> PulseSelection {
         };
     }
     match pulse {
-        Value::BoundFunctionHandle { .. } | Value::MethodFunctionHandle(_) => {
+        Value::BoundFunctionHandle(_) | Value::MethodFunctionHandle(_) => {
             PulseSelection::HandleCallback
         }
         _ => PulseSelection::Invalid(Box::new(pulstran_error(&PULSTRAN_ERROR_INVALID_PULSE))),
@@ -413,7 +415,7 @@ async fn parse_pulse_source(
             params: parse_gauspuls_params(&rest).await?,
         }),
         PulseSelection::NamedCallback(name) => Ok(PulseSource::Callback {
-            handle: Value::FunctionHandle(name),
+            handle: Value::function_handle(name),
             args: rest,
         }),
         PulseSelection::HandleCallback => Ok(PulseSource::Callback {

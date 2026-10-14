@@ -1,9 +1,9 @@
 use super::*;
 use runmat_accelerate::placement::{ExplorationMode, PlacementSessionConfig};
 use runmat_accelerate_api::{
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
-    HostNumericDataView, HostNumericTensorView, ProviderPrecision, ReductionTwoPassMode,
-    allocation::AllocationReleaseOutcome,
+    allocation::AllocationReleaseOutcome, AccelProvider, GpuHandleProvenance, GpuTensorHandle,
+    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
+    ProviderPrecision, ReductionTwoPassMode,
 };
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
@@ -83,11 +83,9 @@ fn external_automatic_input_uses_reconciled_compiler_stack_certificate() {
         .get(..group.span.start)
         .expect("instructions before the reduction span");
     assert_eq!(prefix.len(), 2);
-    assert!(
-        prefix
-            .iter()
-            .all(|instruction| matches!(instruction, runmat_vm::Instr::LoadVar(0)))
-    );
+    assert!(prefix
+        .iter()
+        .all(|instruction| matches!(instruction, runmat_vm::Instr::LoadVar(0))));
     let layout = group
         .stack_layout
         .as_ref()
@@ -190,11 +188,9 @@ fn execute_actual_auto(
         "both physical offers remain admitted"
     );
     let offered_device = offered_devices[0];
-    assert!(
-        offered_devices
-            .iter()
-            .all(|device| *device == offered_device)
-    );
+    assert!(offered_devices
+        .iter()
+        .all(|device| *device == offered_device));
     assert_eq!(
         selected.signature.provider_provenance,
         Some(typed_reduction_placement::selected_provider_capability_digest(offered_device)),

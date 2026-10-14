@@ -1476,7 +1476,7 @@ pub mod datasample {
 
 enum RandsamplePopulation {
     Range(usize),
-    Values(Value, Vec<usize>, usize),
+    Values(Box<Value>, Vec<usize>, usize),
 }
 
 struct RandsampleArgs {
@@ -1529,7 +1529,7 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
                 ));
             }
             let axis = first_non_singleton(&shape);
-            RandsamplePopulation::Values(first, shape, axis)
+            RandsamplePopulation::Values(Box::new(first), shape, axis)
         }
     };
     let pop_len = match &population {
@@ -1585,7 +1585,7 @@ fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
                 args.replacement,
                 args.weights.as_deref(),
             )?;
-            sample_value_axis(value, axis, &indices, "randsample")
+            sample_value_axis(*value, axis, &indices, "randsample")
         }
     }
 }
@@ -2437,7 +2437,7 @@ async fn bootstrp_compute(
                             format!("bootstrp: bootfun failed: {}", err.message()),
                         )
                     })?;
-            rows.push(bootstat_row(result).await?);
+            rows.push(result.with_owned_async(bootstat_row).await?);
         }
         if let Some(samples) = samples.as_mut() {
             samples.push(indices);
@@ -3318,7 +3318,7 @@ mod tests {
         );
         let Value::OutputList(outputs) = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Int(IntValue::U16(2)),
-            Value::FunctionHandle("min".to_string()),
+            Value::FunctionHandle("min".into()),
             data,
             Value::from("Weights"),
             weights,
@@ -3425,7 +3425,7 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(2));
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(4.0),
-            Value::FunctionHandle("mean".to_string()),
+            Value::FunctionHandle("mean".into()),
             data,
             Value::from("Weights"),
             Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap()),
@@ -3496,7 +3496,7 @@ mod tests {
         let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(3.0),
-            Value::FunctionHandle("corr".to_string()),
+            Value::FunctionHandle("corr".into()),
             x,
             y,
         ]))
@@ -3513,7 +3513,7 @@ mod tests {
         random::reset_rng();
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(3.0),
-            Value::FunctionHandle("mean".to_string()),
+            Value::FunctionHandle("mean".into()),
             Value::Num(42.0),
         ]))
         .unwrap();
@@ -3560,7 +3560,7 @@ mod tests {
         let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
         let err = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
-            Value::FunctionHandle("corr".to_string()),
+            Value::FunctionHandle("corr".into()),
             x,
             y,
         ]))
@@ -3571,7 +3571,7 @@ mod tests {
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let err = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
-            Value::FunctionHandle("definitely_missing_bootstrap_callback".to_string()),
+            Value::FunctionHandle("definitely_missing_bootstrap_callback".into()),
             data,
         ]))
         .unwrap_err();

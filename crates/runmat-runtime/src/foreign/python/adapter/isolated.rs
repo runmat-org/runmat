@@ -71,7 +71,8 @@ impl Drop for IsolatedCallGuard {
         if self.finished {
             return;
         }
-        // Owned ChildProcess has kill_on_drop; no async Drop is required.
+        // The process owner performs bounded whole-tree/member retirement in
+        // Drop and preserves exact snapshot bytes if that proof fails.
         self.client.take();
         self.state
             .handles
@@ -91,5 +92,52 @@ impl IsolatedCallGuard {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+    }
+}
+
+/// Replacement retirement is retryable: cancellation must restore the same
+/// child and shutdown progress, never abandon the registry or old byte owner.
+pub(super) struct ProjectRetirementGuard {
+    state: IsolatedPythonState,
+    client: Option<IsolatedPythonClient>,
+    verified: bool,
+}
+
+impl ProjectRetirementGuard {
+    pub(super) fn begin(state: IsolatedPythonState) -> Self {
+        let client = state.client.borrow_mut().take();
+        state.call_active.set(true);
+        Self {
+            state,
+            client,
+            verified: false,
+        }
+    }
+
+    pub(super) fn client(&mut self) -> &mut Option<IsolatedPythonClient> {
+        &mut self.client
+    }
+
+    pub(super) fn finish_verified(mut self) {
+        self.verified = true;
+        self.client.take();
+        self.state.nested_calls.borrow_mut().clear();
+        self.state
+            .released
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.state.terminated.set(true);
+        self.state.call_active.set(false);
+    }
+}
+
+impl Drop for ProjectRetirementGuard {
+    fn drop(&mut self) {
+        if !self.verified {
+            *self.state.client.borrow_mut() = self.client.take();
+            self.state.call_active.set(false);
+        }
     }
 }

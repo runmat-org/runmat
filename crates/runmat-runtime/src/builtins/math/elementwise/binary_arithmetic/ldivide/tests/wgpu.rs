@@ -96,3 +96,48 @@ fn ldivide_explicit_integer_fallback_preserves_public_operand_order() {
         source.allocation_lease().validate_live().unwrap();
     }
 }
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[test]
+#[ignore = "requires an actual WGPU adapter with native integer transfer"]
+fn ldivide_explicit_integer_scalar_uses_native_resident_division_in_both_orders() {
+    use runmat_accelerate_api::AccelProvider;
+
+    let _guard = test_support::accel_test_lock();
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("required WGPU adapter");
+    let input = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
+    let source = gpu_helpers::upload_tensor(provider, &input)
+        .unwrap()
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    for (resident_on_left, expected) in [(true, vec![4, 2]), (false, vec![0, 1])] {
+        provider.reset_telemetry();
+        let (left, right) = if resident_on_left {
+            (Value::GpuTensor(source.clone()), Value::Num(8.0))
+        } else {
+            (Value::Num(8.0), Value::GpuTensor(source.clone()))
+        };
+        let Value::GpuTensor(output) = ldivide_builtin(left, right, Vec::new())
+            .expect("native integer scalar division remains resident")
+        else {
+            panic!("explicit integer result must remain resident")
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(runmat_accelerate_api::IntegerElementType::I32)
+        );
+        assert!(!output.shares_allocation_with(&source));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(provider.telemetry_snapshot().upload_bytes > 0);
+        let gathered = test_support::gather(Value::GpuTensor(output)).unwrap();
+        assert_eq!(
+            gathered.integer_storage(),
+            Some(&IntegerStorage::I32(expected))
+        );
+        source.allocation_lease().validate_live().unwrap();
+    }
+}

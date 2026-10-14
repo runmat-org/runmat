@@ -93,9 +93,12 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                         protocol_error("failed to initialize worker session", error)
                     })?;
                 if let Some(project) = bootstrap.project.clone() {
-                    session.install_project_handoff(project).map_err(|error| {
-                        protocol_error("failed to install frozen worker project", error)
-                    })?;
+                    session
+                        .install_project_handoff(project)
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to install frozen worker project", error)
+                        })?;
                 }
                 let run_id = plan.run_id.clone();
                 installed = Some(InstalledRun {

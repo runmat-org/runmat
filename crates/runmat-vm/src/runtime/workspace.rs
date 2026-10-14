@@ -9,6 +9,7 @@ mod activation;
 mod admission;
 mod declaration;
 mod frame;
+mod lexical_error;
 use activation::active_frame;
 pub(crate) use activation::WorkspaceFrameActivation;
 pub(crate) use admission::transactional_workspace_admission_with_global_bindings;
@@ -26,6 +27,7 @@ pub(crate) use frame::{
     workspace_frame_publishes, workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId,
     WorkspaceFrameLifecycle,
 };
+use lexical_error::{committed as committed_lexical_error, unavailable as workspace_unavailable};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum WorkspaceOwner {
@@ -83,9 +85,15 @@ struct WorkspaceFrame {
     delegate: Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
     service: Option<Weak<dyn runmat_runtime::context::RuntimeWorkspaceService>>,
     session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
+    lexical: Option<LexicalWorkspaceBindings>,
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
     policy: WorkspaceFramePolicy,
+}
+
+struct LexicalWorkspaceBindings {
+    environment: runmat_value::LexicalEnvironment,
+    slots: HashMap<usize, crate::bytecode::program::LexicalBindingSlot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,6 +146,51 @@ pub struct WorkspaceTargetSnapshot {
     pub assigned: HashSet<String>,
     pub vars: Vec<Value>,
     pub global_aliases: HashMap<usize, FrameGlobalBinding>,
+}
+
+/// The exact frame selected by CURRENT/CALLER/BASE before a VM request is
+/// queued. The sibling uses the original current frame as its poll-scoped
+/// activation, and the parent must still address this same target at commit.
+#[derive(Clone, Copy)]
+pub(crate) struct WorkspaceTargetIdentity {
+    owner: WorkspaceOwner,
+    current: WorkspaceFrameId,
+    target: WorkspaceFrameId,
+    selector: WorkspaceTarget,
+}
+
+impl WorkspaceTargetIdentity {
+    pub(crate) fn scope<F: std::future::Future>(
+        self,
+        future: F,
+    ) -> activation::WorkspaceFrameFuture<F> {
+        WorkspaceFrameActivation::new(self.owner, self.current).scope(future)
+    }
+
+    pub(crate) fn commit(
+        self,
+        vars: Vec<Value>,
+        names: HashMap<String, usize>,
+        assigned: HashSet<String>,
+        global_aliases: HashMap<usize, FrameGlobalBinding>,
+        report: WorkspaceAssignedReport,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if current_owner() != self.owner
+            || target_frame_id(self.owner, self.selector) != Some(self.target)
+        {
+            return Err(workspace_target_error(
+                "captured workspace target has changed",
+            ));
+        }
+        replace_workspace_target_vars_and_state(
+            self.selector,
+            vars,
+            names,
+            assigned,
+            global_aliases,
+            report,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -502,6 +555,7 @@ fn install_workspace_state(
             delegate: service_frame.delegate,
             service,
             session_variables,
+            lexical: None,
             global_aliases,
             state: WorkspaceState {
                 names,
@@ -520,6 +574,35 @@ fn install_workspace_state(
         owner,
         frame: frame_id,
     }
+}
+
+/// Install the selected function's typed lexical slots on its existing
+/// workspace frame. Clear/remove then retire the same binding cells after the
+/// workspace effect has committed, without a second name resolver.
+pub(crate) fn attach_lexical_workspace_bindings(
+    environment: Option<&runmat_value::LexicalEnvironment>,
+    bindings: &[crate::bytecode::program::LexicalBindingSlot],
+) -> Result<(), String> {
+    if bindings.is_empty() {
+        return Ok(());
+    }
+    let environment = environment
+        .ok_or_else(|| "lexical workspace bindings have no activation".to_string())?
+        .clone();
+    let mut slots = HashMap::new();
+    for binding in bindings {
+        if slots.insert(binding.slot, *binding).is_some() {
+            return Err("lexical workspace has a duplicate binding slot".into());
+        }
+    }
+    with_active_frame_mut(current_owner(), |frame| {
+        if frame.lexical.is_some() {
+            return Err("lexical workspace bindings were installed twice".into());
+        }
+        frame.lexical = Some(LexicalWorkspaceBindings { environment, slots });
+        Ok(())
+    })
+    .unwrap_or_else(|| Err("lexical workspace frame is unavailable".into()))
 }
 
 pub(crate) fn set_workspace_state_with_policy(
@@ -599,7 +682,27 @@ pub fn workspace_slot_name(index: usize) -> Option<String> {
     })
 }
 
-pub fn workspace_assign(name: &str, value: Value) -> Result<(), String> {
+/// Read only binding metadata from the live VM frame when a deferred closure
+/// reaches its issuance opcode. This deliberately does not clone the frame's
+/// Values or publish a second workspace snapshot.
+pub(crate) fn workspace_binding_state(
+) -> Option<(WorkspaceFrameId, HashMap<String, usize>, HashSet<String>)> {
+    with_stack(current_owner(), |stack| {
+        let frame = stack.last()?;
+        Some((
+            frame.id,
+            frame.state.names.clone(),
+            frame.state.assigned.clone(),
+        ))
+    })
+}
+
+/// The active frame identity without copying workspace names or Values.
+pub(crate) fn workspace_frame_identity() -> Option<WorkspaceFrameId> {
+    with_stack(current_owner(), |stack| stack.last().map(|frame| frame.id))
+}
+
+pub fn workspace_assign(name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
     workspace_assign_target(WorkspaceTarget::Current, name, value)
 }
 
@@ -607,22 +710,73 @@ pub fn workspace_assign_target(
     target: WorkspaceTarget,
     name: &str,
     value: Value,
-) -> Result<(), String> {
+) -> Result<(), runmat_runtime::RuntimeError> {
     let owner = current_owner();
     let frame = target_frame_id(owner, target)
-        .ok_or_else(|| "load: workspace state unavailable".to_string())?;
-    with_frame_by_id_mut(owner, frame, |frame| {
-        set_workspace_variable_in_frame(frame, name, value)
+        .ok_or_else(|| workspace_unavailable("load: workspace state unavailable"))?;
+    // Keep managed input reachable across workspace commit and shared-cell
+    // publication, including a fresh Owned slot that may allocate in the GC.
+    let admitted = runmat_runtime::execution::RootedValue::new(value)
+        .map_err(|error| error.into_runtime_error())?;
+    let shared_value = admitted.value().clone();
+    let lexical = with_frame_by_id_mut(owner, frame, |frame| {
+        set_workspace_variable_in_frame(frame, name, admitted.value().clone())?;
+        Ok::<_, String>(frame.state.names.get(name).and_then(|slot| {
+            frame.lexical.as_ref().and_then(|owner| {
+                owner
+                    .slots
+                    .get(slot)
+                    .copied()
+                    .map(|binding| (owner.environment.clone(), binding))
+            })
+        }))
     })
     .unwrap_or_else(|| Err("load: workspace state unavailable".to_string()))
+    .map_err(workspace_unavailable)?;
+    if let Some((environment, binding)) = lexical {
+        publish_lexical_binding(&environment, binding, shared_value)?;
+    }
+    Ok(())
 }
 
-pub fn workspace_clear() -> Result<(), String> {
-    with_active_frame_mut(current_owner(), |frame| {
-        clear_workspace_frame(frame);
-        Ok(())
+/// The workspace assignment has committed before this shared-cell publication.
+/// Do not hold the workspace stack borrow while mutating the GC-owned cell.
+fn publish_lexical_binding(
+    environment: &runmat_value::LexicalEnvironment,
+    binding: crate::bytecode::program::LexicalBindingSlot,
+    value: Value,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    let result = match binding.kind {
+        crate::bytecode::program::LexicalBindingKind::Owned => {
+            runmat_runtime::call::lexical::write_owned_binding(environment, binding.binding, value)
+        }
+        crate::bytecode::program::LexicalBindingKind::Inherited => {
+            runmat_runtime::call::lexical::write_binding(environment, binding.binding, value)
+        }
+        crate::bytecode::program::LexicalBindingKind::Transit => return Ok(()),
+    };
+    result.map_err(|error| {
+        committed_lexical_error(
+            "RunMat:Workspace:LexicalPublication",
+            format!("workspace assignment committed before lexical publication: {error}"),
+            error,
+        )
     })
-    .unwrap_or_else(|| Err("clear: workspace state unavailable".to_string()))
+}
+
+pub fn workspace_clear() -> Result<(), runmat_runtime::RuntimeError> {
+    let retired = with_active_frame_mut(current_owner(), |frame| {
+        let lexical = frame.lexical.as_ref().map(|owner| {
+            (
+                owner.environment.clone(),
+                owner.slots.values().copied().collect::<Vec<_>>(),
+            )
+        });
+        clear_workspace_frame(frame);
+        lexical
+    })
+    .ok_or_else(|| workspace_unavailable("clear: workspace state unavailable"))?;
+    retire_lexical_bindings(retired)
 }
 
 fn clear_workspace_frame(frame: &mut WorkspaceFrame) {
@@ -639,12 +793,54 @@ fn clear_workspace_frame(frame: &mut WorkspaceFrame) {
     frame.global_aliases.unbind_all();
 }
 
-pub fn workspace_remove(name: &str) -> Result<(), String> {
-    with_active_frame_mut(current_owner(), |frame| {
+pub fn workspace_remove(name: &str) -> Result<(), runmat_runtime::RuntimeError> {
+    let retired = with_active_frame_mut(current_owner(), |frame| {
+        let lexical = frame.state.names.get(name).and_then(|slot| {
+            frame.lexical.as_ref().and_then(|owner| {
+                owner
+                    .slots
+                    .get(slot)
+                    .copied()
+                    .map(|binding| (owner.environment.clone(), vec![binding]))
+            })
+        });
         remove_workspace_name(frame, name);
-        Ok(())
+        lexical
     })
-    .unwrap_or_else(|| Err("clear: workspace state unavailable".to_string()))
+    .ok_or_else(|| workspace_unavailable("clear: workspace state unavailable"))?;
+    retire_lexical_bindings(retired)
+}
+
+/// The workspace mutation has already committed when this runs. A failure is
+/// reported as a post-commit retirement error, never as a fictitious rollback.
+fn retire_lexical_bindings(
+    retired: Option<(
+        runmat_value::LexicalEnvironment,
+        Vec<crate::bytecode::program::LexicalBindingSlot>,
+    )>,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    let Some((environment, bindings)) = retired else {
+        return Ok(());
+    };
+    for binding in bindings {
+        let result = match binding.kind {
+            crate::bytecode::program::LexicalBindingKind::Owned => {
+                runmat_runtime::call::lexical::remove_owned_binding(&environment, binding.binding)
+            }
+            crate::bytecode::program::LexicalBindingKind::Inherited => {
+                runmat_runtime::call::lexical::remove_binding(&environment, binding.binding)
+            }
+            crate::bytecode::program::LexicalBindingKind::Transit => continue,
+        };
+        result.map_err(|error| {
+            committed_lexical_error(
+                "RunMat:Workspace:LexicalRetirement",
+                format!("workspace clear committed before lexical retirement: {error}"),
+                error,
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn remove_workspace_name(frame: &mut WorkspaceFrame, name: &str) {
@@ -685,21 +881,39 @@ pub fn workspace_snapshot() -> Vec<(String, Value)> {
     })
 }
 
-pub fn workspace_target_snapshot(
+pub(crate) fn capture_workspace_target(
     target: WorkspaceTarget,
-) -> Result<WorkspaceTargetSnapshot, String> {
+) -> Result<(WorkspaceTargetIdentity, WorkspaceTargetSnapshot), String> {
     let owner = current_owner();
-    let frame =
-        target_frame_id(owner, target).ok_or_else(|| "workspace state unavailable".to_string())?;
-    with_frame_by_id(owner, frame, |frame| {
-        Ok(WorkspaceTargetSnapshot {
-            names: frame.state.names.clone(),
-            assigned: frame.state.assigned.clone(),
-            vars: frame.state.values.clone(),
-            global_aliases: frame.global_aliases.snapshot(),
-        })
+    let (current, frame) = with_stack(owner, |stack| {
+        let current = active_frame(owner).or_else(|| (stack.len() == 1).then(|| stack[0].id))?;
+        let current_frame = stack.iter().find(|frame| frame.id == current)?;
+        Some((
+            current,
+            match target {
+                WorkspaceTarget::Current => current,
+                WorkspaceTarget::Caller => current_frame.parent.unwrap_or(current),
+                WorkspaceTarget::Base => current_frame.base,
+            },
+        ))
     })
-    .unwrap_or_else(|| Err("workspace state unavailable".to_string()))
+    .ok_or_else(|| "workspace state unavailable".to_string())?;
+    let snapshot = with_frame_by_id(owner, frame, |frame| WorkspaceTargetSnapshot {
+        names: frame.state.names.clone(),
+        assigned: frame.state.assigned.clone(),
+        vars: frame.state.values.clone(),
+        global_aliases: frame.global_aliases.snapshot(),
+    })
+    .ok_or_else(|| "workspace state unavailable".to_string())?;
+    Ok((
+        WorkspaceTargetIdentity {
+            owner,
+            current,
+            target: frame,
+            selector: target,
+        },
+        snapshot,
+    ))
 }
 
 pub fn replace_workspace_target_vars_and_state(
@@ -915,6 +1129,64 @@ pub fn mark_workspace_assigned(index: usize, value: &Value) {
                 ws.values.resize(index + 1, Value::Num(0.0));
             }
             ws.values[index] = value.clone();
+        }
+    });
+}
+
+/// Synchronize an observed ancestor-cell value without treating the read as
+/// another executor assignment or workspace publication.
+pub(crate) fn refresh_workspace_shared_slot(
+    index: usize,
+    value: &Value,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    with_active_frame_mut(current_owner(), |frame| {
+        let ws = &mut frame.state;
+        if let Some(name) = ws
+            .slot_lifecycle
+            .get(&index)
+            .map(|slot| slot.name().to_string())
+        {
+            if ws
+                .names
+                .get(&name)
+                .is_some_and(|existing| *existing != index)
+            {
+                return Err(runmat_runtime::runtime_error::semantic_error(
+                    "RunMat:Workspace:LexicalSlot",
+                    "shared binding name resolves to another workspace slot",
+                ));
+            }
+            // An ancestor can reassign a cell after this frame cleared its
+            // local view. Restore the same typed slot, not a new assignment.
+            ws.names.insert(name.clone(), index);
+            ws.assigned.insert(name.clone());
+            mark_slot_assigned(ws, index, name);
+        }
+        if ws.values.len() <= index {
+            ws.values.resize(index + 1, Value::Num(0.0));
+        }
+        ws.values[index] = value.clone();
+        Ok(())
+    })
+    .unwrap_or(Ok(()))
+}
+
+/// Retire a shared lexical slot that its owning activation has cleared. Keep
+/// the name and slot so a later indexed assignment can initialize a new base,
+/// but never serve the stale cached value to an ordinary load.
+pub(crate) fn mark_workspace_unassigned(index: usize) {
+    with_active_frame_mut(current_owner(), |frame| {
+        let ws = &mut frame.state;
+        if let Some(name) = ws
+            .slot_lifecycle
+            .get(&index)
+            .map(|slot| slot.name().to_string())
+        {
+            ws.assigned.remove(&name);
+            mark_slot_unassigned(ws, index, name);
+            if let Some(value) = ws.values.get_mut(index) {
+                *value = Value::Num(0.0);
+            }
         }
     });
 }
@@ -1379,3 +1651,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "workspace/lexical_tests.rs"]
+mod lexical_tests;

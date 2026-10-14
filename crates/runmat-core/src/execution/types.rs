@@ -65,9 +65,17 @@ pub struct ExecutionStreamEntry {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionProfiling {
+    /// Outer command wall time, including admitted cleanup. This can exceed
+    /// ExecutionOutcome::execution_time_ms, which measures the inner evaluator.
     pub total_ms: u64,
+    /// Attributed CPU duration, when measured. Not derived by subtracting GPU
+    /// time from wall duration, since execution and waiting can overlap.
     pub cpu_ms: Option<u64>,
+    /// Attributed device execution duration, when measured. Provider-wide host
+    /// wall counters are not device execution measurements.
     pub gpu_ms: Option<u64>,
+    /// Exact attributed kernel launches, when observed; not submission counts
+    /// or the length of a bounded provider diagnostic log.
     pub kernel_count: Option<u32>,
 }
 
@@ -93,4 +101,15 @@ pub struct SessionExecutionResult {
     pub fusion_plan: Option<FusionPlanSnapshot>,
     /// Recorded stdin interactions (prompts, values) during execution.
     pub stdin_events: Vec<StdinEvent>,
+}
+
+pub type RootedSessionExecutionResult =
+    runmat_runtime::execution::RootedResult<SessionExecutionResult>;
+
+impl runmat_gc::Trace for SessionExecutionResult {
+    fn trace(&self, tracer: &mut dyn runmat_gc::Tracer) {
+        if let Some(value) = &self.value {
+            runmat_gc::Trace::trace(value, tracer);
+        }
+    }
 }

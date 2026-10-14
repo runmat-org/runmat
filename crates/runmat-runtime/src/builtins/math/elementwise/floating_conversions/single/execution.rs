@@ -4,7 +4,7 @@ pub(super) async fn convert(
     value: Value,
     template: OutputTemplate,
     mut borrowed: Vec<runmat_accelerate_api::GpuTensorHandle>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     template.validate_input(&value)?;
     // Services may transform the operand; protect both originals and the
     // actual prepared resident payload, and re-admit through the domain body.
@@ -29,5 +29,5 @@ pub(super) async fn convert(
         template_protected.push(handle);
     }
     let result = apply_output_template(converted, &template, &template_protected).await?;
-    Ok(result)
+    RootedValue::new(result).map_err(|cause| cause.into_runtime_error())
 }

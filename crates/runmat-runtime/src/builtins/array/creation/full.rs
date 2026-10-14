@@ -102,7 +102,7 @@ async fn full_builtin(value: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Err(invalid_input("function_handle")),
         Value::ClassRef(_) => Err(invalid_input("meta.class")),
         Value::MException(_)

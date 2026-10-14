@@ -1,7 +1,7 @@
 pub use runmat_async::{
-    runtime_error as build_runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError,
-    RuntimeErrorBuilder, RuntimeErrorOwner, RuntimeErrorSourceBound, RuntimeFailureOrigin,
-    SharedRuntimeErrorSource,
+    runtime_error as build_runtime_error, CallFrame, CallFrameDiagnosticSource,
+    CallFrameSourceOwner, ErrorContext, GpuGatherRetry, RuntimeError, RuntimeErrorBuilder,
+    RuntimeErrorOwner, RuntimeErrorSourceBound, RuntimeFailureOrigin, SharedRuntimeErrorSource,
 };
 
 #[cfg(test)]
@@ -36,13 +36,31 @@ pub fn with_provider_execution_source(
 /// namespace. Executors may attach frame and source-span information, but the
 /// identifier and message are executor-neutral runtime semantics.
 pub fn semantic_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(semantic_identifier(identifier))
+        .build()
+}
+
+fn semantic_identifier(identifier: &str) -> String {
     let suffix = identifier
         .split_once(':')
         .map_or(identifier, |(_, suffix)| suffix);
     let namespace =
         crate::context::legacy::error_namespace().unwrap_or_else(|| "RunMat".to_string());
+    format!("{namespace}:{suffix}")
+}
+
+/// Preserve an owned operational cause under a language-semantic diagnostic.
+/// The source retains its own diagnostic allocation and error chain; the
+/// wrapper owns only its new message and namespace-qualified identifier.
+pub fn semantic_error_with_source(
+    identifier: &str,
+    message: impl Into<String>,
+    source: impl RuntimeErrorSourceBound,
+) -> RuntimeError {
     build_runtime_error(message)
-        .with_identifier(format!("{namespace}:{suffix}"))
+        .with_identifier(semantic_identifier(identifier))
+        .with_source(source)
         .build()
 }
 
@@ -172,6 +190,49 @@ mod tests {
     }
 
     #[test]
+    fn semantic_source_keeps_the_original_diagnostic_lease_until_wrapper_drop() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        #[derive(Debug)]
+        struct Lease(Arc<AtomicUsize>);
+        impl Drop for Lease {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        context.set_error_namespace("Acme");
+        let _scope = RuntimeContextGuard::enter(context);
+        let drops = Arc::new(AtomicUsize::new(0));
+        let original = build_runtime_error("typed inner")
+            .with_identifier("Acme:Inner")
+            .with_retained_diagnostic_allocation(runmat_async::RetainedDiagnosticAllocation::Owned(
+                Box::new(Lease(drops.clone())),
+            ))
+            .build();
+        let wrapped =
+            semantic_error_with_source("RunMat:Workspace:LexicalPublication", "outer", original);
+        assert_eq!(
+            wrapped.identifier(),
+            Some("Acme:Workspace:LexicalPublication")
+        );
+        assert_eq!(
+            wrapped
+                .source()
+                .and_then(|source| source.downcast_ref::<RuntimeError>())
+                .and_then(RuntimeError::identifier),
+            Some("Acme:Inner")
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(wrapped);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn caught_exception_materialization_preserves_structured_and_legacy_errors() {
         let structured = semantic_error("IndexOutOfBounds", "bad index");
         let exception = exception_from_error(structured);
@@ -196,6 +257,8 @@ mod tests {
                 function: "origin".into(),
                 source_id: Some(7),
                 span: Some((3, 8)),
+                source_owner: None,
+                diagnostic_source: None,
             }])
             .with_span((3, 5).into())
             .with_phase("execution")

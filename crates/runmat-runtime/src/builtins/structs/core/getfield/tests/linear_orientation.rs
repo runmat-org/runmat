@@ -22,10 +22,10 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
             vec![Value::from("values"), Value::Cell(index)],
         )
         .expect("numeric linear selection");
-        let Value::Tensor(tensor) = result else {
-            panic!("expected tensor result");
-        };
-        tensor
+        result.with_owned(|value| match value {
+            Value::Tensor(tensor) => tensor,
+            _ => panic!("expected tensor result"),
+        })
     }
 
     fn select_logical(target_shape: Vec<usize>, mask: Vec<u8>, mask_shape: Vec<usize>) -> Tensor {
@@ -45,10 +45,10 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
             vec![Value::from("values"), Value::Cell(index)],
         )
         .expect("logical linear selection");
-        let Value::Tensor(tensor) = result else {
-            panic!("expected tensor result");
-        };
-        tensor
+        result.with_owned(|value| match value {
+            Value::Tensor(tensor) => tensor,
+            _ => panic!("expected tensor result"),
+        })
     }
 
     let row_from_column = select_numeric(

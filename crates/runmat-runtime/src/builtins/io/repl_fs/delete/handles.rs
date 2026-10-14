@@ -1,10 +1,13 @@
 use super::*;
 
-pub(super) async fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
+pub(super) async fn delete_handles(
+    context: Option<&crate::context::RuntimeContext>,
+    values: &[Value],
+) -> BuiltinResult<Value> {
     let mut mutated_last: Option<Value> = None;
     let mut total = 0usize;
     for value in values {
-        total += process_handle_value(value, &mut mutated_last).await?;
+        total += process_handle_value(context, value, &mut mutated_last).await?;
     }
     if total == 1 {
         Ok(mutated_last.unwrap_or(Value::Num(0.0)))
@@ -14,6 +17,7 @@ pub(super) async fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
 }
 
 async fn process_handle_value(
+    context: Option<&crate::context::RuntimeContext>,
     value: &Value,
     mutated_last: &mut Option<Value>,
 ) -> BuiltinResult<usize> {
@@ -24,12 +28,14 @@ async fn process_handle_value(
                 &handle.class_name,
                 &runmat_types::MethodName::from("delete"),
             ) {
-                if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
-                    &delete_method.function_name,
-                    &[Value::HandleObject(handle.clone())],
-                    0,
-                )
-                .await
+                if let Some(result) =
+                    crate::user_functions::try_call_semantic_function_by_name_in_context(
+                        context,
+                        &delete_method.function_name,
+                        &[Value::HandleObject(handle.clone())],
+                        0,
+                    )
+                    .await
                 {
                     result?;
                     method_dispatched = true;
@@ -37,12 +43,26 @@ async fn process_handle_value(
                     .is_some()
                     && delete_method.function_name != "delete"
                 {
-                    crate::call_builtin_async_with_outputs(
-                        &delete_method.function_name,
-                        &[Value::HandleObject(handle.clone())],
-                        0,
-                    )
-                    .await?;
+                    let arguments = [Value::HandleObject(handle.clone())];
+                    match context {
+                        Some(runtime) => {
+                            crate::call_builtin_async_with_outputs_in_context(
+                                runtime,
+                                &delete_method.function_name,
+                                &arguments,
+                                0,
+                            )
+                            .await?;
+                        }
+                        None => {
+                            crate::call_builtin_async_with_outputs(
+                                &delete_method.function_name,
+                                &arguments,
+                                0,
+                            )
+                            .await?;
+                        }
+                    }
                     method_dispatched = true;
                 } else {
                     return Err(delete_error_with(
@@ -86,7 +106,7 @@ async fn process_handle_value(
             let mut total = 0usize;
             for handle in &cell.data {
                 let inner = handle;
-                total += Box::pin(process_handle_value(inner, mutated_last)).await?;
+                total += Box::pin(process_handle_value(context, inner, mutated_last)).await?;
             }
             Ok(total)
         }

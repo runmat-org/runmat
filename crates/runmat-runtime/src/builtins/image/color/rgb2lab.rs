@@ -17,8 +17,7 @@ use crate::builtins::image::color::color_presentation::{
 };
 use crate::builtins::image::color::common;
 use crate::context::preparation::{
-    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -66,7 +65,7 @@ async fn rgb2lab_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     rgb: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let options = parse_rgb2lab_options(&rest)?;
     crate::output_count::validate_fixed_outputs(
         &RGB2LAB_DESCRIPTOR,
@@ -138,10 +137,7 @@ async fn rgb2lab_builtin(
         )
         .await
     };
-    match runtime.as_ref() {
-        Some(runtime) => execute_admitted(runtime, request, execute).await,
-        None => execute_current_request(request, execute).await,
-    }
+    execute_request(runtime.as_ref(), request, execute).await
 }
 
 fn admit_rgb(rgb: &Value) -> BuiltinResult<bool> {
@@ -179,7 +175,7 @@ async fn rgb2lab_execute(
     options: Rgb2LabOptions,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
     mut selected: Option<SelectedColorPresentation>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = match rgb {
         Value::Tensor(tensor) => tensor,
@@ -227,13 +223,15 @@ async fn rgb2lab_execute(
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INTERNAL))?;
-    color_presentation::publish(&mut selected, || {
+    let output = color_presentation::publish(&mut selected, || {
         common::restore_resident_numeric_result_for_sources(
             &resident_sources,
             common::image_value_from_tensor(out),
             NAME,
         )
-    })
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| rgb2lab_map_error(err.into_runtime_error(), &RGB2LAB_ERROR_INTERNAL))
 }
 
 fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {

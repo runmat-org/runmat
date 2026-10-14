@@ -88,45 +88,6 @@ pub(super) const DATESHIFT_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Optional current/next/previous/nearest or integer occurrence rule.",
     },
 ];
-pub(super) const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Datetime receiver object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-];
-pub(super) const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Datetime receiver object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
 
 pub(super) const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -223,18 +184,6 @@ pub(super) const DATETIME_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         label: "X = second(t)",
         inputs: &DATETIME_SINGLE_INPUT,
         outputs: &OUT_NUMERIC,
-    }];
-pub(super) const DATETIME_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "out = datetime.subsref(obj, S)",
-        inputs: &DATETIME_SUBSREF_INPUTS,
-        outputs: &OUT_ANY,
-    }];
-pub(super) const DATETIME_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "out = datetime.subsasgn(obj, S, rhs)",
-        inputs: &DATETIME_SUBSASGN_INPUTS,
-        outputs: &OUT_ANY,
     }];
 pub(super) const DATETIME_BINARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
     [BuiltinSignatureDescriptor {

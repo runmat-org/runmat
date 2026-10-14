@@ -15,6 +15,7 @@ pub use owned::{
 pub use request::{AdmittedBuiltinPreparation, AdmittedSumReduction, BuiltinPreparationAdmission};
 
 use super::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -29,7 +30,9 @@ pub async fn prepare_admitted(
     let expected = request.operands().len();
     let prepared = match context.service_ports().acceleration() {
         Some(service) => service.prepare_admitted(context.clone(), request).await?,
-        None => PreparedBuiltinOperands::passthrough(request.into_operands()),
+        None => request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinOperands::passthrough)?,
     };
     if prepared.operands().len() != expected {
         return Err(request::invalid(
@@ -45,61 +48,52 @@ pub async fn prepare_admitted(
 pub(crate) fn execute_prepared<F, Fut>(
     mut prepared: PreparedBuiltinOperands,
     execute: F,
-) -> impl Future<Output = Result<Value, RuntimeError>>
+) -> impl Future<Output = Result<RootedValue, RuntimeError>>
 where
     F: FnOnce(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let recorder = prepared.provider_recorder();
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         prepared.begin_execution();
         let result = execute(prepared.take_operands()).await;
-        let cleanup = prepared.finish(&result);
+        let cleanup = prepared.finish(result.as_ref().map(|value| value.value()));
         crate::runtime_error::complete_with_cleanup(result, cleanup)
     })
 }
 
-pub(crate) async fn execute_admitted<F, Fut>(
-    context: &RuntimeContext,
-    request: AdmittedBuiltinPreparation,
-    execute: F,
-) -> Result<Value, RuntimeError>
-where
-    F: FnOnce(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
-{
-    execute_prepared(prepare_admitted(context, request).await?, execute).await
-}
-
-/// Transitional adapter for the existing args-only builtin ABI. S2/L23 owns
-/// eliminating this single ambient lookup when bindings carry explicit context.
-/// No context or session is fabricated for direct runtime calls.
-pub(crate) async fn execute_current_invocation<F, Fut>(
+pub(crate) async fn execute_invocation<F, Fut>(
+    context: Option<&RuntimeContext>,
     admission: BuiltinPreparationAdmission,
     operands: Vec<Value>,
     execute: F,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     F: FnOnce(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let request = AdmittedBuiltinPreparation::new(admission, operands)?;
-    execute_current_request(request, execute).await
+    execute_request(context, request, execute).await
 }
 
-pub(crate) async fn execute_current_request<F, Fut>(
+/// An explicit absent context means ordinary runtime execution: never consult
+/// an ambient session or silently borrow another call's preparation service.
+pub(crate) async fn execute_request<F, Fut>(
+    context: Option<&RuntimeContext>,
     request: AdmittedBuiltinPreparation,
     execute: F,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     F: FnOnce(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    match super::legacy::active() {
-        Some(context) => execute_admitted(&context, request, execute).await,
+    match context {
+        Some(context) => execute_prepared(prepare_admitted(context, request).await?, execute).await,
         None => {
             execute_prepared(
-                PreparedBuiltinOperands::passthrough(request.into_operands()),
+                request
+                    .into_operands()
+                    .with_owned_values(PreparedBuiltinOperands::passthrough)?,
                 execute,
             )
             .await

@@ -13,6 +13,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
             .iter()
             .map(|class| class.declaration.clone())
             .collect(),
+        class_property_defaults: super::class_defaults::project(hir),
         ..MirAssembly::default()
     };
     assembly.classes.sort_by_key(|class| class.id);
@@ -61,6 +62,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
             )?,
         );
     }
+    super::lexical_captures::propagate(hir, &mut assembly)?;
     Ok(assembly)
 }
 
@@ -68,7 +70,7 @@ fn class_method_owner(
     hir: &HirAssembly,
     function: &HirFunction,
 ) -> Result<Option<runmat_types::ClassMethodOwner>, HirError> {
-    let runmat_hir::FunctionKind::ClassMethod { is_static } = &function.kind else {
+    let runmat_hir::FunctionKind::ClassMethod { is_static, role } = &function.kind else {
         return Ok(None);
     };
     let is_static = *is_static;
@@ -96,6 +98,7 @@ fn class_method_owner(
             .map_err(|error| HirError::new(error.to_string()))?,
         method: method.name.clone(),
         is_static,
+        role: *role,
     }))
 }
 

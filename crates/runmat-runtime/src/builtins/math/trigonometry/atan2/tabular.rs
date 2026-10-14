@@ -1,17 +1,20 @@
 //! Own numeric column results until the complete tabular value is published.
 use super::*;
+use crate::execution::{RootedValues, RootedValuesBuilder};
 use runmat_value::ObjectInstance;
 
 pub(super) async fn execute(
     source: ObjectInstance,
-    variables: Vec<(String, Value, Value)>,
-) -> BuiltinResult<Value> {
-    for (_, y, x) in &variables {
+    variables: Vec<(String, Value)>,
+    right_values: RootedValues,
+) -> BuiltinResult<RootedValue> {
+    for ((_, y), x) in variables.iter().zip(right_values.values()) {
         admission::pair(y, x)?;
     }
     let borrowed: Vec<_> = variables
         .iter()
-        .flat_map(|(_, y, x)| [y, x])
+        .map(|(_, y)| y)
+        .chain(right_values.values().iter())
         .filter_map(|value| {
             if let Value::GpuTensor(handle) = value {
                 Some(handle.clone())
@@ -20,18 +23,27 @@ pub(super) async fn execute(
             }
         })
         .collect();
-    let mut protected = borrowed.clone();
-    let mut columns = Vec::with_capacity(variables.len());
-    for (name, y, x) in variables {
-        let output = atan2_admitted(y, x, &protected).await?;
-        if let Value::GpuTensor(handle) = &output {
-            protected.push(handle.clone());
-        }
-        columns.push((name, output));
-    }
-    let result = crate::builtins::table::finish_binary(&source, columns)
-        .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error))?;
-    Ok(result)
+    right_values
+        .with_owned_values_async(|rights| async move {
+            let mut protected = borrowed;
+            let mut names = Vec::with_capacity(variables.len());
+            let mut columns = RootedValuesBuilder::with_capacity(variables.len());
+            for ((name, y), x) in variables.into_iter().zip(rights) {
+                let output = atan2_admitted(y, x, &protected).await?;
+                if let Value::GpuTensor(handle) = &output {
+                    protected.push(handle.clone());
+                }
+                names.push(name);
+                let owned = RootedValue::new(output).map_err(|cause| cause.into_runtime_error())?;
+                columns.push_owned(owned);
+            }
+            let columns = columns
+                .finish()
+                .map_err(|cause| cause.into_runtime_error())?;
+            crate::builtins::table::finish_binary_owned(&source, names, columns)
+                .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error))
+        })
+        .await
 }
 
 #[cfg(test)]

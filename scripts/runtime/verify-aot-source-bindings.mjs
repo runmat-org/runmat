@@ -2,14 +2,25 @@
 // This is a packaged-product gate: a missing binary or compile capability is a failure.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyAotSuperConstructors } from "./aot-super-constructors.mjs";
 
 const binary = process.argv[2] && resolve(process.argv[2]);
 if (!binary || !existsSync(binary)) {
-    throw new Error("pass the existing embedded-AOT runmat binary as the sole argument");
+    throw new Error("pass an existing embedded-AOT runmat binary");
+}
+if (process.argv.length > 4 || (process.argv[3] && !["--java", "--java-only", "--super-only"].includes(process.argv[3]))) {
+    throw new Error("usage: node verify-aot-source-bindings.mjs <embedded-AOT runmat> [--java|--java-only|--super-only]");
+}
+const javaOnly = process.argv[3] === "--java-only";
+const superOnly = process.argv[3] === "--super-only";
+const javaRequested = process.argv[3] === "--java" || javaOnly;
+const javaHome = javaRequested && process.env.RUNMAT_TEST_JAVA_HOME;
+if (javaRequested && !javaHome) {
+    throw new Error("--java requires RUNMAT_TEST_JAVA_HOME to name a JDK with javac, jar, and java");
 }
 
 const directory = mkdtempSync(join(tmpdir(), "runmat-aot-sources-"));
@@ -17,7 +28,12 @@ const timeout = 120_000;
 function invoke(program, args = []) {
     const completed = spawnSync(program, args, {
         cwd: directory,
-        env: { ...process.env, NO_COLOR: "1" },
+        env: {
+            ...process.env,
+            RUNMAT_EXECUTION_STATE_DIR: process.env.RUNMAT_EXECUTION_STATE_DIR ?? join(directory, "execution-state"),
+            RUNMAT_PACKAGE_CACHE_DIR: process.env.RUNMAT_PACKAGE_CACHE_DIR ?? join(directory, "package-cache"),
+            NO_COLOR: "1"
+        },
         encoding: "utf8",
         maxBuffer: 16 * 1024 * 1024,
         timeout
@@ -35,7 +51,98 @@ function compile(name, sourceText, options = []) {
     return output;
 }
 
-try {
+function verifyCapturedJavaPolicy() {
+    const jdk = resolve(javaHome);
+    const executable = name => join(jdk, "bin", process.platform === "win32" ? `${name}.exe` : name);
+    for (const name of ["javac", "jar", "java"]) {
+        assert.ok(existsSync(executable(name)), `--java requires ${name} in RUNMAT_TEST_JAVA_HOME/bin`);
+    }
+    const project = join(directory, "aot_java_project");
+    const javaSource = join(project, "java", "fixture", "packaged", "Value.java");
+    const classes = join(project, "classes");
+    const jarPath = join(project, "lib", "fixture.jar");
+    const configPath = join(project, "runmat.toml");
+    const source = join(project, "src", "aot_java_policy.m");
+    const output = join(directory, process.platform === "win32" ? "aot_java_policy.exe" : "aot_java_policy");
+    const planPath = join(directory, "aot_java_policy.plan.json");
+    mkdirSync(join(project, "java", "fixture", "packaged"), { recursive: true });
+    mkdirSync(classes, { recursive: true });
+    mkdirSync(join(project, "lib"), { recursive: true });
+    mkdirSync(join(project, "src"), { recursive: true });
+    writeFileSync(javaSource, [
+        "package fixture.packaged;",
+        "public final class Value {",
+        "  private Value() {}",
+        "  public static int read() {",
+        "    return Integer.parseInt(System.getProperty(\"runmat.aot.captured.policy\", \"-1\"));",
+        "  }",
+        "}",
+        ""
+    ].join("\n"));
+    const compiledJava = invoke(executable("javac"), ["-d", classes, javaSource]);
+    assert.equal(compiledJava.status, 0, `compiling AOT Java fixture failed:\n${compiledJava.stderr}`);
+    const archivedJava = invoke(executable("jar"), ["--create", "--file", jarPath, "-C", classes, "."]);
+    assert.equal(archivedJava.status, 0, `archiving AOT Java fixture failed:\n${archivedJava.stderr}`);
+    writeFileSync(configPath, [
+        "[package]",
+        "name = \"aot-java-policy\"",
+        "version = \"1.0.0\"",
+        "",
+        "[sources]",
+        "roots = [\"src\"]",
+        "",
+        "[java-artifacts.fixture]",
+        "path = \"lib/fixture.jar\"",
+        "",
+        "[runtime.foreign.java]",
+        `home = ${JSON.stringify(jdk)}`,
+        "options = [\"-Drunmat.aot.captured.policy=73\"]",
+        ""
+    ].join("\n"));
+    writeFileSync(source, [
+        "function value = aot_java_policy()",
+        "  advance = @(x) javaMethod('sum', 'java.lang.Integer', x, int32(2));",
+        "  stream = javaMethod('iterate', 'java.util.stream.IntStream', int32(1), advance);",
+        "  limited = javaMethod('limit', stream, int64(3));",
+        "  values = javaMethod('toArray', limited);",
+        "  assert(isequal(values, int32([1, 3, 5])));",
+        "  callbackSum = sum(values);",
+        "  assert(callbackSum == 9);",
+        "  policyValue = javaMethod('read', 'fixture.packaged.Value');",
+        "  assert(policyValue == 73);",
+        "  value = policyValue;",
+        "end",
+        ""
+    ].join("\n"));
+    let compileSource = relative(directory, source);
+    if (process.platform !== "win32") {
+        const projectAlias = join(directory, "aot_java_project_alias");
+        symlinkSync(project, projectAlias, "dir");
+        compileSource = join(basename(projectAlias), "src", basename(source));
+    }
+    const compilation = invoke(binary, [
+        "--color=never", "--config", configPath, "compile", compileSource,
+        "--output", output, "--link-plan-json", planPath
+    ]);
+    assert.equal(compilation.status, 0, `compiling linked AOT Java fixture failed:\n${compilation.stderr}`);
+    assert.ok(existsSync(output), "linked AOT Java fixture has no executable");
+    const plan = JSON.parse(readFileSync(planPath, "utf8"));
+    const javaGrant = plan.interop.adapters.filter(item => item.adapter === "java");
+    assert.equal(javaGrant.length, 1, "linked AOT Java plan must select exactly one Java adapter grant");
+    assert.equal(javaGrant[0].artifact_identities.length, 1, "linked AOT Java plan must grant exactly one JAR identity");
+    assert.match(javaGrant[0].artifact_identities[0], /^java:v\d+:sha256:[0-9a-f]{64}$/u);
+
+    // The linked process must use embedded source/JAR bytes and captured
+    // policy, not a later project file or surviving local artifact path.
+    renameSync(source, `${source}.removed-after-compile`);
+    renameSync(jarPath, `${jarPath}.removed-after-compile`);
+    writeFileSync(configPath, "[runtime.foreign.java]\noptions = []\n");
+    const result = invoke(output);
+    assert.equal(result.status, 0, `linked AOT Java execution failed:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), "73", "linked Java lost its archived source/JAR, captured JVM option, or callback reentry");
+}
+
+function verifyPureAotSources() {
     const direct = compile("aot_source_direct", "function name = aot_source_direct(); name = mfilename(); end\n");
     for (let invocation = 0; invocation < 2; invocation++) {
         const result = invoke(direct);
@@ -235,7 +342,21 @@ try {
     assert.notEqual(dealBadCountResult.status, 0, "linked deal must reject mismatched input/output counts");
     assert.match(dealBadCountResult.stderr, /RunMat:deal:InputOutputCountMismatch/u);
 
-    console.log("linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, and deal witnesses passed");
+    verifyAotSuperConstructors({ directory, compile, invoke });
+}
+
+try {
+    if (superOnly) verifyAotSuperConstructors({ directory, compile, invoke });
+    else if (!javaOnly) verifyPureAotSources();
+    if (javaRequested) verifyCapturedJavaPolicy();
+
+    console.log(superOnly
+        ? "linked AOT superclass witnesses passed"
+        : javaOnly
+        ? "linked AOT captured Java policy witness passed"
+        : javaRequested
+        ? "linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, deal, superclass, and captured Java policy witnesses passed"
+        : "linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, deal, and superclass witnesses passed");
 } finally {
     rmSync(directory, { recursive: true, force: true });
 }

@@ -165,8 +165,8 @@ fn typed_resident_nonfinite_cause_is_not_an_unavailable_hook() {
 #[test]
 fn host_envelope_abandons_unpublished_bounds_on_cancellation() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-    use runmat_execution::CancellationReason;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::num::NonZeroU64;
 
     let source = CancellationSource::new();
@@ -203,8 +203,8 @@ fn host_envelope_abandons_unpublished_bounds_on_cancellation() {
 #[test]
 fn one_large_channel_checks_each_numerical_method_before_publication() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-    use runmat_execution::CancellationReason;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::cell::Cell;
     use std::num::NonZeroU64;
     use std::rc::Rc;
@@ -318,16 +318,12 @@ fn matrix_inputs_are_processed_column_wise() {
         panic!("expected tensor");
     };
     assert_eq!(upper.shape(), [4, 2]);
-    assert!(
-        upper.materialize_f64()[..4]
-            .iter()
-            .all(|value| (*value - 1.0).abs() < 1.0e-12)
-    );
-    assert!(
-        upper.materialize_f64()[4..]
-            .iter()
-            .all(|value| *value >= 2.0)
-    );
+    assert!(upper.materialize_f64()[..4]
+        .iter()
+        .all(|value| (*value - 1.0).abs() < 1.0e-12));
+    assert!(upper.materialize_f64()[4..]
+        .iter()
+        .all(|value| *value >= 2.0));
 }
 
 #[test]
@@ -344,16 +340,12 @@ fn envelope_reads_typed_integer_matrix_storage_exactly() {
         panic!("expected tensor");
     };
     assert_eq!(upper.shape(), [4, 2]);
-    assert!(
-        upper.materialize_f64()[..4]
-            .iter()
-            .all(|value| (*value - 1.0).abs() < 1.0e-12)
-    );
-    assert!(
-        upper.materialize_f64()[4..]
-            .iter()
-            .all(|value| *value >= 2.0)
-    );
+    assert!(upper.materialize_f64()[..4]
+        .iter()
+        .all(|value| (*value - 1.0).abs() < 1.0e-12));
+    assert!(upper.materialize_f64()[4..]
+        .iter()
+        .all(|value| *value >= 2.0));
 }
 
 #[cfg(feature = "plot-core")]
@@ -376,21 +368,19 @@ fn output_count_zero_preserves_host_validation_before_typed_missing_presentation
     );
     let unavailable = call(col(vec![1.0, 0.0, -1.0, 0.0]), Vec::new(), Some(0))
         .expect_err("presentation needs plot-core");
-    assert!(
-        unavailable
-            .source
-            .as_deref()
-            .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
-            .is_some()
-    );
+    assert!(unavailable
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
 }
 
 #[cfg(not(feature = "plot-core"))]
 #[test]
 fn resident_statement_preflight_rejects_known_shape_and_storage_without_download() {
     use runmat_accelerate_api::{
-        AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
-        NumericElementType, ThreadProviderGuard, test_support::TestAllocationOwner,
+        test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+        GpuTensorStorage, HostTensorView, NumericElementType, ThreadProviderGuard,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -484,7 +474,7 @@ fn analytic_filter_length_uses_fir_path() {
 #[cfg(feature = "wgpu")]
 fn assert_gpu_envelope_matches_cpu(values: Vec<f64>, shape: Vec<usize>, rest: Vec<Value>) {
     use crate::builtins::common::test_support;
-    use runmat_accelerate::backend::wgpu::provider::{WgpuProviderOptions, register_wgpu_provider};
+    use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
 
     let _guard = test_support::accel_test_lock();

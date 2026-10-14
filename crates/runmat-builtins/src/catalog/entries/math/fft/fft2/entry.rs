@@ -8,6 +8,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
 }
 
 pub const FFT2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fft2" },
     category: "math/fft",

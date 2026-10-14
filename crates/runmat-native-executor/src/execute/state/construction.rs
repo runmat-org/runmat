@@ -13,6 +13,7 @@ impl HostState {
             program_capture,
             functions,
             captures,
+            lexical_environment,
             deoptimization,
             interpreter_resume_points,
             coverage_sites,
@@ -20,6 +21,18 @@ impl HostState {
             optimized_regions,
             workspace,
         } = input;
+        let (lexical_environment, lexical_roots) = if function.creates_lexical_environment {
+            let (environment, roots) =
+                runmat_runtime::call::lexical::allocate_environment(lexical_environment)?;
+            (Some(environment), roots)
+        } else {
+            let roots = lexical_environment
+                .as_ref()
+                .map(runmat_runtime::call::lexical::root_environment)
+                .transpose()?
+                .unwrap_or_default();
+            (lexical_environment, roots)
+        };
         // Workspace entry is a script frame; ordinary native invocation owns
         // the exact supplied/requested function arity. Project it before any
         // callsite can suspend or reach the runtime builtin dispatcher.
@@ -125,6 +138,7 @@ impl HostState {
                 Some(runtime.session_variable_authority()),
             )
         };
+        workspace.attach_lexical_bindings(&function, lexical_environment.as_ref())?;
         let ports = runtime
             .service_ports()
             .clone()
@@ -160,6 +174,30 @@ impl HostState {
                 })?;
             locals[local.id.0 as usize] = arena.insert(capture.value.clone());
         }
+        if let Some(receiver) = runtime.captured_constructor_receiver().filter(|_| {
+            function
+                .class_method_owner
+                .as_ref()
+                .is_some_and(|owner| owner.role == runmat_types::ClassMethodRole::Constructor)
+        }) {
+            let local = function.abi.fixed_outputs.first().ok_or_else(|| {
+                NativeExecutorError::from(
+                    runmat_runtime::build_runtime_error("constructor has no fixed instance output")
+                        .with_identifier("RunMat:ConstructorOutputInvalid")
+                        .build(),
+                )
+            })?;
+            let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
+                NativeExecutorError::from(
+                    runmat_runtime::build_runtime_error(
+                        "constructor instance output is out of bounds",
+                    )
+                    .with_identifier("RunMat:ConstructorOutputInvalid")
+                    .build(),
+                )
+            })?;
+            *slot = arena.insert(receiver.clone());
+        }
         for (local, value) in function.abi.fixed_inputs.iter().zip(&prepared.fixed) {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 NativeExecutorError::Host("function ABI input local is out of bounds".into())
@@ -184,6 +222,30 @@ impl HostState {
             locals[local.0 as usize] =
                 arena.insert(runmat_value::Value::Num(requested_outputs as f64));
         }
+        for binding in &function.lexical_bindings {
+            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Transit
+                && lexical_environment.is_none()
+            {
+                return Err(NativeExecutorError::Host(
+                    "transit lexical binding has no admitted activation".into(),
+                ));
+            }
+            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Inherited {
+                let environment = lexical_environment.as_ref().ok_or_else(|| {
+                    NativeExecutorError::Host("inherited lexical binding has no activation".into())
+                })?;
+                let local = locals.get_mut(binding.local.0 as usize).ok_or_else(|| {
+                    NativeExecutorError::Host("inherited lexical local is out of bounds".into())
+                })?;
+                if let Some(value) =
+                    runmat_runtime::call::lexical::read_binding(environment, binding.binding)?
+                {
+                    *local = arena.insert(value);
+                } else {
+                    *local = NativeValueRef::NULL;
+                }
+            }
+        }
         for (slot, local) in locals.iter_mut().enumerate() {
             if let Some(value) = workspace.initial_value(slot) {
                 *local = arena.insert(value);
@@ -191,6 +253,28 @@ impl HostState {
             let reference = *local;
             if !reference.is_null() {
                 workspace.initialize_local(slot, arena.get(reference)?.clone())?;
+            }
+        }
+        for binding in &function.lexical_bindings {
+            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Owned {
+                let environment = lexical_environment.as_ref().ok_or_else(|| {
+                    NativeExecutorError::Host("owned lexical binding has no activation".into())
+                })?;
+                if !environment.reserve_owned_binding(binding.binding) {
+                    return Err(NativeExecutorError::Host(
+                        "owned lexical binding was reserved twice".into(),
+                    ));
+                }
+                let reference = *locals.get(binding.local.0 as usize).ok_or_else(|| {
+                    NativeExecutorError::Host("owned lexical local is out of bounds".into())
+                })?;
+                if !reference.is_null() {
+                    runmat_runtime::call::lexical::write_owned_binding(
+                        environment,
+                        binding.binding,
+                        arena.get(reference)?.clone(),
+                    )?;
+                }
             }
         }
         let roots = locals
@@ -267,7 +351,24 @@ impl HostState {
             vectorized_regions: 0,
             workspace: Some(workspace),
             last_expression: None,
+            lexical_environment,
+            _lexical_roots: lexical_roots,
         };
+        for binding in state.function.inherited_storage_bindings.clone() {
+            let slot = binding.local.0 as usize;
+            match binding.kind {
+                runmat_native_codegen::NativeInheritedStorageKind::Global => {
+                    state.declare_global(slot, binding.name)?;
+                }
+                runmat_native_codegen::NativeInheritedStorageKind::Persistent => {
+                    state.declare_persistent_for_owner(
+                        slot,
+                        binding.name,
+                        binding.owner_function,
+                    )?;
+                }
+            }
+        }
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
     }

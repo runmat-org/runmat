@@ -24,7 +24,8 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
             let recorded = recorded.clone();
             Box::pin(async move {
                 *recorded.lock().unwrap() += 1;
-                Ok(crate::sequence::ValueSequence::empty())
+                crate::execution::RootedValueSequence::new(crate::sequence::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
             })
         },
     )));

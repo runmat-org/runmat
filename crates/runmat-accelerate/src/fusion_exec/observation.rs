@@ -1,6 +1,7 @@
 use crate::fusion_exec::reduction::{CpuReadbackFailure, CpuReadbackPlan};
 use crate::placement::LocalPlacementFeedback;
 use runmat_accelerate_api::observation::ProviderOperationReceipt;
+use runmat_execution::profiling::CommandProviderContribution;
 use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionHostRoute};
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
@@ -11,6 +12,7 @@ use runmat_value::Value;
 /// zero-duration failure.
 pub struct FusionProviderCompletion {
     receipt: ProviderOperationReceipt,
+    command_contribution: Option<CommandProviderContribution>,
     feedback: LocalPlacementFeedback,
     right: VmFusionCompletionRight,
 }
@@ -20,10 +22,12 @@ impl FusionProviderCompletion {
         receipt: ProviderOperationReceipt,
         feedback: LocalPlacementFeedback,
         right: VmFusionCompletionRight,
+        command_contribution: Option<CommandProviderContribution>,
     ) -> Option<Self> {
         (feedback.is_current() && right.placement_revision() == Some(&feedback.signature.revision))
             .then_some(Self {
                 receipt,
+                command_contribution,
                 feedback,
                 right,
             })
@@ -41,6 +45,7 @@ impl FusionProviderCompletion {
             self.feedback,
             prelude,
             lease,
+            self.command_contribution,
         );
     }
 }

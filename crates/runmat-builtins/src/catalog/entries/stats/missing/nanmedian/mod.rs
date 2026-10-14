@@ -13,6 +13,7 @@ pub use contract::{
 };
 
 pub const NANMEDIAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "nanmedian" },
     category: "missing",

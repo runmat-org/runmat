@@ -181,7 +181,7 @@ fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
         Value::String(SCALE_FACTOR_FIELD.to_string()),
     ))
     .expect("ScaleFactor");
-    assert_eq!(approx_vec(prop), vec![3.0]);
+    assert_eq!(approx_vec_rooted(prop), vec![3.0]);
     assert_eq!(
         complex_scalar(&Value::Tensor(scale), "scale").unwrap(),
         (3.0, 0.0)

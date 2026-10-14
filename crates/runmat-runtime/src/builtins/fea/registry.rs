@@ -99,6 +99,7 @@ pub(in crate::builtins::fea) fn workflow_methods(
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )
     })
@@ -124,6 +125,7 @@ pub(in crate::builtins::fea) fn run_result_methods(
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )
     })
@@ -148,6 +150,7 @@ pub(in crate::builtins::fea) fn results_methods(
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )
     })
@@ -169,6 +172,7 @@ pub(in crate::builtins::fea) fn field_methods(
                     access: MemberAccess::Public,
                     function_name: function_name.into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )
         })

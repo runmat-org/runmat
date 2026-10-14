@@ -106,6 +106,7 @@ const FULL_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BI
 const FULL_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "full" },
     category: "array/creation",

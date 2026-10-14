@@ -2,6 +2,8 @@ use runmat_value::{IntegerStorage, StringArray, Tensor, Value};
 
 use crate::builtins::common::binary::BinaryInputPlan;
 
+mod ownership;
+
 fn table(names: &[&str], columns: &[&[f64]]) -> Value {
     super::super::table_from_columns(
         names.iter().map(|name| (*name).to_string()).collect(),
@@ -56,13 +58,12 @@ fn aligns_variable_and_named_row_order_to_the_left_operand() {
     let BinaryInputPlan::Structured(plan) = super::plan_binary(left, right).unwrap() else {
         panic!("expected tabular plan")
     };
-    let (_, variables) = plan.variables();
-    assert_eq!(variables[0].0, "A");
-    assert_eq!(variables[1].0, "B");
-    let Value::Tensor(right_a) = &variables[0].2 else {
+    assert_eq!(plan.variables[0].0, "A");
+    assert_eq!(plan.variables[1].0, "B");
+    let Value::Tensor(right_a) = &plan.right_values.values()[0] else {
         panic!("expected numeric A")
     };
-    let Value::Tensor(right_b) = &variables[1].2 else {
+    let Value::Tensor(right_b) = &plan.right_values.values()[1] else {
         panic!("expected numeric B")
     };
     assert_eq!(right_a.materialize_f64(), vec![10.0, 20.0]);
@@ -98,8 +99,7 @@ fn aligns_timetable_rows_without_rounding_wide_integer_times() {
     let BinaryInputPlan::Structured(plan) = super::plan_binary(left, right).unwrap() else {
         panic!("expected timetable plan")
     };
-    let (_, variables) = plan.variables();
-    let Value::Tensor(right_a) = &variables[0].2 else {
+    let Value::Tensor(right_a) = &plan.right_values.values()[0] else {
         panic!("expected numeric A")
     };
     assert_eq!(right_a.materialize_f64(), vec![10.0, 20.0]);

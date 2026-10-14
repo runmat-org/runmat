@@ -5,10 +5,14 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 fn workspace(values: BTreeMap<String, Value>) -> NativeWorkspaceState {
     let function = NativeFunction {
+        lexical_bindings: Vec::new(),
+        inherited_storage_bindings: Vec::new(),
+        creates_lexical_environment: false,
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "gc_workspace".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        lexical_parent: None,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {
@@ -110,10 +114,14 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
         );
         let canonical: Rc<dyn RuntimeWorkspaceService> = projection.clone();
         let function = NativeFunction {
+            lexical_bindings: Vec::new(),
+            inherited_storage_bindings: Vec::new(),
+            creates_lexical_environment: false,
             id: ProgramFunctionId(0),
             source: ProgramSourceId(0),
             name: "gc_workspace".into(),
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            lexical_parent: None,
             class_method_owner: None,
             capabilities: Default::default(),
             abi: NativeFunctionAbi {

@@ -56,7 +56,7 @@ impl NativeEntrypointBinding {
         mir: &runmat_mir::MirAssembly,
         manifest: &runmat_execution::ExecutableUnitManifest,
     ) -> NativeCodegenResult<()> {
-        if self.portable != manifest.identity.entrypoint_function
+        if Some(self.portable) != manifest.identity.entrypoint_function
             || self.body_digest != entrypoint_body_digest(mir, self.compiled)?
         {
             return Err(NativeCodegenError::new(
@@ -155,13 +155,20 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             )
             .at_function(function_id)
         })?;
+        let retained_callable_parent =
+            input
+                .mir
+                .retained_callable_parent(*function)
+                .map_err(|error| {
+                    NativeCodegenError::new("native.lowering.lexical_parent", error)
+                        .at_function(function_id)
+                })?;
         functions.push(super::function::lower_function(
             function_id,
+            &input,
             metadata,
+            retained_callable_parent,
             body,
-            input.analysis,
-            input.binding_names,
-            &input.manifest.regions,
         )?);
     }
     functions.sort_by_key(|function| function.id);
@@ -227,6 +234,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         selected_entrypoint_body: input.entrypoint.body_digest,
         entrypoints,
         functions,
+        class_declarations: super::super_constructor::lower(input.mir)?,
     };
     assembly.verify()?;
     verify_against_manifest(&assembly, input.manifest)?;
@@ -269,6 +277,12 @@ pub fn verify_against_mir(
     mir: &runmat_mir::MirAssembly,
     binding_names: Option<&std::collections::BTreeMap<runmat_types::BindingId, String>>,
 ) -> NativeCodegenResult<()> {
+    if assembly.class_declarations != super::super_constructor::lower(mir)? {
+        return Err(NativeCodegenError::new(
+            "native.ir.mir_class_declarations",
+            "Native IR class declarations differ from canonical MIR",
+        ));
+    }
     if assembly.selected_entrypoint_body
         != entrypoint_body_digest(mir, assembly.selected_entrypoint)?
     {

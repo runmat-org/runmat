@@ -1,6 +1,6 @@
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::{AttemptState, TaskState};
-use runmat_execution::{PoolId, TaskId};
+use runmat_execution::{PoolId, ProgramCallable, TaskId};
 
 use crate::cancellation::CancellationEscalation;
 use crate::pool::{PoolRecord, WorkerRecord};
@@ -57,19 +57,36 @@ impl Driver {
         if self.task_is_terminal(task_id)? {
             return Ok(());
         }
-        let active = self.task_mut(task_id)?.active_attempt;
+        let task = self.task_mut(task_id)?;
+        let active = task.active_attempt;
+        let graph_attempt = active.is_some()
+            && matches!(
+                &task.submission.request.callable.program,
+                ProgramCallable::GraphTarget { .. }
+            );
         self.snapshot.ready.remove_task(task_id);
-        self.transition_task(task_id, TaskState::Cancelled)?;
+        // A running Graph worker can still own foreign callbacks and children.
+        // Keep its attempt active until its report proves cleanup or records
+        // unverified retirement; queued Graph and ordinary tasks retain the
+        // existing immediate-cancellation behavior.
+        if !graph_attempt {
+            self.transition_task(task_id, TaskState::Cancelled)?;
+        }
         if let Some(attempt_id) = active {
             let attempt = self
                 .snapshot
                 .attempts
                 .get_mut(&attempt_id)
                 .ok_or(RunnerError::UnknownAttempt(attempt_id))?;
+            let first_request = attempt.cancellation_requested_at.is_none();
             attempt.cancellation_requested_at.get_or_insert(now_millis);
-            attempt.cancellation_escalation = Some(CancellationEscalation::Request);
+            if first_request {
+                attempt.cancellation_escalation = Some(CancellationEscalation::Request);
+            }
             let request = attempt.request.clone();
-            actions.push(DriverAction::Cancel(request));
+            if first_request || !graph_attempt {
+                actions.push(DriverAction::Cancel(request));
+            }
         }
         Ok(())
     }
@@ -143,16 +160,24 @@ impl Driver {
                     if current == Some(CancellationEscalation::Request) {
                         actions.push(DriverAction::Terminate(attempt.request.clone()));
                     }
-                    self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                    let graph_attempt = matches!(
+                        &attempt.request.task.callable.program,
+                        ProgramCallable::GraphTarget { .. }
+                    );
+                    if !graph_attempt {
+                        self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                    }
                     self.snapshot
                         .attempts
                         .get_mut(&attempt_id)
                         .expect("candidate attempt exists")
                         .cancellation_escalation = Some(CancellationEscalation::Fence);
-                    self.emit(DriverEventKind::AttemptCancelled {
-                        task_id: attempt.request.task_id,
-                        attempt_id,
-                    });
+                    if !graph_attempt {
+                        self.emit(DriverEventKind::AttemptCancelled {
+                            task_id: attempt.request.task_id,
+                            attempt_id,
+                        });
+                    }
                 }
                 _ => {}
             }

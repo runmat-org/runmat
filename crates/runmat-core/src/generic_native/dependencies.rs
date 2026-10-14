@@ -6,23 +6,35 @@ use runmat_mir::{
     MirSubscriptChain, MirTerminatorKind,
 };
 
+#[derive(Default)]
 pub(super) struct ReferencedFunctions {
     pub functions: BTreeSet<FunctionId>,
+    pub super_callers: BTreeSet<FunctionId>,
+    has_super_call: bool,
     pub dynamic_catalog: bool,
 }
 
-pub(super) fn analyze(assembly: &runmat_mir::MirAssembly) -> ReferencedFunctions {
-    let mut referenced = ReferencedFunctions {
-        functions: BTreeSet::new(),
-        dynamic_catalog: false,
-    };
+pub(super) fn analyze(
+    assembly: &runmat_mir::MirAssembly,
+    selected_functions: &BTreeSet<FunctionId>,
+) -> ReferencedFunctions {
+    let mut referenced = ReferencedFunctions::default();
     for body in assembly.bodies.values() {
+        if !selected_functions.contains(&body.function) {
+            continue;
+        }
+        let mut body_references = ReferencedFunctions::default();
         for block in &body.blocks {
             for statement in &block.statements {
-                visit_statement(statement, &mut referenced);
+                visit_statement(statement, &mut body_references);
             }
-            visit_terminator(&block.terminator.kind, &mut referenced);
+            visit_terminator(&block.terminator.kind, &mut body_references);
         }
+        if body_references.has_super_call {
+            referenced.super_callers.insert(body.function);
+        }
+        referenced.functions.extend(body_references.functions);
+        referenced.dynamic_catalog |= body_references.dynamic_catalog;
     }
     referenced
 }
@@ -138,7 +150,10 @@ fn visit_rvalue(value: &MirRvalue, out: &mut ReferencedFunctions) {
                     out.dynamic_catalog = true;
                     visit_operand(operand, out);
                 }
-                MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => {}
+                MirCallee::SuperConstructor { .. } => {
+                    out.has_super_call = true;
+                }
+                MirCallee::SuperMethod { .. } => {}
             }
             for argument in &call.args {
                 visit_call_arg(argument, out);

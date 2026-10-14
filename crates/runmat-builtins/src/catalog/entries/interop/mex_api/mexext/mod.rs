@@ -9,6 +9,7 @@ use crate::*;
 use runmat_types::EffectKind;
 
 pub const MEXEXT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "mexext" },
     category: "interop/mex",

@@ -85,7 +85,7 @@ fn listener_callback_is_dispatchable(callback: &Value) -> bool {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => !name.trim().is_empty(),
-        Value::BoundFunctionHandle { .. } | Value::Closure(_) => true,
+        Value::BoundFunctionHandle(_) | Value::Closure(_) => true,
         _ => false,
     }
 }
@@ -176,11 +176,7 @@ pub(crate) async fn addlistener_builtin(
     let Value::HandleObject(target_handle) = &target else {
         unreachable!("validated listener target is a handle object")
     };
-    let admission = EventAdmission::new(
-        &target_handle.class_name,
-        &event_name,
-        EventOperation::Listen,
-    )?;
+    let admission = EventAdmission::for_target(target_handle, &event_name, EventOperation::Listen)?;
     let (target_root, target_class_name) = match &target {
         Value::HandleObject(h) => {
             let class_name = h.class_name.clone();
@@ -299,11 +295,7 @@ pub(crate) async fn notify_builtin(
     let Value::HandleObject(target_handle) = &target else {
         unreachable!("validated notification target is a handle object")
     };
-    let admission = EventAdmission::new(
-        &target_handle.class_name,
-        &event_name,
-        EventOperation::Notify,
-    )?;
+    let admission = EventAdmission::for_target(target_handle, &event_name, EventOperation::Notify)?;
     let prepared = if rest.len() <= 1 {
         Some(
             crate::class_registry::prepare_event_data(&target, &event_name, rest.first().cloned())

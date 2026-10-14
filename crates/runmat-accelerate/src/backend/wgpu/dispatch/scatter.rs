@@ -9,11 +9,12 @@ pub(crate) fn run(
     bind_group: &wgpu::BindGroup,
     groups_x: u32,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-scatter-encoder"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-scatter-pass"),

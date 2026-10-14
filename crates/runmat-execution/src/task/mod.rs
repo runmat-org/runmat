@@ -7,7 +7,9 @@ mod parallel;
 
 pub use assignment::ProgramExecutionAssignment;
 pub use callable::ProgramCallable;
-pub use failure::{ProgramCallFrame, ProgramRuntimeFailure, ProgramSourceSpan};
+pub use failure::{
+    ProgramCallFrame, ProgramDetachedDiagnosticSource, ProgramRuntimeFailure, ProgramSourceSpan,
+};
 pub use parallel::{
     ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
     ParallelTaskGraph, ProgramInvocationContext,

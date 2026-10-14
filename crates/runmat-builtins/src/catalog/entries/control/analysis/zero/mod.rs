@@ -12,6 +12,7 @@ mod tests;
 pub use contract::{ZERO_DESCRIPTOR, ZERO_ERRORS, ZERO_INTEGER_AUDIT};
 
 pub const ZERO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "zero" },
     category: "control/analysis",

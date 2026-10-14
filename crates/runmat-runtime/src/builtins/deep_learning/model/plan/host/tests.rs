@@ -8,7 +8,7 @@ use super::{admit_training_geometry, HostNetworkPlan, HostValue};
 use crate::builtins::deep_learning::model::state::{self, StateRole, StateUpdate};
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
-fn network() -> Value {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -29,11 +29,12 @@ fn network() -> Value {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn feature_input_preparation_keeps_admitted_rank_one_shape_exact() {
-    let Value::Object(network) = network() else {
+    let network_owner = network();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network object expected")
     };
     let rank_one = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &rank_one, "forward").expect("feature input");
+    let plan = HostNetworkPlan::admit(network, &rank_one, "forward").expect("feature input");
     assert_eq!(plan.input_axes().shape(), &[2]);
     let HostValue::Real(prepared) = block_on(plan.prepare_input(&rank_one)).unwrap() else {
         panic!("real input expected")
@@ -45,7 +46,7 @@ fn feature_input_preparation_keeps_admitted_rank_one_shape_exact() {
     let row_shorthand = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
     assert!(block_on(plan.prepare_input(&row_shorthand)).is_err());
     let rank_zero = Value::Tensor(Tensor::from_f32(vec![1.0], Vec::new()).unwrap());
-    assert!(HostNetworkPlan::admit(&network, &rank_zero, "forward").is_err());
+    assert!(HostNetworkPlan::admit(network, &rank_zero, "forward").is_err());
 }
 
 #[test]
@@ -82,10 +83,10 @@ fn compare_training_geometry_with_filled_network(layers: Vec<Value>, input: Valu
     let layers = Value::Cell(CellArray::new(layers, 2, 1).unwrap());
     let proposed = admit_training_geometry(&layers, &input, "test").unwrap();
     let network = block_on(dlnetwork_builtin(vec![layers])).unwrap();
-    let Value::Object(network) = network else {
+    let Value::Object(network) = network.value() else {
         panic!("initialized network expected")
     };
-    let filled = HostNetworkPlan::admit(&network, &input, "test").unwrap();
+    let filled = HostNetworkPlan::admit(network, &input, "test").unwrap();
     assert_eq!(proposed.input_axes.shape(), filled.input_axes().shape());
     assert_eq!(proposed.output_axes.shape(), filled.output_axes().shape());
     assert_eq!(proposed.output_axes.layout(), filled.output_axes().layout());
@@ -142,20 +143,21 @@ fn training_geometry_matches_filled_bilstm_sequence_and_last_modes() {
 fn training_geometry_reads_supplied_network_canonical_state_batch() {
     let input_layer = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
     let recurrent = block_on(lstm_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, recurrent], 2, 1).unwrap(),
     )]))
-    .unwrap() else {
+    .unwrap();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network expected")
     };
     let input = Value::Tensor(Tensor::from_f32(vec![1.; 3 * 2 * 4], vec![3, 2, 4]).unwrap());
     let proposed =
         admit_training_geometry(&Value::Object(network.clone()), &input, "test").unwrap();
-    let filled = HostNetworkPlan::admit(&network, &input, "test").unwrap();
+    let filled = HostNetworkPlan::admit(network, &input, "test").unwrap();
     assert_eq!(proposed.output_axes.shape(), filled.output_axes().shape());
 
     let state = state::publish_updates(
-        &network,
+        network,
         vec![
             StateUpdate {
                 layer_index: 1,
@@ -171,7 +173,7 @@ fn training_geometry_reads_supplied_network_canonical_state_batch() {
         "test",
     )
     .unwrap();
-    let Value::Object(network) = state::apply(network, state, "test").unwrap() else {
+    let Value::Object(network) = state::apply(network.clone(), state, "test").unwrap() else {
         panic!("updated network expected")
     };
     let error = admit_training_geometry(&Value::Object(network), &input, "test")
@@ -185,11 +187,12 @@ fn training_geometry_reads_supplied_network_canonical_state_batch() {
 
 #[test]
 fn admitted_steps_retain_their_own_input_and_output_axes() {
-    let Value::Object(network) = network() else {
+    let network_owner = network();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(Tensor::new(vec![1.0; 6], vec![3, 2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].input_axes.shape(), &[3, 2]);
     assert_eq!(plan.steps[0].output_axes.shape(), &[3, 2]);
@@ -208,13 +211,13 @@ fn admitted_steps_retain_their_own_input_and_output_axes() {
             ("Labels", Value::String("CB".into())),
         ],
     );
-    let plan = HostNetworkPlan::admit(&network, &formatted, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &formatted, "forward").unwrap();
     assert_eq!(plan.steps[0].input_axes.shape(), &[2, 3]);
     assert_eq!(plan.steps[1].input_axes, plan.steps[0].output_axes);
     assert_eq!(plan.steps[1].output_axes.shape(), &[1, 3]);
 }
 
-fn pooling_network(input_layer: Value) -> Value {
+fn pooling_network(input_layer: Value) -> crate::execution::RootedValue {
     let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, pooling], 2, 1).unwrap(),
@@ -240,7 +243,7 @@ fn public_raw_complex_sequence_gap_retains_double_and_input_storage() {
     .unwrap();
     let original = input.as_f64_slice().unwrap().as_ptr();
     let Value::ComplexTensor(result) = block_on(forward_builtin(
-        network,
+        network.value().clone(),
         Value::ComplexTensor(input.clone()),
         vec![],
     ))
@@ -276,7 +279,9 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
             ("Labels", Value::String("CBT".into())),
         ],
     );
-    let Value::Object(cbt_output) = block_on(forward_builtin(vector, cbt, vec![])).unwrap() else {
+    let Value::Object(cbt_output) =
+        block_on(forward_builtin(vector.value().clone(), cbt, vec![])).unwrap()
+    else {
         panic!("formatted complex result expected")
     };
     let Some(Value::ComplexTensor(cbt_data)) = cbt_output.properties.get("Data") else {
@@ -325,7 +330,9 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
             ("Labels", Value::String("SB".into())),
         ],
     );
-    let Value::Object(sb_output) = block_on(forward_builtin(spatial, sb, vec![])).unwrap() else {
+    let Value::Object(sb_output) =
+        block_on(forward_builtin(spatial.value().clone(), sb, vec![])).unwrap()
+    else {
         panic!("formatted no-channel complex result expected")
     };
     let Some(Value::ComplexTensor(sb_data)) = sb_output.properties.get("Data") else {
@@ -396,7 +403,8 @@ fn public_real_gap_admits_documented_channel_less_bt_sb_and_sbt_formats() {
                 ("Labels", Value::String(format.into())),
             ],
         );
-        let Value::Object(output) = block_on(forward_builtin(network, input, vec![])).unwrap()
+        let Value::Object(output) =
+            block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
         else {
             panic!("formatted real GAP output expected")
         };
@@ -428,7 +436,7 @@ fn missing_channel_requires_a_global_pool_route_and_singleton_input_size() {
     let wrong_size =
         pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());
     assert!(HostNetworkPlan::admit(
-        match &wrong_size {
+        match wrong_size.value() {
             Value::Object(object) => object,
             _ => unreachable!(),
         },
@@ -443,10 +451,10 @@ fn missing_channel_requires_a_global_pool_route_and_singleton_input_size() {
         CellArray::new(vec![input, relu], 2, 1).unwrap(),
     )]))
     .unwrap();
-    let Value::Object(without_pool) = without_pool else {
+    let Value::Object(without_pool) = without_pool.value() else {
         unreachable!()
     };
-    assert!(HostNetworkPlan::admit(&without_pool, &bt, "forward").is_err());
+    assert!(HostNetworkPlan::admit(without_pool, &bt, "forward").is_err());
 
     let input = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
     let pool = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
@@ -464,10 +472,10 @@ fn missing_channel_requires_a_global_pool_route_and_singleton_input_size() {
         CellArray::new(vec![input, pool, dense], 3, 1).unwrap(),
     )]))
     .unwrap();
-    let Value::Object(with_channel_dependent_layer) = with_channel_dependent_layer else {
+    let Value::Object(with_channel_dependent_layer) = with_channel_dependent_layer.value() else {
         unreachable!()
     };
-    assert!(HostNetworkPlan::admit(&with_channel_dependent_layer, &bt, "forward").is_err());
+    assert!(HostNetworkPlan::admit(with_channel_dependent_layer, &bt, "forward").is_err());
 }
 
 #[test]
@@ -477,7 +485,7 @@ fn complex_preparation_shares_cow_payload_and_rejects_real_only_layers_before_ef
     let input = Value::ComplexTensor(
         ComplexTensor::from_f32(vec![(1., 2.), (3., 4.), (5., 6.), (7., 8.)], vec![2, 2]).unwrap(),
     );
-    let Value::Object(ref network_object) = pool_net else {
+    let Value::Object(network_object) = pool_net.value() else {
         panic!("network object expected")
     };
     let admitted = HostNetworkPlan::admit(network_object, &input, "forward").unwrap();
@@ -496,7 +504,8 @@ fn complex_preparation_shares_cow_payload_and_rejects_real_only_layers_before_ef
     };
     assert!(left.shares_allocation_with(right));
 
-    let Value::Object(ref dense_network) = network() else {
+    let dense_network_owner = network();
+    let Value::Object(dense_network) = dense_network_owner.value() else {
         panic!("network object expected")
     };
     let rejected = HostNetworkPlan::admit(dense_network, &input, "forward");
@@ -508,7 +517,9 @@ fn nonsquare_bc_and_cb_use_distinct_physical_channel_axes() {
     let net = network();
     let raw_bc =
         Value::Tensor(Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap());
-    let Value::Tensor(raw) = block_on(forward_builtin(net.clone(), raw_bc, vec![])).unwrap() else {
+    let Value::Tensor(raw) =
+        block_on(forward_builtin(net.value().clone(), raw_bc, vec![])).unwrap()
+    else {
         panic!("raw tensor result expected")
     };
     assert_eq!(raw.shape(), &[3, 1]);
@@ -525,7 +536,9 @@ fn nonsquare_bc_and_cb_use_distinct_physical_channel_axes() {
             ("Labels", Value::String("CB".into())),
         ],
     );
-    let Value::Object(wrapped) = block_on(forward_builtin(net, cb, vec![])).unwrap() else {
+    let Value::Object(wrapped) =
+        block_on(forward_builtin(net.value().clone(), cb, vec![])).unwrap()
+    else {
         panic!("dlarray result expected")
     };
     let Some(Value::Tensor(result)) = wrapped.properties.get("Data") else {
@@ -543,7 +556,8 @@ fn nonsquare_bc_and_cb_use_distinct_physical_channel_axes() {
 fn single_input_projects_double_parameters_only_at_execution_boundary() {
     let net = network();
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let Value::Tensor(output) = block_on(forward_builtin(net.clone(), input, vec![])).unwrap()
+    let Value::Tensor(output) =
+        block_on(forward_builtin(net.value().clone(), input, vec![])).unwrap()
     else {
         panic!("tensor result expected")
     };
@@ -553,10 +567,10 @@ fn single_input_projects_double_parameters_only_at_execution_boundary() {
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![-0.5, 0.5])
     );
-    let Value::Object(net) = net else {
+    let Value::Object(net) = net.value() else {
         panic!("network object")
     };
-    let rows = parameters::view(&net, "forward").unwrap();
+    let rows = parameters::view(net, "forward").unwrap();
     assert!(rows
         .iter()
         .filter_map(|row| row.value)
@@ -571,7 +585,8 @@ fn stateless_two_output_forward_publishes_canonical_empty_state() {
     let network = network();
     let _count = crate::output_count::push_output_count(Some(2));
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-    let Value::OutputList(outputs) = block_on(forward_builtin(network, input, vec![])).unwrap()
+    let Value::OutputList(outputs) =
+        block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
     else {
         panic!("[Y, state] result expected")
     };

@@ -10,6 +10,14 @@ pub(super) struct CompiledGenericUnit {
     pub entrypoint: ProgramFunctionId,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
+    #[cfg(test)]
+    pub safepoint_locations: BTreeMap<
+        ProgramFunctionId,
+        Vec<(
+            runmat_native_codegen::NativeSafepointId,
+            runmat_native_codegen::NativeSourceLocation,
+        )>,
+    >,
 }
 
 pub(super) struct PreparedGenericUnit {
@@ -23,6 +31,14 @@ pub(super) struct BackgroundCompiledGenericUnit {
     pub entrypoint: ProgramFunctionId,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
+    #[cfg(test)]
+    pub safepoint_locations: BTreeMap<
+        ProgramFunctionId,
+        Vec<(
+            runmat_native_codegen::NativeSafepointId,
+            runmat_native_codegen::NativeSourceLocation,
+        )>,
+    >,
 }
 
 pub(super) fn compile(
@@ -35,6 +51,8 @@ pub(super) fn compile(
         entrypoint: compiled.entrypoint,
         #[cfg(test)]
         safepoints: compiled.safepoints,
+        #[cfg(test)]
+        safepoint_locations: compiled.safepoint_locations,
     })
 }
 
@@ -95,6 +113,34 @@ pub(super) fn compile_prepared(
             (function.id, points)
         })
         .collect();
+    #[cfg(test)]
+    let safepoint_locations = assembly
+        .functions
+        .iter()
+        .map(|function| {
+            let points = function
+                .blocks
+                .iter()
+                .flat_map(|block| {
+                    block
+                        .instructions
+                        .iter()
+                        .filter_map(|instruction| {
+                            instruction
+                                .safepoint
+                                .map(|id| (id, instruction.source.clone()))
+                        })
+                        .chain(
+                            block
+                                .terminator
+                                .safepoint
+                                .map(|id| (id, block.terminator.source.clone())),
+                        )
+                })
+                .collect();
+            (function.id, points)
+        })
+        .collect();
     let executor = match prepared.specialization {
         Some(profile) => runmat_jit::GenericCompiler::compile_specialized_executor_with_metadata(
             assembly,
@@ -116,5 +162,7 @@ pub(super) fn compile_prepared(
         entrypoint: prepared.entrypoint,
         #[cfg(test)]
         safepoints,
+        #[cfg(test)]
+        safepoint_locations,
     })
 }

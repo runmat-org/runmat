@@ -157,7 +157,7 @@ async fn worker_unzip_streams_real_zip_into_captured_memory_filesystem() {
     .expect("Worker unzip");
 
     assert_eq!(calls.get(), 1, "one invocation has one Fetch");
-    let Value::Cell(names) = result else {
+    let Value::Cell(names) = result.value() else {
         panic!("unzip must return a filename cell")
     };
     assert_eq!(names.shape, vec![2, 1]);

@@ -5,17 +5,29 @@ use runmat_runtime::user_functions::DynamicFunctionLoadPhase;
 pub struct MexRuntimeGuard {
     runtime: runmat_runtime::context::RuntimeContext,
     mex_runtime: Rc<runmat_runtime::foreign::MexRuntimeSession>,
+    _lifecycle_supervisor: Rc<runmat_runtime::context::RuntimeLocalTaskSupervisor>,
     shutdown_complete: bool,
 }
 
 impl MexRuntimeGuard {
-    pub async fn shutdown_gracefully(&mut self) -> Result<(), runmat_runtime::RuntimeError> {
-        let result = self
+    pub fn force_abandon_if_needed(&mut self) {
+        if !self.shutdown_complete {
+            self.mex_runtime.force_abandon();
+        }
+    }
+
+    pub async fn shutdown_gracefully_retirement(
+        &mut self,
+    ) -> runmat_runtime::foreign::MexSessionRetirement {
+        let retirement = self
             .mex_runtime
-            .shutdown_gracefully(self.runtime.clone())
+            .shutdown_gracefully_retirement(self.runtime.clone())
             .await;
-        self.shutdown_complete = true;
-        result
+        self.shutdown_complete = matches!(
+            &retirement,
+            runmat_runtime::foreign::MexSessionRetirement::Retired(_)
+        );
+        retirement
     }
 }
 
@@ -24,10 +36,12 @@ impl Drop for MexRuntimeGuard {
         if self.shutdown_complete {
             return;
         }
-        if let Err(error) = self.mex_runtime.shutdown(self.runtime.clone()) {
+        let abandoned = self.mex_runtime.has_unretired_work();
+        self.force_abandon_if_needed();
+        if abandoned {
             runmat_runtime::console::record_console_line(
                 runmat_runtime::console::ConsoleStream::Stderr,
-                format!("could not finish MEX lifecycle during standalone shutdown: {error}"),
+                "abandoned MEX lifecycle during forced standalone disposal; mexAtExit completion is not guaranteed",
             );
         }
     }
@@ -36,7 +50,18 @@ impl Drop for MexRuntimeGuard {
 pub fn install(
     runtime: &runmat_runtime::context::RuntimeContext,
     mex_runtime: Rc<runmat_runtime::foreign::MexRuntimeSession>,
-) -> MexRuntimeGuard {
+    supervisor: Rc<runmat_runtime::context::RuntimeLocalTaskSupervisor>,
+) -> Result<MexRuntimeGuard, String> {
+    let tasks = runtime
+        .service_ports()
+        .local_tasks()
+        .ok_or_else(|| "MEX admission requires a scoped native lifecycle host".to_string())?;
+    let token = tasks
+        .owner_token()
+        .ok_or_else(|| "MEX admission requires a host-owned local task supervisor".to_string())?;
+    if !token.same(&supervisor.owner_token()) {
+        return Err("MEX lifecycle guard and runtime use different task supervisors".into());
+    }
     runtime.set_native_name_observer(Some(mex_runtime.name_observer()));
     let load_runtime = Rc::clone(&mex_runtime);
     let guard_runtime = Rc::clone(&mex_runtime);
@@ -61,9 +86,10 @@ pub fn install(
             Box::pin(async move { mex_runtime.clear_gracefully(&request, runtime).await })
         });
     runtime.set_dynamic_function_clearer(Some(clearer));
-    MexRuntimeGuard {
+    Ok(MexRuntimeGuard {
         runtime: runtime.clone(),
         mex_runtime: guard_runtime,
+        _lifecycle_supervisor: supervisor,
         shutdown_complete: false,
-    }
+    })
 }

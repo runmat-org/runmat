@@ -197,14 +197,14 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
         &args,
     ))
     .expect("admitted explicit fallback");
-    let Value::GpuTensor(output) = result else {
+    let Value::GpuTensor(output) = result.value() else {
         panic!("explicit output must remain resident")
     };
     assert_eq!(output.device_id(), input.device_id());
     assert!(!output.shares_allocation_with(&input));
     assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(
-        block_on(backend.download_numeric(&output))
+        block_on(backend.download_numeric(output))
             .expect("native readback")
             .data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
@@ -283,13 +283,13 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
         &args,
     ))
     .expect("admitted preparation Unsupported continuation");
-    let Value::GpuTensor(prepared_output) = prepared_result else {
+    let Value::GpuTensor(prepared_output) = prepared_result.value() else {
         panic!("explicit preparation fallback must restore the original owner")
     };
     assert_eq!(preparation.1.load(Ordering::SeqCst), 0);
     assert_eq!(prepared_output.device_id(), input.device_id());
     assert_eq!(
-        block_on(backend.download_numeric(&prepared_output))
+        block_on(backend.download_numeric(prepared_output))
             .expect("prepared fallback readback")
             .data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
@@ -368,13 +368,13 @@ fn actual_provider_host_mediated_route_has_one_completed_whole_call() {
         &args,
     ))
     .expect("admitted provider-owned host route");
-    let Value::GpuTensor(output) = result else {
+    let Value::GpuTensor(output) = result.value() else {
         panic!("explicit output must remain resident")
     };
     assert_eq!(output.device_id(), input.device_id());
     assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(
-        block_on(backend.download_numeric(&output)).unwrap().data,
+        block_on(backend.download_numeric(output)).unwrap().data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
     );
     assert!(
@@ -444,7 +444,7 @@ fn automatic_integer_two_readbacks_obey_finite_host_quota_before_effects() {
         &args,
     ))
     .expect("admitted integer host result");
-    let Value::Tensor(output) = result else {
+    let Value::Tensor(output) = result.value() else {
         panic!("automatic integer result stays host-side")
     };
     assert_eq!(output.shape(), [2, 2]);
@@ -538,7 +538,7 @@ fn explicit_integer_and_logical_restore_keep_exact_class_owner_and_fence() {
             &args,
         ))
         .expect("admitted class-preserving restore");
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("explicit result remains on original owner")
         };
         assert_eq!(output.device_id(), image.device_id());
@@ -546,11 +546,11 @@ fn explicit_integer_and_logical_restore_keep_exact_class_owner_and_fence() {
         assert!(!output.shares_allocation_with(&image));
         assert!(!output.shares_allocation_with(&kernel));
         assert_eq!(
-            runmat_accelerate_api::handle_is_logical(&output),
+            runmat_accelerate_api::handle_is_logical(output),
             logical_class
         );
         assert_eq!(
-            block_on(backend.download_numeric(&output)).unwrap().data,
+            block_on(backend.download_numeric(output)).unwrap().data,
             expected
         );
         assert!(

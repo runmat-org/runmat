@@ -138,7 +138,7 @@ fn production_vm_cancellation_wakes_pending_dispatch_and_bypasses_catch_inner() 
 
 fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
     use runmat_runtime::execution::{
-        AwaitAction, DeferredCall, DeferredInvocation, ExecutionServiceError,
+        AwaitAction, DeferredCall, DeferredInvocation, DeferredProgram, ExecutionServiceError,
         RuntimeExecutionService, RuntimeExecutionServices,
     };
     use runmat_value::Value;
@@ -163,7 +163,7 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
         retry: runmat_execution::RetryPolicy::Never,
         program_revision: None,
         capabilities: Default::default(),
-        program: None,
+        program: DeferredProgram::Local,
     };
     let owned = service.create_future(deferred()).unwrap();
     let sibling = service.create_future(deferred()).unwrap();
@@ -209,7 +209,13 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
         Ok(AwaitAction::ExecuteFuture { .. })
     ));
     service
-        .complete_future(&sibling, Ok(runmat_value::ValueSequence::empty()))
+        .complete_future(
+            &sibling,
+            Ok(runmat_runtime::execution::RootedValueSequence::new(
+                runmat_value::ValueSequence::empty(),
+            )
+            .unwrap()),
+        )
         .unwrap();
     assert!(runmat_runtime::context::legacy::active().is_none());
     runmat_vm::reset_thread_state_for_tests();

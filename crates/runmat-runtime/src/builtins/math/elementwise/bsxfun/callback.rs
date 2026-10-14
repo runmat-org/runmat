@@ -73,7 +73,7 @@ pub(super) fn validate(value: &Value) -> crate::BuiltinResult<()> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::String(_)
         | Value::StringArray(_)

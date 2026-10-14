@@ -23,6 +23,8 @@ fn retained_allocation_survives_original_error_in_a_nested_source_chain() {
             function: "origin".into(),
             source_id: Some(7),
             span: Some((5, 8)),
+            source_owner: None,
+            diagnostic_source: None,
         }])
         .with_source(std::io::Error::other("typed original cause"))
         .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Owned(Box::new(Lease(
@@ -43,6 +45,13 @@ fn retained_allocation_survives_original_error_in_a_nested_source_chain() {
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     drop(nested);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn call_frame_source_owners_compare_issuance_not_empty_payload() {
+    let issued = CallFrameSourceOwner::issue();
+    assert_eq!(issued, issued.clone());
+    assert_ne!(issued, CallFrameSourceOwner::issue());
 }
 
 #[test]

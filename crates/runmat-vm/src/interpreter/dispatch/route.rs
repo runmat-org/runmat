@@ -9,6 +9,8 @@ use crate::bytecode::Instr;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum InstructionDispatchFamily {
     Immediate,
+    SemanticClosure,
+    NameHandle,
     Parallel,
     PreparedOutput,
     Call,
@@ -23,6 +25,8 @@ pub(super) enum InstructionDispatchFamily {
 pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
     use InstructionDispatchFamily::*;
     match instruction {
+        Instr::CreateSemanticClosure(..) => SemanticClosure,
+        Instr::CreateFunctionHandle(..) | Instr::CreateExternalFunctionHandle(..) => NameHandle,
         Instr::CreateSemanticFuture(..)
         | Instr::CreateSemanticFutureExpandMultiOutput(..)
         | Instr::ScheduleFeval { .. }
@@ -179,13 +183,10 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::CreateStructLiteral(..)
         | Instr::CreateObjectLiteral { .. }
         | Instr::LoadMethod(..)
-        | Instr::CreateFunctionHandle(..)
-        | Instr::CreateExternalFunctionHandle(..)
         | Instr::CreateMethodFunctionHandle(..)
         | Instr::CreateBoundFunctionHandle(..)
         | Instr::CreateExternalBoundFunctionHandle(..)
         | Instr::CreateClosure(..)
-        | Instr::CreateSemanticClosure(..)
         | Instr::LoadStaticProperty(..)
         | Instr::LoadWorkspaceFirstStaticProperty { .. }
         | Instr::RegisterClass { .. }

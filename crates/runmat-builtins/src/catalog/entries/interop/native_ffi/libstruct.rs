@@ -45,6 +45,7 @@ pub const LIBSTRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "value = libstruct(type, structure_with_integer_fields)", inputs: &[], computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Only integer fields declared by the prepared structure layout are admitted. Field storage and checked conversion follow their ABI widths; the public result is a foreign handle. No generic integer field class follows from the type text alone." }];
 
 pub const LIBSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "libstruct" },
     category: "interop/native",

@@ -24,7 +24,10 @@ pub(super) const BUILTIN_NAME: &str = "cellfun";
     binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
-async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn cellfun_builtin(
+    func: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     execution::execute(func, rest).await
 }
 

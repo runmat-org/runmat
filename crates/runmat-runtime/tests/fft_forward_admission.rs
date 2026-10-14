@@ -160,12 +160,11 @@ fn forward_passes_preserve_explicit_and_automatic_intent_without_mutating_inputs
             let source = input.handle.with_provenance(intent).unwrap();
             let original_intent = handle_provenance(&input.handle);
             let args = [Value::GpuTensor(source.clone())];
-            let Value::GpuTensor(output) =
-                block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap()
-            else {
+            let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("resident result")
             };
-            assert_eq!(handle_provenance(&output), Some(intent), "{name} {fault:?}");
+            assert_eq!(handle_provenance(output), Some(intent), "{name} {fault:?}");
             assert_eq!(
                 *provider.input_intents.lock().unwrap(),
                 vec![Some(intent); count]
@@ -173,7 +172,7 @@ fn forward_passes_preserve_explicit_and_automatic_intent_without_mutating_inputs
             assert_eq!(handle_provenance(&source), Some(intent));
             assert_eq!(handle_provenance(&input.handle), original_intent);
             assert_eq!(provider.calls.load(Ordering::SeqCst), count);
-            drop(output);
+            drop(result);
             drop(args);
             drop(source);
             assert_eq!(input.probe.retirements(), 0);
@@ -290,12 +289,15 @@ fn unchanged_complex_unit_axis_may_return_an_immutable_view_alias() {
             Value::Num(1.0),
         ];
         let output = block_on(runmat_runtime::call_builtin_async("fft", &args)).unwrap();
-        let Value::GpuTensor(output) = output else {
+        let Value::GpuTensor(resident_output) = output.value() else {
             panic!("resident no-op remains resident")
         };
-        assert!(output.shares_allocation_with(&input.handle));
-        assert_ne!(output.view_identity(), input.handle.view_identity());
-        assert_eq!(output.shape(), &[1, 2]);
+        assert!(resident_output.shares_allocation_with(&input.handle));
+        assert_ne!(
+            resident_output.view_identity(),
+            input.handle.view_identity()
+        );
+        assert_eq!(resident_output.shape(), &[1, 2]);
         input
             .probe
             .with_data(&input.handle, |data| {
@@ -332,12 +334,13 @@ fn second_noop_pass_can_alias_current_but_cannot_resurrect_original_input() {
             let result = block_on(runmat_runtime::call_builtin_async(name, &args));
             match fault {
                 Fault::CurrentAlias => {
-                    let Value::GpuTensor(output) = result.unwrap() else {
+                    let result = result.unwrap();
+                    let Value::GpuTensor(output) = result.value() else {
                         panic!("resident result")
                     };
                     assert!(!output.shares_allocation_with(&input.handle));
                     assert_eq!(provider.outputs.lock().unwrap()[0].retirements(), 0);
-                    drop(output);
+                    drop(result);
                 }
                 Fault::OriginalAlias => {
                     assert_eq!(result.unwrap_err().gpu_gather_retry, GpuGatherRetry::Never)
@@ -366,18 +369,14 @@ fn native_single_output_is_admitted_independently_of_preferred_double_precision(
             .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
             .unwrap();
         let args = [Value::GpuTensor(input.handle.clone())];
-        let Value::GpuTensor(output) =
-            block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap()
-        else {
+        let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
+        let Value::GpuTensor(output) = result.value() else {
             panic!("native resident output")
         };
         assert_eq!(output.shape(), &[2, 3]);
-        assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
-        assert_eq!(
-            handle_storage(&output),
-            GpuTensorStorage::ComplexInterleaved
-        );
-        drop(output);
+        assert_eq!(handle_precision(output), Some(ProviderPrecision::F32));
+        assert_eq!(handle_storage(output), GpuTensorStorage::ComplexInterleaved);
+        drop(result);
         drop(args);
         drop(input.handle);
         assert_eq!(input.probe.retirements(), 1);

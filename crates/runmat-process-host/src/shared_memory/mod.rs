@@ -7,4 +7,4 @@ mod unix;
 mod windows;
 
 pub use descriptor::{SharedMemoryDescriptor, SharedMemoryKind};
-pub use fallback::SharedSnapshotStore;
+pub use fallback::{SharedSnapshotParent, SharedSnapshotStore};

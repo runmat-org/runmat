@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use futures::FutureExt;
 use runmat_runtime::sequence::{PreparedSequenceDestination, SequenceDestinationBuilder};
 use runmat_value::Value;
 
@@ -73,16 +72,7 @@ pub(in crate::execute) fn begin_sequence_stage(
             .map(Box::new)
             .map(CallCompletion::SequenceStage)
     });
-    let mut future = super::scope_completion(state, future);
-    if let Some(result) = future.as_mut().now_or_never() {
-        drop(future);
-        let CallCompletion::SequenceStage(stage) =
-            super::super::sync::CompletedOperation::new(result).finish(state)?
-        else {
-            unreachable!("sequence preparation future has a typed completion")
-        };
-        return Ok(*stage);
-    }
+    let future = super::scope_completion(state, future);
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending sequence preparation has no active site".into())
     })?;

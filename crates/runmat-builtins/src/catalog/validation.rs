@@ -1,6 +1,7 @@
 use super::{
-    builtin_catalog_aliases, BuiltinBindingAvailability, BuiltinCatalogEntry, BuiltinDocumentation,
-    BuiltinDocumentationAuthority, BuiltinExampleVerification,
+    builtin_catalog_aliases, BuiltinBindingAvailability, BuiltinCatalogAudience,
+    BuiltinCatalogEntry, BuiltinDocumentation, BuiltinDocumentationAuthority,
+    BuiltinExampleVerification,
 };
 use crate::BuiltinAsyncBehavior;
 use runmat_types::EffectKind;
@@ -147,11 +148,11 @@ pub fn validate_builtin_catalog_with_aliases(
         .map(|entry| {
             (
                 entry.identity.name.to_ascii_lowercase(),
-                entry.identity.name,
+                (entry.identity.name, entry.audience),
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let mut public_names = primary_names.keys().cloned().collect::<BTreeSet<_>>();
+    let mut occupied_names = primary_names.keys().cloned().collect::<BTreeSet<_>>();
     for alias in aliases {
         let spelling = alias.alias.name;
         let target = alias.canonical.name;
@@ -171,13 +172,20 @@ pub fn validate_builtin_catalog_with_aliases(
                 Some(spelling),
                 "builtin alias target is not a canonical catalog identity",
             ));
-        } else if canonical_target.copied() != Some(target) {
+        } else if canonical_target.copied().map(|(name, _)| name) != Some(target) {
             errors.push(error(
                 Some(spelling),
                 "builtin alias target must use the exact canonical spelling",
             ));
+        } else if canonical_target.copied().map(|(_, audience)| audience)
+            == Some(BuiltinCatalogAudience::Fixture)
+        {
+            errors.push(error(
+                Some(spelling),
+                "public builtin alias cannot target a fixture identity",
+            ));
         }
-        if !public_names.insert(spelling.to_ascii_lowercase()) {
+        if !occupied_names.insert(spelling.to_ascii_lowercase()) {
             errors.push(error(Some(spelling), "duplicate public builtin spelling"));
         }
     }

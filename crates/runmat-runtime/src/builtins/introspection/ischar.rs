@@ -82,7 +82,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn function_handle_reports_false() {
-        let fh = Value::FunctionHandle("sin".to_string());
+        let fh = Value::FunctionHandle("sin".into());
         let result = ischar_builtin(fh).expect("ischar");
         assert_eq!(result, Value::Bool(false));
     }

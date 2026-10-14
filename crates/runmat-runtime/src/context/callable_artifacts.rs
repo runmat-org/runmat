@@ -152,11 +152,11 @@ pub trait RuntimeCallableArtifactService {
         runtime: RuntimeContext,
         bundle: RuntimeCallableArtifactBundle,
         limits: RuntimeCallableArtifactLimits,
-    ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<RootedValues, RuntimeError>> {
         let prepared = self.prepare_admit(runtime, bundle, limits);
         Box::pin(async move {
             let committed = prepared.await?.commit()?;
-            Ok(committed.into_values())
+            Ok(committed.into_rooted_values())
         })
     }
 }
@@ -197,10 +197,10 @@ impl RuntimeCallableArtifactCommit {
         self.values.values()
     }
 
-    pub fn into_values(self) -> Vec<Value> {
+    pub fn into_rooted_values(self) -> RootedValues {
         let Self { values, retirement } = self;
         drop(retirement);
-        values.into_values()
+        values
     }
 }
 
@@ -310,7 +310,7 @@ mod tests {
                 }),
             );
 
-            let returned = committed.into_values();
+            let returned = committed.into_rooted_values();
             assert!(
                 observed_live.get(),
                 "retirement must run while returned values remain explicitly rooted"
@@ -319,7 +319,7 @@ mod tests {
                 runmat_gc::gc_clone_value(&handle).expect("returned target remains readable"),
                 Value::String("retained".into())
             );
-            assert!(matches!(returned.as_slice(), [Value::HandleObject(_)]));
+            assert!(matches!(returned.values(), [Value::HandleObject(_)]));
         });
     }
 

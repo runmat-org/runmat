@@ -1,12 +1,13 @@
 use super::*;
 use crate::context::RuntimeContext;
+use crate::execution::RootedValueSequence;
 use crate::execution::{AwaitAction, DeferredCall};
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
@@ -102,7 +103,7 @@ impl RuntimeExecutionServices for TestTurnService {
     fn complete_future(
         &self,
         _: &FutureHandle,
-        _: Result<ValueSequence, ExecutionServiceError>,
+        _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }

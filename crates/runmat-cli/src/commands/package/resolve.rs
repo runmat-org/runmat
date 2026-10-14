@@ -143,6 +143,45 @@ pub(crate) async fn install_project_for_source(
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             project.resolved.frozen.clone(),
         ))
+        .await
         .context("failed to install resolved project graph")?;
     Ok(Some(project))
+}
+
+/// Project ownership comes from the frozen access row, not an absolute path
+/// labeled as the root package. Pure, unprojected inputs retain their local identity.
+pub(crate) fn executable_source(
+    project: Option<&runmat_package::FrozenProject>,
+    file: &Path,
+    text: String,
+) -> Result<runmat_core::ExecutableSource> {
+    let Some(project) = project else {
+        return Ok(runmat_core::ExecutableSource::new(
+            "root",
+            file.to_string_lossy(),
+            text,
+        ));
+    };
+    let canonical_file = std::fs::canonicalize(file)
+        .with_context(|| format!("failed to resolve entrypoint {}", file.display()))?;
+    let mut selected = None;
+    for (descriptor, access) in project.all_sources() {
+        let canonical_access = std::fs::canonicalize(access.as_path()).with_context(|| {
+            format!(
+                "failed to resolve frozen source {}",
+                access.as_path().display()
+            )
+        })?;
+        if canonical_access == canonical_file {
+            anyhow::ensure!(
+                selected.is_none(),
+                "entrypoint has ambiguous frozen project ownership"
+            );
+            selected = Some(descriptor);
+        }
+    }
+    let descriptor =
+        selected.context("entrypoint is absent from the frozen project source catalog")?;
+    runmat_core::ExecutableSource::from_project_source(&descriptor.id, text)
+        .map_err(anyhow::Error::msg)
 }

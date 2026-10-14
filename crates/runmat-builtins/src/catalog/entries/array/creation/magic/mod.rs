@@ -92,6 +92,7 @@ pub const MAGIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 pub const MAGIC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "magic" },
     category: "array/creation",

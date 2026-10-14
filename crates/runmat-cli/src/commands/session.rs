@@ -36,6 +36,7 @@ pub(crate) fn create_session(
     engine
         .set_python_config(&config.foreign.python)
         .context("failed to configure Python runtime")?;
+    engine.set_selected_foreign_config(std::sync::Arc::new(config.clone()));
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }

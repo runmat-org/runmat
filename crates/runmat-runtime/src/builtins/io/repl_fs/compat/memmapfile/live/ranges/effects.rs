@@ -5,6 +5,7 @@ use super::super::{member, Property};
 use super::plan::plan;
 use super::{checkpoint, empty_value, mapped_error, receiver, scalar_bytes};
 use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::object::indexing::ObjectSubscriptPath;
 use crate::BuiltinResult;
 use runmat_builtins::{MEMMAPFILE_ERROR_READ_FAILED, MEMMAPFILE_ERROR_WRITE_FAILED};
@@ -18,7 +19,9 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn read(
     runtime: Option<&RuntimeContext>,
     receiver_value: Value,
     path: ObjectSubscriptPath,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _receiver_root = RootedValueLease::for_values(std::iter::once(&receiver_value))
+        .map_err(|error| error.into_runtime_error())?;
     if member(&path.steps()[0])? != Property::Data {
         return Err(format_error("memmapfile: expected Data path"));
     }
@@ -129,6 +132,7 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn read(
     } else {
         value
     };
+    let value = RootedValue::new(value).map_err(|error| error.into_runtime_error())?;
     checkpoint(&mut budget, 0).await?;
     Ok(value)
 }
@@ -138,7 +142,9 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
     receiver_value: Value,
     path: ObjectSubscriptPath,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _input_roots = RootedValueLease::for_values([&receiver_value, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     if member(&path.steps()[0])? != Property::Data {
         return Err(format_error("memmapfile: expected Data path"));
     }
@@ -160,6 +166,8 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
     } else {
         crate::gather_if_needed_async(&rhs).await?
     };
+    let _gathered_root = RootedValueLease::for_values(std::iter::once(&rhs))
+        .map_err(|error| error.into_runtime_error())?;
     let bytes = if !selected.records && selected.unit_bytes == selected.format.dtype.byte_size() {
         if let Some(element) = scalar_bytes(selected.format.dtype, &rhs) {
             let capacity = element
@@ -235,10 +243,7 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
                     .map_err(|source| {
                         mapped_error(
                             &MEMMAPFILE_ERROR_WRITE_FAILED,
-                            FsMappedWriteFailure::indeterminate(
-                                slice.len(),
-                                io::Error::other(source),
-                            ),
+                            FsMappedWriteFailure::indeterminate(slice.len(), source),
                             committed + unit_written,
                         )
                     })?
@@ -267,10 +272,7 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
                     .map_err(|source| {
                         mapped_error(
                             &MEMMAPFILE_ERROR_WRITE_FAILED,
-                            FsMappedWriteFailure::committed(
-                                committed + unit_written,
-                                io::Error::other(source),
-                            ),
+                            FsMappedWriteFailure::committed(committed + unit_written, source),
                             committed + unit_written,
                         )
                     })?;
@@ -285,10 +287,10 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
         budget.checkpoint(0).await.map_err(|source| {
             mapped_error(
                 &MEMMAPFILE_ERROR_WRITE_FAILED,
-                FsMappedWriteFailure::committed(committed, io::Error::other(source)),
+                FsMappedWriteFailure::committed(committed, source),
                 committed,
             )
         })?;
     }
-    Ok(receiver_value)
+    RootedValue::new(receiver_value).map_err(|error| error.into_runtime_error())
 }

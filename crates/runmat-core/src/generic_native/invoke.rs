@@ -4,11 +4,20 @@ use std::{
     sync::Arc,
 };
 
+use runmat_gc::{Trace, Tracer};
 use runmat_runtime::user_functions;
 use runmat_types::ProgramFunctionId;
 use runmat_value::{Value, ValueSequence};
 
 use crate::ExecutableUnit;
+
+#[path = "invoke/native_semantic.rs"]
+mod native_semantic;
+#[path = "invoke/bound_constructor.rs"]
+mod bound_constructor;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "invoke/native_semantic_tests.rs"]
+mod native_semantic_tests;
 
 pub(crate) struct NativeExecution {
     pub outputs: ValueSequence,
@@ -17,6 +26,22 @@ pub(crate) struct NativeExecution {
     pub vectorized_regions: u64,
     pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceSnapshot>,
     pub expression: Option<Value>,
+}
+
+pub(crate) type RootedNativeExecution = runmat_runtime::execution::RootedResult<NativeExecution>;
+
+impl Trace for NativeExecution {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.outputs.trace(tracer);
+        if let Some(workspace) = &self.workspace {
+            for value in workspace.values.values() {
+                value.trace(tracer);
+            }
+        }
+        if let Some(expression) = &self.expression {
+            expression.trace(tracer);
+        }
+    }
 }
 
 pub(crate) struct NativeInvocation<'a> {
@@ -29,6 +54,7 @@ pub(crate) struct NativeInvocation<'a> {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
+    pub dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
     pub runtime_functions: &'a runmat_vm::FunctionRegistry,
     pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
@@ -36,7 +62,7 @@ pub(crate) struct NativeInvocation<'a> {
 pub(crate) async fn invoke(
     unit: &ExecutableUnit,
     invocation: NativeInvocation<'_>,
-) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
     let NativeInvocation {
         published,
         osr,
@@ -44,6 +70,7 @@ pub(crate) async fn invoke(
         arguments,
         requested_outputs,
         runtime,
+        dynamic_admission,
         runtime_functions,
         workspace,
     } = invocation;
@@ -59,7 +86,36 @@ pub(crate) async fn invoke(
         })
         .transpose()?
         .unwrap_or(published.entrypoint);
-    let registry = Arc::new(runtime_functions.clone());
+    let selected_function = runmat_hir::FunctionId(function.0 as usize);
+    let selected_body = runtime_functions.get_current(selected_function);
+    let runtime = if selected_body.is_some_and(|body| {
+        body.class_method_owner.as_ref().is_some_and(|owner| {
+            owner.role == runmat_types::ClassMethodRole::Constructor && !owner.is_static
+        })
+    }) {
+        selected_body
+            .and_then(|body| body.selected_class_product.as_ref())
+            .ok_or_else(|| {
+                super::error::stage(
+                    "NativeClassProduct",
+                    "selected native constructor lacks its exact class product",
+                )
+            })?
+            .invocation_runtime(runtime)?
+    } else {
+        runtime
+    };
+    let runtime = runtime.with_constructor_receiver_for_method(
+        unit.mir()
+            .functions
+            .get(&selected_function)
+            .and_then(|metadata| metadata.class_method_owner.as_ref()),
+    )?;
+    let registry = Rc::new(runtime_functions.clone());
+    let runtime = runtime.with_selected_graph_function_resolver({
+        let registry = Rc::clone(&registry);
+        Rc::new(move |function| registry.exact_bound_binding(function))
+    });
     let native_functions = unit
         .mir()
         .bodies
@@ -84,94 +140,195 @@ pub(crate) async fn invoke(
 
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);
-    let nested_runtime = runtime.clone();
+    let nested_runtime = runtime.native_invocation_context().0;
     let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
     let semantic_unit = unit.clone();
-    let semantic_registry = Arc::clone(&registry);
-    let invoker =
-        user_functions::install_local_semantic_function_invoker(Rc::new(
-            move |function, arguments, requested_outputs| {
-                let arguments = arguments.to_vec();
-                let previous_invoker = previous_invoker.clone();
-                let executor = Rc::clone(&nested_executor);
-                let runtime = nested_runtime.clone();
-                let capture_bindings = Arc::clone(&semantic_capture_bindings);
-                let unit = semantic_unit.clone();
-                let registry = Arc::clone(&semantic_registry);
-                let is_native = u32::try_from(function)
-                    .map(ProgramFunctionId)
-                    .is_ok_and(|function| semantic_native_functions.contains(&function));
-                Box::pin(async move {
-                    let runtime = isolated_procedure_runtime(runtime);
-                    if is_native {
-                        let function = program_function(runmat_hir::FunctionId(function))?;
-                        let bindings = capture_bindings.get(&function).cloned().unwrap_or_default();
-                        if arguments.len() < bindings.len() {
-                            return Err(super::error::stage(
-                                "NativeCaptureArity",
-                                "closure invocation omitted lexical captures",
-                            ));
-                        }
-                        let captures =
-                            bindings
-                                .into_iter()
-                                .zip(arguments.iter().cloned())
-                                .map(|(binding, value)| {
-                                    runmat_runtime::call::lexical::LexicalCapture { binding, value }
-                                })
-                                .collect::<Vec<_>>();
-                        let arguments = arguments[captures.len()..].to_vec();
-                        let execution = super::deopt::invoke(
-                            &unit,
-                            super::deopt::DeoptimizationRequest {
-                                executor,
-                                function,
-                                captures,
-                                arguments,
-                                requested_outputs,
-                                runtime,
-                                osr: None,
-                                workspace: None,
-                            },
-                        )
-                        .await?;
-                        normalize_outputs(execution.outputs, requested_outputs)
-                    } else if registry.get(runmat_hir::FunctionId(function)).is_some() {
-                        // A retained session closure need not belong to this
-                        // unit's native MIR. Its registry definition remains
-                        // authoritative; arguments still include its captures.
-                        runmat_vm::invoke_semantic_function_value_in_context(
+    let semantic_registry = Rc::clone(&registry);
+    let semantic_dynamic_admission = dynamic_admission.clone();
+    let invoker = user_functions::install_local_semantic_function_invoker(Rc::new(
+        move |selected, function, arguments, requested_outputs| {
+            let arguments = arguments.to_vec();
+            let argument_roots =
+                runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
+                    .map_err(|error| error.into_runtime_error());
+            let previous_invoker = previous_invoker.clone();
+            let executor = Rc::clone(&nested_executor);
+            let same_owner = selected
+                .as_ref()
+                .is_none_or(|context| context.local_identity() == nested_runtime.local_identity());
+            let runtime = if same_owner {
+                selected.map_or_else(
+                    || nested_runtime.clone(),
+                    |context| {
+                        nested_runtime
+                            .clone()
+                            .try_with_inherited_callback_invocation_authority_from(&context)
+                            .expect("callback Runtime owner checked before authority projection")
+                    },
+                )
+            } else {
+                nested_runtime.clone()
+            };
+            let capture_bindings = Arc::clone(&semantic_capture_bindings);
+            let unit = semantic_unit.clone();
+            let registry = Rc::clone(&semantic_registry);
+            let dynamic_admission = semantic_dynamic_admission.clone();
+            let method_owner = unit
+                .mir()
+                .functions
+                .get(&runmat_hir::FunctionId(function))
+                .and_then(|metadata| metadata.class_method_owner.clone())
+                .or_else(|| {
+                    registry
+                        .get(runmat_hir::FunctionId(function))
+                        .and_then(|function| function.class_method_owner.clone())
+                });
+            let runtime = runtime.with_constructor_receiver_for_method(method_owner.as_ref());
+            let is_native = u32::try_from(function)
+                .map(ProgramFunctionId)
+                .is_ok_and(|function| semantic_native_functions.contains(&function));
+            Box::pin(async move {
+                let _argument_roots = argument_roots?;
+                if !same_owner {
+                    return Err(super::error::stage(
+                        "NativeCallbackOwner",
+                        "semantic callback selected another native session owner",
+                    ));
+                }
+                let runtime = runtime?;
+                let runtime = isolated_procedure_runtime(runtime);
+                if is_native {
+                    let execution_sources = registry.execution_source_resolver_in(&runtime);
+                    let runtime = super::super_constructor::bind_selected(
+                        runtime,
+                        &registry,
+                        runmat_hir::FunctionId(function),
+                        &execution_sources,
+                    )?;
+                    let function = program_function(runmat_hir::FunctionId(function))?;
+                    native_semantic::invoke(
+                        &unit,
+                        super::deopt::DeoptimizationRequest {
+                            executor,
+                            function,
+                            captures: Vec::new(),
+                            lexical_environment: None,
+                            arguments,
+                            requested_outputs,
+                            runtime,
+                            dynamic_admission,
+                            osr: None,
+                            workspace: None,
+                        },
+                        capture_bindings
+                            .get(&function)
+                            .map(Vec::as_slice)
+                            .unwrap_or(&[]),
+                    )
+                    .await
+                } else if registry.get(runmat_hir::FunctionId(function)).is_some() {
+                    // A retained session closure need not belong to this
+                    // unit's native MIR. Its registry definition remains
+                    // authoritative; arguments still include its captures.
+                    invoke_vm_with_admission(
+                        function,
+                        &arguments,
+                        requested_outputs,
+                        &registry,
+                        runtime,
+                        None,
+                        dynamic_admission,
+                    )
+                    .await
+                } else if let Some(previous_invoker) = previous_invoker {
+                    runtime
+                        .scope(previous_invoker(
+                            Some(runtime.clone()),
                             function,
                             &arguments,
                             requested_outputs,
-                            &registry,
-                            runtime,
-                        )
-                        .await
-                    } else if let Some(previous_invoker) = previous_invoker {
-                        runtime
-                            .scope(previous_invoker(function, &arguments, requested_outputs))
-                            .await
-                    } else {
-                        Err(super::error::stage(
-                            "UndefinedFunction",
-                            format!("semantic function {function} is unavailable"),
                         ))
-                    }
-                })
-            },
-        ));
+                        .await
+                } else {
+                    Err(super::error::stage(
+                        "UndefinedFunction",
+                        format!("semantic function {function} is unavailable"),
+                    ))
+                }
+            })
+        },
+    ));
 
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let direct_invoker = user_functions::current_semantic_function_invoker();
-    let bound_registry = Arc::clone(&registry);
+    let bound_registry = Rc::clone(&registry);
+    let bound_dynamic_admission = dynamic_admission.clone();
+    let bound_executor = Rc::clone(&published.executor);
+    let bound_unit = unit.clone();
+    let bound_capture_bindings = Arc::new(capture_bindings);
+    let bound_native_functions = native_functions.clone();
+    let bound_program = unit
+        .revision()
+        .program_revision
+        .identity_digest()
+        .map_err(|error| super::error::stage("NativeProgramIdentity", error))?;
     let bound_invoker = user_functions::install_local_bound_function_invoker(Rc::new(
-        move |runtime, binding, arguments, requested_outputs| {
+        move |runtime, binding, arguments, requested_outputs, lexical_environment| {
             let previous = previous_bound_invoker.clone();
             let direct = direct_invoker.clone();
-            let registry = Arc::clone(&bound_registry);
+            let registry = Rc::clone(&bound_registry);
+            let dynamic_admission = bound_dynamic_admission.clone();
+            let executor = Rc::clone(&bound_executor);
+            let unit = bound_unit.clone();
+            let capture_bindings = Arc::clone(&bound_capture_bindings);
+            let is_native = u32::try_from(binding.function)
+                .map(ProgramFunctionId)
+                .is_ok_and(|function| bound_native_functions.contains(&function));
+            // Select the exact body before the sibling future can be queued.
+            // A later same-name class publication must not replace its
+            // invocation-owned class defaults or constructor role.
+            let selected_body = match &binding.authority {
+                runmat_value::BoundFunctionAuthority::Local { .. } => binding
+                    .authority
+                    .local_lease(binding.function)
+                    .and_then(|lease| {
+                        registry.get_owned(runmat_hir::FunctionId(binding.function), lease)
+                    }),
+                runmat_value::BoundFunctionAuthority::Portable { origin } => registry
+                    .get_current(runmat_hir::FunctionId(binding.function))
+                    .filter(|body| body.binding_origin == Some(*origin)),
+            };
+            let native_selected_body = is_native
+                && selected_body.is_some_and(|body| {
+                    body.binding_origin
+                        .is_some_and(|origin| origin.program == bound_program)
+                        && unit
+                            .functions()
+                            .get_current(runmat_hir::FunctionId(binding.function))
+                            .is_some_and(|compiled| {
+                                Arc::ptr_eq(&compiled.definition_owner, &body.definition_owner)
+                            })
+                });
+            let constructor_owner = selected_body
+                .and_then(|body| body.class_method_owner.clone())
+                .filter(|owner| owner.role == runmat_types::ClassMethodRole::Constructor);
+            let selected_product =
+                selected_body.and_then(|body| body.selected_class_product.clone());
+            let super_selection = runtime.take_retained_super_body_for(&binding);
             Box::pin(async move {
+                let (runtime, super_body_owner) = super_selection?;
+                if let Some(expected) = &super_body_owner {
+                    if constructor_owner.as_ref() != Some(expected)
+                        || expected.is_static
+                        || expected.role != runmat_types::ClassMethodRole::Constructor
+                    {
+                        return Err(super::error::stage(
+                            "NativeConstructorOwner",
+                            "selected superclass body disagrees with its admitted owner",
+                        ));
+                    }
+                }
                 let function = runmat_hir::FunctionId(binding.function);
                 let (view, current_definition) = match &binding.authority {
                     runmat_value::BoundFunctionAuthority::Local {
@@ -201,39 +358,126 @@ pub(crate) async fn invoke(
                             .is_some_and(|body| body.binding_origin == Some(*origin)),
                     ),
                 };
+                if let Some(owner) = constructor_owner.filter(|_| {
+                    (super_body_owner.is_some()
+                        || matches!(
+                            &binding.authority,
+                            runmat_value::BoundFunctionAuthority::Local { .. }
+                        ))
+                        && (current_definition || view.is_some())
+                }) {
+                    return bound_constructor::invoke(
+                        bound_constructor::Invocation {
+                            runtime,
+                            binding,
+                            owner,
+                            product: selected_product,
+                            registry: view.map(Rc::new).unwrap_or_else(|| Rc::clone(&registry)),
+                            unit,
+                            executor,
+                            capture_bindings,
+                            direct: direct.filter(|_| current_definition && native_selected_body),
+                            arguments,
+                            requested_outputs,
+                            lexical_environment,
+                            is_native: current_definition && native_selected_body,
+                            dynamic_admission,
+                        },
+                        super_body_owner.is_some(),
+                    )
+                    .await;
+                }
+                if super_body_owner.is_some() {
+                    return Err(super::error::stage(
+                        "NativeConstructorOwner",
+                        "selected superclass body has no exact executable definition",
+                    ));
+                }
                 if current_definition {
                     let runtime = isolated_procedure_runtime(runtime);
-                    if let Some(direct) = direct {
+                    if native_selected_body && lexical_environment.is_some() {
+                        let function = program_function(function)?;
+                        let method_owner = unit
+                            .mir()
+                            .functions
+                            .get(&runmat_hir::FunctionId(function.0 as usize))
+                            .and_then(|metadata| metadata.class_method_owner.as_ref());
+                        let runtime = runtime.with_constructor_receiver_for_method(method_owner)?;
+                        let execution_sources = registry.execution_source_resolver_in(&runtime);
+                        let runtime = super::super_constructor::bind_selected(
+                            runtime,
+                            &registry,
+                            runmat_hir::FunctionId(function.0 as usize),
+                            &execution_sources,
+                        )?;
+                        let selected = runtime.clone();
+                        return selected
+                            .scope(native_semantic::invoke(
+                                &unit,
+                                super::deopt::DeoptimizationRequest {
+                                    executor,
+                                    function,
+                                    captures: Vec::new(),
+                                    lexical_environment,
+                                    arguments: arguments.values().to_vec(),
+                                    requested_outputs,
+                                    runtime,
+                                    dynamic_admission: dynamic_admission.clone(),
+                                    osr: None,
+                                    workspace: None,
+                                },
+                                capture_bindings
+                                    .get(&function)
+                                    .map(Vec::as_slice)
+                                    .unwrap_or(&[]),
+                            ))
+                            .await;
+                    }
+                    if let Some(direct) =
+                        direct.filter(|_| native_selected_body && lexical_environment.is_none())
+                    {
                         return runtime
                             .scope(direct(
+                                Some(runtime.clone()),
                                 binding.function,
                                 arguments.values(),
                                 requested_outputs,
                             ))
                             .await;
                     }
-                    return runmat_vm::invoke_semantic_function_value_in_context(
+                    return invoke_vm_with_admission(
                         binding.function,
                         arguments.values(),
                         requested_outputs,
                         &registry,
                         runtime,
+                        lexical_environment,
+                        dynamic_admission,
                     )
                     .await;
                 }
                 if let Some(view) = view {
                     let runtime = isolated_procedure_runtime(runtime);
-                    return runmat_vm::invoke_semantic_function_value_in_context(
+                    return invoke_vm_with_admission(
                         binding.function,
                         arguments.values(),
                         requested_outputs,
                         &view,
                         runtime,
+                        lexical_environment,
+                        dynamic_admission,
                     )
                     .await;
                 }
                 if let Some(previous) = previous {
-                    return previous(runtime, binding, arguments, requested_outputs).await;
+                    return previous(
+                        runtime,
+                        binding,
+                        arguments,
+                        requested_outputs,
+                        lexical_environment,
+                    )
+                    .await;
                 }
                 Err(super::error::stage(
                     "UnavailableBoundFunction",
@@ -244,30 +488,55 @@ pub(crate) async fn invoke(
     ));
 
     let previous_external_invoker = user_functions::current_external_function_invoker();
-    let external_registry = Arc::clone(&registry);
-    let external_runtime = runtime.clone();
+    let external_registry = Rc::clone(&registry);
+    let external_dynamic_admission = dynamic_admission.clone();
+    let external_runtime = runtime.native_invocation_context().0;
     let external_invoker =
-        user_functions::install_local_external_function_invoker(Rc::new(move |call| {
+        user_functions::install_local_external_function_invoker(Rc::new(move |selected, call| {
             let previous = previous_external_invoker.clone();
-            let registry = Arc::clone(&external_registry);
-            let runtime = external_runtime.clone();
+            let registry = Rc::clone(&external_registry);
+            let dynamic_admission = external_dynamic_admission.clone();
+            let same_owner = selected.as_ref().is_none_or(|context| {
+                context.local_identity() == external_runtime.local_identity()
+            });
+            let runtime = if same_owner {
+                selected.map_or_else(
+                    || external_runtime.clone(),
+                    |context| {
+                        external_runtime
+                            .clone()
+                            .try_with_inherited_callback_invocation_authority_from(&context)
+                            .expect("callback Runtime owner checked before authority projection")
+                    },
+                )
+            } else {
+                external_runtime.clone()
+            };
             Box::pin(async move {
+                if !same_owner {
+                    return Err(super::error::stage(
+                        "NativeCallbackOwner",
+                        "external callback selected another native session owner",
+                    ));
+                }
                 let runtime = isolated_procedure_runtime(runtime);
                 if registry
                     .get(runmat_hir::FunctionId(call.function))
                     .is_some()
                 {
-                    return runmat_vm::invoke_semantic_function_value_in_context(
+                    return invoke_vm_with_admission(
                         call.function,
                         &call.arguments,
                         call.requested_outputs,
                         &registry,
                         runtime,
+                        None,
+                        dynamic_admission,
                     )
                     .await;
                 }
                 if let Some(previous) = previous {
-                    return runtime.scope(previous(call)).await;
+                    return runtime.scope(previous(Some(runtime.clone()), call)).await;
                 }
                 Err(super::error::stage(
                     "UndefinedFunction",
@@ -278,23 +547,56 @@ pub(crate) async fn invoke(
 
     let previous_lexical_invoker = user_functions::current_lexical_function_invoker();
     let lexical_executor = Rc::clone(&published.executor);
-    let lexical_runtime = runtime.clone();
+    let lexical_runtime = runtime.native_invocation_context().0;
     let lexical_native_functions = native_functions.clone();
     let lexical_unit = unit.clone();
+    let lexical_dynamic_admission = dynamic_admission.clone();
     let lexical_invoker =
-        user_functions::install_local_lexical_function_invoker(Rc::new(move |call| {
+        user_functions::install_local_lexical_function_invoker(Rc::new(move |selected, call| {
+            let call_roots = runmat_runtime::execution::RootedValueLease::for_traced(&call)
+                .map_err(|error| error.into_runtime_error());
             let previous = previous_lexical_invoker.clone();
             let executor = Rc::clone(&lexical_executor);
-            let runtime = lexical_runtime.clone();
+            let same_owner = selected
+                .as_ref()
+                .is_none_or(|context| context.local_identity() == lexical_runtime.local_identity());
+            let runtime = if same_owner {
+                selected.map_or_else(
+                    || lexical_runtime.clone(),
+                    |context| {
+                        lexical_runtime
+                            .clone()
+                            .try_with_inherited_callback_invocation_authority_from(&context)
+                            .expect("callback Runtime owner checked before authority projection")
+                    },
+                )
+            } else {
+                lexical_runtime.clone()
+            };
             let unit = lexical_unit.clone();
+            let dynamic_admission = lexical_dynamic_admission.clone();
+            let method_owner = unit
+                .mir()
+                .functions
+                .get(&runmat_hir::FunctionId(call.function))
+                .and_then(|metadata| metadata.class_method_owner.as_ref());
+            let runtime = runtime.with_constructor_receiver_for_method(method_owner);
             let is_native = u32::try_from(call.function)
                 .map(ProgramFunctionId)
                 .is_ok_and(|function| lexical_native_functions.contains(&function));
             Box::pin(async move {
+                let _call_roots = call_roots?;
+                if !same_owner {
+                    return Err(super::error::stage(
+                        "NativeCallbackOwner",
+                        "lexical callback selected another native session owner",
+                    ));
+                }
+                let runtime = runtime?;
                 let runtime = isolated_procedure_runtime(runtime);
                 if !is_native {
                     if let Some(previous) = previous {
-                        return runtime.scope(previous(call)).await;
+                        return runtime.scope(previous(Some(runtime.clone()), call)).await;
                     }
                     return Err(super::error::stage(
                         "UndefinedFunction",
@@ -308,26 +610,33 @@ pub(crate) async fn invoke(
                         executor,
                         function,
                         captures: call.captures,
+                        lexical_environment: call.environment,
                         arguments: call.arguments,
                         requested_outputs: call.requested_outputs,
                         runtime,
+                        dynamic_admission,
                         osr: None,
                         workspace: None,
                     },
                 )
                 .await?;
-                Ok(runmat_runtime::call::lexical::LexicalCallResult {
-                    outputs: normalize_outputs(execution.outputs, call.requested_outputs)?,
-                    captures: execution.captures,
-                })
+                execution.try_map_owned(
+                    |execution| {
+                        Ok(runmat_runtime::call::lexical::LexicalCallResult {
+                            outputs: normalize_outputs(execution.outputs, call.requested_outputs)?,
+                            captures: execution.captures,
+                        })
+                    },
+                    |error| error.into_runtime_error(),
+                )
             })
         }));
 
     let previous_resolver = user_functions::current_semantic_function_resolver();
-    let resolver_registry = Arc::clone(&registry);
+    let resolver_names = registry.published_name_resolution_view();
     let resolver =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name| {
-            resolver_registry
+            resolver_names
                 .resolve_name(name)
                 .map(|function| function.0)
                 .or_else(|| {
@@ -336,32 +645,9 @@ pub(crate) async fn invoke(
                         .and_then(|resolver| resolver(name))
                 })
         })));
-    let execution_registry = Arc::clone(&registry);
-    let execution_group_registry = Arc::clone(&registry);
-    let execution_owner_registry = Arc::clone(&registry);
-    let execution_origin_registry = Arc::clone(&registry);
-    let source_runtime = runtime.clone();
-    let group_runtime = runtime.clone();
-    let origin_runtime = runtime.clone();
-    let execution_source = user_functions::install_execution_source_resolver(Some(Rc::new(
-        user_functions::ExecutionSourceFacts::new(
-            Rc::new(move |function| {
-                execution_registry
-                    .execution_source_fact_in(&source_runtime, runmat_hir::FunctionId(function))
-            }),
-            Rc::new(move |source| {
-                execution_group_registry.execution_source_group_facts_in(&group_runtime, source)
-            }),
-            Rc::new(move |function| {
-                execution_owner_registry
-                    .execution_definition_owners(runmat_hir::FunctionId(function))
-            }),
-            Rc::new(move |origin| {
-                execution_origin_registry
-                    .execution_source_fact_for_origin_in(&origin_runtime, origin)
-            }),
-        ),
-    )));
+    let execution_sources = registry.execution_source_resolver_in(&runtime);
+    let execution_source =
+        user_functions::install_execution_source_resolver(Some(Rc::clone(&execution_sources)));
     let mut source_functions = registry
         .functions
         .values()
@@ -383,6 +669,12 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
     let active = user_functions::push_active_semantic_function(function.0 as usize);
+    let runtime = super::super_constructor::bind_selected(
+        runtime,
+        &registry,
+        runmat_hir::FunctionId(function.0 as usize),
+        &execution_sources,
+    )?;
     let osr = osr
         .map(|(target, point)| {
             runmat_native_executor::osr::OsrTarget::new(target.executor, function, point)
@@ -395,9 +687,11 @@ pub(crate) async fn invoke(
             executor: published.executor,
             function,
             captures: Vec::new(),
+            lexical_environment: None,
             arguments,
             requested_outputs,
             runtime,
+            dynamic_admission,
             osr,
             workspace,
         },
@@ -412,14 +706,52 @@ pub(crate) async fn invoke(
     drop(invoker);
     drop(bound_invoker);
     let execution = execution?;
-    Ok(NativeExecution {
-        outputs: normalize_outputs(execution.outputs, requested_outputs)?,
-        loop_backedges: execution.loop_backedges,
-        osr_entry: execution.osr_entry,
-        vectorized_regions: execution.vectorized_regions,
-        workspace: execution.workspace,
-        expression: execution.expression,
-    })
+    execution.try_map_owned(
+        |execution| {
+            Ok(NativeExecution {
+                outputs: normalize_outputs(execution.outputs, requested_outputs)?,
+                loop_backedges: execution.loop_backedges,
+                osr_entry: execution.osr_entry,
+                vectorized_regions: execution.vectorized_regions,
+                workspace: execution.workspace,
+                expression: execution.expression,
+            })
+        },
+        |error| error.into_runtime_error(),
+    )
+}
+
+async fn invoke_vm_with_admission(
+    function: usize,
+    arguments: &[Value],
+    requested_outputs: usize,
+    registry: &runmat_vm::FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
+    if let Some(dynamic_admission) = dynamic_admission {
+        runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+            function,
+            arguments,
+            requested_outputs,
+            registry,
+            runtime,
+            lexical_environment,
+            dynamic_admission,
+        )
+        .await
+    } else {
+        runmat_vm::invoke_semantic_function_value_with_environment_in_context(
+            function,
+            arguments,
+            requested_outputs,
+            registry,
+            runtime,
+            lexical_environment,
+        )
+        .await
+    }
 }
 
 fn program_function(

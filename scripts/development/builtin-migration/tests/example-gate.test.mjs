@@ -10,6 +10,7 @@ import { sha256 } from "../../../runtime/builtin-example-verifier/identity.mjs";
 import { buildPlan } from "../../../runtime/builtin-example-verifier/plan.mjs";
 import { reconcileShardResults } from "../../../runtime/builtin-example-verifier/reconcile.mjs";
 import { buildShardResult } from "../../../runtime/builtin-example-verifier/result-manifest.mjs";
+import { probeNativeRuntimeFeatures } from "../../../runtime/builtin-example-verifier/runtime-feature-probe.mjs";
 import { buildExampleGateProof, parseExampleGateProof } from "../example-gate.mjs";
 import { contentDigest } from "../evidence.mjs";
 
@@ -80,6 +81,14 @@ function withEvidence(callback) {
         lane: lane.lane, shardIndex: shard.index, shardCount: lane.shardCount, assignmentDigest: shard.assignmentDigest,
         product: lane.product, artifactProfile: plan.products.find((entry) => entry.kind === lane.product).artifactProfile,
         artifactManifestDigest: artifacts.get(lane.product).artifactManifestDigest,
+        runtimeFeatureProbe: lane.product === "native-cli"
+          ? probeNativeRuntimeFeatures(nativeBinary, native.artifactManifestDigest, () => ({
+              status: 0, stderr: "", stdout: JSON.stringify({
+                schema: "runmat.runtime-features.v1",
+                runtime: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["plot-core"], enabled_features: ["plot-core"] },
+              }),
+            }))
+          : null,
         environment: { platform: "test", architecture: "test", node: "test" }, limits: lane.limits,
         adapter: { available: true, reason: "" },
         results: units.map((unit) => ({ executionIdentity: unit.executionIdentity, exampleIdentity: unit.exampleIdentity, definitionDigest: unit.definitionDigest, builtinKey: unit.builtinKey, exampleId: unit.exampleId, lane: unit.lane, status: "passed", errorIdentifier: "", errorText: "", normalizedExpected: "1", normalizedActual: "1", imageRelativePath: null })),

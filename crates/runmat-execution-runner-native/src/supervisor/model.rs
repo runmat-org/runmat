@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
-    ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    GraphExecutionRequest, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +164,83 @@ impl ProgramBatchSubmission {
     }
 }
 
+/// Durable V10 submission. Its graph and selected products are one authenticated
+/// request; the local result receipt remains with the submitting service.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphBatchSubmission {
+    pub request: GraphExecutionRequest,
+    pub idempotency_key: Option<String>,
+    pub retention_millis: u64,
+}
+
+/// A graph submission whose archives and selected products were admitted
+/// before taking the supervisor's durable-store lock.
+pub(super) struct ValidatedGraphBatchSubmission {
+    pub(super) submission: GraphBatchSubmission,
+    pub(super) request_digest: Digest,
+    pub(super) idempotency_key_digest: Option<Digest>,
+}
+
+impl GraphBatchSubmission {
+    pub(super) fn into_validated(self) -> NativeExecutionResult<ValidatedGraphBatchSubmission> {
+        self.validate()?;
+        let request_digest = self.request_digest()?;
+        let idempotency_key_digest = self.idempotency_digest();
+        Ok(ValidatedGraphBatchSubmission {
+            submission: self,
+            request_digest,
+            idempotency_key_digest,
+        })
+    }
+
+    pub fn validate(&self) -> NativeExecutionResult<()> {
+        self.request
+            .validate()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        if self.request.assignment.is_some()
+            || self.request.job_id.is_some()
+            || self
+                .idempotency_key
+                .as_deref()
+                .is_some_and(|key| key.is_empty() || key.len() > 256 || key.contains('\0'))
+            || !(MIN_RETENTION_MILLIS..=MAX_RETENTION_MILLIS).contains(&self.retention_millis)
+        {
+            return Err(NativeExecutionError::Configuration(
+                "graph batch submission has an assignment, job identity, key, or retention mismatch"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn request_digest(&self) -> NativeExecutionResult<Digest> {
+        // Hash the same serialized field shape without cloning the selected
+        // executable bundle and graph for each durable Show/InspectKind.
+        #[derive(Serialize)]
+        struct StableGraphSubmission<'a> {
+            request: &'a GraphExecutionRequest,
+            idempotency_key: Option<&'a str>,
+            retention_millis: u64,
+        }
+        let stable = StableGraphSubmission {
+            request: &self.request,
+            idempotency_key: None,
+            retention_millis: self.retention_millis,
+        };
+        let mut identity = b"runmat-local-graph-batch-request-v1\0".to_vec();
+        identity.extend(
+            serde_json::to_vec(&stable)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+        );
+        Ok(Digest::sha256(identity))
+    }
+
+    pub fn idempotency_digest(&self) -> Option<Digest> {
+        self.idempotency_key.as_deref().map(idempotency_digest)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalJobState {
@@ -191,6 +268,10 @@ impl LocalJobState {
 pub struct LocalJobRecord {
     pub schema_version: u16,
     pub handle: JobHandle,
+    /// The persisted request's typed workload. Legacy records omit this field
+    /// and are resolved against request.json before Show/list returns them.
+    #[serde(default)]
+    pub workload_kind: LocalJobWorkloadKind,
     pub state: LocalJobState,
     pub request_digest: Digest,
     pub workload_digest: Digest,
@@ -206,6 +287,7 @@ pub struct LocalJobRecord {
 impl LocalJobRecord {
     pub fn validate(&self) -> NativeExecutionResult<()> {
         if self.schema_version != 1
+            || self.workload_kind == LocalJobWorkloadKind::Legacy
             || self.handle.generation == 0
             || self.updated_unix_millis < self.submitted_unix_millis
             || self.retain_until_unix_millis < self.updated_unix_millis
@@ -221,6 +303,16 @@ impl LocalJobRecord {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalJobWorkloadKind {
+    #[default]
+    Legacy,
+    Script,
+    Program,
+    Graph,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -239,6 +331,7 @@ impl DriverCompletion {
             matches!(
                 response,
                 ProgramExecutionResponse::Success { .. }
+                    | ProgramExecutionResponse::GraphSuccess { .. }
                     | ProgramExecutionResponse::ExternalizedSuccess { .. }
             )
         });
@@ -288,14 +381,19 @@ pub enum BatchDriverInvocation {
         job_id: runmat_execution::JobId,
         submission: Box<ProgramBatchSubmission>,
     },
+    Graph {
+        job_directory: PathBuf,
+        job_id: runmat_execution::JobId,
+        submission: Box<GraphBatchSubmission>,
+    },
 }
 
 impl BatchDriverInvocation {
     pub fn job_directory(&self) -> &Path {
         match self {
-            Self::Script { job_directory, .. } | Self::Program { job_directory, .. } => {
-                job_directory
-            }
+            Self::Script { job_directory, .. }
+            | Self::Program { job_directory, .. }
+            | Self::Graph { job_directory, .. } => job_directory,
         }
     }
 }

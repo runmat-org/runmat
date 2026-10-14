@@ -1,7 +1,12 @@
 use runmat_runtime::data::{DataArrayPayload, DataArrayValues};
 use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, StructValue, Tensor, Value};
 
-fn create_array(path: String, dtype: &str, shape: Vec<usize>, chunk: Vec<usize>) -> Value {
+fn create_array(
+    path: String,
+    dtype: &str,
+    shape: Vec<usize>,
+    chunk: Vec<usize>,
+) -> runmat_runtime::execution::RootedValue {
     let mut array = StructValue::new();
     array
         .fields
@@ -35,7 +40,7 @@ fn create_array(path: String, dtype: &str, shape: Vec<usize>, chunk: Vec<usize>)
             .expect("create dataset");
     runmat_runtime::call_builtin(
         "Dataset.array",
-        &[dataset, Value::String("samples".to_string())],
+        &[(*dataset).clone(), Value::String("samples".to_string())],
     )
     .expect("open data array")
 }
@@ -93,11 +98,11 @@ fn data_arrays_keep_exact_integer_storage_through_chunked_api_paths() {
             vec![1, 1],
         );
         let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
-        runmat_runtime::call_builtin("DataArray.write", &[array.clone(), Value::Tensor(input)])
+        runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
             .expect("write array");
-        let Value::Tensor(read_back) =
-            runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read array")
-        else {
+        let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+            .expect("read array");
+        let Value::Tensor(read_back) = &*read_back else {
             panic!("expected tensor");
         };
         assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
@@ -114,11 +119,11 @@ fn data_arrays_keep_native_single_storage_through_chunked_api_paths() {
         vec![1, 1],
     );
     let input = Tensor::from_f32(vec![0.1, -2.5], vec![2, 1]).expect("single tensor");
-    runmat_runtime::call_builtin("DataArray.write", &[array.clone(), Value::Tensor(input)])
+    runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
         .expect("write single array");
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read single array")
-    else {
+    let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+        .expect("read single array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(read_back.numeric_dtype(), NumericDType::F32);
@@ -132,7 +137,7 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     let array = create_array(dataset_path.clone(), "uint64", vec![2, 2], vec![1, 1]);
     runmat_runtime::call_builtin(
         "DataArray.fill",
-        &[array.clone(), Value::Int(IntValue::U64(u64::MAX))],
+        &[(*array).clone(), Value::Int(IntValue::U64(u64::MAX))],
     )
     .expect("fill array");
 
@@ -151,27 +156,29 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     .expect("replacement");
     runmat_runtime::call_builtin(
         "DataArray.write",
-        &[array.clone(), slice, Value::Tensor(replacement)],
+        &[(*array).clone(), slice, Value::Tensor(replacement)],
     )
     .expect("slice write");
 
     let dataset = runmat_runtime::call_builtin("data.open", &[Value::String(dataset_path)])
         .expect("open dataset");
-    let tx = runmat_runtime::call_builtin("Dataset.begin", &[dataset]).expect("begin transaction");
+    let tx = runmat_runtime::call_builtin("Dataset.begin", &[(*dataset).clone()])
+        .expect("begin transaction");
     runmat_runtime::call_builtin(
         "DataTransaction.fill",
         &[
-            tx.clone(),
+            (*tx).clone(),
             Value::String("samples".to_string()),
             Value::Int(IntValue::U64(1_u64 << 63)),
         ],
     )
     .expect("queue transaction fill");
-    runmat_runtime::call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+    runmat_runtime::call_builtin("DataTransaction.commit", &[(*tx).clone()])
+        .expect("commit transaction");
 
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read array")
-    else {
+    let read_back =
+        runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()]).expect("read array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(
@@ -191,7 +198,7 @@ fn dataset_lifecycle_preserves_wide_uint64_payloads_exactly() {
     let array = create_array(source_path.clone(), "uint64", vec![1, 2], vec![1, 2]);
     let storage = IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
     let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
-    runmat_runtime::call_builtin("DataArray.write", &[array, Value::Tensor(input)])
+    runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
         .expect("write source");
 
     runmat_runtime::call_builtin(
@@ -234,24 +241,24 @@ fn dataset_lifecycle_preserves_wide_uint64_payloads_exactly() {
     let inspected =
         runmat_runtime::call_builtin("data.inspect", &[Value::String(moved_path.clone())])
             .expect("inspect");
-    assert!(matches!(inspected, Value::Struct(_)));
+    assert!(matches!(&*inspected, Value::Struct(_)));
     let listed = runmat_runtime::call_builtin(
         "data.list",
         &[Value::String(dir.path().display().to_string())],
     )
     .expect("list");
-    assert!(matches!(listed, Value::Cell(_)));
+    assert!(matches!(&*listed, Value::Cell(_)));
 
     let dataset = runmat_runtime::call_builtin("data.open", &[Value::String(moved_path.clone())])
         .expect("open moved dataset");
     let array = runmat_runtime::call_builtin(
         "Dataset.array",
-        &[dataset, Value::String("samples".to_string())],
+        &[(*dataset).clone(), Value::String("samples".to_string())],
     )
     .expect("open moved array");
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read moved array")
-    else {
+    let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+        .expect("read moved array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(read_back.integer_storage(), Some(&storage));

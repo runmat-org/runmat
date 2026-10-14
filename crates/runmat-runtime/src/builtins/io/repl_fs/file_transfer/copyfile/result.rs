@@ -4,7 +4,6 @@ use runmat_builtins::{
     COPYFILE_RESULT_OS_ERROR, COPYFILE_RESULT_PATTERN_ERROR, COPYFILE_RESULT_SAME_PATH,
     COPYFILE_RESULT_SOURCE_NOT_FOUND,
 };
-use std::io;
 
 use super::super::outcome::TransferOutcome;
 
@@ -68,7 +67,11 @@ pub(super) fn invalid_pattern(pattern: &str, reason: &str) -> TransferOutcome {
     )
 }
 
-pub(super) fn filesystem(source: &str, target: &str, error: &io::Error) -> TransferOutcome {
+pub(super) fn filesystem(
+    source: &str,
+    target: &str,
+    error: &impl std::fmt::Display,
+) -> TransferOutcome {
     failure(
         format!("Unable to copy \"{source}\" to \"{target}\": {error}"),
         &COPYFILE_RESULT_OS_ERROR,

@@ -52,9 +52,21 @@ const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR: &str =
 const IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED: &str =
     "RunMat:FunctionArgumentDefaultUnsupported";
 
+fn class_method_role(
+    class_name: &str,
+    method_name: &str,
+    is_static: bool,
+) -> runmat_types::ClassMethodRole {
+    if !is_static && class_name.rsplit('.').next() == Some(method_name) {
+        runmat_types::ClassMethodRole::Constructor
+    } else {
+        runmat_types::ClassMethodRole::Ordinary
+    }
+}
+
 #[derive(Clone)]
 struct ScopeFrame {
-    owner: FunctionId,
+    owner: BindingOwner,
     bindings: HashMap<String, BindingId>,
     workspace_visibility: WorkspaceVisibility,
     external_bindings_visible: bool,
@@ -77,6 +89,8 @@ struct LoweringCtx {
     function_names: HashMap<String, FunctionId>,
     local_function_name_scopes: Vec<HashMap<String, FunctionId>>,
     class_names: HashMap<String, ClassId>,
+    class_identities: HashMap<ClassId, ClassIdentity>,
+    active_class_method: Option<(FunctionId, ClassIdentity)>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
     private_function_owners: HashMap<String, String>,
@@ -298,6 +312,8 @@ impl LoweringCtx {
             function_names: HashMap::new(),
             local_function_name_scopes: Vec::new(),
             class_names: HashMap::new(),
+            class_identities: HashMap::new(),
+            active_class_method: None,
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
             private_function_owners: context.private_function_owners.clone(),
@@ -636,7 +652,9 @@ impl LoweringCtx {
     }
 
     fn alloc_parallel_region_id(&mut self) -> runmat_types::ParallelRegionId {
-        let function = self.current_scope().owner;
+        let BindingOwner::Function(function) = self.current_scope().owner else {
+            unreachable!("parallel statements require a function scope")
+        };
         let ordinal = self.next_parallel_region.entry(function).or_default();
         let id = runmat_types::ParallelRegionId(runmat_types::RegionId {
             function: runmat_types::ProgramFunctionId(
@@ -657,7 +675,7 @@ impl LoweringCtx {
         f: impl FnOnce(&mut Self) -> Result<T, HirError>,
     ) -> Result<T, HirError> {
         self.scopes.push(ScopeFrame {
-            owner,
+            owner: BindingOwner::Function(owner),
             bindings: HashMap::new(),
             workspace_visibility,
             external_bindings_visible: false,
@@ -671,12 +689,52 @@ impl LoweringCtx {
         result
     }
 
+    fn lower_class_default(&mut self, expr: &AstExpr) -> Result<HirExpr, HirError> {
+        // A class declaration need not contain a callable or script entrypoint.
+        // Its defaults still require a semantic scope for catalog constants and
+        // references; that scope belongs to the module, not a fabricated body.
+        self.scopes.push(ScopeFrame {
+            owner: BindingOwner::Module(self.module),
+            bindings: HashMap::new(),
+            workspace_visibility: WorkspaceVisibility::TopLevel,
+            external_bindings_visible: false,
+        });
+        let result = self.lower_expr_semantic(expr);
+        self.scopes.pop();
+        result
+    }
+
     fn current_allows_await(&self) -> bool {
         self.function_modifiers
             .last()
             .map(|modifiers| modifiers.is_async)
             .unwrap_or(false)
             || self.top_level_await.last().copied().unwrap_or(false)
+    }
+
+    fn bound_super_caller(&self, parsed: &str, span: Span) -> Result<ClassIdentity, HirError> {
+        let Some((function, declared)) = &self.active_class_method else {
+            return Err(HirError::new("super call has no enclosing class method").with_span(span));
+        };
+        if !self.scopes.last().is_some_and(
+            |scope| matches!(&scope.owner, BindingOwner::Function(owner) if owner == function),
+        ) {
+            return Err(
+                HirError::new("super call escapes its enclosing class method").with_span(span),
+            );
+        }
+        let parsed = ClassIdentity::new(parsed.to_string())
+            .map_err(|error| HirError::new(error.to_string()).with_span(span))?;
+        let parsed_name = parsed.qualified_name();
+        let declared_name = declared.qualified_name();
+        if parsed != *declared
+            && (parsed_name.0.len() != 1 || parsed_name.0.first() != declared_name.0.last())
+        {
+            return Err(
+                HirError::new("super call disagrees with its enclosing class").with_span(span),
+            );
+        }
+        Ok(declared.clone())
     }
 
     fn spawn_arg_captures_lexical_binding(&self, arg: &HirExpr) -> bool {
@@ -718,7 +776,7 @@ impl LoweringCtx {
             .insert(name.to_string(), id);
         self.assembly.bindings.push(HirBinding {
             id,
-            owner: BindingOwner::Function(owner),
+            owner,
             name: BindingName(name.to_string()),
             role,
             storage,
@@ -728,7 +786,7 @@ impl LoweringCtx {
         self.hir_index.bindings.push(BindingResolution {
             name: BindingName(name.to_string()),
             binding: id,
-            owner: BindingOwner::Function(owner),
+            owner,
             span,
         });
         id
@@ -774,16 +832,19 @@ impl LoweringCtx {
         self.current_scope_mut().external_bindings_visible = true;
     }
 
-    fn stmt_expr_call_loads_external_bindings(&self, expr: &AstExpr) -> Result<bool, HirError> {
+    fn stmt_expr_call_exposes_external_bindings(
+        &self,
+        expr: &AstExpr,
+    ) -> Result<Option<runmat_builtins::BuiltinWorkspaceEffect>, HirError> {
         if self.current_scope().external_bindings_visible {
-            return Ok(false);
+            return Ok(None);
         }
         let (call_name, lexical_bindings_apply, span) = match expr {
             AstExpr::Ident(name, span) | AstExpr::FuncCall(name, _, span) => {
                 (name.as_str(), true, *span)
             }
             AstExpr::CommandCall(name, _, span) => (name.as_str(), false, *span),
-            _ => return Ok(false),
+            _ => return Ok(None),
         };
 
         let Some(semantics) = runmat_builtins::builtin_catalog_entry_by_name(call_name)
@@ -794,23 +855,43 @@ impl LoweringCtx {
             })
             .or_else(|| runmat_builtins::builtin_semantics_for_name(call_name))
         else {
-            return Ok(false);
+            return Ok(None);
         };
         if !matches!(
             semantics.workspace_effect,
-            Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+            Some(
+                runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+                    | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+            )
         ) {
-            return Ok(false);
+            return Ok(None);
         }
 
         Ok(self
             .plain_call_builtin_workspace_effect(call_name, span, lexical_bindings_apply)?
-            .is_some_and(|effect| {
+            .filter(|effect| {
                 matches!(
                     effect,
                     runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+                        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
                 )
             }))
+    }
+
+    fn lower_statement_value_expr(
+        &mut self,
+        expr: &AstExpr,
+        requested_outputs: RequestedOutputCount,
+    ) -> Result<HirExpr, HirError> {
+        let exposes_current_workspace = matches!(
+            self.stmt_expr_call_exposes_external_bindings(expr)?,
+            Some(runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace)
+        );
+        let lowered = self.lower_expr_semantic_requested(expr, requested_outputs)?;
+        if exposes_current_workspace {
+            self.mark_external_bindings_visible();
+        }
+        Ok(lowered)
     }
 
     fn plain_call_builtin_workspace_effect(
@@ -960,7 +1041,9 @@ impl LoweringCtx {
     }
 
     fn record_capture_if_outer(&mut self, binding: BindingId) {
-        let current = self.current_scope().owner;
+        let BindingOwner::Function(current) = self.current_scope().owner else {
+            return;
+        };
         let owner = self
             .assembly
             .bindings
@@ -972,13 +1055,19 @@ impl LoweringCtx {
             });
         if let Some(owner) = owner {
             if owner != current {
-                if let Some(owner_index) = self.scopes.iter().position(|scope| scope.owner == owner)
+                if let Some(owner_index) = self
+                    .scopes
+                    .iter()
+                    .position(|scope| scope.owner == BindingOwner::Function(owner))
                 {
                     let functions = self
                         .scopes
                         .iter()
                         .skip(owner_index + 1)
-                        .map(|scope| scope.owner)
+                        .filter_map(|scope| match scope.owner {
+                            BindingOwner::Function(owner) => Some(owner),
+                            BindingOwner::Module(_) => None,
+                        })
                         .collect::<Vec<_>>();
                     for function in functions {
                         self.record_capture(function, binding, owner);
@@ -1036,7 +1125,18 @@ impl LoweringCtx {
             parent,
             enclosing_class,
         } = spec;
-        self.with_private_alias_scope_for_function(name, |ctx| {
+        let active_class_method = if matches!(&kind, FunctionKind::ClassMethod { .. }) {
+            let class = enclosing_class
+                .and_then(|class| self.class_identities.get(&class))
+                .cloned()
+                .ok_or_else(|| HirError::new("class method lacks its declared class identity"))?;
+            Some((id, class))
+        } else {
+            None
+        };
+        let prior_class_method =
+            std::mem::replace(&mut self.active_class_method, active_class_method);
+        let result = self.with_private_alias_scope_for_function(name, |ctx| {
             ctx.local_function_name_scopes.push(HashMap::new());
             let result = ctx.with_scope(
                 id,
@@ -1259,7 +1359,9 @@ impl LoweringCtx {
             );
             ctx.local_function_name_scopes.pop();
             result
-        })
+        });
+        self.active_class_method = prior_class_method;
+        result
     }
 
     fn lower_class(
@@ -1277,6 +1379,9 @@ impl LoweringCtx {
             );
         }
         let class_id = self.reserve_class_name(name);
+        let class_identity = ClassIdentity::new(name.to_string())
+            .map_err(|error| HirError::new(error.to_string()).with_span(span))?;
+        self.class_identities.insert(class_id, class_identity);
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
         let mut property_defaults = Vec::new();
@@ -1318,7 +1423,7 @@ impl LoweringCtx {
                         let default = property_decl
                             .default
                             .as_ref()
-                            .map(|expr| self.lower_expr_semantic(expr))
+                            .map(|expr| self.lower_class_default(expr))
                             .transpose()?;
                         let property_name = crate::MemberName(prop_name.clone());
                         if let Some(value) = default {
@@ -1403,7 +1508,10 @@ impl LoweringCtx {
                                 argument_block_kinds,
                                 body,
                                 span: *span,
-                                kind: FunctionKind::ClassMethod { is_static },
+                                kind: FunctionKind::ClassMethod {
+                                    is_static,
+                                    role: class_method_role(name, method_name, is_static),
+                                },
                                 modifiers: FunctionModifiers {
                                     isolated: *isolated,
                                     is_async: *is_async,
@@ -1430,6 +1538,7 @@ impl LoweringCtx {
                                 function: function_id,
                                 name: crate::MethodName(method_name.clone()),
                                 is_static,
+                                role: class_method_role(name, method_name, is_static),
                                 attributes: method_attributes.clone(),
                                 declared_attributes: declared_attributes.clone(),
                                 span: *span,
@@ -1453,7 +1562,10 @@ impl LoweringCtx {
                                 argument_block_kinds: &[],
                                 body: &[],
                                 span: method_span,
-                                kind: FunctionKind::ClassMethod { is_static },
+                                kind: FunctionKind::ClassMethod {
+                                    is_static,
+                                    role: class_method_role(name, &method_name, is_static),
+                                },
                                 modifiers: FunctionModifiers::default(),
                                 parent: None,
                                 enclosing_class: Some(class_id),
@@ -1475,8 +1587,9 @@ impl LoweringCtx {
                             }
                             methods.push(MethodDeclaration {
                                 function: function_id,
-                                name: crate::MethodName(method_name),
+                                name: crate::MethodName(method_name.clone()),
                                 is_static,
+                                role: class_method_role(name, &method_name, is_static),
                                 attributes: method_attributes.clone(),
                                 declared_attributes: declared_attributes.clone(),
                                 span: method_span,
@@ -2126,7 +2239,12 @@ impl LoweringCtx {
                     }
                     _ => {}
                 }
-                let loads_external_bindings = self.stmt_expr_call_loads_external_bindings(expr)?;
+                let external_binding_effect =
+                    self.stmt_expr_call_exposes_external_bindings(expr)?;
+                let loads_external_bindings = matches!(
+                    external_binding_effect,
+                    Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+                );
                 let requested_outputs = if *suppressed || loads_external_bindings {
                     RequestedOutputCount::Zero
                 } else {
@@ -2140,7 +2258,7 @@ impl LoweringCtx {
                     )?,
                     *suppressed,
                 );
-                if loads_external_bindings {
+                if external_binding_effect.is_some() {
                     self.mark_external_bindings_visible();
                 }
                 stmt
@@ -2156,7 +2274,7 @@ impl LoweringCtx {
                 );
                 HirStmtKind::Assign(
                     place,
-                    self.lower_expr_semantic_requested(expr, RequestedOutputCount::One)?,
+                    self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                     *suppressed,
                 )
             }
@@ -2177,7 +2295,7 @@ impl LoweringCtx {
                             id: self.alloc_stmt_id(),
                             kind: HirStmtKind::SequenceAssign {
                                 target,
-                                value: self.lower_expr_semantic_requested(
+                                value: self.lower_statement_value_expr(
                                     expr,
                                     RequestedOutputCount::DestinationSequenceCardinality,
                                 )?,
@@ -2191,7 +2309,7 @@ impl LoweringCtx {
                         id: self.alloc_stmt_id(),
                         kind: HirStmtKind::Assign(
                             place,
-                            self.lower_expr_semantic_requested(expr, requested)?,
+                            self.lower_statement_value_expr(expr, requested)?,
                             *suppressed,
                         ),
                         span,
@@ -2235,7 +2353,7 @@ impl LoweringCtx {
                         requested_outputs,
                         targets: lowered_targets,
                     },
-                    self.lower_expr_semantic_requested(expr, requested_outputs)?,
+                    self.lower_statement_value_expr(expr, requested_outputs)?,
                     *suppressed,
                 )
             }
@@ -2402,7 +2520,7 @@ impl LoweringCtx {
                 );
                 HirStmtKind::Assign(
                     place,
-                    self.lower_expr_semantic_requested(
+                    self.lower_statement_value_expr(
                         expr,
                         requested_outputs_for_lvalue_assignment(lvalue, expr),
                     )?,
@@ -2717,7 +2835,7 @@ impl LoweringCtx {
                 let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperConstructor {
-                        current_class: SymbolName(current_class.clone()),
+                        current_class: self.bound_super_caller(current_class, span)?,
                         super_class: qualified_name(
                             &super_class
                                 .split('.')
@@ -2742,7 +2860,7 @@ impl LoweringCtx {
                 let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperMethod {
-                        current_class: SymbolName(current_class.clone()),
+                        current_class: self.bound_super_caller(current_class, span)?,
                         super_class: qualified_name(
                             &super_class
                                 .split('.')
@@ -2822,7 +2940,10 @@ impl LoweringCtx {
                         Ok(HirFunction {
                             id: function_id,
                             module: ctx.module,
-                            parent: Some(ctx.scopes[ctx.scopes.len() - 2].owner),
+                            parent: match ctx.scopes[ctx.scopes.len() - 2].owner {
+                                BindingOwner::Function(parent) => Some(parent),
+                                BindingOwner::Module(_) => None,
+                            },
                             enclosing_class: None,
                             name: FunctionName(format!("anonymous#{}", function_id.0)),
                             kind: FunctionKind::Anonymous,

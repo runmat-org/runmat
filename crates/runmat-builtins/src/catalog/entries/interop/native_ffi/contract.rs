@@ -41,7 +41,7 @@ pub(super) const HOST_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementCont
 
 pub(super) const FOREIGN_LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
-    policy: BuiltinLinkPolicy::ForeignRuntime,
+    policy: BuiltinLinkPolicy::ForeignRuntime(ForeignAdapterFamily::NativeFfi),
     execution_stack: ExecutionStackRequirement::Process,
     artifact_dependencies: &[],
 };

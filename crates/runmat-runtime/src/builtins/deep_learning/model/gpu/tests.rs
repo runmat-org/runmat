@@ -10,7 +10,7 @@ use crate::builtins::deep_learning::{layers::*, model::*, object};
 
 mod raw_inputs;
 
-fn dense_network() -> Value {
+fn dense_network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -89,7 +89,8 @@ fn admitted_transpose_failure_is_operational_not_a_late_host_retry() {
         effects: AtomicUsize::new(0),
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let Value::Object(network) = dense_network() else {
+    let network_owner = dense_network();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network object expected")
     };
     let input_axes = AxisPlan::new(
@@ -103,7 +104,7 @@ fn admitted_transpose_failure_is_operational_not_a_late_host_retry() {
     )
     .unwrap();
     let error = block_on(super::evaluate_network_gpu(
-        &network,
+        network,
         &allocated.handle,
         super::GpuForwardLayout::ChannelsBatch,
         super::NetworkOutputLayout::Preserve,
@@ -139,8 +140,9 @@ fn explicit_nonsquare_cb_is_transposed_on_provider_and_restored_without_download
             ],
         );
         provider.reset_telemetry();
+        let network = dense_network();
         let Value::Object(result) =
-            block_on(forward_builtin(dense_network(), input, vec![])).unwrap()
+            block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
         else {
             panic!("dlarray output expected")
         };
@@ -189,8 +191,9 @@ fn single_cb_projects_double_parameters_once_and_keeps_native_resident_result() 
             ],
         );
         provider.reset_telemetry();
+        let network = dense_network();
         let Value::Object(result) =
-            block_on(forward_builtin(dense_network(), input, vec![])).unwrap()
+            block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
         else {
             panic!("dlarray output expected")
         };
@@ -233,7 +236,7 @@ fn cb_softmax_reduces_channels_not_batches() {
             ],
         );
         let Value::Object(expected) =
-            block_on(forward_builtin(network.clone(), host, vec![])).unwrap()
+            block_on(forward_builtin(network.value().clone(), host, vec![])).unwrap()
         else {
             panic!("host dlarray expected")
         };
@@ -255,7 +258,8 @@ fn cb_softmax_reduces_channels_not_batches() {
             ],
         );
         provider.reset_telemetry();
-        let Value::Object(actual) = block_on(forward_builtin(network, resident, vec![])).unwrap()
+        let Value::Object(actual) =
+            block_on(forward_builtin(network.value().clone(), resident, vec![])).unwrap()
         else {
             panic!("resident dlarray expected")
         };
@@ -432,7 +436,8 @@ fn gpu_route_keeps_supported_fully_connected_execution_ready() {
             input.shape(),
         )
         .unwrap();
-        let Value::Object(network) = dense_network() else {
+        let network_owner = dense_network();
+        let Value::Object(network) = network_owner.value() else {
             panic!("network object expected")
         };
         let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -554,7 +559,8 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
 
         // The public route's canonical parameter preflight is earlier than
         // GPU placement and owns the unsupported resident descriptor error.
-        let mut network = dense_network();
+        let network_owner = dense_network();
+        let mut network = network_owner.value().clone();
         let Value::Object(network_object) = &mut network else {
             panic!("network object expected")
         };

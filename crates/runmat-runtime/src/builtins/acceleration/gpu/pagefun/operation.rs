@@ -7,9 +7,9 @@ pub(super) enum PageOperation {
 impl PageOperation {
     pub(super) fn from_callable(value: Value) -> BuiltinResult<Self> {
         let raw = match value {
-            Value::FunctionHandle(func) => func,
-            Value::ExternalFunctionHandle(func) => func,
-            Value::BoundFunctionHandle { name, .. } => name,
+            Value::FunctionHandle(func) => func.into_name(),
+            Value::ExternalFunctionHandle(func) => func.into_name(),
+            Value::BoundFunctionHandle(handle) => handle.into_data().name,
             Value::String(s) => s,
             Value::StringArray(sa) => {
                 if sa.data.len() != 1 {

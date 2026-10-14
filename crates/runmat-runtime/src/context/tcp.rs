@@ -2,6 +2,7 @@
 //! when the installed service recognizes its exact lease and issuer.
 
 use super::{RuntimeContext, RuntimeContextLocalId, RuntimeServiceFuture};
+use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_value::ForeignRef;
 use std::net::SocketAddr;
 use std::sync::Weak;
@@ -43,6 +44,30 @@ impl RuntimeTcpIssuer {
             (Self::Process, Self::Process) => true,
             _ => false,
         }
+    }
+}
+
+/// One TCP call's session authority and command attribution, captured together
+/// before an asynchronous host call can outlive its caller.
+pub struct RuntimeTcpInvocation {
+    issuer: RuntimeTcpIssuer,
+    profiling: Option<CommandProfilingReceipt>,
+}
+
+impl RuntimeTcpInvocation {
+    pub fn from_context(runtime: Option<&RuntimeContext>) -> Self {
+        Self {
+            issuer: RuntimeTcpIssuer::from_context(runtime),
+            profiling: runtime.and_then(RuntimeContext::command_profiling).cloned(),
+        }
+    }
+
+    pub fn issuer(&self) -> &RuntimeTcpIssuer {
+        &self.issuer
+    }
+
+    pub(crate) fn into_parts(self) -> (RuntimeTcpIssuer, Option<CommandProfilingReceipt>) {
+        (self.issuer, self.profiling)
     }
 }
 
@@ -176,39 +201,39 @@ pub trait RuntimeTcpService {
 
     fn describe_client(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, crate::tcp::TcpTransportError>>;
 
     fn connect(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         request: RuntimeTcpConnect,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, crate::tcp::TcpTransportError>>;
 
     fn bind(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         request: RuntimeTcpBind,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpServer, crate::tcp::TcpTransportError>>;
 
     fn accept(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         server: ForeignRef,
         timeout: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, crate::tcp::TcpTransportError>>;
 
     fn read(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
         mode: RuntimeTcpReadMode,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, crate::tcp::TcpTransportError>>;
 
     fn write(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
         bytes: Vec<u8>,
     ) -> RuntimeServiceFuture<Result<usize, crate::tcp::TcpTransportError>>;

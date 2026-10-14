@@ -1,6 +1,9 @@
 use crate::*;
 #[path = "tests/portable_entrypoint.rs"]
 mod portable_entrypoint;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/project_test_services.rs"]
+mod project_test_services;
 #[path = "tests/timers.rs"]
 mod timers;
 #[cfg(not(target_arch = "wasm32"))]
@@ -235,7 +238,7 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
         &self,
         future: &runmat_execution::FutureHandle,
         result: Result<
-            runmat_value::ValueSequence,
+            runmat_runtime::execution::RootedValueSequence,
             runmat_runtime::execution::ExecutionServiceError,
         >,
     ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
@@ -262,7 +265,7 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 static TIMER_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-struct CwdGuard {
+pub(crate) struct CwdGuard {
     original: PathBuf,
 }
 
@@ -286,7 +289,7 @@ impl Drop for PathStateGuard {
     }
 }
 
-fn push_cwd(path: &Path) -> CwdGuard {
+pub(crate) fn push_cwd(path: &Path) -> CwdGuard {
     let original = std::env::current_dir().expect("read cwd");
     std::env::set_current_dir(path).expect("set cwd");
     CwdGuard { original }
@@ -312,7 +315,7 @@ fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
 fn execute_text_request(
     session: &mut RunMatSession,
     source_text: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     execute_text_request_named_source(session, "<test>", source_text)
 }
 
@@ -320,7 +323,7 @@ fn execute_text_request_named_source(
     session: &mut RunMatSession,
     source_name: &str,
     source_text: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Text {
             name: source_name.into(),
@@ -336,7 +339,7 @@ fn execute_text_request_named_source(
 fn execute_path_request(
     session: &mut RunMatSession,
     source_path: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Path(source_path.to_string()),
         session.compat_mode(),
@@ -1498,7 +1501,7 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
-            [varargout{1:nargout}] = feval('inner', x);
+            [varargout{1:nargout}] = feval(@inner, x);
             function varargout = inner(v)
                 varargout{1} = v + 10;
                 varargout{2} = v + 20;
@@ -8093,6 +8096,8 @@ roots = ["."]
     .expect("freeze project")
     .expect("project exists");
     let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    #[cfg(not(target_arch = "wasm32"))]
+    let handoff_for_failed_clear = handoff.clone();
     let expected_revision = handoff.revision();
 
     // A broken manifest proves compilation consumes the installed snapshot
@@ -8101,15 +8106,25 @@ roots = ["."]
         .expect("invalidate manifest after freeze");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    assert_eq!(
-        session
-            .install_project_handoff(handoff)
-            .expect("install handoff"),
-        expected_revision
-    );
+    #[cfg(not(target_arch = "wasm32"))]
+    let project_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("project lifecycle test runtime");
+    #[cfg(not(target_arch = "wasm32"))]
+    let installed = project_runtime.block_on(session.install_project_handoff(handoff));
+    #[cfg(target_arch = "wasm32")]
+    let installed = session.install_project_handoff(handoff);
+    assert_eq!(installed.expect("install handoff"), expected_revision);
     assert_eq!(session.project_revision(), Some(expected_revision.clone()));
 
     let _cwd = push_cwd(tmp.path());
+    #[cfg(not(target_arch = "wasm32"))]
+    let outcome = {
+        let _entered = project_runtime.enter();
+        execute_path_request(&mut session, "main.m").expect("execute frozen project")
+    };
+    #[cfg(target_arch = "wasm32")]
     let outcome = execute_path_request(&mut session, "main.m").expect("execute frozen project");
     assert!(
         outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
@@ -8118,8 +8133,28 @@ roots = ["."]
         outcome.diagnostics
     );
 
-    session.clear_project_handoff();
+    #[cfg(not(target_arch = "wasm32"))]
+    let cleared = project_runtime.block_on(session.clear_project_handoff());
+    #[cfg(target_arch = "wasm32")]
+    let cleared = session.clear_project_handoff();
+    cleared.expect("clear handoff");
     assert_eq!(session.project_revision(), None);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        project_runtime
+            .block_on(session.install_project_handoff(handoff_for_failed_clear))
+            .expect("reinstall handoff before retirement failure");
+        session.shutdown_local_tasks();
+        let error = project_runtime
+            .block_on(session.clear_project_handoff())
+            .expect_err("closed lifecycle host cannot retire MEX modules");
+        assert!(error
+            .to_string()
+            .contains("could not clear loaded MEX modules"));
+        assert_eq!(session.project_revision(), Some(expected_revision));
+        assert!(session.project_handoff().is_some());
+    }
 }
 
 #[test]
@@ -14444,7 +14479,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         )
     );
     assert_eq!(
-        envelope.manifest.identity.entrypoint_function,
+        envelope.manifest.identity.entrypoint_function.unwrap(),
         published_portable_function
     );
     assert_eq!(
@@ -14463,8 +14498,9 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .expect("entrypoint origin")
     );
     let mut mismatched_entrypoint = envelope.clone();
-    mismatched_entrypoint.manifest.identity.entrypoint_function =
-        runmat_types::ProgramFunctionId(published_portable_function.0.saturating_add(10_000));
+    mismatched_entrypoint.manifest.identity.entrypoint_function = Some(
+        runmat_types::ProgramFunctionId(published_portable_function.0.saturating_add(10_000)),
+    );
     let mismatch = runmat_vm::admit_executable_unit(
         &mismatched_entrypoint
             .canonical_bytes()
@@ -14544,7 +14580,7 @@ fn portable_entrypoint_rejects_matching_function_id_from_another_revision() {
     let mut envelope = unit
         .portable_envelope_for(Some("entrypointOrigin"))
         .expect("portable function product");
-    let portable_function = envelope.manifest.identity.entrypoint_function;
+    let portable_function = envelope.manifest.identity.entrypoint_function.unwrap();
     let wrong_revision = runmat_execution::ProgramRevision::new(
         *envelope.manifest.identity.program.graph_digest(),
         runmat_execution::Digest::sha256(b"different-entrypoint-source-revision"),
@@ -14649,7 +14685,7 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         serde_json::from_slice(&registry_payload.bytes).expect("decode script function registry");
     assert!(registry.resolve_name("localPlusOne").is_some());
     assert!(registry.functions.values().all(|function| {
-        function.portable_function != first.manifest.identity.entrypoint_function
+        Some(function.portable_function) != first.manifest.identity.entrypoint_function
     }));
     assert!(first
         .manifest
@@ -14675,7 +14711,7 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         admitted_script.entrypoint_origin().unwrap(),
         runmat_execution::FunctionBindingOrigin::from_revision(
             &first.manifest.identity.program,
-            first.manifest.identity.entrypoint_function,
+            first.manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap()
     );

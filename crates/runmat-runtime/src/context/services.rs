@@ -11,7 +11,7 @@ use runmat_types::{
     BuiltinId, CallableFallbackPolicy, CallableIdentity, DistributedValueContract,
     DistributionScheme, LabRank, SourceId,
 };
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -37,7 +37,7 @@ pub trait RuntimeCallService {
         &self,
         runtime: super::RuntimeContext,
         request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
 
     fn source_functions(&self, _source_id: SourceId) -> Vec<(String, usize)> {
         Vec::new()
@@ -64,7 +64,7 @@ impl RuntimeCallService for RuntimeCallRouter {
         &self,
         runtime: super::RuntimeContext,
         request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         let fallback_policy = match &request.identity {
             CallableIdentity::DynamicName(_)
             | CallableIdentity::Imported(_)
@@ -358,6 +358,7 @@ pub trait RuntimeHostService {
 pub trait RuntimeHttpService {
     fn send(
         &self,
+        runtime: super::RuntimeContext,
         request: crate::http::HttpRequest,
     ) -> RuntimeServiceFuture<Result<crate::http::HttpResponse, crate::http::TransportError>>;
 
@@ -369,6 +370,7 @@ pub trait RuntimeHttpService {
     /// or TLS allocation peak; finite memory quotas need separate admission.
     fn open_bounded(
         &self,
+        _runtime: super::RuntimeContext,
         request: crate::http::HttpRequest,
         _accepted_limit: u64,
     ) -> RuntimeServiceFuture<Result<crate::http::HttpBodyStream, crate::http::TransportError>>
@@ -442,9 +444,9 @@ pub trait RuntimeAccelerationService {
     ) -> RuntimeServiceFuture<Result<super::preparation::PreparedBuiltinOperands, RuntimeError>>
     {
         Box::pin(async move {
-            Ok(super::preparation::PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(super::preparation::PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -893,7 +895,7 @@ pub trait RuntimeForeignService {
         &self,
         context: super::RuntimeContext,
         call: ForeignCall,
-    ) -> RuntimeServiceFuture<Result<runmat_value::ValueSequence, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1113,12 +1115,12 @@ pub trait RuntimeDistributedService {
         &self,
         handle: runmat_execution::DistributedValueHandle,
         rank: LabRank,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn materialize(
         &self,
         handle: runmat_execution::DistributedValueHandle,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn redistribute(
         &self,
@@ -1135,7 +1137,7 @@ pub trait RuntimeDistributedService {
         &self,
         handle: runmat_execution::CompositeHandle,
         rank: LabRank,
-    ) -> RuntimeServiceFuture<Result<Option<Value>, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<Option<crate::execution::RootedValue>, RuntimeError>>;
 }
 
 /// SPMD worker communication. The installed service owns the current rank and
@@ -1292,6 +1294,22 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    /// Only effect-routing ports affect the command's device-route proof.
+    /// Workspace/base-workspace replacements during ordinary Core execution
+    /// must not erase an otherwise exact canonical admission.
+    pub fn same_device_route_owners(&self, other: &Self) -> bool {
+        fn same<T: ?Sized>(left: Option<&Rc<T>>, right: Option<&Rc<T>>) -> bool {
+            match (left, right) {
+                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        same(self.call.as_ref(), other.call.as_ref())
+            && same(self.acceleration.as_ref(), other.acceleration.as_ref())
+            && same(self.foreign.as_ref(), other.foreign.as_ref())
+    }
+
     pub fn with_local_tasks(mut self, service: Rc<dyn super::RuntimeLocalTaskService>) -> Self {
         self.local_tasks = Some(service);
         self

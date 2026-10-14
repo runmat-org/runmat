@@ -170,7 +170,8 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
     crate::bytecode::program::function_remap::remap_closed_function(
         &mut closed,
         &std::collections::HashMap::from([(original.function, runmat_hir::FunctionId(702))]),
-    );
+    )
+    .expect("closed projection");
     assert_eq!(closed.function, runmat_hir::FunctionId(702));
     assert_eq!(closed.portable_function, original.portable_function);
     assert!(closed.validate_fusion_stage_projection().is_ok());
@@ -183,7 +184,8 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
     crate::bytecode::program::function_remap::remap_eval_local_function(
         &mut eval,
         &std::collections::HashMap::from([(original.function, runmat_hir::FunctionId(703))]),
-    );
+    )
+    .expect("eval-local projection");
     assert_eq!(eval.function, runmat_hir::FunctionId(703));
     assert!(eval.validate_fusion_stage_projection().is_ok());
     assert_eq!(

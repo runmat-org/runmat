@@ -36,7 +36,7 @@ fn unsupported_fill_before_allocation_keeps_supported_scalar_max_route() {
             [resident, Value::Num(3.0)]
         };
         let output = futures::executor::block_on(crate::call_builtin_async("max", &args)).unwrap();
-        let Value::GpuTensor(ref handle) = output else {
+        let Value::GpuTensor(handle) = output.value() else {
             panic!("supported scalar result stays resident")
         };
         assert_eq!(provider.read(handle).unwrap(), vec![3.0, 4.0]);
@@ -115,7 +115,7 @@ fn builtin_values_only_skips_origin_work_but_public_evaluate_preserves_exact_ori
         let output = futures::executor::block_on(crate::call_builtin_async(name, &args)).unwrap();
         assert_eq!(provider.values.load(Ordering::SeqCst), 1);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-        let Value::GpuTensor(ref handle) = output else {
+        let Value::GpuTensor(handle) = output.value() else {
             panic!("device values")
         };
         assert!(runmat_accelerate_api::handle_is_explicit(handle));
@@ -137,12 +137,12 @@ fn builtin_values_only_skips_origin_work_but_public_evaluate_preserves_exact_ori
                 name, &args, count,
             ))
             .unwrap();
-            let Value::OutputList(outputs) = output else {
+            let Value::OutputList(outputs) = output.value() else {
                 panic!("explicit output-count result")
             };
             assert_eq!(outputs.len(), count);
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-            drop(outputs);
+            drop(output);
         }
         assert_eq!(
             provider.values.load(Ordering::SeqCst),
@@ -251,7 +251,7 @@ fn valid_immutable_result_alias_is_adopted_without_retiring_caller() {
         ],
     ))
     .unwrap();
-    let Value::GpuTensor(ref output_handle) = output else {
+    let Value::GpuTensor(output_handle) = output.value() else {
         panic!("resident alias")
     };
     assert!(output_handle.shares_allocation_with(&left.handle));

@@ -3,6 +3,7 @@ mod admission;
 mod normalize;
 
 use super::callback::Callable;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_builtins::{arrayfun_gpu_callback, ArrayfunGpuCallback, ArrayfunGpuUnary};
 use runmat_value::Value;
@@ -12,7 +13,7 @@ pub(super) async fn try_fast_path(
     callable: &Callable,
     inputs: &[Value],
     error_handler: Option<&Callable>,
-) -> BuiltinResult<Option<Value>> {
+) -> BuiltinResult<Option<RootedValue>> {
     if error_handler.is_some()
         || !inputs
             .iter()

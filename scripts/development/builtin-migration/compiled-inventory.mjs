@@ -11,7 +11,7 @@ const KNOWN_RUNTIME_FEATURES = Object.freeze([
 ]);
 
 export function parseCompiledInventory(value) {
-  kind(value, 3, "runmat-compiled-builtin-migration-inventory", "compiled migration inventory");
+  kind(value, 4, "runmat-compiled-builtin-migration-inventory", "compiled migration inventory");
   exact(value, ["schema_version", "kind", "authority", "digest", "snapshot"], "compiled migration inventory");
   if (value.authority !== "derived-read-only-evidence") throw new Error("compiled migration inventory has invalid authority");
   exact(value.digest, ["algorithm", "value"], "compiled inventory digest");
@@ -59,7 +59,7 @@ function parseBuild(value) {
 function parseDeclared(value) {
   exact(value, ["namespace_scope", "catalog_schema_version", "catalog_fingerprint", "catalog_entries", "catalog_aliases", "catalog_provenance", "constants", "legacy_functions", "legacy_documentation"], "compiled declared inventory");
   if (value.namespace_scope !== "function_callables_and_constants_are_reported_separately") throw new Error("compiled namespace scope is unsupported");
-  if (value.catalog_schema_version !== 6) throw new Error("compiled catalog schema version must be 6"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
+  if (value.catalog_schema_version !== 8) throw new Error("compiled catalog schema version must be 8"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
   array(value.catalog_entries, "compiled catalog entries", { empty: true }).forEach(catalogEntry);
   array(value.catalog_aliases, "compiled catalog aliases", { empty: true }).forEach(catalogAlias);
   array(value.catalog_provenance, "compiled catalog provenance", { empty: true }).forEach(catalogProvenance);
@@ -73,13 +73,15 @@ function parseDeclared(value) {
   const declaredBindings = value.catalog_entries.flatMap((entry) => entry.bindings.map((binding) => `${entry.identity.name}\0${binding.variant}`)).sort();
   const provenBindings = value.catalog_provenance.map((entry) => `${entry.identity.builtin.name}\0${entry.identity.variant}`).sort();
   if (JSON.stringify(declaredBindings) !== JSON.stringify(provenBindings)) throw new Error("catalog provenance must cover every declared binding exactly once");
-  const primary = new Set(value.catalog_entries.map((entry) => entry.identity.name.toLowerCase()));
-  const publicNames = new Set(primary);
+  const primary = new Map(value.catalog_entries.map((entry) => [entry.identity.name.toLowerCase(), entry]));
+  const occupiedNames = new Set(primary.keys());
   for (const entry of value.catalog_aliases) {
     const alias = entry.alias.name.toLowerCase();
-    if (!primary.has(entry.canonical.name.toLowerCase())) throw new Error(`${entry.alias.name}: catalog alias target is not canonical`);
-    if (publicNames.has(alias)) throw new Error(`${entry.alias.name}: catalog alias collides with another public spelling`);
-    publicNames.add(alias);
+    const target = primary.get(entry.canonical.name.toLowerCase());
+    if (!target || target.identity.name !== entry.canonical.name) throw new Error(`${entry.alias.name}: catalog alias target is not canonical`);
+    if (target.audience !== "Public") throw new Error(`${entry.alias.name}: catalog alias target is not public`);
+    if (occupiedNames.has(alias)) throw new Error(`${entry.alias.name}: catalog alias collides with another callable spelling`);
+    occupiedNames.add(alias);
   }
 }
 
@@ -257,6 +259,7 @@ export function authorityFor(compiled, identityName) {
 
 export function publicSpellingsFor(compiled, identityName) {
   const authority = authorityFor(compiled, identityName);
+  if (authority.catalog_entries.some((entry) => entry.audience === "Fixture")) return [];
   const callable = [
     ...authority.catalog_entries.map((entry) => entry.identity.name),
     ...authority.catalog_aliases.map((entry) => entry.alias.name),

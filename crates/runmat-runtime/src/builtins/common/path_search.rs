@@ -636,10 +636,13 @@ pub async fn path_is_directory(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
     use super::{
-        class_folder_candidates_with_origin, directory_candidates_with_origin, file_candidates,
-        file_candidates_with_origin, find_all_files_with_extensions_with_origin,
-        find_file_with_extensions_with_origin, FileCandidateOrigin, MEX_EXTENSIONS,
+        class_folder_candidates_with_origin, directory_candidates_with_origin,
+        find_all_files_with_extensions_with_origin, find_file_with_extensions_with_origin,
+    };
+    use super::{
+        file_candidates, file_candidates_with_origin, FileCandidateOrigin, MEX_EXTENSIONS,
         PCODE_EXTENSIONS,
     };
     use std::path::PathBuf;

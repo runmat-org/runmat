@@ -117,7 +117,11 @@ fn default_and_subclass_event_data_reach_callbacks_as_second_argument() {
                 })
                 .expect("event data target");
                 observed.fetch_add(1, Ordering::SeqCst);
-                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(0.0)) })
+                Box::pin(async {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        0.0,
+                    ))
+                })
             },
         )));
         let source = register_source("EventAdmissionPayloadSource", EventAccess::Public);
@@ -176,7 +180,11 @@ fn callback_republication_stops_later_delivery_without_replay() {
                     methods: HashMap::new(),
                     events: HashMap::new(),
                 });
-                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(0.0)) })
+                Box::pin(async {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        0.0,
+                    ))
+                })
             },
         )));
         let target = block_on(crate::new_handle_object_builtin(source.to_string())).unwrap();

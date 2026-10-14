@@ -674,7 +674,9 @@ impl LeastSquaresEvaluator for NonlinEvaluator {
         Box::pin(async move {
             let arg = x_value(x, &self.x_shape, self.x_scalar)?;
             let value = call_function(&self.function, vec![arg]).await?;
-            let residual = real_array("function output", value).await?;
+            let residual = value
+                .with_owned_async(|value| real_array("function output", value))
+                .await?;
             if let Some(expected) = &self.residual_shape {
                 if expected != &residual.shape {
                     return Err(lsq_error_with_detail(
@@ -992,8 +994,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         vec![x[0] - 2.0, x[1] - 3.0, x[0] + x[1] - 5.0],
                         vec![3, 1],
                     ))
@@ -1026,8 +1028,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(vec![x - 2.0, x - 2.0], vec![1, 2]))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                        vec![x - 2.0, x - 2.0],
+                        vec![1, 2],
+                    ))
                 })
             },
         )));
@@ -1063,7 +1068,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 3.0)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x - 3.0,
+                    ))
+                })
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
@@ -1089,8 +1098,11 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(vec![x[0] - 2.0, x[1] - 5.0], vec![2, 1]))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                        vec![x[0] - 2.0, x[1] - 5.0],
+                        vec![2, 1],
+                    ))
                 })
             },
         )));
@@ -1122,8 +1134,11 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(vec![x[0] - 1.0, 2.0 * x[1] - 4.0], vec![1, 2]))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                        vec![x[0] - 1.0, 2.0 * x[1] - 4.0],
+                        vec![1, 2],
+                    ))
                 })
             },
         )));
@@ -1178,8 +1193,11 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(vec![x[0] - 4.0, x[1] - 5.0], vec![2, 1]))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                        vec![x[0] - 4.0, x[1] - 5.0],
+                        vec![2, 1],
+                    ))
                 })
             },
         )));

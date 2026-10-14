@@ -68,12 +68,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        oversized
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-RESOURCE")
-    );
+    assert!(oversized
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-RESOURCE"));
     let false_width = super::super::inference::infer_de2bi(
         &call(
             numeric(NumericClass::Double, 1, 1),
@@ -81,12 +79,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        false_width
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL")
-    );
+    assert!(false_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
     let true_width = super::super::inference::infer_de2bi(
         &call(
             numeric(NumericClass::Double, 1, 1),
@@ -105,12 +101,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        zero_width
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL")
-    );
+    assert!(zero_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
     assert_eq!(
         zero_width.outputs[0].shape.known_dims(),
         Some(vec![Some(1), None])
@@ -125,12 +119,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        zero_integer_width
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL")
-    );
+    assert!(zero_integer_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
     let bad_width = super::super::inference::infer_de2bi(
         &call(
             numeric(NumericClass::Double, 1, 1),
@@ -138,12 +130,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        bad_width
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL")
-    );
+    assert!(bad_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
     let invalid = super::super::inference::infer_de2bi(
         &call(
             ValueFact::proven(
@@ -155,12 +145,10 @@ fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
         ),
         &DE2BI_CATALOG_ENTRY,
     );
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-DE2BI-DATA")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-DATA"));
     assert_eq!(DE2BI_CATALOG_ENTRY.bindings, &REQUIRED_DEFAULT_BINDING);
     assert_eq!(DE2BI_CATALOG_ENTRY.documentation.examples.len(), 7);
 }

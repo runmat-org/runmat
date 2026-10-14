@@ -1321,9 +1321,10 @@ mod tests {
             ],
         )
         .expect("integer patch");
-        let Value::Num(handle) = handle else {
+        let Value::Num(handle) = handle.value() else {
             panic!("expected patch handle");
         };
+        let handle = *handle;
         let retained_faces = get_builtin(vec![Value::Num(handle), Value::String("Faces".into())])
             .expect("patch Faces");
         let retained_vertices =
@@ -1395,12 +1396,13 @@ mod tests {
             ],
         )
         .expect("patch builtin should dispatch");
-        let Value::Num(handle) = handle else {
+        let Value::Num(handle) = handle.value() else {
             panic!("expected numeric graphics handle");
         };
+        let handle = *handle;
         let ty = crate::call_builtin("get", &[Value::Num(handle), Value::String("Type".into())])
             .expect("get patch type");
-        assert_eq!(ty, Value::String("patch".into()));
+        assert_eq!(ty.value(), &Value::String("patch".into()));
     }
 
     #[test]
@@ -1415,9 +1417,10 @@ mod tests {
             ],
         )
         .expect("patch builtin should dispatch");
-        let Value::Num(handle) = handle else {
+        let Value::Num(handle) = handle.value() else {
             panic!("expected numeric graphics handle");
         };
+        let handle = *handle;
         crate::call_builtin(
             "set",
             &[
@@ -1433,10 +1436,10 @@ mod tests {
             &[Value::Num(handle), Value::String("Visible".into())],
         )
         .expect("get patch visible");
-        assert_eq!(visible, Value::Bool(false));
+        assert_eq!(visible.value(), &Value::Bool(false));
 
         let all = crate::call_builtin("get", &[Value::Num(handle)]).expect("get patch struct");
-        let Value::Struct(st) = all else {
+        let Value::Struct(st) = all.value() else {
             panic!("expected patch property struct");
         };
         assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));

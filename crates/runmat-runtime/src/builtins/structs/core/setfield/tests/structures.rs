@@ -9,7 +9,7 @@ fn setfield_creates_scalar_field() {
         vec![Value::from("answer"), Value::Num(42.0)],
     )
     .expect("setfield");
-    match updated {
+    match updated.value() {
         Value::Struct(st) => {
             assert_eq!(
                 st.fields.get("answer"),
@@ -34,7 +34,7 @@ fn setfield_creates_nested_structs() {
         ],
     )
     .expect("setfield");
-    match updated {
+    match updated.value() {
         Value::Struct(st) => {
             let solver = st.fields.get("solver").expect("solver field");
             match solver {
@@ -73,7 +73,7 @@ fn setfield_updates_struct_array_element() {
         ],
     )
     .expect("setfield");
-    match updated {
+    match updated.value() {
         Value::StructArray(array) => assert_eq!(
             array.get_linear(1).unwrap().fields.get("id"),
             Some(&Value::Int(IntValue::I32(42)))
@@ -120,7 +120,7 @@ fn setfield_struct_array_with_end_index() {
         ],
     )
     .expect("setfield");
-    match updated {
+    match updated.value() {
         Value::StructArray(array) => assert_eq!(
             array.get_linear(1).unwrap().fields.get("id"),
             Some(&Value::Int(IntValue::I32(99)))

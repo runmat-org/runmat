@@ -9,7 +9,7 @@ fn zeros_ones_variants() {
     let z2 = runmat_runtime::call_builtin("zeros", &[Value::Num(2.0), Value::Num(3.0)]).unwrap();
     let o = runmat_runtime::call_builtin("ones", &[Value::Num(4.0)]).unwrap();
     let o2 = runmat_runtime::call_builtin("ones", &[Value::Num(2.0), Value::Num(2.0)]).unwrap();
-    match (z, z2, o, o2) {
+    match (z.value(), z2.value(), o.value(), o2.value()) {
         (Value::Tensor(_), Value::Tensor(_), Value::Tensor(_), Value::Tensor(_)) => {}
         _ => panic!(),
     }
@@ -53,15 +53,15 @@ fn find_variants() {
 #[test]
 fn degree_radian_conversion_builtins_dispatch() {
     let radians = runmat_runtime::call_builtin("deg2rad", &[Value::Num(90.0)]).unwrap();
-    match radians {
-        Value::Num(value) => assert!((value - std::f64::consts::FRAC_PI_2).abs() < 1e-12),
+    match radians.value() {
+        Value::Num(value) => assert!((*value - std::f64::consts::FRAC_PI_2).abs() < 1e-12),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let degrees =
         runmat_runtime::call_builtin("rad2deg", &[Value::Num(std::f64::consts::PI)]).unwrap();
-    match degrees {
-        Value::Num(value) => assert!((value - 180.0).abs() < 1e-12),
+    match degrees.value() {
+        Value::Num(value) => assert!((*value - 180.0).abs() < 1e-12),
         other => panic!("expected scalar result, got {other:?}"),
     }
 }
@@ -70,37 +70,37 @@ fn degree_radian_conversion_builtins_dispatch() {
 #[test]
 fn degree_trig_builtins_return_matlab_exact_values() {
     let sin_zero = runmat_runtime::call_builtin("sind", &[Value::Num(180.0)]).unwrap();
-    match sin_zero {
-        Value::Num(value) => assert_eq!(value, 0.0),
+    match sin_zero.value() {
+        Value::Num(value) => assert_eq!(*value, 0.0),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let sin_half = runmat_runtime::call_builtin("sind", &[Value::Num(30.0)]).unwrap();
-    match sin_half {
-        Value::Num(value) => assert_eq!(value, 0.5),
+    match sin_half.value() {
+        Value::Num(value) => assert_eq!(*value, 0.5),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let cos_zero = runmat_runtime::call_builtin("cosd", &[Value::Num(90.0)]).unwrap();
-    match cos_zero {
-        Value::Num(value) => assert_eq!(value, 0.0),
+    match cos_zero.value() {
+        Value::Num(value) => assert_eq!(*value, 0.0),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let tan_one = runmat_runtime::call_builtin("tand", &[Value::Num(45.0)]).unwrap();
-    match tan_one {
-        Value::Num(value) => assert_eq!(value, 1.0),
+    match tan_one.value() {
+        Value::Num(value) => assert_eq!(*value, 1.0),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let tan_pos_inf = runmat_runtime::call_builtin("tand", &[Value::Num(90.0)]).unwrap();
-    match tan_pos_inf {
+    match tan_pos_inf.value() {
         Value::Num(value) => assert!(value.is_infinite() && value.is_sign_positive()),
         other => panic!("expected scalar result, got {other:?}"),
     }
 
     let tan_neg_inf = runmat_runtime::call_builtin("tand", &[Value::Num(-90.0)]).unwrap();
-    match tan_neg_inf {
+    match tan_neg_inf.value() {
         Value::Num(value) => assert!(value.is_infinite() && value.is_sign_negative()),
         other => panic!("expected scalar result, got {other:?}"),
     }

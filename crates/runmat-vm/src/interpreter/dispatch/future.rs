@@ -80,6 +80,22 @@ pub(super) fn dispatch_instruction<'a>(
         InstructionDispatchFamily::Immediate => {
             InstructionDispatchFuture::immediate(meta, state, hooks)
         }
+        InstructionDispatchFamily::SemanticClosure => {
+            let pending = matches!(meta.instr, Instr::CreateSemanticClosure(function, ..)
+            if state.context.dynamic_eval_admission.as_ref().is_some_and(|port| {
+                port.pending.as_ref().is_some_and(|plan| plan.function(*function).is_some())
+            }));
+            if pending {
+                InstructionDispatchFuture::suspended(Box::pin(dispatch_semantic_closure(
+                    meta, state,
+                )))
+            } else {
+                InstructionDispatchFuture::immediate(meta, state, hooks)
+            }
+        }
+        InstructionDispatchFamily::NameHandle => {
+            InstructionDispatchFuture::suspended(Box::pin(dispatch_name_handle(meta, state)))
+        }
         InstructionDispatchFamily::Parallel => {
             InstructionDispatchFuture::suspended(suspend_parallel(meta, state))
         }
@@ -108,6 +124,306 @@ pub(super) fn dispatch_instruction<'a>(
             InstructionDispatchFuture::suspended(suspend_aggregate(meta, state))
         }
     }
+}
+
+async fn dispatch_semantic_closure(
+    meta: DispatchMeta<'_>,
+    state: DispatchState<'_>,
+) -> DispatchResult {
+    let Instr::CreateSemanticClosure(function, display_name, capture_count, source_role) =
+        meta.instr
+    else {
+        unreachable!("semantic-closure route requires its creation opcode");
+    };
+    let inherits_shared_bindings = *source_role == runmat_types::FunctionSourceRole::Anonymous
+        && meta.function_registry.get(*function).is_some_and(|target| {
+            target.lexical_binding_slots.iter().any(|binding| {
+                binding.kind == crate::bytecode::program::LexicalBindingKind::Transit
+            })
+        });
+    let lexical_environment = (*source_role == runmat_types::FunctionSourceRole::Nested
+        || inherits_shared_bindings)
+        .then(|| state.context.lexical_environment.clone())
+        .flatten();
+    let port = state.context.dynamic_eval_admission.clone();
+    let pending = port.as_ref().and_then(|port| {
+        port.pending
+            .as_ref()
+            .filter(|plan| plan.function(*function).is_some())
+            .cloned()
+    });
+    if let Some(plan) = pending {
+        let port = port.expect("pending closure requires its admission port");
+        let pending_function = plan
+            .function(*function)
+            .expect("pending closure lookup was checked above");
+        if pending_function.abi.original_capture_count() != *capture_count {
+            return Err(crate::interpreter::errors::mex(
+                "DynamicWorkspaceCompile",
+                "pending closure opcode differs from its original capture layout",
+            ));
+        }
+        let runtime = state.context.runtime.clone();
+        let compiled = crate::call::builtins::compile_pending_closure(
+            &plan,
+            pending_function,
+            &runtime,
+            meta.function_registry,
+            *function,
+            &port,
+        )
+        .await?;
+        if crate::runtime::workspace::workspace_frame_identity() != Some(compiled.issuing_frame) {
+            return Err(crate::interpreter::errors::mex(
+                "DynamicWorkspaceCompile",
+                "pending closure changed workspace frame after source selection",
+            ));
+        }
+        let direct_captures = compiled.captures.len() == *capture_count
+            && compiled.captures.iter().enumerate().all(|(index, capture)| {
+                matches!(capture, crate::call::builtins::SelectedClosureCapture::Original(original) if *original == index)
+            });
+        let additional_captures = if direct_captures {
+            None
+        } else {
+            if state.stack.len() < *capture_count {
+                return Err(crate::interpreter::errors::mex(
+                    "DynamicWorkspaceCompile",
+                    "pending closure's original captures are absent from the stack",
+                ));
+            }
+            let (live_frame, live_names, assigned) =
+                crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "DynamicWorkspaceUnavailable",
+                        "pending closure lost its issuing workspace frame",
+                    )
+                })?;
+            if live_frame != compiled.issuing_frame {
+                return Err(crate::interpreter::errors::mex(
+                    "DynamicWorkspaceCompile",
+                    "pending closure changed workspace frame after source selection",
+                ));
+            }
+            let mut values = Vec::with_capacity(compiled.captures.len());
+            for capture in &compiled.captures {
+                let crate::call::builtins::SelectedClosureCapture::AssignedWorkspace { name, slot } =
+                    capture
+                else {
+                    continue;
+                };
+                if live_names.get(name) != Some(slot) || !assigned.contains(name) {
+                    return Err(crate::interpreter::errors::mex(
+                        "DynamicWorkspaceCompile",
+                        "pending closure workspace capture changed after source selection",
+                    ));
+                }
+                values.push(
+                    crate::runtime::workspace::workspace_lookup(name).ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "DynamicWorkspaceCompile",
+                            "pending closure workspace capture is no longer assigned",
+                        )
+                    })?,
+                );
+            }
+            Some(
+                runmat_runtime::execution::RootedValues::new(values)
+                    .map_err(|error| error.into_runtime_error())?,
+            )
+        };
+        let admitted = port.host().admit_pending_closure(
+            crate::interpreter::dynamic_admission::PendingClosureAdmissionRequest {
+                runtime: &runtime,
+                source: &plan.source,
+                caller_source: plan.caller_source,
+                product: compiled.product,
+                compile_inherited: &plan.inherited,
+                executing: meta.function_registry,
+                local_function: pending_function.local_id,
+                execution_function: *function,
+                expected_issuing_owner: &pending_function.execution_owner,
+                expected_source: pending_function.execution_source,
+                siblings: &pending_function.siblings,
+            },
+        )?;
+        if admitted.binding.function != function.0 {
+            return Err(crate::interpreter::errors::mex(
+                "DynamicWorkspaceCompile",
+                "pending closure selected a different execution identity",
+            ));
+        }
+        if let Some(captures) = additional_captures {
+            let _stack_roots = runmat_runtime::execution::RootedValueLease::for_values(
+                state.stack[state.stack.len() - *capture_count..].iter(),
+            )
+            .map_err(|error| error.into_runtime_error())?;
+            let mut originals = Vec::with_capacity(*capture_count);
+            for _ in 0..*capture_count {
+                originals.push(crate::interpreter::stack::pop_value(state.stack)?);
+            }
+            originals.reverse();
+            let mut originals = originals.into_iter().map(Some).collect::<Vec<_>>();
+            captures.with_owned_values(|captures| -> Result<(), RuntimeError> {
+                let mut added = captures.into_iter();
+                let mut ordered = Vec::with_capacity(compiled.captures.len());
+                for source in &compiled.captures {
+                    let next = match source {
+                        crate::call::builtins::SelectedClosureCapture::Original(index) => {
+                            originals.get_mut(*index).and_then(Option::take)
+                        }
+                        crate::call::builtins::SelectedClosureCapture::AssignedWorkspace {
+                            ..
+                        } => added.next(),
+                    }
+                    .ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "DynamicWorkspaceCompile",
+                            "pending closure capture plan lost a selected value",
+                        )
+                    })?;
+                    ordered.push(next);
+                }
+                if originals.iter().any(Option::is_some) || added.next().is_some() {
+                    return Err(crate::interpreter::errors::mex(
+                        "DynamicWorkspaceCompile",
+                        "pending closure capture plan left an issuing value unbound",
+                    ));
+                }
+                crate::call::closures::create_selected_semantic_closure_with_captures(
+                    state.stack,
+                    admitted.binding,
+                    display_name.clone(),
+                    admitted.source_file,
+                    ordered,
+                    *source_role,
+                    lexical_environment,
+                );
+                Ok(())
+            })?;
+        } else {
+            crate::call::closures::create_selected_semantic_closure(
+                state.stack,
+                admitted.binding,
+                display_name.clone(),
+                admitted.source_file,
+                *capture_count,
+                *source_role,
+                lexical_environment,
+            )?;
+        }
+        drop(admitted.publication);
+    } else {
+        handle_create_semantic_closure(
+            state.stack,
+            *function,
+            display_name.clone(),
+            *capture_count,
+            *source_role,
+            lexical_environment,
+        )?;
+    }
+    Ok(Some(DispatchHandled::Generic(
+        DispatchDecision::FallThrough,
+    )))
+}
+
+async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
+    use runmat_runtime::user_functions::{
+        DynamicFunctionLoadPhase, RuntimeNameCandidate, RuntimeNameFilter, RuntimeNameQuery,
+        RuntimeNameRoute,
+    };
+
+    let (name, external) = match meta.instr {
+        Instr::CreateFunctionHandle(name) => (name, false),
+        Instr::CreateExternalFunctionHandle(name) => (name, true),
+        _ => unreachable!("name-handle route requires a name-handle opcode"),
+    };
+    let runtime = state.context.runtime.clone();
+    let selected = runtime
+        .clone()
+        .scope(async {
+            let observed = runmat_runtime::user_functions::observe_runtime_name(
+                name,
+                RuntimeNameQuery {
+                    route: RuntimeNameRoute::NamedFeval,
+                    filter: RuntimeNameFilter::Any,
+                    all: false,
+                },
+            )
+            .await
+            .map_err(|error| {
+                runmat_runtime::build_runtime_error(error.to_string())
+                    .with_identifier("RunMat:SelectedHandle:NameResolution")
+                    .build()
+            })?;
+            let phase = match observed.selected() {
+                Some(RuntimeNameCandidate::RegisteredConstructor(class)) => {
+                    Some(DynamicFunctionLoadPhase::Handle {
+                        class: Some(class.clone()),
+                        selected_source: None,
+                    })
+                }
+                Some(RuntimeNameCandidate::Source(file))
+                | Some(RuntimeNameCandidate::ClassFile(file)) => {
+                    Some(DynamicFunctionLoadPhase::Handle {
+                        class: None,
+                        selected_source: Some(file.clone()),
+                    })
+                }
+                _ => None,
+            };
+            let Some(phase) = phase else {
+                return Ok(None);
+            };
+            let selected = runmat_runtime::user_functions::try_load_and_call_dynamic_function(
+                name.clone(),
+                Vec::new(),
+                1,
+                phase,
+                None,
+            )
+            .await;
+            if runtime.search_path().map(|path| path.generation())
+                != observed.captured_path_revision
+                || runmat_runtime::class_registry::class_registry_generation()
+                    != observed.captured_class_revision
+            {
+                return Err(runmat_runtime::build_runtime_error(
+                    "name selection changed while creating a bound handle",
+                )
+                .with_identifier("RunMat:SelectedHandle:SelectionChanged")
+                .build());
+            }
+            Ok(selected)
+        })
+        .await?;
+    if let Some(result) = selected {
+        let rooted = result?;
+        rooted.with_owned(|sequence| {
+            let mut values = sequence.into_values();
+            if values.len() != 1 || !matches!(values.first(), Some(Value::BoundFunctionHandle(_))) {
+                return Err(runmat_runtime::build_runtime_error(
+                    "selected source did not return one exact bound handle",
+                )
+                .with_identifier("RunMat:SelectedHandle:InvalidOutput")
+                .build());
+            }
+            state
+                .stack
+                .push(values.pop().expect("one checked selected handle"));
+            Ok(())
+        })?;
+    } else if external {
+        state
+            .stack
+            .push(Value::external_function_handle(name.clone()));
+    } else {
+        state.stack.push(Value::function_handle(name.clone()));
+    }
+    Ok(Some(DispatchHandled::Generic(
+        DispatchDecision::FallThrough,
+    )))
 }
 
 // Keep construction of each concrete async family outside the exhaustive
@@ -355,9 +671,10 @@ async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) ->
                 row_lengths,
                 elements,
             )?;
-            state
-                .stack
-                .push(runmat_runtime::create_matrix_from_values(&rows).await?);
+            let _rows_roots = crate::call::root_values(rows.iter().flatten())?;
+            runmat_runtime::create_matrix_from_values(&rows)
+                .await?
+                .with_owned(|value| state.stack.push(value));
         }
         Instr::CreateMatrixDynamic(num_rows) => {
             create_matrix_dynamic(state.stack, *num_rows, |rows_data| async move {

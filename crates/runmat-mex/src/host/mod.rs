@@ -17,9 +17,10 @@ pub use async_request::MexAsyncThreadBound;
 pub use async_request::{
     MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle,
 };
-pub use boundary::{DirectMexBoundaryHostServices, MexBoundaryHostServices};
+pub use boundary::{DirectMexBoundaryHostServices, MexBoundaryHostServices, MxBoundaryCodec};
 pub use service_slot::ConcurrentMexBoundaryHostServices;
 pub(crate) use service_slot::{BoundaryServiceSlot, LocalBoundaryServiceGuard};
 pub use services::{
-    MexCancellationScope, MexEngineCompletion, MexHostServices, UnavailableMexHostServices,
+    MexCallOutput, MexCancellationScope, MexEngineCompletion, MexHostServices,
+    UnavailableMexHostServices,
 };

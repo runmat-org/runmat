@@ -3,7 +3,66 @@ use super::resources::{
     browser_accelerators, browser_execution_host_inventory, browser_inventory, browser_request,
 };
 use runmat_execution::security::ExecutionTrustTier;
-use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
+use runmat_execution_artifact::{
+    ProgramExecutionRequest, ProgramExecutionResponse, WorkerProgramRequest,
+};
+
+pub(super) async fn execute_local_worker_program(
+    request: WorkerProgramRequest,
+) -> ProgramExecutionResponse {
+    match request {
+        WorkerProgramRequest::Direct(request) => execute_local_program(request).await,
+        WorkerProgramRequest::Graph(request) => {
+            if let Err(message) = validate_browser_graph_admission(&request) {
+                return ProgramExecutionResponse::Failure { message };
+            }
+            runmat_vm::execute_graph_request(request).await
+        }
+    }
+}
+
+fn validate_browser_graph_admission(
+    request: &runmat_execution_artifact::GraphExecutionRequest,
+) -> Result<(), String> {
+    request
+        .validate()
+        .map_err(|error| format!("browser host rejected invalid graph artifact: {error}"))?;
+    let host_requirement = request
+        .execution_host_requirement([ExecutionTrustTier::CustomerTrusted].into_iter().collect())
+        .map_err(|error| format!("browser host rejected invalid graph contract: {error}"))?;
+    let accelerators = browser_accelerators()
+        .map_err(|error| format!("browser accelerator inventory is unavailable: {error}"))?;
+    let host = browser_execution_host_inventory(&accelerators)
+        .map_err(|error| format!("browser host inventory is unavailable: {error}"))?;
+    host_requirement.is_satisfied_by(&host).map_err(|error| {
+        format!("browser host rejected unavailable graph capabilities: {error}")
+    })?;
+    let mut resources = browser_request(
+        BrowserExecutionCapabilities::default(),
+        request.recipe.accelerators.clone(),
+    );
+    let wire_bytes = serde_json::to_vec(request)
+        .map_err(|error| format!("browser graph request cannot be encoded: {error}"))?;
+    resources.memory_bytes = request
+        .input_allocation_floor_bytes(wire_bytes.len())
+        .map_err(|error| format!("browser graph demand is invalid: {error}"))?;
+    resources.scratch_bytes = u64::try_from(wire_bytes.len())
+        .map_err(|_| "browser graph wire length exceeds u64".to_string())?
+        .max(1024 * 1024);
+    request
+        .recipe
+        .validate_resource_request(&resources)
+        .map_err(|error| format!("browser graph resources are unavailable: {error}"))?;
+    let inventory = browser_inventory(BrowserExecutionCapabilities::default(), accelerators);
+    if !runmat_execution_runner::scheduler::fits(
+        &inventory,
+        &runmat_execution_runner::scheduler::ResourceAllocation::default(),
+        &resources,
+    ) {
+        return Err("browser graph resources are unavailable".into());
+    }
+    Ok(())
+}
 
 pub(crate) async fn execute_local_program(
     request: ProgramExecutionRequest,

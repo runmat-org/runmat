@@ -151,6 +151,7 @@ fn object_overload_uses_inherited_remapped_method_metadata() {
             access: MemberAccess::Public,
             function_name: format!("OverIdx.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}"),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {

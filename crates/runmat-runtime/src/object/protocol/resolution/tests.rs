@@ -22,6 +22,7 @@ fn method(name: &str, access: MemberAccess, is_static: bool) -> RuntimeMethod {
         access,
         function_name: format!("protocol_fixture.{name}"),
         implicit_class_argument: None,
+        role: runmat_types::ClassMethodRole::Ordinary,
     }
 }
 
@@ -53,7 +54,7 @@ fn resolves_inherited_protocol_to_a_typed_callable_once() {
     );
     register(child.clone(), Some(parent.clone()), []);
     let base = Value::Object(ObjectInstance::new(child.clone()));
-    let ProtocolResolution::Method(resolved) = resolve_object_protocol(
+    let Some(resolved) = resolve_object_protocol(
         &base,
         ObjectProtocol::Subsref,
         &ObjectAccessContext::default(),
@@ -82,7 +83,7 @@ fn missing_protocol_selects_default_indexing() {
             &ObjectAccessContext::default(),
         )
         .unwrap(),
-        ProtocolResolution::DefaultIndexing
+        None
     );
 }
 
@@ -120,6 +121,7 @@ fn method_frame_context_requires_the_exact_current_binding() {
         declaring_class: class.clone(),
         method: method_name,
         is_static: false,
+        role: runmat_types::ClassMethodRole::Ordinary,
     };
     let context = ObjectAccessContext::from_method_frame(Some(&owner), &bound.callable)
         .expect("matching frame");
@@ -150,7 +152,7 @@ fn resolution_stamp_ignores_unrelated_registration_but_rejects_redefinition() {
         [method("subsref", MemberAccess::Public, false)],
     );
     let base = Value::Object(ObjectInstance::new(class.clone()));
-    let ProtocolResolution::Method(resolved) = resolve_object_protocol(
+    let Some(resolved) = resolve_object_protocol(
         &base,
         ObjectProtocol::Subsref,
         &ObjectAccessContext::default(),
@@ -183,13 +185,14 @@ fn active_inherited_binding_bypasses_only_that_exact_protocol_method() {
         declaring_class: parent,
         method: MethodName::from("subsref"),
         is_static: false,
+        role: runmat_types::ClassMethodRole::Ordinary,
     };
     let access = ObjectAccessContext::from_method_frame(Some(&owner), &parent_bound.callable)
         .expect("active parent frame");
     let child_value = Value::Object(ObjectInstance::new(child.clone()));
     assert_eq!(
         resolve_object_protocol(&child_value, ObjectProtocol::Subsref, &access).unwrap(),
-        ProtocolResolution::DefaultIndexing
+        None
     );
 
     register(
@@ -197,7 +200,7 @@ fn active_inherited_binding_bypasses_only_that_exact_protocol_method() {
         Some(owner.declaring_class.clone()),
         [method("subsref", MemberAccess::Public, false)],
     );
-    let ProtocolResolution::Method(override_method) =
+    let Some(override_method) =
         resolve_object_protocol(&child_value, ObjectProtocol::Subsref, &access).unwrap()
     else {
         panic!("a distinct subclass override must not inherit the active-method exemption");
@@ -220,10 +223,11 @@ fn protected_access_distinguishes_subclass_and_external_callers() {
         caller_class: Some(child),
         ..ObjectAccessContext::default()
     };
-    assert!(matches!(
-        resolve_object_protocol(&base, ObjectProtocol::Subsref, &subclass_access).unwrap(),
-        ProtocolResolution::Method(_)
-    ));
+    assert!(
+        resolve_object_protocol(&base, ObjectProtocol::Subsref, &subclass_access)
+            .unwrap()
+            .is_some()
+    );
     let error = resolve_object_protocol(
         &base,
         ObjectProtocol::Subsref,
@@ -247,6 +251,7 @@ fn active_protocol_frame_rejects_redefinition_before_dispatch() {
         declaring_class: class.clone(),
         method: MethodName::from("subsref"),
         is_static: false,
+        role: runmat_types::ClassMethodRole::Ordinary,
     };
     let access = ObjectAccessContext::from_method_frame(Some(&owner), &bound.callable)
         .expect("active method frame");

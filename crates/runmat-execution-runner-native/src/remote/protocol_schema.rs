@@ -35,4 +35,11 @@ mod tests {
         assert!(error.contains("unsupported remote worker protocol 4; expected 5"));
         assert!(error.contains("rebuild or upgrade"));
     }
+
+    #[test]
+    fn v5_remains_the_remote_wire_version() {
+        assert_eq!(REMOTE_WORKER_PROTOCOL_V5, 5);
+        let frozen = br#"{"schemaVersion":5,"command":{"kind":"drain"}}"#;
+        admit_remote_worker_bytes(frozen).unwrap();
+    }
 }

@@ -107,6 +107,7 @@ macro_rules! define_relational_entry {
             runmat_types::EffectKind::MayThrow,
         ];
         pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity { name: $name },
             category: "logical/rel",

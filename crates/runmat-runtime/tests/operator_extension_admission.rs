@@ -50,5 +50,5 @@ fn core_operator_extensions_reject_before_semantic_dispatch_in_matlab_mode() {
     );
     let xor = futures::executor::block_on(call_builtin_async_with_outputs("xor", &args, 1))
         .expect("character xor belongs to the supported strict subset");
-    assert!(matches!(xor, Value::Bool(true)));
+    assert!(matches!(xor.value(), Value::Bool(true)));
 }

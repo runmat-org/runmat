@@ -55,6 +55,10 @@ impl ExpansionRoots {
         })
     }
     pub(crate) fn retain_values(&self, values: &[Value]) {
+        self.retain_iter(values.iter());
+    }
+
+    pub(crate) fn retain_iter<'a>(&self, values: impl IntoIterator<Item = &'a Value>) {
         let mut handles = self.handles.borrow_mut();
         for value in values {
             value.trace(&mut *handles);
@@ -66,23 +70,29 @@ impl ExpansionRoots {
             match argument {
                 MaterializedArgument::Single(value) => value.trace(&mut *handles),
                 MaterializedArgument::Sequence(sequence) => sequence.trace(&mut *handles),
-                MaterializedArgument::Expansion(source) => match source {
-                    MaterializedExpansionSource::CellContents { base, indices, .. } => {
-                        base.trace(&mut *handles);
-                        for index in indices {
-                            index.trace(&mut *handles);
-                        }
-                    }
-                    MaterializedExpansionSource::ReturnedOutputs(sequence) => {
-                        sequence.trace(&mut *handles)
-                    }
-                    MaterializedExpansionSource::Member { base, .. } => base.trace(&mut *handles),
-                    MaterializedExpansionSource::DynamicMember { base, member } => {
-                        base.trace(&mut *handles);
-                        member.trace(&mut *handles);
-                    }
-                },
+                MaterializedArgument::Expansion(source) => trace_source(source, &mut handles),
             }
+        }
+    }
+
+    pub(super) fn retain_source(&self, source: &MaterializedExpansionSource) {
+        trace_source(source, &mut self.handles.borrow_mut());
+    }
+}
+
+fn trace_source(source: &MaterializedExpansionSource, handles: &mut Handles) {
+    match source {
+        MaterializedExpansionSource::CellContents { base, indices, .. } => {
+            base.trace(handles);
+            for index in indices {
+                index.trace(handles);
+            }
+        }
+        MaterializedExpansionSource::ReturnedOutputs(sequence) => sequence.trace(handles),
+        MaterializedExpansionSource::Member { base, .. } => base.trace(handles),
+        MaterializedExpansionSource::DynamicMember { base, member } => {
+            base.trace(handles);
+            member.trace(handles);
         }
     }
 }

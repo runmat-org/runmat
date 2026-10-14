@@ -907,7 +907,10 @@ mod tests {
         block_on(optimoptions_builtin(rest))
     }
 
-    fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+    fn run_call_builtin(
+        name: &str,
+        args: &[Value],
+    ) -> BuiltinResult<crate::execution::RootedValue> {
         block_on(call_builtin_async(name, args))
     }
 
@@ -1546,8 +1549,8 @@ mod tests {
             ],
         )
         .expect("fminbnd");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-4),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-4),
             other => panic!("unexpected fminbnd result {other:?}"),
         }
     }
@@ -1571,8 +1574,8 @@ mod tests {
             ],
         )
         .expect("fzero");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-6),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-6),
             other => panic!("unexpected fzero result {other:?}"),
         }
     }
@@ -1597,8 +1600,8 @@ mod tests {
             ],
         )
         .expect("fsolve");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-6),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-6),
             other => panic!("unexpected fsolve result {other:?}"),
         }
     }

@@ -86,7 +86,7 @@ async fn object_path_cardinality_with_context(
         crate::object::protocol::ObjectProtocol::NumArgumentsFromSubscript,
         access,
     )?;
-    if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
+    if let Some(method) = resolution {
         let arguments = vec![target.clone(), descriptor.clone(), context];
         let value = match runtime {
             Some(runtime) => {
@@ -100,8 +100,10 @@ async fn object_path_cardinality_with_context(
                     .await?
             }
         };
+        let value =
+            value.try_map_owned(require_single_sequence, |error| error.into_runtime_error())?;
         return Ok(PreparedObjectAssignmentCardinality {
-            count: exact_output_count(&require_single_sequence(value)?)?,
+            count: exact_output_count(value.value())?,
             method: Some(method),
         });
     }

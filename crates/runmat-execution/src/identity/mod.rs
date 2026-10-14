@@ -1,9 +1,11 @@
 mod digest;
+mod foreign_policy;
 mod function;
 mod program;
 mod typed;
 
 pub use digest::{Digest, DigestStream};
+pub use foreign_policy::ForeignPolicyRef;
 pub use function::FunctionBindingOrigin;
 pub use program::{
     DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,

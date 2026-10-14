@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use runmat_execution_artifact::LogicalObject;
+use runmat_execution_artifact::{LogicalObject, PrivateArtifactRoot};
 use runmat_python::{PythonArtifactBundle, PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -19,7 +19,7 @@ pub(crate) struct MaterializedPythonBundle {
 
 pub(crate) fn discover(
     objects: &[LogicalObject],
-    root: &Path,
+    root: &mut PrivateArtifactRoot,
 ) -> NativeExecutionResult<MaterializedPythonBundle> {
     let mut matches = objects
         .iter()
@@ -38,16 +38,15 @@ pub(crate) fn discover(
     let bundle = PythonArtifactBundle::from_canonical_bytes(&object.bytes).map_err(protocol)?;
     let mut artifacts = Vec::with_capacity(bundle.artifacts.len());
     for artifact in &bundle.artifacts {
+        let relative = format!(
+            "python-wheels/{}/{}",
+            artifact.logical_name, artifact.filename
+        );
         let path = root
-            .join("python-wheels")
-            .join(&artifact.logical_name)
-            .join(&artifact.filename);
-        let parent = path
-            .parent()
-            .ok_or_else(|| protocol("Python wheel has no materialization parent"))?;
-        std::fs::create_dir_all(parent).map_err(protocol)?;
-        super::make_private(parent)?;
-        super::write_exact(&path, &artifact.bytes)?;
+            .write_verified(&relative, &artifact.bytes)
+            .map_err(protocol)?
+            .as_path()
+            .to_path_buf();
         artifacts.push(MaterializedPythonArtifact {
             logical_name: artifact.logical_name.clone(),
             module: artifact.module.clone(),

@@ -38,7 +38,7 @@ struct PreparedGuard {
 impl BuiltinPreparationObservation for PreparedGuard {
     fn finish(
         self: Box<Self>,
-        body: &Result<Value, crate::RuntimeError>,
+        body: Result<&Value, &crate::RuntimeError>,
     ) -> Result<(), crate::RuntimeError> {
         let Self {
             right,
@@ -89,12 +89,7 @@ impl RuntimeAccelerationService for AdmittedService {
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, crate::RuntimeError>> {
         self.prepared.set(self.prepared.get() + 1);
         let right = request.take_prepared_completion_right();
-        let mut operands = request.into_operands();
-        if self.fail_body {
-            // Admission used the original numeric argument. This service
-            // fault forces the actual prepared body to return an error.
-            operands[0] = Value::String("body fixture invalid operand".into());
-        }
+        let fail_body = self.fail_body;
         let guard = right.map(|right| {
             Box::new(PreparedGuard {
                 right,
@@ -102,7 +97,16 @@ impl RuntimeAccelerationService for AdmittedService {
                 fail_cleanup: self.fail_cleanup,
             }) as Box<dyn BuiltinPreparationObservation>
         });
-        Box::pin(async move { Ok(PreparedBuiltinOperands::new(operands, guard)) })
+        Box::pin(async move {
+            request.into_operands().with_owned_values(|mut operands| {
+                if fail_body {
+                    // Admission used the original numeric argument. This service
+                    // fault forces the actual prepared body to return an error.
+                    operands[0] = Value::String("body fixture invalid operand".into());
+                }
+                PreparedBuiltinOperands::new(operands, guard)
+            })
+        })
     }
 }
 
@@ -216,7 +220,7 @@ fn call_outer_route(
     runtime: &RuntimeContext,
     binding: RuntimeBuiltinBinding,
     route: usize,
-) -> Result<ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     let args = arguments();
     let name = binding.identity.builtin.name;
     match route {

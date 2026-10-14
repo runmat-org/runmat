@@ -195,6 +195,7 @@ mod tests {
             access,
             function_name: format!("{name}_impl"),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         }
     }
 

@@ -123,6 +123,6 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
         1,
     ))
     .expect("captured text");
-    assert!(matches!(value, Value::String(text) if text.contains("Dataset: /A")));
+    assert!(matches!(value.value(), Value::String(text) if text.contains("Dataset: /A")));
     assert!(quiet.finish().is_empty(), "captured display must be silent");
 }

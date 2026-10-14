@@ -25,7 +25,10 @@ fn floating_tensor(values: Vec<f64>, shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(values, shape.to_vec()).expect("floating tensor"))
 }
 
-fn call(name: &str, args: Vec<Value>) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn call(
+    name: &str,
+    args: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async(name, &args)).map_err(Box::new)
 }
 
@@ -320,7 +323,7 @@ fn documented_random_size_controls_accept_all_eight_integer_classes() {
         ] {
             let value =
                 call(name, args).unwrap_or_else(|error| panic!("{name}/{size:?}: {error:?}"));
-            let Value::Tensor(tensor) = value else {
+            let Value::Tensor(tensor) = value.value() else {
                 panic!("{name}/{size:?}: expected tensor");
             };
             if name == "randperm" {
@@ -336,7 +339,8 @@ fn documented_random_size_controls_accept_all_eight_integer_classes() {
 #[test]
 fn rectpuls_uses_left_closed_right_open_edges() {
     let values = floating_tensor(vec![-0.5, 0.0, 0.5], &[1, 3]);
-    let Value::Tensor(output) = call("rectpuls", vec![values]).expect("rectpuls") else {
+    let output = call("rectpuls", vec![values]).expect("rectpuls");
+    let Value::Tensor(output) = output.value() else {
         panic!("expected tensor");
     };
     assert_eq!(output.materialize_f64(), vec![1.0, 1.0, 0.0]);
@@ -347,9 +351,9 @@ fn randsample_preserves_exact_wide_integer_population_values() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let base = 9_007_199_254_740_992_u64;
     let population = integer_tensor(IntegerStorage::U64(vec![base, base + 1]), &[1, 2]);
-    let Value::Tensor(output) =
-        call("randsample", vec![population, Value::Num(2.0)]).expect("wide integer population")
-    else {
+    let output =
+        call("randsample", vec![population, Value::Num(2.0)]).expect("wide integer population");
+    let Value::Tensor(output) = output.value() else {
         panic!("expected integer tensor");
     };
     assert_eq!(output.shape(), &[1, 2]);

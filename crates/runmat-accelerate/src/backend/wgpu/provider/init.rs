@@ -184,7 +184,6 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
 
         let adapter_info = adapter.get_info();
-        #[cfg(not(target_arch = "wasm32"))]
         let adapter_features = adapter.features();
         let forced_precision = std::env::var("RUNMAT_WGPU_FORCE_PRECISION")
             .ok()
@@ -248,10 +247,19 @@ impl WgpuProvider {
             _ => ReductionTwoPassMode::Auto,
         };
 
+        let optional_timestamp_features =
+            if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+                adapter_features
+                    & (wgpu::Features::TIMESTAMP_QUERY
+                        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+            } else {
+                wgpu::Features::empty()
+            };
         #[cfg(not(target_arch = "wasm32"))]
-        let required_features = native_required_features(precision, adapter_features);
+        let required_features =
+            native_required_features(precision, adapter_features) | optional_timestamp_features;
         #[cfg(target_arch = "wasm32")]
-        let required_features = wgpu::Features::empty();
+        let required_features = optional_timestamp_features;
         let limits = adapter.limits();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -277,12 +285,34 @@ impl WgpuProvider {
             )
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
-        let access = runmat_accelerate_api::WgpuDeviceAccess::new(device_raw, queue_raw);
+        let timestamp_period_ns = queue_raw.get_timestamp_period();
+        let (access, emission_authority) =
+            runmat_accelerate_api::WgpuDeviceAccess::new_profiled(device_raw, queue_raw);
         #[cfg(target_arch = "wasm32")]
-        access.with_shared(|emission| install_device_error_handlers(emission.device()))?;
+        access.with_profiled_shared(&emission_authority, |emission| {
+            install_device_error_handlers(emission.device())
+        })?;
         let adapter = Arc::new(adapter);
-        let satisfied_limits = access.with_shared(|emission| emission.device().limits())?;
-        let enabled_features = access.with_shared(|emission| emission.device().features())?;
+        let satisfied_limits = access
+            .with_profiled_shared(&emission_authority, |emission| emission.device().limits())?;
+        let enabled_features = access
+            .with_profiled_shared(&emission_authority, |emission| emission.device().features())?;
+        let timestamp_capability = enabled_features
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+            .then(|| {
+                crate::backend::wgpu::dispatch::observation::TimestampCapability::new(
+                    timestamp_period_ns,
+                    enabled_features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
+                )
+            })
+            .flatten();
+        let observation_limit =
+            std::num::NonZeroU32::new(64).expect("nonzero provider observation safety limit");
+        // The same optional byte admission also covers browser direct-work
+        // completion fences when timestamp queries are unavailable.
+        let query_requested_byte_limit = u64::from(observation_limit.get())
+            .checked_mul(crate::backend::wgpu::dispatch::observation::MAX_QUERY_REQUESTED_BYTES)
+            .ok_or_else(|| anyhow!("WGPU observation byte bound overflow"))?;
 
         let workgroup_config = WorkgroupConfig::new(
             &satisfied_limits,
@@ -458,13 +488,13 @@ impl WgpuProvider {
         ));
         allocations.set_reduction_reuse(OwnerShared::downgrade(&reduction_reuse))?;
         #[cfg(not(target_arch = "wasm32"))]
-        let observation_stopped = access.with_shared(|emission| {
+        let observation_stopped = access.with_profiled_shared(&emission_authority, |emission| {
             install_device_error_handlers(emission.device(), &allocations)
         })?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_progress = super::observation_progress::NativeObservationProgress::start(
             access.clone(),
-            std::num::NonZeroU32::new(64).expect("nonzero observation mailbox bound"),
+            observation_limit,
             observation_stopped,
         )
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
@@ -473,10 +503,12 @@ impl WgpuProvider {
         Ok(Self {
             instance,
             access,
+            emission_authority,
             adapter,
             adapter_info,
             adapter_limits: satisfied_limits,
             enabled_features,
+            timestamp_capability,
             workgroup_config,
             linear_launch,
             global_reduce_launch,
@@ -488,9 +520,9 @@ impl WgpuProvider {
             #[cfg(not(target_arch = "wasm32"))]
             observation_progress,
             observation_budget: Arc::new(
-                runmat_accelerate_api::observation::ProviderObservationBudget::new(
-                    std::num::NonZeroU32::new(64)
-                        .expect("nonzero provider observation safety limit"),
+                runmat_accelerate_api::observation::ProviderObservationBudget::with_wgpu_query_bytes(
+                    observation_limit,
+                    query_requested_byte_limit,
                 ),
             ),
             cache_device_id,

@@ -67,6 +67,10 @@ fn read_guard_rejects_unowned_address() {
             gc_read_value(&handle),
             Err(GcError::InvalidPointer(_))
         ));
+        assert!(matches!(
+            gc_add_root(handle),
+            Err(GcError::InvalidPointer(_))
+        ));
 
         unsafe {
             drop(Box::from_raw(raw));
@@ -194,13 +198,14 @@ fn root_traversal_scans_nested_trace_variants() {
             enabled: true,
             valid: true,
         });
-        let closure = Value::Closure(Closure {
-            function_name: "callback".into(),
-            binding: None,
-            source_role: Default::default(),
-            source_file: None,
-            captures: vec![Value::OutputList(vec![handle, listener])],
-        });
+        let closure = Value::Closure(Closure::new(
+            "callback".into(),
+            None,
+            Default::default(),
+            None,
+            vec![Value::OutputList(vec![handle, listener])],
+            None,
+        ));
 
         let mut object = ObjectInstance::new("Owner".to_string());
         object.properties.insert("capture".to_string(), closure);
@@ -251,5 +256,7 @@ fn stale_survivor_handle_is_rejected_after_unrooted_collection() {
             gc_clone_value(&handle),
             Err(GcError::InvalidPointer(_))
         ));
+        assert!(matches!(gc_root(handle), Err(GcError::InvalidPointer(_))));
+        gc_collect_major().expect("invalid root admission must not poison collection");
     });
 }

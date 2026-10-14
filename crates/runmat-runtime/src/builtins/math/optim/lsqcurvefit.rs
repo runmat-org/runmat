@@ -784,8 +784,11 @@ impl LeastSquaresEvaluator for CurveFitEvaluator {
         Box::pin(async move {
             let arg = x_value(x, &self.x_shape, self.x_scalar)?;
             let value = call_function(&self.function, vec![arg, self.xdata.clone()]).await?;
-            let model =
-                real_array_checked("model output", value, &INTEGER_CALLBACK_EXTENSION).await?;
+            let model = value
+                .with_owned_async(|value| {
+                    real_array_checked("model output", value, &INTEGER_CALLBACK_EXTENSION)
+                })
+                .await?;
             if model.shape != self.ydata.shape {
                 return Err(lsq_error_with_detail(
                     &ERROR_INVALID_INPUT,
@@ -1143,7 +1146,11 @@ mod tests {
                     xdata.numeric_value_at(0),
                     Some(runmat_value::NumericScalar::U64(value)) if value == expected
                 ));
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(0.0)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        0.0,
+                    ))
+                })
             },
         )));
         let xdata = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
@@ -1168,7 +1175,11 @@ mod tests {
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|function, _args, _requested_outputs| {
                     assert_eq!(function, 904);
-                    Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(0.0)) })
+                    Box::pin(async move {
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Num(0.0),
+                        )
+                    })
                 }),
             ));
             let values = [0.0];
@@ -1238,8 +1249,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         xdata.iter().map(|x| p[0] * x + p[1]).collect::<Vec<_>>(),
                         vec![1, xdata.len()],
                     ))
@@ -1279,8 +1290,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         xdata
                             .iter()
                             .map(|x| p[0] * (-p[1] * x).exp())
@@ -1327,8 +1338,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         xdata.iter().map(|x| p[0] * x).collect::<Vec<_>>(),
                         vec![1, xdata.len()],
                     ))
@@ -1366,8 +1377,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         xdata.iter().map(|x| p[0] * x + p[1]).collect(),
                         vec![1, xdata.len()],
                     ))
@@ -1425,8 +1436,8 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
                         xdata.iter().map(|x| p * x).collect::<Vec<_>>(),
                         vec![1, xdata.len()],
                     ))
@@ -1472,9 +1483,11 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(p[0] + p[1])) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        p[0] + p[1],
+                    ))
+                })
             },
         )));
         let result = block_on(runtime.scope(lsqcurvefit_builtin(
@@ -1500,8 +1513,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, _args, _requested_outputs| {
                 assert_eq!(function, 6);
-                crate::sequence::single_value_future(async move {
-                    Ok(tensor(vec![1.0, 2.0], vec![1, 2]))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                        vec![1.0, 2.0],
+                        vec![1, 2],
+                    ))
                 })
             },
         )));

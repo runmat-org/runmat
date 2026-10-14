@@ -3,6 +3,7 @@
 use crate::context::{
     RuntimeContext, RuntimeHttpService, RuntimeServiceFuture, RuntimeServicePorts,
 };
+use crate::execution::RootedValueSequence;
 use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
     RuntimeExecutionServices,
@@ -14,7 +15,7 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::{StringArray, Value, ValueSequence};
+use runmat_value::{StringArray, Value};
 use std::cell::Cell;
 use std::future::Future;
 use std::io::Write;
@@ -117,7 +118,7 @@ impl RuntimeExecutionServices for TurnService {
     fn complete_future(
         &self,
         _: &FutureHandle,
-        _: Result<ValueSequence, ExecutionServiceError>,
+        _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -173,7 +174,11 @@ struct ReadyHttpService {
 }
 
 impl RuntimeHttpService for ReadyHttpService {
-    fn send(&self, _: HttpRequest) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
+    fn send(
+        &self,
+        _: RuntimeContext,
+        _: HttpRequest,
+    ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         self.sends.set(self.sends.get() + 1);
         let body = self.body.clone();
         Box::pin(async move {
@@ -195,7 +200,7 @@ fn call<'a>(
     runtime: &'a RuntimeContext,
     name: &'a str,
     args: &'a [Value],
-) -> impl Future<Output = crate::BuiltinResult<Value>> + 'a {
+) -> impl Future<Output = crate::BuiltinResult<crate::execution::RootedValue>> + 'a {
     crate::call_builtin_async_with_outputs_in_context(runtime, name, args, 1)
 }
 

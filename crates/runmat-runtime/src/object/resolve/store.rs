@@ -7,7 +7,7 @@ pub async fn store_member<OnWrite>(
     allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
@@ -31,7 +31,7 @@ pub async fn store_member_in_context<OnWrite>(
     allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
@@ -55,7 +55,7 @@ pub(super) async fn store_member_with_context<OnWrite>(
     allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
@@ -82,17 +82,19 @@ async fn store_member_in_scope<OnWrite>(
     allow_init: bool,
     caller_function_name: Option<&str>,
     mut on_write: OnWrite,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
+    let _inputs_root = RootedValueLease::for_values([&base, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     match base {
         Value::Object(obj) => {
             let base = Value::Object(obj.clone());
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
             );
-            if let crate::object::protocol::ProtocolResolution::Method(method) =
+            if let Some(method) =
                 crate::object::protocol::resolve_object_protocol(
                     &base,
                     crate::object::protocol::ObjectProtocol::Subsasgn,
@@ -143,7 +145,8 @@ where
                     ));
                 }
                 crate::class_registry::set_static_property_value_in_owner(&owner, &field, rhs)?;
-                Ok(Value::ClassRef(cls))
+                RootedValue::new(Value::ClassRef(cls))
+                    .map_err(|error| error.into_runtime_error())
             } else {
                 Err(format!("Unknown property '{}' on class {}", field, cls).into())
             }
@@ -156,7 +159,7 @@ where
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
             );
-            if let crate::object::protocol::ProtocolResolution::Method(method) =
+            if let Some(method) =
                 crate::object::protocol::resolve_object_protocol(
                     &base,
                     crate::object::protocol::ObjectProtocol::Subsasgn,
@@ -194,7 +197,7 @@ where
         Value::Num(0.0) if allow_init => {
             let mut st = StructValue::new();
             st.fields.insert(field, rhs);
-            Ok(Value::Struct(st))
+            RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
         }
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
@@ -215,7 +218,7 @@ where
                 on_write(oldv, &rhs);
             }
             st.fields.insert(field, rhs);
-            Ok(Value::Struct(st))
+            RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
         }
         Value::StructArray(_) => Err(mex(
             "RunMat:CommaSeparatedListAssignmentArity",
@@ -233,7 +236,7 @@ pub async fn store_member_dynamic<OnWrite>(
     allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {

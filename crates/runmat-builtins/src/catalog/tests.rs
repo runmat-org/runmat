@@ -52,6 +52,7 @@ const PILOT_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaratio
     availability: BuiltinBindingAvailability::Required,
 }];
 const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: PILOT_ID,
     category: "test",
@@ -86,11 +87,23 @@ const SECOND_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclarati
     availability: BuiltinBindingAvailability::Required,
 }];
 const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: SECOND_ID,
     bindings: &SECOND_BINDINGS,
     ..PILOT
 };
+
+const FIXTURE_PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: BuiltinCatalogAudience::Fixture,
+    ..PILOT
+};
+
+const FIXTURE_ALIAS: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+    "fixturePilotAlias",
+    "pilot",
+    BuiltinCatalogProvenance::new(file!(), module_path!()),
+);
 const PILOT_ALIAS: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
     "pilotAlias",
     "pilot",
@@ -145,6 +158,7 @@ const INCOMPLETE_CANONICAL_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     ..BuiltinDocumentation::EMPTY
 };
 const INCOMPLETE_CANONICAL: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "incompleteCanonical",
@@ -193,6 +207,33 @@ fn typed_aliases_validate_and_change_the_catalog_fingerprint() {
         canonical_catalog_fingerprint(&[&PILOT], &[&RELOCATED]).unwrap(),
         "source provenance is migration evidence, not execution semantics",
     );
+}
+
+#[test]
+fn fixture_audience_is_fingerprinted_and_cannot_acquire_a_public_alias() {
+    assert_ne!(
+        canonical_catalog_fingerprint(&[&PILOT], &[]).unwrap(),
+        canonical_catalog_fingerprint(&[&FIXTURE_PILOT], &[]).unwrap(),
+    );
+    let errors = validate_builtin_catalog_with_aliases(&[&FIXTURE_PILOT], &[&FIXTURE_ALIAS]);
+    assert!(errors
+        .iter()
+        .any(|error| { error.message == "public builtin alias cannot target a fixture identity" }));
+}
+
+#[test]
+fn executable_fixture_is_excluded_only_from_public_catalog_projection() {
+    let fixture =
+        builtin_catalog_entry_by_name("OverIdx.subsref").expect("canonical executable fixture");
+    assert_eq!(fixture.audience, BuiltinCatalogAudience::Fixture);
+    assert_eq!(
+        fixture.descriptor.completion_policy,
+        BuiltinCompletionPolicy::MethodOnly
+    );
+    assert!(public_builtin_catalog_entry_by_name("OverIdx.subsref").is_none());
+    assert!(public_builtin_catalog_entries()
+        .iter()
+        .all(|entry| entry.audience == BuiltinCatalogAudience::Public));
 }
 
 #[test]

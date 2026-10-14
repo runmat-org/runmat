@@ -168,6 +168,7 @@ const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
         purity,
     } = definition;
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category,

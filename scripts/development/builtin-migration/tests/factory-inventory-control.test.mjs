@@ -264,8 +264,8 @@ test("baseline prepare evidence and subject gate evidence retain distinct proven
 test("inventory rejects absent, future, or tampered compiled semantic authority", () => {
   const repository = repositoryFixture();
   assert.throws(() => buildInventory(repository, undefined, { revision: REVISION }), /requires a compiled migration inventory/);
-  const future = compiledInventoryFixture(); future.schema_version = 4;
-  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: future }), /schema_version 3/);
+  const future = compiledInventoryFixture(); future.schema_version = 5;
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: future }), /schema_version 4/);
   const tampered = compiledInventoryFixture(); tampered.snapshot.observed.runtime_bindings[0].variant = "changed";
   assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: tampered }), /digest mismatch/);
   const collision = compiledInventoryFixture(); collision.snapshot.declared.legacy_documentation.push({ name: "Foo", category: null, summary: null, keywords: null, errors: null, related: null, introduced: null, status: null, examples: null });

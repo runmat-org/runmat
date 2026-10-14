@@ -23,7 +23,7 @@ pub fn noop_then_poll(emission: &WgpuEmission<'_>, pipeline: &wgpu::ComputePipel
 pub(crate) fn submit(
     emission: &WgpuEmission<'_>,
     pending: &mut PendingSubmissions,
-    enc: wgpu::CommandEncoder,
+    enc: impl super::observation::SubmissionEncoder,
 ) -> anyhow::Result<wgpu::SubmissionIndex> {
     let submission = pending.submit(emission, enc)?;
     pending.request_legacy_poll(submission.clone());

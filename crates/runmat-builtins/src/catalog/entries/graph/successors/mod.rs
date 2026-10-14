@@ -8,6 +8,7 @@ pub use contract::SUCCESSORS_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&SUCCESSORS_CATALOG_ENTRY];
 
 pub const SUCCESSORS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "successors" },
     category: "graph",

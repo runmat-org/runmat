@@ -231,7 +231,7 @@ mod tests {
         tensor.materialize_f64().clone()
     }
 
-    fn assign_numerator(model: Value, numerator: Value) -> Value {
+    fn assign_numerator(model: Value, numerator: Value) -> crate::execution::RootedValue {
         block_on(crate::object::resolve::store_member(
             model,
             "Numerator".into(),
@@ -339,8 +339,8 @@ mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let mutated = assign_numerator(model(1.0), wide.clone());
             for result in [
-                block_on(tf_plus(mutated.clone(), Value::Num(1.0))),
-                block_on(tf_plus(Value::Num(1.0), mutated)),
+                block_on(tf_plus(mutated.value().clone(), Value::Num(1.0))),
+                mutated.with_owned(|mutated| block_on(tf_plus(Value::Num(1.0), mutated))),
             ] {
                 let error = result.expect_err("model coefficient cannot round as a scalar gain");
                 assert_eq!(error.identifier(), Some("RunMat:tf:InvalidCoefficients"));
@@ -357,7 +357,9 @@ mod tests {
             );
             assert_eq!(
                 coefficients(
-                    &block_on(tf_plus(exact, Value::Num(0.0))).unwrap(),
+                    &exact
+                        .with_owned(|exact| block_on(tf_plus(exact, Value::Num(0.0))))
+                        .unwrap(),
                     "Numerator"
                 ),
                 vec![9_007_199_254_740_992.0],
@@ -365,7 +367,9 @@ mod tests {
         }
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let mutated = assign_numerator(model(1.0), wide);
-        let error = block_on(tf_plus(mutated, Value::Num(1.0))).unwrap_err();
+        let error = mutated
+            .with_owned(|mutated| block_on(tf_plus(mutated, Value::Num(1.0))))
+            .unwrap_err();
         assert_eq!(
             error.identifier(),
             INTEGER_COEFFICIENT_EXTENSION.error_identifier

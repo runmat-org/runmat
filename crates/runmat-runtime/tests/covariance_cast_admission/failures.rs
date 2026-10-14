@@ -56,14 +56,14 @@ fn certified_widening_refusal_adapts_only_the_produced_f32_covariance() {
         1,
     ))
     .unwrap();
-    let output = match result {
-        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+    let output = match result.value() {
+        Value::OutputList(values) if values.len() == 1 => &values[0],
         value => value,
     };
     let Value::GpuTensor(output) = output else {
         panic!("covariance should restore the selected F64 result class");
     };
-    assert_eq!(handle_precision(&output), Some(ProviderPrecision::F64));
+    assert_eq!(handle_precision(output), Some(ProviderPrecision::F64));
     assert_eq!(output.shape(), &[2, 2]);
     assert!(!output.shares_allocation_with(&original.handle));
     assert_eq!(provider.covariance_calls.load(Ordering::SeqCst), 1);
@@ -71,10 +71,10 @@ fn certified_widening_refusal_adapts_only_the_produced_f32_covariance() {
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     assert_eq!(provider.input_downloads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
-    let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+    let downloaded = block_on(provider.download_numeric(output)).unwrap();
     assert_eq!(downloaded.shape, vec![2, 2]);
     assert_eq!(downloaded.data, HostNumericDataOwned::F64(vec![0.5; 4]));
-    drop(output);
+    drop(result);
     let outputs = provider.outputs.lock().unwrap();
     assert!(!outputs.is_empty());
     assert!(outputs.iter().all(|probe| probe.retirements() == 1));

@@ -459,7 +459,7 @@ fn builtin_dimensional_demand_skips_only_unrequested_index_adaptation() {
                 count,
             ))
             .unwrap();
-            let Value::OutputList(outputs) = output else {
+            let Value::OutputList(outputs) = output.value() else {
                 panic!("explicit output-count result")
             };
             assert_eq!(outputs.len(), count);
@@ -481,7 +481,7 @@ fn builtin_dimensional_demand_skips_only_unrequested_index_adaptation() {
                     Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 3]).unwrap())
                 );
             }
-            drop(outputs);
+            drop(output);
             for (id, probe) in provider.records.lock().unwrap().iter() {
                 assert_eq!(
                     probe.retirements(),

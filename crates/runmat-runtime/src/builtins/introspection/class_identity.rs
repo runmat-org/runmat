@@ -36,7 +36,7 @@ pub(crate) fn class_identity_for_value(value: &Value) -> ClassIdentity {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => standard::FUNCTION_HANDLE.owned(),
         Value::HandleObject(handle) => handle.class_name.clone(),
         Value::Listener(_) => standard::EVENT_LISTENER.owned(),

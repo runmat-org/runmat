@@ -204,7 +204,7 @@ fn inverse_range_all_nan_is_inconclusive_not_complex_evidence() {
             1,
         ))
         .unwrap();
-        let Value::GpuTensor(output) = &result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("{name}: explicit input must retain residency");
         };
         assert!(runmat_accelerate_api::handle_is_explicit(output));
@@ -241,7 +241,7 @@ fn inverse_range_complex_policy_is_independent_of_probe_support_and_respects_pro
                 if automatic {
                     let output = result.unwrap();
                     assert!(matches!(
-                        output,
+                        output.value(),
                         Value::Complex(_, _) | Value::ComplexTensor(_)
                     ));
                     let expected = block_on(crate::dispatcher::call_builtin_async_with_outputs(

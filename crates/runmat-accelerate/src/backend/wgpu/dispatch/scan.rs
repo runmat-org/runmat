@@ -14,11 +14,12 @@ pub(crate) fn run(
     if groups_x == 0 {
         return Ok(());
     }
-    let mut encoder = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut encoder = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some(encoder_label),
-        });
+        },
+    );
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(pass_label),

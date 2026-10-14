@@ -1,7 +1,8 @@
 use runmat_builtins::{
     builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
-    validate_builtin_catalog, validate_builtin_documentation, BuiltinConstantCatalogEntry,
-    BuiltinDocumentation, BuiltinDocumentationAuthority, BuiltinDocumentationLinkTarget,
+    public_builtin_catalog_entries, validate_builtin_catalog, validate_builtin_documentation,
+    BuiltinCatalogAudience, BuiltinConstantCatalogEntry, BuiltinDocumentation,
+    BuiltinDocumentationAuthority, BuiltinDocumentationLinkTarget,
 };
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -61,7 +62,19 @@ fn build_export(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let mut legacy = read_legacy_documents(legacy_directory)?;
     let legacy_sidecar_count = legacy.len();
-    let mut catalog_entries = builtin_catalog_entries().to_vec();
+    for entry in builtin_catalog_entries()
+        .iter()
+        .filter(|entry| entry.audience == BuiltinCatalogAudience::Fixture)
+    {
+        if legacy.contains_key(&entry.identity.name.to_ascii_lowercase()) {
+            return Err(format!(
+                "fixture {} must not have a public legacy documentation sidecar",
+                entry.identity.name
+            )
+            .into());
+        }
+    }
+    let mut catalog_entries = public_builtin_catalog_entries().to_vec();
     catalog_entries.sort_by(|left, right| {
         left.identity
             .name
@@ -469,6 +482,7 @@ mod tests {
         let entry = BuiltinConstantCatalogEntry {
             name: "pi",
             kind: BuiltinConstantKind::RealDouble,
+            literal: None,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             documentation: Some(DOCUMENTATION),
         };
@@ -500,7 +514,7 @@ mod tests {
             .expect("legacy documents")
             .into_keys()
             .chain(
-                builtin_catalog_entries()
+                public_builtin_catalog_entries()
                     .iter()
                     .filter(|entry| {
                         entry.documentation.authority == BuiltinDocumentationAuthority::Catalog
@@ -521,6 +535,12 @@ mod tests {
             "the transition must preserve the complete current documentation inventory"
         );
         assert_eq!(first["schema_version"], EXPORT_SCHEMA_VERSION);
+        assert!(first["builtins"]
+            .as_array()
+            .expect("documentation rows")
+            .iter()
+            .all(|document| document["key"] != "overidx.subsref"
+                && document["key"] != "overidx.subsasgn"));
         for document in first["builtins"]
             .as_array()
             .expect("documentation export rows")

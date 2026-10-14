@@ -54,17 +54,21 @@ fn excessive_requested_outputs_fail_before_callback_evaluation() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
         std::sync::Arc::new(move |_function, _args, _requested_outputs| {
             observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            crate::sequence::single_value_future(async { Ok(Value::Num(0.0)) })
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
+            })
         }),
     ));
     let error = block_on(fminbnd_builtin(
-        Value::BoundFunctionHandle {
-            name: "unobserved".into(),
-            function: 7_710,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(7_710),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        },
+        Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "unobserved".into(),
+                function: 7_710,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(7_710),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        )),
         Value::Num(0.0),
         Value::Num(5.0),
         Vec::new(),

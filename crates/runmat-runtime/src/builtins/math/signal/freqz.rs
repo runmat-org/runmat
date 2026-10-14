@@ -17,10 +17,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    SIGNAL_WORK_CHUNK, SignalCooperation, parse_nonnegative_integer, parse_scalar_f64,
-    value_to_complex_vector,
+    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector, SignalCooperation,
+    SIGNAL_WORK_CHUNK,
 };
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[cfg(feature = "plot-core")]
 use runmat_builtins::FREQZ_ERROR_PLOT;
@@ -404,7 +404,7 @@ async fn polynomial_in_z_inverse(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{REQUIRED_DEFAULT_BINDING, builtin_function_by_name};
+    use runmat_builtins::{builtin_function_by_name, REQUIRED_DEFAULT_BINDING};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn call(b: Value, a: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
@@ -430,19 +430,15 @@ mod tests {
             builtin.binding_identity(&builtin.bindings[0])
         );
         let descriptor = builtin.descriptor;
-        assert!(
-            descriptor
-                .signatures
-                .iter()
-                .any(|sig| sig.label == "[H, w] = freqz(b, a, n, fs)")
-        );
+        assert!(descriptor
+            .signatures
+            .iter()
+            .any(|sig| sig.label == "[H, w] = freqz(b, a, n, fs)"));
         assert_eq!(builtin.integer_capabilities.len(), 3);
-        assert!(
-            builtin
-                .extensions
-                .iter()
-                .any(|extension| extension.id == "freqz-resident-input")
-        );
+        assert!(builtin
+            .extensions
+            .iter()
+            .any(|extension| extension.id == "freqz-resident-input"));
     }
 
     #[test]
@@ -574,8 +570,8 @@ mod tests {
             lock_plot_test_registry, reset_plot_state,
         };
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-        use runmat_execution::CancellationReason;
         use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
         use std::num::NonZeroU64;
         use std::rc::Rc;
 
@@ -614,11 +610,9 @@ mod tests {
         assert_eq!(current_figure_handle(), figure);
         let after = capture_figure_persistence_snapshot(&[figure], 1, 1024 * 1024)
             .expect("unchanged fixture snapshot");
-        assert!(
-            before.entries[0]
-                .scene_lease
-                .shares_lease(&after.entries[0].scene_lease)
-        );
+        assert!(before.entries[0]
+            .scene_lease
+            .shares_lease(&after.entries[0].scene_lease));
         assert_eq!(clone_figure(figure).expect("retained figure").len(), 2);
         reset_plot_state();
         assert!(clone_figure(current_figure_handle()).is_none());

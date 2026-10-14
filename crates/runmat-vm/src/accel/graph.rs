@@ -1445,7 +1445,7 @@ mod tests {
                 runmat_runtime::dispatcher::call_builtin_async("single", &[Value::Num(source)]),
             )
             .expect("ordinary single binding");
-            assert_eq!(output.constant.as_ref(), Some(&ordinary));
+            assert_eq!(output.constant.as_ref(), Some(ordinary.value()));
         }
 
         for instructions in [

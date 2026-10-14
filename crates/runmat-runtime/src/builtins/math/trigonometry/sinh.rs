@@ -16,6 +16,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
@@ -77,9 +79,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "sinh",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
-async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn sinh_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -97,9 +102,13 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     super::inverse_helpers::preparation::unary(
+        runtime.as_ref(),
         runmat_builtins::SINH_CATALOG_ENTRY.identity,
         value,
-        sinh_admitted,
+        |value| async move {
+            let output = sinh_admitted(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
 }
@@ -215,7 +224,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
 
     fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
-        block_on(super::sinh_builtin(value))
+        block_on(super::sinh_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[test]
@@ -252,28 +261,32 @@ pub(crate) mod tests {
     #[test]
     fn sinh_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::sinh_builtin(Value::Int(IntValue::I8(1))))
+        let integer = block_on(super::sinh_builtin(None, Value::Int(IntValue::I8(1))))
+            .map(|owned| owned.value().clone())
             .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             SINH_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::sinh_builtin(Value::Bool(true)))
+        let logical = block_on(super::sinh_builtin(None, Value::Bool(true)))
+            .map(|owned| owned.value().clone())
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             SINH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::sinh_builtin(Value::CharArray(chars)))
+        let character = block_on(super::sinh_builtin(None, Value::CharArray(chars)))
+            .map(|owned| owned.value().clone())
             .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             SINH_CHARACTER_INPUT_EXTENSION.error_identifier
         );
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity =
-            block_on(super::sinh_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        let arity = block_on(super::sinh_builtin(None, Value::Num(0.0)))
+            .map(|owned| owned.value().clone())
+            .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), SINH_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 

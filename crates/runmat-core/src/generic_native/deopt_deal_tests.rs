@@ -98,9 +98,19 @@ fn deal_outputs_keep_wide_aliases_and_pre_safepoint_effects_on_vm_resume() {
                             target,
                             runmat_runtime::native::NativeResumeKind::INTERPRETER
                         );
-                        break super::resume_interpreter(&unit, frame, 4, runtime.clone())
-                            .await
-                            .expect("resume exact VM frame");
+                        let environment = invocation
+                            .deoptimized_lexical_environment()
+                            .expect("retain exact deoptimized activation");
+                        break super::resume_interpreter(
+                            &unit,
+                            frame,
+                            4,
+                            runtime.clone(),
+                            environment,
+                            None,
+                        )
+                        .await
+                        .expect("resume exact VM frame");
                     }
                 }
             }

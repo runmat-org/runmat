@@ -1,9 +1,9 @@
 //! One canonical CPU/provider candidate set for a local placement decision.
 //! Each physical record is normalized before a single service plan call.
 use super::{
-    LocalPlacementFeedback, LocalPlacementOutcome, PlacementPolicy, RejectedCpuFeedbackRequest,
-    TotalCandidateObservationContract, observation_revision, observation_semantic_identity,
-    rejected_cpu_feedback, session_facts, signature, transfer_prior_ns,
+    observation_revision, observation_semantic_identity, rejected_cpu_feedback, session_facts,
+    signature, transfer_prior_ns, LocalPlacementFeedback, LocalPlacementOutcome, PlacementPolicy,
+    RejectedCpuFeedbackRequest, TotalCandidateObservationContract,
 };
 use crate::placement::{select_candidate, summarize_values, tensor_representation};
 use runmat_accelerate_api::{
@@ -75,7 +75,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
 mod decision;
 mod graph;
 mod inputs;
-use graph::{Admitted, candidate_name, candidate_resource, cpu_resource};
+use graph::{candidate_name, candidate_resource, cpu_resource, Admitted};
 
 pub(crate) fn plan_local_multi(
     provider: &dyn AccelProvider,

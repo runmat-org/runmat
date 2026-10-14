@@ -56,6 +56,7 @@ impl ProgramArtifact {
             },
             capabilities,
             interop,
+            additional_units: Vec::new(),
             execution_stack,
             permitted_trust_tiers,
         };

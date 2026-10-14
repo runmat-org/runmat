@@ -14,9 +14,7 @@ impl WgpuProvider {
             size,
             label,
         )?;
-        emission
-            .queue()
-            .write_buffer(buffer.as_ref(), 0, bytes_of(data));
+        emission.write_buffer(buffer.as_ref(), 0, bytes_of(data));
         Ok(buffer)
     }
 
@@ -35,9 +33,7 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             },
         ));
-        emission
-            .queue()
-            .write_buffer(buffer.as_ref(), 0, bytes_of(data));
+        emission.write_buffer(buffer.as_ref(), 0, bytes_of(data));
         Ok(buffer)
     }
 
@@ -64,12 +60,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-fft-debug-copy"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-fft-debug-copy"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(buffer.as_ref(), 0, &staging, 0, size_bytes);
                 self.submit(emission, pending, encoder)?;
                 Ok(staging)
@@ -170,9 +166,7 @@ impl WgpuProvider {
                     tw.push(angle.cos());
                     tw.push(angle.sin());
                 }
-                emission
-                    .queue()
-                    .write_buffer(twiddle.as_ref(), 0, cast_slice(&tw));
+                emission.write_buffer(twiddle.as_ref(), 0, cast_slice(&tw));
             }
             NumericPrecision::F32 => {
                 let mut tw = Vec::with_capacity(twiddle_scalar_len);
@@ -181,9 +175,7 @@ impl WgpuProvider {
                     tw.push(angle.cos() as f32);
                     tw.push(angle.sin() as f32);
                 }
-                emission
-                    .queue()
-                    .write_buffer(twiddle.as_ref(), 0, cast_slice(&tw));
+                emission.write_buffer(twiddle.as_ref(), 0, cast_slice(&tw));
             }
         }
 

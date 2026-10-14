@@ -5,6 +5,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::errors::FloatingConversion;
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::{BuiltinResult, RuntimeError};
 
 mod specs;
@@ -29,10 +31,15 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 #[runtime_builtin(
     name = "single",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::floating_conversions::single"
 )]
-async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch::execute(value, rest).await
+async fn single_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    dispatch::execute(runtime.as_ref(), value, rest).await
 }
 
 mod dispatch;

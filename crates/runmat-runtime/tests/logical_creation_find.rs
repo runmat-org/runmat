@@ -104,18 +104,18 @@ fn logical_constructors_use_owned_u8_without_numeric_relabeling() {
             1,
         ))
         .unwrap();
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("resident logical output")
         };
         assert_eq!(output.shape(), &[2, 3]);
         assert_eq!(output.physical().element_type(), NumericElementType::U8);
-        assert!(handle_is_logical(&output));
+        assert!(handle_is_logical(output));
         assert!(!output.shares_allocation_with(&prototype));
         assert_eq!(output.device_id(), provider.device_id());
         let retired = output.allocation_lease().downgrade();
-        let host = block_on(provider.inner.download_numeric(&output)).unwrap();
+        let host = block_on(provider.inner.download_numeric(output)).unwrap();
         assert!(matches!(host.data, HostNumericDataOwned::U8(data) if data == vec![bit;6]));
-        drop(output);
+        drop(result);
         assert!(retired.acquire().is_none());
         assert!(borrowed.acquire().is_some());
     }
@@ -164,31 +164,32 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
         );
         match mode {
             Mode::Supported => {
-                let Value::OutputList(mut outputs) = result.unwrap() else {
+                let result = result.unwrap();
+                let Value::OutputList(outputs) = result.value() else {
                     panic!("three outputs")
                 };
                 assert_eq!(outputs.len(), 3);
-                let Value::GpuTensor(output) = outputs.pop().unwrap() else {
+                let Value::GpuTensor(output) = &outputs[2] else {
                     panic!("resident selected values")
                 };
                 assert_eq!(output.physical().element_type(), NumericElementType::U8);
                 assert_eq!(output.shape(), &[2, 1]);
-                assert!(handle_is_logical(&output));
+                assert!(handle_is_logical(output));
                 assert_eq!(
-                    handle_provenance(&output),
+                    handle_provenance(output),
                     Some(GpuHandleProvenance::Automatic)
                 );
                 assert_eq!(output.device_id(), owner.device_id());
                 assert!(!output.shares_allocation_with(&input));
                 let retired = output.allocation_lease().downgrade();
-                let host = block_on(owner.inner.download_numeric(&output)).unwrap();
+                let host = block_on(owner.inner.download_numeric(output)).unwrap();
                 assert!(matches!(host.data, HostNumericDataOwned::U8(data) if data == vec![1,1]));
-                drop(output);
+                drop(result);
                 assert!(retired.acquire().is_none());
             }
             Mode::Unsupported => {
                 assert!(matches!(
-                    result.unwrap(),
+                    result.unwrap().value(),
                     Value::OutputList(outputs)
                         if outputs.len() == 3
                             && matches!(&outputs[0], Value::Tensor(t) if t.as_f64_slice() == Some(&[1.0, 2.0][..]) && t.shape() == [2, 1])
@@ -291,7 +292,7 @@ fn automatic_logical_find_retains_host_values_only_for_certified_unsupported() {
         3,
     ))
     .unwrap();
-    let Value::OutputList(outputs) = output else {
+    let Value::OutputList(outputs) = output.value() else {
         panic!("three outputs")
     };
     assert!(

@@ -1,5 +1,6 @@
 use super::*;
 use runmat_accelerate_api::RealPowerOperand;
+use runmat_value::Tensor;
 
 fn power_receipt(evidence: FusionAdmissionEvidence) -> FusionPowerArithmeticReceipt {
     let Some(FusionArithmeticEvidence::RealPower(receipt)) = evidence.arithmetic else {

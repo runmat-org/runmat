@@ -12,7 +12,7 @@ fn arrayfun_text_callable_and_host_scalar_expansion_are_mode_gated() {
             ARRAYFUN_TEXT_CALLABLE_EXTENSION.error_identifier
         );
         let error = call(
-            Value::FunctionHandle("atan2".to_string()),
+            Value::FunctionHandle("atan2".into()),
             vec![input.clone(), Value::Num(1.0)],
         )
         .expect_err("host scalar expansion must reject in compatible mode");
@@ -25,7 +25,7 @@ fn arrayfun_text_callable_and_host_scalar_expansion_are_mode_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert!(call(Value::from("sin"), vec![input.clone()]).is_ok());
         assert!(call(
-            Value::FunctionHandle("atan2".to_string()),
+            Value::FunctionHandle("atan2".into()),
             vec![input, Value::Num(1.0)],
         )
         .is_ok());

@@ -58,7 +58,7 @@ fn bsxfun_gt_collects_logical_outputs() {
     let column = Tensor::new(vec![8.0, 17.0, 20.0, 24.0], vec![4, 1]).unwrap();
     let row = Tensor::new(vec![0.0, 10.0, 21.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::FunctionHandle("gt".to_string()),
+        Value::FunctionHandle("gt".into()),
         Value::Tensor(column),
         Value::Tensor(row),
     )
@@ -76,7 +76,7 @@ fn bsxfun_gt_collects_logical_outputs() {
 fn bsxfun_handles_complex_callback_results() {
     let left = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -1.0)], vec![2, 1]).unwrap();
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::ComplexTensor(left),
         Value::Num(10.0),
     )
@@ -121,7 +121,7 @@ fn bsxfun_rejects_typed_complex_integer_inputs_before_callback_dispatch() {
     .expect("tensor");
 
     let err = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::ComplexTensor(complex),
         Value::Num(1.0),
     )
@@ -135,7 +135,7 @@ fn bsxfun_empty_logical_callback_preserves_logical_type() {
     let empty = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
     let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::FunctionHandle("gt".to_string()),
+        Value::FunctionHandle("gt".into()),
         Value::Tensor(empty),
         Value::Tensor(row),
     )

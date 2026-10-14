@@ -124,13 +124,13 @@ fn arrayfun_preserves_every_integer_input_and_uniform_output_class() {
         ),
     ] {
         let result = call(
-            Value::FunctionHandle(callback.to_string()),
+            Value::function_handle(callback.to_string()),
             vec![Value::Tensor(
                 Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer input"),
             )],
         )
         .expect("arrayfun integer identity cast");
-        let Value::Tensor(result) = result else {
+        let Value::Tensor(result) = result.value() else {
             panic!("expected typed integer tensor");
         };
         assert_eq!(result.integer_storage(), Some(&storage));

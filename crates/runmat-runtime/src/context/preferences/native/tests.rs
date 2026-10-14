@@ -2,6 +2,7 @@ use super::*;
 use crate::context::UserPathSetting;
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
+use runmat_execution::profiling::{CommandProfilingRoot, DeferredWorkCounts};
 use runmat_value::{HandleRef, IntValue};
 use std::future::Future;
 use std::io::BufRead;
@@ -26,6 +27,32 @@ fn driver() -> tokio::runtime::Runtime {
         .enable_all()
         .build()
         .expect("isolated test driver")
+}
+
+#[test]
+fn native_service_admits_actual_blocking_attempts_from_call_origin() {
+    let directory = tempfile::tempdir().unwrap();
+    let driver = driver();
+    let service = NativePreferenceService::new(
+        directory.path().join("application.json"),
+        driver.handle().clone(),
+    )
+    .unwrap();
+    let command = CommandProfilingRoot::new();
+    let call = service.set_many(
+        runtime().with_command_profiling(command.receipt()),
+        "app".into(),
+        vec![("name".into(), Value::Num(3.0))],
+    );
+    block_on(call).unwrap();
+    assert_eq!(
+        command.seal().deferred_work,
+        Some(DeferredWorkCounts {
+            admitted: 2, // one lock attempt and one owning transaction worker
+            completed: 2,
+            ..DeferredWorkCounts::default()
+        })
+    );
 }
 
 #[test]

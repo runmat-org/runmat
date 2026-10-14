@@ -82,7 +82,7 @@ impl RuntimePlacementService for SelectedRoute {
     fn invalidate(&self, _: PlacementInvalidation) {}
 }
 
-fn network() -> Value {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -195,7 +195,7 @@ impl AccelProvider for RacingReluProvider {
     }
 }
 
-fn relu_network() -> Value {
+fn relu_network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let relu = block_on(relu_layer_builtin(vec![])).unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
@@ -209,7 +209,7 @@ fn publication_completes_one_selected_host_observation() {
     let service = Rc::new(SelectedRoute::default());
     let runtime = runtime(service.clone());
     let network = network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
@@ -246,8 +246,9 @@ fn publication_completes_one_selected_host_observation() {
 fn registered_predict_uses_explicit_context_and_output_count_for_placement() {
     let service = Rc::new(SelectedRoute::default());
     let runtime = runtime(service.clone());
+    let network_owner = network();
     let args = [
-        network(),
+        network_owner.value().clone(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
     ];
     let bindings = crate::builtin::runtime_builtin_bindings_by_name("predict");
@@ -305,7 +306,7 @@ fn abandoning_unpublished_result_releases_without_failure_feedback() {
     let service = Rc::new(SelectedRoute::default());
     let runtime = runtime(service.clone());
     let network = network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
@@ -329,7 +330,7 @@ fn cancellation_before_presentation_abandons_without_success_feedback() {
     let runtime = runtime(service.clone()).with_cancellation_token(cancellation.token());
     runtime.set_error_namespace("PublicationInvocation");
     let network = network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let ((error, source_nodes), recorded_nodes) =
@@ -381,7 +382,7 @@ fn uncancelled_annotated_network_publishes_tape_node() {
     let service = Rc::new(SelectedRoute::default());
     let runtime = runtime(service.clone());
     let network = network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let ((output, source_nodes, input_node, output_node), recorded_nodes) =
@@ -433,7 +434,7 @@ fn classified_operational_failure_is_observed_despite_later_cancellation() {
     let cancellation = runmat_execution::cancellation::CancellationSource::new();
     let runtime = runtime(service.clone()).with_cancellation_token(cancellation.token());
     let network = network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
@@ -474,7 +475,7 @@ fn selected_provider_failure_is_observed_when_cancellation_races_the_stage() {
     });
     let runtime = runtime(service.clone()).with_cancellation_token(provider.cancellation.token());
     let network = relu_network();
-    let Value::Object(object) = &network else {
+    let Value::Object(object) = network.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(Tensor::new(vec![1.0, -2.0], vec![1, 2]).unwrap());

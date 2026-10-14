@@ -168,6 +168,8 @@ impl ObjectArrayAdmission {
                 class_name: self.class_name,
                 data,
                 shape: self.shape,
+                selected_provenance: Vec::new(),
+                unselected_provenance: false,
             },
         })
     }
@@ -202,6 +204,13 @@ fn validate_value(
         .is_some_and(|kind| kind != element_kind)
     {
         return Err("object array cannot mix value-object and handle-object storage".into());
+    }
+    if let Value::Object(object) = value {
+        if let Some(facts) = object.selected_class() {
+            if facts.class() != class_name {
+                return Err("object-array selected element differs from its class".into());
+            }
+        }
     }
     Ok(())
 }

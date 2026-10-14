@@ -314,9 +314,9 @@ fn selector_from_value(value: &Value) -> BuiltinResult<PlotSelector> {
     let text = match value {
         Value::String(text) => text.clone(),
         Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect::<String>(),
-        Value::FunctionHandle(name) => name.clone(),
-        Value::ExternalFunctionHandle(name) => name.clone(),
-        Value::MethodFunctionHandle(name) => name.clone(),
+        Value::FunctionHandle(name) => name.name().to_owned(),
+        Value::ExternalFunctionHandle(name) => name.name().to_owned(),
+        Value::MethodFunctionHandle(name) => name.name().to_owned(),
         _ => {
             return Err(invalid(
                 "plotting function must be a function handle or function name",

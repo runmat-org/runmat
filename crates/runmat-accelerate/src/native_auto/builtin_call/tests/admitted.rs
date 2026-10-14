@@ -60,10 +60,12 @@ fn runtime_owned_conversion_like_form_never_enters_native_placement_or_feedback(
             assert!(matches!(&prepared.args()[0], Value::Tensor(value) if value.shape() == [1, 2]));
             assert!(probe.requests.borrow().is_empty());
             let result = futures::executor::block_on(prepared.execute(|mut operands| async move {
-                Ok(operands.pop().expect("unchanged conversion data operand"))
+                Ok(rooted(
+                    operands.pop().expect("unchanged conversion data operand"),
+                ))
             }))
             .unwrap();
-            assert!(matches!(result, Value::Tensor(_)));
+            assert!(matches!(result.value(), Value::Tensor(_)));
             assert!(probe.requests.borrow().is_empty());
             assert!(probe.feedback.borrow().is_empty());
         }
@@ -164,9 +166,12 @@ fn native_integer_sum_rejected_provider_keeps_cpu_observation() {
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "sum");
     let result = futures::executor::block_on(
-        prepared.execute(|_| async { Ok(Value::Int(runmat_value::IntValue::I8(100))) }),
+        prepared.execute(|_| async { Ok(rooted(Value::Int(runmat_value::IntValue::I8(100)))) }),
     );
-    assert_eq!(result.unwrap(), Value::Int(runmat_value::IntValue::I8(100)));
+    assert_eq!(
+        result.unwrap().value(),
+        &Value::Int(runmat_value::IntValue::I8(100))
+    );
     let feedback = probe.feedback.borrow();
     assert_eq!(feedback.len(), 1);
     assert!(feedback[0].succeeded);
@@ -185,7 +190,7 @@ fn nansum_admitted_identity_and_abandonment_use_the_same_session_owner() {
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "nansum");
     assert!(probe.feedback.borrow().is_empty());
-    drop(prepared.execute(|_| async { Ok(Value::Num(4.0)) }));
+    drop(prepared.execute(|_| async { Ok(rooted(Value::Num(4.0))) }));
     assert!(probe.feedback.borrow().is_empty());
 }
 
@@ -203,7 +208,8 @@ fn admitted_sum_uses_existing_session_only_for_real_reduction_work() {
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "sum");
     assert!(probe.feedback.borrow().is_empty());
-    futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Num(4.0)) })).unwrap();
+    futures::executor::block_on(prepared.execute(|_| async { Ok(rooted(Value::Num(4.0))) }))
+        .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
 }
 
@@ -217,7 +223,8 @@ fn admitted_cpu_route_uses_existing_session_and_finishes_after_body() {
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "logical");
     assert!(probe.feedback.borrow().is_empty());
-    futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Bool(true)) })).unwrap();
+    futures::executor::block_on(prepared.execute(|_| async { Ok(rooted(Value::Bool(true))) }))
+        .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }
@@ -243,7 +250,7 @@ fn rejected_provider_uses_cpu_only_session_and_observes_actual_body_once() {
         assert!(probe.feedback.borrow().is_empty());
         let result = futures::executor::block_on(prepared.execute(|_| async move {
             if succeeds {
-                Ok(Value::Bool(true))
+                Ok(rooted(Value::Bool(true)))
             } else {
                 Err(runmat_runtime::build_runtime_error("test host failure").build())
             }
@@ -262,7 +269,7 @@ fn rejected_provider_unpolled_body_aborts_once_without_success_observation() {
     let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, ThresholdConfig::default());
     let prepared =
         super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
-    drop(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
+    drop(prepared.execute(|_| async { Ok(rooted(Value::Bool(true))) }));
     let feedback = probe.feedback.borrow();
     assert!(feedback.is_empty());
 }
@@ -280,7 +287,8 @@ fn rejected_provider_cancelled_body_never_reports_cpu_success() {
     let prepared =
         super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
     source.cancel(runmat_execution::CancellationReason::User);
-    let _ = futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
+    let _ =
+        futures::executor::block_on(prepared.execute(|_| async { Ok(rooted(Value::Bool(true))) }));
     let feedback = probe.feedback.borrow();
     assert!(feedback.is_empty());
 }
@@ -301,7 +309,7 @@ fn admitted_unpolled_future_and_panicking_body_abort_once() {
             }));
             assert!(outcome.is_err());
         } else {
-            drop(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
+            drop(prepared.execute(|_| async { Ok(rooted(Value::Bool(true))) }));
         }
         assert!(probe.feedback.borrow().is_empty());
     }

@@ -13,12 +13,64 @@ use runmat_execution::{ProviderInputStageDemand, ProviderInputStageDemands, Reso
 
 #[cfg(feature = "wgpu")]
 mod host;
+#[cfg(all(test, feature = "wgpu"))]
+mod tests;
 
 #[cfg(feature = "wgpu")]
 struct HookPlan {
     estimate: ProviderResourceEstimate,
     physical: ProviderImfilterPhysicalEvidence,
     submissions: u32,
+    compute_encoders: u32,
+}
+
+#[cfg(feature = "wgpu")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DirectSubmissionGeometry {
+    output_queue_slots: u32,
+    submissions: u32,
+    compute_encoders: u32,
+    dispatches: u32,
+}
+
+#[cfg(feature = "wgpu")]
+fn direct_submission_geometry(
+    filter_dispatches: u32,
+    kernel_readback_submissions: u32,
+    permutation: Option<crate::backend::wgpu_geometry::PermutationSubmissionGeometry>,
+) -> Option<DirectSubmissionGeometry> {
+    let permute_queue = permutation.map_or(0, |work| work.queue_submissions);
+    let permute_compute = permutation.map_or(0, |work| work.compute_encoders);
+    let permute_dispatches = permutation.map_or(0, |work| work.dispatches);
+    let output_queue_slots = filter_dispatches.checked_add(permute_queue)?;
+    Some(DirectSubmissionGeometry {
+        output_queue_slots,
+        submissions: output_queue_slots.checked_add(kernel_readback_submissions)?,
+        compute_encoders: filter_dispatches.checked_add(permute_compute)?,
+        dispatches: filter_dispatches.checked_add(permute_dispatches)?,
+    })
+}
+
+#[cfg(feature = "wgpu")]
+fn kernel_readback_stage(
+    device_id: u32,
+    kernel_len: u64,
+    prepared_kernel_bytes: u64,
+    kernel_readback_bytes: u64,
+) -> Option<ProviderInputStageDemands> {
+    let queue_slots = u32::from(kernel_len != 0);
+    // Empty native downloads allocate no staging buffer and submit nothing.
+    // The prepared kernel's persistent allocation belongs to the main peak.
+    let incremental_peak_bytes = if queue_slots == 0 {
+        0
+    } else {
+        prepared_kernel_bytes.checked_add(kernel_readback_bytes)?
+    };
+    ProviderInputStageDemands::sequential([ProviderInputStageDemand {
+        device_id,
+        incremental_peak_bytes: ResourceByteBound::Known(incremental_peak_bytes),
+        queue_slots,
+    }])
 }
 
 #[cfg(feature = "wgpu")]
@@ -199,6 +251,10 @@ pub(crate) fn observation_capability(
         requested_peak_buffer_bytes,
         clear_commands: plan.submissions,
         map_callbacks: plan.submissions,
+        wgpu_compute_query: crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+            plan.compute_encoders,
+            plan.submissions,
+        ),
     })
 }
 
@@ -302,6 +358,45 @@ fn direct_plan(
     } else {
         output_len.div_ceil(chunk_capacity)
     };
+    let permutation = if image.layout == ProviderLayout::Strided {
+        // The authenticated lazy transpose is materialized by the same
+        // permutation owner used in reshape_exec. F64 on an F32 provider
+        // copies two storage words for each logical real element.
+        let word_factor = u64::from(
+            image.element_type == ProviderElementType::F64
+                && provider.precision() == ProviderPrecision::F32,
+        ) + 1;
+        if image_shape
+            .len()
+            .checked_add(usize::from(word_factor > 1))?
+            > crate::backend::wgpu::params::PERMUTE_MAX_RANK
+        {
+            return None;
+        }
+        let storage_elements = image_len.checked_mul(word_factor)?;
+        let workgroup = provider.elementwise_geometry()?.workgroup_size;
+        Some(
+            crate::backend::wgpu_geometry::permutation_submission_geometry(
+                storage_elements,
+                workgroup,
+            )?,
+        )
+    } else {
+        None
+    };
+    let permutation_uniform_width = u64::try_from(std::mem::size_of::<
+        crate::backend::wgpu::params::PermuteParams,
+    >())
+    .ok()?;
+    let permutation_uniform_bytes = permutation.map_or(Some(0), |work| {
+        u64::from(work.dispatches).checked_mul(permutation_uniform_width)
+    })?;
+    if permutation.is_some_and(|work| work.dispatches != 0)
+        && (permutation_uniform_width > geometry.max_buffer_bytes
+            || permutation_uniform_width > geometry.max_binding_bytes)
+    {
+        return None;
+    }
     let uniform_width = if accumulation_f64 {
         std::mem::size_of::<crate::backend::wgpu::params::ImfilterParamsF64>() as u64
     } else {
@@ -332,6 +427,7 @@ fn direct_plan(
         values_bytes,
         uniform_bytes,
         lazy_image_bytes,
+        permutation_uniform_bytes,
     ]
     .into_iter()
     .try_fold(0_u64, |total, bytes| total.checked_add(bytes))?;
@@ -369,29 +465,30 @@ fn direct_plan(
     ]
     .into_iter()
     .try_fold(0_u64, |total, bytes| total.checked_add(bytes))?;
-    let readback_peak = prepared_kernel_bytes.checked_add(kernel_readback_bytes)?;
-    let input_stages = ProviderInputStageDemands::sequential([ProviderInputStageDemand {
-        device_id: provider.device_id(),
-        incremental_peak_bytes: ResourceByteBound::Known(readback_peak),
-        queue_slots: 1,
-    }])?;
-    let output_queue_slots =
-        u32::try_from(chunks.checked_add(u64::from(image.layout == ProviderLayout::Strided))?)
-            .ok()?;
-    let submissions = output_queue_slots.checked_add(1)?;
+    let kernel_readback_submissions = u32::from(kernel_len != 0);
+    let input_stages = kernel_readback_stage(
+        provider.device_id(),
+        kernel_len,
+        prepared_kernel_bytes,
+        kernel_readback_bytes,
+    )?;
+    let filter_dispatches = u32::try_from(chunks).ok()?;
+    let direct =
+        direct_submission_geometry(filter_dispatches, kernel_readback_submissions, permutation)?;
     Some(HookPlan {
         estimate: ProviderResourceEstimate {
             transient_bytes: Some(peak),
             output_bytes: Some(output_bytes),
-            dispatches: Some(submissions),
+            dispatches: Some(direct.dispatches),
         },
         physical: ProviderImfilterPhysicalEvidence {
             route: ProviderImfilterPhysicalRoute::Direct,
             host_workspace: ResourceByteBound::Known(host_workspace),
             input_stages,
-            output_queue_slots,
+            output_queue_slots: direct.output_queue_slots,
             prepared_kernel_requested_bytes: planned_kernel.then_some(prepared_kernel_bytes),
         },
-        submissions,
+        submissions: direct.submissions,
+        compute_encoders: direct.compute_encoders,
     })
 }

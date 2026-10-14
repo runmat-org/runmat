@@ -48,6 +48,8 @@ fn native_runtime_failure_keeps_original_source_and_frames() {
             function: "source_callback".into(),
             source_id: Some(3),
             span: Some((2, 5)),
+            source_owner: None,
+            diagnostic_source: None,
         }])
         .with_source(std::io::Error::other("typed source cause"))
         .build();

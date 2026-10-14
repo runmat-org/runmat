@@ -47,6 +47,7 @@ pub struct ExecutionBundleBuilder<'a, R> {
     resources: BuildResourceDeclaration,
     code_closure: CodeClosureMode,
     foreign_objects: Vec<LogicalObject>,
+    foreign_policy_objects: Vec<LogicalObject>,
     foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
@@ -80,6 +81,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             },
             code_closure: CodeClosureMode::SourceProject,
             foreign_objects: Vec::new(),
+            foreign_policy_objects: Vec::new(),
             foreign_artifact_closures: Vec::new(),
         })
     }
@@ -119,6 +121,14 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         Ok(self)
     }
 
+    /// Attach only the exact bounded opaque policy object referenced by a
+    /// recipe. The producer remains responsible for setting that descriptor.
+    pub fn with_foreign_policy_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
+        crate::object::validate_foreign_policy_object(&object)?;
+        self.foreign_policy_objects.push(object);
+        Ok(self)
+    }
+
     pub fn with_foreign_artifact_closure(
         mut self,
         closure: ForeignArtifactClosure,
@@ -155,6 +165,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             ));
         }
         let mut objects = std::mem::take(&mut self.foreign_objects);
+        objects.extend(std::mem::take(&mut self.foreign_policy_objects));
         let mut callables = Vec::new();
         let code_closure = match self.code_closure {
             CodeClosureMode::SourceProject => {

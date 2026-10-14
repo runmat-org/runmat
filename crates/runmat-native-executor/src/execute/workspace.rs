@@ -98,9 +98,22 @@ pub struct NativeWorkspaceSnapshot {
 
 struct NativeWorkspaceFrame {
     values: RefCell<BTreeMap<String, RootedWorkspaceValue>>,
+    lexical: RefCell<Option<NativeLexicalWorkspaceBindings>>,
     externally_mutated: Cell<bool>,
     canonical_revision: Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>,
     active: Cell<bool>,
+}
+
+#[derive(Clone)]
+struct NativeLexicalWorkspaceBindings {
+    environment: runmat_value::LexicalEnvironment,
+    by_name: BTreeMap<String, runmat_native_codegen::NativeLexicalBinding>,
+}
+
+#[derive(Clone, Copy)]
+enum NativeWorkspaceMutationOrigin {
+    ExecutorStore,
+    CanonicalRefresh,
 }
 
 pub(super) struct NativeWorkspaceState {
@@ -173,6 +186,7 @@ impl NativeWorkspaceState {
         Ok(Self {
             frame: Rc::new(NativeWorkspaceFrame {
                 values: RefCell::new(values),
+                lexical: RefCell::new(None),
                 externally_mutated: Cell::new(false),
                 canonical_revision: Cell::new(None),
                 active: Cell::new(true),
@@ -200,6 +214,7 @@ impl NativeWorkspaceState {
         Self {
             frame: Rc::new(NativeWorkspaceFrame {
                 values: RefCell::new(BTreeMap::new()),
+                lexical: RefCell::new(None),
                 externally_mutated: Cell::new(false),
                 canonical_revision: Cell::new(None),
                 active: Cell::new(true),
@@ -221,6 +236,46 @@ impl NativeWorkspaceState {
             publish: self.publish,
             session_variables: self.session_variables.clone(),
         })
+    }
+
+    pub(super) fn attach_lexical_bindings(
+        &self,
+        function: &runmat_native_codegen::NativeFunction,
+        environment: Option<&runmat_value::LexicalEnvironment>,
+    ) -> NativeExecutorResult<()> {
+        if function.lexical_bindings.is_empty() {
+            return Ok(());
+        }
+        let environment = environment.ok_or_else(|| {
+            NativeExecutorError::Host("native lexical workspace has no activation".into())
+        })?;
+        let mut by_name = BTreeMap::new();
+        for binding in &function.lexical_bindings {
+            let name = self
+                .local_names
+                .get(&(binding.local.0 as usize))
+                .ok_or_else(|| {
+                    NativeExecutorError::Host("native lexical binding has no workspace name".into())
+                })?;
+            if by_name.insert(name.clone(), *binding).is_some() {
+                return Err(NativeExecutorError::Host(
+                    "native lexical workspace has duplicate binding names".into(),
+                ));
+            }
+        }
+        let mut slot = self.frame.lexical.try_borrow_mut().map_err(|_| {
+            NativeExecutorError::Host("native lexical workspace is borrowed".into())
+        })?;
+        if slot.is_some() {
+            return Err(NativeExecutorError::Host(
+                "native lexical workspace was installed twice".into(),
+            ));
+        }
+        *slot = Some(NativeLexicalWorkspaceBindings {
+            environment: environment.clone(),
+            by_name,
+        });
+        Ok(())
     }
 
     pub(super) fn needs_reconciliation(&self) -> bool {
@@ -258,6 +313,56 @@ impl NativeWorkspaceState {
     }
 
     pub(super) fn synchronize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
+        self.synchronize_local_with_origin(
+            slot,
+            value,
+            NativeWorkspaceMutationOrigin::ExecutorStore,
+        )
+    }
+
+    pub(super) fn refresh_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
+        self.synchronize_local_with_origin(
+            slot,
+            value,
+            NativeWorkspaceMutationOrigin::CanonicalRefresh,
+        )
+    }
+
+    /// Mirror an observed shared-cell value into the named frame view. This
+    /// is a read, not an executor store or another canonical effect.
+    pub(super) fn observe_shared_local(
+        &self,
+        slot: usize,
+        value: Option<Value>,
+    ) -> NativeExecutorResult<()> {
+        let Some(name) = self.local_names.get(&slot) else {
+            return Ok(());
+        };
+        let rooted = value
+            .map(RootedWorkspaceValue::new)
+            .transpose()
+            .map_err(NativeExecutorError::Runtime)?;
+        let mut values = self
+            .frame
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?;
+        let previous = if let Some(rooted) = rooted {
+            values.insert(name.clone(), rooted)
+        } else {
+            values.remove(name)
+        };
+        drop(values);
+        drop(previous);
+        Ok(())
+    }
+
+    fn synchronize_local_with_origin(
+        &self,
+        slot: usize,
+        value: Value,
+        origin: NativeWorkspaceMutationOrigin,
+    ) -> NativeExecutorResult<()> {
         if let Some(name) = self.local_names.get(&slot) {
             let rooted =
                 RootedWorkspaceValue::new(value.clone()).map_err(NativeExecutorError::Runtime)?;
@@ -268,7 +373,14 @@ impl NativeWorkspaceState {
                 .map_err(workspace_borrow_error)?;
             if let Some(canonical) = self.canonical.as_ref() {
                 if self.publish && !self.global_aliases.is_bound(slot, name) {
-                    canonical.assign(name, value.clone())?;
+                    match origin {
+                        NativeWorkspaceMutationOrigin::ExecutorStore => {
+                            canonical.assign_executor_slot(slot, name, value.clone())?;
+                        }
+                        NativeWorkspaceMutationOrigin::CanonicalRefresh => {
+                            canonical.assign(name, value.clone())?;
+                        }
+                    }
                 } else {
                     canonical.ensure_mutation_authority()?;
                 }
@@ -321,6 +433,10 @@ impl Drop for NativeWorkspaceState {
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workspace/lexical_tests.rs"]
+mod lexical_tests;
 
 #[cfg(test)]
 mod gc_tests;
@@ -604,7 +720,20 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .any(|(slot, local)| local == name && self.global_aliases.is_bound(*slot, name));
         let global_value = publish_global.then(|| value.clone());
         let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
+        let shared_value = rooted.value.clone();
         let frame = self.frame()?;
+        let lexical = frame
+            .lexical
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?
+            .as_ref()
+            .and_then(|owner| {
+                owner
+                    .by_name
+                    .get(name)
+                    .copied()
+                    .map(|binding| (owner.environment.clone(), binding))
+            });
         frame
             .values
             .try_borrow_mut()
@@ -636,12 +765,21 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         }
         frame.externally_mutated.set(true);
         drop(previous);
+        if let Some((environment, binding)) = lexical {
+            publish_native_lexical_binding(&environment, binding, shared_value)
+                .map_err(|error| *error)?;
+        }
         Ok(())
     }
 
     fn clear(&self) -> Result<(), runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
         let frame = self.frame()?;
+        let lexical = frame
+            .lexical
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?
+            .clone();
         frame
             .values
             .try_borrow_mut()
@@ -661,6 +799,10 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         frame.externally_mutated.set(true);
         self.global_aliases.unbind_all();
         drop(previous);
+        if let Some(lexical) = lexical {
+            retire_native_lexical_bindings(&lexical.environment, lexical.by_name.values().copied())
+                .map_err(|error| *error)?;
+        }
         Ok(())
     }
 
@@ -682,6 +824,18 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
         let frame = self.frame()?;
+        let lexical = frame
+            .lexical
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?
+            .as_ref()
+            .and_then(|owner| {
+                owner
+                    .by_name
+                    .get(name)
+                    .copied()
+                    .map(|binding| (owner.environment.clone(), binding))
+            });
         frame
             .values
             .try_borrow_mut()
@@ -701,8 +855,61 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         frame.externally_mutated.set(true);
         self.global_aliases.unbind_name(name);
         drop(previous);
+        if let Some((environment, binding)) = lexical {
+            retire_native_lexical_bindings(&environment, std::iter::once(binding))
+                .map_err(|error| *error)?;
+        }
         Ok(())
     }
+}
+
+/// Called only after the workspace effect has committed and its RefCell
+/// borrows have been released. A failure reports partial publication.
+fn retire_native_lexical_bindings(
+    environment: &runmat_value::LexicalEnvironment,
+    bindings: impl IntoIterator<Item = runmat_native_codegen::NativeLexicalBinding>,
+) -> Result<(), Box<runmat_runtime::RuntimeError>> {
+    for binding in bindings {
+        match binding.kind {
+            runmat_native_codegen::NativeLexicalBindingKind::Owned => {
+                runmat_runtime::call::lexical::remove_owned_binding(environment, binding.binding)?;
+            }
+            runmat_native_codegen::NativeLexicalBindingKind::Inherited => {
+                runmat_runtime::call::lexical::remove_binding(environment, binding.binding)?;
+            }
+            runmat_native_codegen::NativeLexicalBindingKind::Transit => {}
+        }
+    }
+    Ok(())
+}
+
+/// The canonical and local workspace write has committed before this call.
+/// Report an explicit partial publication error if the shared cell rejects it.
+fn publish_native_lexical_binding(
+    environment: &runmat_value::LexicalEnvironment,
+    binding: runmat_native_codegen::NativeLexicalBinding,
+    value: Value,
+) -> Result<(), Box<runmat_runtime::RuntimeError>> {
+    let result = match binding.kind {
+        runmat_native_codegen::NativeLexicalBindingKind::Owned => {
+            runmat_runtime::call::lexical::write_owned_binding(environment, binding.binding, value)
+        }
+        runmat_native_codegen::NativeLexicalBindingKind::Inherited => {
+            runmat_runtime::call::lexical::write_binding(environment, binding.binding, value)
+        }
+        runmat_native_codegen::NativeLexicalBindingKind::Transit => return Ok(()),
+    };
+    result.map_err(|error| {
+        let failure_origin = error.failure_origin;
+        let mut failure = runmat_runtime::runtime_error::semantic_error_with_source(
+            "RunMat:Workspace:LexicalPublication",
+            format!("workspace assignment committed before lexical publication: {error}"),
+            error,
+        );
+        failure.gpu_gather_retry = runmat_runtime::runtime_error::GpuGatherRetry::Never;
+        failure.failure_origin = failure_origin;
+        Box::new(failure)
+    })
 }
 
 fn native_workspace_closed() -> runmat_runtime::RuntimeError {

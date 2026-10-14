@@ -9,6 +9,7 @@ fn encode_infer(
     inference::encode(request, entry)
 }
 pub const ONEHOTENCODE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "onehotencode",

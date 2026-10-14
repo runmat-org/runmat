@@ -101,6 +101,11 @@ async fn evaluate_with_output(
             filesystem: &resolved.filesystem,
         },
     )?;
+    // Capture the invocation's command owner before any archive-source await.
+    // Neither the later worker thread nor a browser rollback uses ambient state.
+    let command_origin = runtime
+        .and_then(crate::context::RuntimeContext::command_profiling)
+        .cloned();
     let resource_lease = receipt
         .as_ref()
         .map(|receipt| receipt.resource_liveness_lease());
@@ -112,6 +117,7 @@ async fn evaluate_with_output(
                     &url,
                     &resolved.output_folder,
                     runtime,
+                    command_origin.clone(),
                     resolved.filesystem,
                     &resource_lease,
                 )
@@ -129,6 +135,7 @@ async fn evaluate_with_output(
                     &path,
                     &resolved.output_folder,
                     runtime,
+                    command_origin.clone(),
                     resolved.filesystem,
                     &resource_lease,
                 )

@@ -4,11 +4,11 @@ use crate::backend::wgpu::params::{
     MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
 };
 use crate::backend::wgpu::shaders::signal::{
-    SpectralFrameShaderConfig, SpectralFrameShaderMode, SpectralRangeShaderMode,
     analytic_signal_mask_shader, envelope_analytic_bounds_shader,
     envelope_analytic_fir_bounds_shader, envelope_analytic_mask_shader,
     envelope_center_real_to_complex_shader, envelope_rms_bounds_shader, spectral_frame_shader,
-    spectral_power_shader, spectral_select_shader,
+    spectral_power_shader, spectral_select_shader, SpectralFrameShaderConfig,
+    SpectralFrameShaderMode, SpectralRangeShaderMode,
 };
 use runmat_accelerate_api::{
     ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
@@ -3291,7 +3291,7 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        WgpuProvider, WgpuProviderOptions, register_wgpu_provider,
+        register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
@@ -4077,13 +4077,11 @@ mod tests {
                 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
             ];
             assert_eq!(actual.shape, vec![2, 3, 4]);
-            assert!(
-                actual
-                    .data
-                    .iter()
-                    .zip(expected)
-                    .all(|(got, want)| (got - want).abs() < 1.0e-5)
-            );
+            assert!(actual
+                .data
+                .iter()
+                .zip(expected)
+                .all(|(got, want)| (got - want).abs() < 1.0e-5));
             assert_eq!(state.shape, vec![1, 2, 3]);
             assert_eq!(state.data.len(), 6);
             assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));

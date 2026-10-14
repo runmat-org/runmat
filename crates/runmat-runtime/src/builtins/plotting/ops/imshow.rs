@@ -1046,7 +1046,7 @@ mod tests {
             &[Value::Tensor(matrix(vec![1.0; 4], 2, 2))],
         ))
         .expect("imshow should be registered");
-        assert!(matches!(result, Value::Num(handle) if handle.is_finite()));
+        assert!(matches!(result.value(), Value::Num(handle) if handle.is_finite()));
     }
 
     #[test]

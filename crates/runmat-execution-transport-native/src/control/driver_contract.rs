@@ -56,6 +56,8 @@ pub struct DriverBootstrap {
     pub checkpoint: Option<DriverArtifactDownload>,
     pub cancellation_requested: bool,
     pub driver_resources: ResourceRequest,
+    /// Exact active driver-allocation devices from authenticated bootstrap.
+    pub driver_accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
     pub desired_worker_count: u32,
     pub worker_resources: ResourceRequest,
 }
@@ -174,12 +176,14 @@ pub trait DriverControlPlane: Send + Sync {
         allocation_lease_id: &str,
         endpoint_fingerprint: &str,
         run_key_envelope: &[u8],
+        ready_v1: bool,
     ) -> TransportResult<()> {
         let _ = (
             authority,
             allocation_lease_id,
             endpoint_fingerprint,
             run_key_envelope,
+            ready_v1,
         );
         Err(TransportError::Unavailable(
             "remote worker authorization is not implemented".into(),

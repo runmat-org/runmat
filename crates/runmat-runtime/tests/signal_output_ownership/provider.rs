@@ -2,8 +2,8 @@ use runmat_accelerate_api::allocation::WeakAllocationLease;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use std::sync::{
-    Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
+    Mutex,
 };
 
 #[derive(Clone, Copy, Debug)]

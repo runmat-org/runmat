@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use super::{
     HttpBodyStream, HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind,
 };
-use crate::context::{RuntimeHttpService, RuntimeServiceFuture};
+use crate::context::{RuntimeContext, RuntimeHttpService, RuntimeServiceFuture};
 
 mod stream;
 
@@ -32,15 +32,21 @@ impl NativeHttpService {
 impl RuntimeHttpService for NativeHttpService {
     fn send(
         &self,
+        runtime: RuntimeContext,
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         let driver = self.driver.clone();
         let clients = Arc::clone(&self.clients);
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             // Spawn only when polled. Dropping this carrier aborts request send
             // and response-body reception rather than detaching a JoinHandle.
             let url = request.url.clone();
-            let task = AbortOnDrop(driver.spawn(send_impl(request, clients)));
+            let task = AbortOnDrop(crate::execution::native_task::spawn(
+                &driver,
+                send_impl(request, clients),
+                profiling,
+            ));
             task.await.map_err(|error| {
                 TransportError::new(TransportErrorKind::Other, &url, error.to_string())
                     .with_source(error)
@@ -50,6 +56,7 @@ impl RuntimeHttpService for NativeHttpService {
 
     fn open_bounded(
         &self,
+        runtime: RuntimeContext,
         request: HttpRequest,
         accepted_limit: u64,
     ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
@@ -58,6 +65,7 @@ impl RuntimeHttpService for NativeHttpService {
             Arc::clone(&self.clients),
             request,
             accepted_limit,
+            runtime.command_profiling().cloned(),
         )
     }
 }

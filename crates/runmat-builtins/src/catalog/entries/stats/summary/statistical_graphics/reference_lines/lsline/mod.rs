@@ -11,6 +11,7 @@ use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement}
 pub use contract::{LSLINE_DESCRIPTOR, LSLINE_ERROR_INTERNAL, LSLINE_ERROR_INVALID_ARGUMENT};
 
 pub const LSLINE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "lsline" },
     category: "stats/summary",

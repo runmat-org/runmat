@@ -139,12 +139,14 @@ async fn dlfeval_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     dlfeval_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
-pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn dlfeval_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     dlfeval_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
 
@@ -152,7 +154,7 @@ async fn dlfeval_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     mut args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let Some(function) = args.first() else {
         return Err(super::errors::descriptor_error(
             "dlfeval",
@@ -165,7 +167,7 @@ async fn dlfeval_in_runtime(
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     ) {
         return Err(super::errors::descriptor_error(

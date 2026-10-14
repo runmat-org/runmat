@@ -48,7 +48,7 @@ fn bsxfun_plus_preserves_all_exact_integer_classes() {
         let left = Tensor::new_integer(left, vec![2, 1]).expect("left");
         let right = Tensor::new_integer(right, vec![1, 1]).expect("right");
         let result = call(
-            Value::FunctionHandle("plus".to_string()),
+            Value::FunctionHandle("plus".into()),
             Value::Tensor(left),
             Value::Tensor(right),
         )
@@ -65,7 +65,7 @@ fn bsxfun_preserves_native_single_and_integer_predicate_outputs() {
     let single = Tensor::from_f32(vec![1.25, 2.5], vec![2, 1]).expect("single");
     let one = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single scalar");
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(single),
         Value::Tensor(one),
     )
@@ -87,7 +87,7 @@ fn bsxfun_preserves_native_single_and_integer_predicate_outputs() {
         Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_994]), vec![1, 1])
             .expect("threshold");
     let result = call(
-        Value::FunctionHandle("gt".to_string()),
+        Value::FunctionHandle("gt".into()),
         Value::Tensor(wide),
         Value::Tensor(threshold),
     )
@@ -104,7 +104,7 @@ fn bsxfun_empty_known_callbacks_preserve_output_class() {
         Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 1]).expect("empty integer");
     let scalar = Value::Int(IntValue::U64(9_007_199_254_740_993));
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(empty),
         scalar,
     )

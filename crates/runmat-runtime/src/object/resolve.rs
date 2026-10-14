@@ -8,6 +8,7 @@
 
 use crate::builtins::introspection::dynamicprops;
 use crate::call::identity::external_qualified_display_name;
+use crate::execution::{RootedValue, RootedValueLease, RootedValueSequence};
 use crate::object::dispatch::{
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
 };

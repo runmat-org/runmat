@@ -84,6 +84,7 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
                 program_function,
                 parameters.get(function).map_or(&[], Vec::as_slice),
                 captures.get(function).map_or(&[], Vec::as_slice),
+                super::super::constructor_entry::instance_output_local(assembly, body),
                 &summaries,
             );
             for observation in &result.calls {

@@ -1,3 +1,4 @@
+use crate::execution::RootedValues;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinOperandPreparation, BuiltinParamArity,
@@ -25,7 +26,7 @@ pub struct BuiltinPreparationAdmission {
 pub struct AdmittedBuiltinPreparation {
     admission: BuiltinPreparationAdmission,
     form: &'static BuiltinPreparationForm,
-    operands: Vec<Value>,
+    operands: RootedValues,
     numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
     sum_reduction: Option<AdmittedSumReduction>,
     prepared_completion: Option<super::PreparedCompletionRight>,
@@ -100,7 +101,7 @@ impl AdmittedBuiltinPreparation {
             -> Result<runmat_accelerate_api::NumericalDomainEvidence, RuntimeError>,
     ) -> Result<Self, RuntimeError> {
         use runmat_accelerate_api::NumericalDomainEvidence;
-        let evidence = classify(&self.operands)?;
+        let evidence = classify(self.operands.values())?;
         let belongs = match (self.form.operation, evidence) {
             (_, NumericalDomainEvidence::Unknown)
             | (
@@ -237,6 +238,7 @@ impl AdmittedBuiltinPreparation {
                 "admitted input count is inconsistent with descriptor signature",
             ));
         }
+        let operands = RootedValues::new(operands).map_err(|error| error.into_runtime_error())?;
         Ok(Self {
             admission,
             form,
@@ -254,9 +256,12 @@ impl AdmittedBuiltinPreparation {
         self.form
     }
     pub fn operands(&self) -> &[Value] {
-        &self.operands
+        self.operands.values()
     }
-    pub fn into_operands(self) -> Vec<Value> {
+    /// Transfer the admitted values without retiring their roots. A service
+    /// must consume them through the owner's sync/async closure and publish
+    /// its replacement carrier before that closure returns.
+    pub fn into_operands(self) -> RootedValues {
         self.operands
     }
 }

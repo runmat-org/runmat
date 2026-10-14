@@ -68,7 +68,8 @@ fn isolated_session() -> RunMatSession {
 fn execute(
     session: &mut RunMatSession,
     source: &str,
-) -> Result<crate::abi::ExecutionOutcome, crate::RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>, crate::RunError>
+{
     let request = request(session, source);
     futures::executor::block_on(session.execute_request(request)).result
 }

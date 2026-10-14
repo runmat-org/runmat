@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::context::{
-    RuntimeContext, RuntimeServicePorts, RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpIssuer,
-    RuntimeTcpService,
+    RuntimeContext, RuntimeServicePorts, RuntimeTcpByteOrder, RuntimeTcpConnect,
+    RuntimeTcpInvocation, RuntimeTcpIssuer, RuntimeTcpService,
 };
 use crate::tcp::NativeTcpService;
 use runmat_value::{ObjectInstance, Value};
@@ -56,7 +56,7 @@ impl TcpTestHost {
     pub(crate) fn connect(&self, port: u16, timeout: f64, order: RuntimeTcpByteOrder) -> Value {
         let endpoint = futures::executor::block_on(
             self.service.connect(
-                RuntimeTcpIssuer::from_context(Some(&self.runtime)),
+                RuntimeTcpInvocation::from_context(Some(&self.runtime)),
                 RuntimeTcpConnect {
                     host: "127.0.0.1".into(),
                     port,
@@ -93,7 +93,7 @@ impl TcpTestHost {
                     let status = self
                         .service
                         .describe_client(
-                            RuntimeTcpIssuer::from_context(Some(&self.runtime)),
+                            RuntimeTcpInvocation::from_context(Some(&self.runtime)),
                             authority.clone(),
                         )
                         .await
@@ -118,7 +118,7 @@ impl TcpTestHost {
                     let status = self
                         .service
                         .describe_client(
-                            RuntimeTcpIssuer::from_context(Some(&self.runtime)),
+                            RuntimeTcpInvocation::from_context(Some(&self.runtime)),
                             authority.clone(),
                         )
                         .await

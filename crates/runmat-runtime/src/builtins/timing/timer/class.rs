@@ -50,6 +50,7 @@ pub(super) fn ensure_timer_class_registered() {
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
@@ -69,6 +70,7 @@ pub(super) fn ensure_timer_class_registered() {
                     access: MemberAccess::Public,
                     function_name: setter,
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }

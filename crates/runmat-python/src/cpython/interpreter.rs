@@ -1,8 +1,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::ffi::c_int;
+use std::ffi::{c_int, CStr};
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-use std::sync::mpsc;
+
+use runmat_process_host::private_bytes::PrivateByteLease;
 
 use super::api::{CpythonApi, PyObject, PySsize};
 use super::support::{attr, capture_error, checked, set_dict_string, unicode};
@@ -11,6 +13,9 @@ use crate::{
 };
 
 pub(super) const PY_FILE_INPUT: c_int = 257;
+const PY_TPFLAGS_HEAPTYPE: std::ffi::c_ulong = 1 << 9;
+const PY_SQ_ITEM: c_int = 44;
+const PY_TP_ITER: c_int = 62;
 
 pub(super) struct BuiltinTypes {
     pub(super) none: *mut PyObject,
@@ -19,6 +24,7 @@ pub(super) struct BuiltinTypes {
     pub(super) float: *mut PyObject,
     pub(super) complex: *mut PyObject,
     pub(super) str_: *mut PyObject,
+    pub(super) list: *mut PyObject,
     pub(super) bytes: *mut PyObject,
     pub(super) datetime: *mut PyObject,
     pub(super) timedelta: *mut PyObject,
@@ -35,13 +41,65 @@ pub(crate) struct Interpreter {
     pub(super) workspace: *mut PyObject,
     pub(super) objects: RefCell<BTreeMap<PythonObjectHandle, *mut PyObject>>,
     pub(super) next_handle: Cell<u64>,
-    pub(super) active_callbacks: RefCell<Option<mpsc::SyncSender<crate::object::PythonLaneEvent>>>,
+    pub(super) active_callbacks: RefCell<Option<crate::session::protocol::PythonLaneEventSink>>,
     self_reference: RefCell<Weak<Interpreter>>,
+    pub(super) owned_imports: RefCell<BTreeMap<String, *mut PyObject>>,
+    pub(super) module_path_list: RefCell<Option<*mut PyObject>>,
+    pub(super) inserted_module_paths: RefCell<Vec<*mut PyObject>>,
+    managed_exposure_unverified: Cell<bool>,
+    all_type_slots_inspectable: bool,
+}
+
+/// A nested callback command temporarily replaces the selected event sink.
+/// Restore the suspended sink on ordinary return and unwinding alike.
+struct CallbackEventScope<'a> {
+    active: &'a RefCell<Option<crate::session::protocol::PythonLaneEventSink>>,
+    previous: Option<crate::session::protocol::PythonLaneEventSink>,
+}
+
+impl<'a> CallbackEventScope<'a> {
+    fn install(
+        active: &'a RefCell<Option<crate::session::protocol::PythonLaneEventSink>>,
+        selected: Option<crate::session::protocol::PythonLaneEventSink>,
+    ) -> Self {
+        let previous = active.replace(selected);
+        Self { active, previous }
+    }
+}
+
+impl Drop for CallbackEventScope<'_> {
+    fn drop(&mut self) {
+        self.active.replace(self.previous.take());
+    }
 }
 
 impl Interpreter {
     pub(crate) fn start(installation: &PythonInstallation) -> Result<Rc<Self>, PythonError> {
         let mut api = CpythonApi::load(&installation.library)?;
+        // Read the loaded library's version, not a caller-supplied discovery
+        // record, before deciding whether static type slots are inspectable.
+        let reported_version = unsafe { CStr::from_ptr((api.py_get_version)()) }
+            .to_str()
+            .map_err(|_| {
+                PythonError::host("PythonConfigurationError", "CPython version is not UTF-8")
+            })?;
+        let mut version_parts = reported_version.split('.');
+        let major = version_parts
+            .next()
+            .and_then(|part| part.parse::<u16>().ok());
+        let minor = version_parts.next().and_then(|part| {
+            let digits: String = part
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            digits.parse::<u16>().ok()
+        });
+        let (Some(major), Some(minor)) = (major, minor) else {
+            return Err(PythonError::host(
+                "PythonConfigurationError",
+                "CPython version could not be identified",
+            ));
+        };
         let initialized_here = api.initialize(&installation.executable, &installation.home)?;
         // SAFETY: this is the interpreter lane. It owns the initialization
         // thread state and releases the GIL before entering its request loop.
@@ -59,6 +117,7 @@ impl Interpreter {
                 float: attr(&api, builtins_module, "float")?,
                 complex: attr(&api, builtins_module, "complex")?,
                 str_: attr(&api, builtins_module, "str")?,
+                list: attr(&api, builtins_module, "list")?,
                 bytes: attr(&api, builtins_module, "bytes")?,
                 datetime: std::ptr::null_mut(),
                 timedelta: std::ptr::null_mut(),
@@ -115,12 +174,17 @@ impl Interpreter {
             }
             let interpreter = Rc::new(Self {
                 api,
+                all_type_slots_inspectable: (major, minor) >= (3, 10),
                 builtins,
                 workspace,
                 objects: RefCell::new(BTreeMap::new()),
                 next_handle: Cell::new(1),
                 active_callbacks: RefCell::new(None),
                 self_reference: RefCell::new(Weak::new()),
+                owned_imports: RefCell::new(BTreeMap::new()),
+                module_path_list: RefCell::new(None),
+                inserted_module_paths: RefCell::new(Vec::new()),
+                managed_exposure_unverified: Cell::new(false),
             });
             *interpreter.self_reference.borrow_mut() = Rc::downgrade(&interpreter);
             Ok(interpreter)
@@ -136,7 +200,8 @@ impl Interpreter {
 
     pub(crate) fn prepend_module_paths(
         &self,
-        paths: &[std::path::PathBuf],
+        paths: &[PathBuf],
+        managed: Option<(&[PathBuf], &PrivateByteLease)>,
     ) -> Result<(), PythonError> {
         self.with_gil(|this| {
             let sys = unsafe {
@@ -146,31 +211,112 @@ impl Interpreter {
                     "import sys",
                 )?
             };
-            let path_list = unsafe { attr(&this.api, sys, "path") };
-            this.decref(sys);
-            let path_list = path_list?;
-            let insert = unsafe { attr(&this.api, path_list, "insert") };
-            this.decref(path_list);
-            let insert = insert?;
-            for path in paths.iter().rev() {
-                let arguments = this.values_to_tuple(vec![
-                    PythonValue::Signed(0),
-                    PythonValue::String(path.to_string_lossy().into_owned()),
-                ])?;
-                let result =
-                    unsafe { (this.api.py_object_call)(insert, arguments, std::ptr::null_mut()) };
-                this.decref(arguments);
-                let result = unsafe { checked(&this.api, result, "prepend Python module path")? };
-                this.decref(result);
+            let sys_dict = unsafe { (this.api.py_module_get_dict)(sys) };
+            let path_list = if sys_dict.is_null() {
+                unsafe { (this.api.py_err_clear)() };
+                std::ptr::null_mut()
+            } else {
+                unsafe { (this.api.py_dict_get_item_string)(sys_dict, c"path".as_ptr()) }
+            };
+            if !path_list.is_null() {
+                unsafe { (this.api.py_inc_ref)(path_list) };
             }
+            this.decref(sys);
+            if path_list.is_null() {
+                return Err(PythonError::host(
+                    "PythonImportOwnerError",
+                    "process sys.path is unavailable",
+                ));
+            }
+            let path_type = unsafe { (this.api.py_object_type)(path_list) };
+            let path_type = match unsafe {
+                checked(&this.api, path_type, "inspect Python module path list")
+            } {
+                Ok(path_type) => path_type,
+                Err(error) => {
+                    this.decref(path_list);
+                    return Err(error);
+                }
+            };
+            let exact_list = path_type == this.builtins.list;
+            this.decref(path_type);
+            if managed.is_some() && !exact_list {
+                this.decref(path_list);
+                return Err(PythonError::host(
+                    "PythonImportOwnerError",
+                    "managed wheel imports require the process sys.path to be an exact built-in list",
+                ));
+            }
+            let insert = unsafe { attr(&this.api, path_list, "insert") };
+            let insert = match insert {
+                Ok(insert) => insert,
+                Err(error) => {
+                    this.decref(path_list);
+                    return Err(error);
+                }
+            };
+            if exact_list {
+                *this.module_path_list.borrow_mut() = Some(path_list);
+            }
+            let result = (|| {
+                for path in paths.iter().rev() {
+                    let arguments = this.values_to_tuple(vec![
+                        PythonValue::Signed(0),
+                        PythonValue::String(path.to_string_lossy().into_owned()),
+                    ])?;
+                    let result = unsafe {
+                        (this.api.py_object_call)(insert, arguments, std::ptr::null_mut())
+                    };
+                    let result =
+                        unsafe { checked(&this.api, result, "prepend Python module path") };
+                    if result.is_err() {
+                        this.decref(arguments);
+                        return result.map(|_| ());
+                    }
+                    let result = result?;
+                    this.decref(result);
+                    let inserted = unsafe { (this.api.py_tuple_get_item)(arguments, 1) };
+                    if exact_list {
+                        // The list and tuple each own the item; retain our own
+                        // identity so cleanup never removes an equal path.
+                        unsafe { (this.api.py_inc_ref)(inserted) };
+                        this.inserted_module_paths.borrow_mut().push(inserted);
+                    }
+                    this.decref(arguments);
+                    if let Some((roots, lease)) = managed {
+                        if roots.contains(path) {
+                            if let Err(error) = this.api.retain_exposed_wheel(lease) {
+                                this.managed_exposure_unverified.set(true);
+                                return Err(error);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })();
             this.decref(insert);
-            Ok(())
+            if !exact_list {
+                // Preserve the pre-existing dynamic-list behavior for raw
+                // paths; only a built-in list is eligible for C-API cleanup.
+                this.decref(path_list);
+            }
+            result
         })
     }
 
-    pub(crate) fn clear(&self) {
+    pub(crate) fn managed_exposure_unverified(&self) -> bool {
+        self.managed_exposure_unverified.get()
+    }
+
+    pub(crate) fn clear_with_import_roots(
+        &self,
+        roots: &[PathBuf],
+        names: &std::collections::BTreeSet<String>,
+    ) -> bool {
         let state = unsafe { (self.api.py_gil_state_ensure)() };
-        for (_, object) in std::mem::take(&mut *self.objects.borrow_mut()) {
+        self.active_callbacks.borrow_mut().take();
+        let objects = std::mem::take(&mut *self.objects.borrow_mut());
+        for (_, object) in objects {
             // SAFETY: registry references are owned and released on the lane.
             unsafe { (self.api.py_dec_ref)(object) };
         }
@@ -183,6 +329,7 @@ impl Interpreter {
             (self.api.py_dec_ref)(self.builtins.float);
             (self.api.py_dec_ref)(self.builtins.complex);
             (self.api.py_dec_ref)(self.builtins.str_);
+            (self.api.py_dec_ref)(self.builtins.list);
             (self.api.py_dec_ref)(self.builtins.bytes);
             (self.api.py_dec_ref)(self.builtins.datetime);
             (self.api.py_dec_ref)(self.builtins.timedelta);
@@ -191,8 +338,13 @@ impl Interpreter {
             (self.api.py_dec_ref)(self.builtins.keyboard_interrupt);
             (self.api.py_dec_ref)(self.builtins.buffer_view);
             (self.api.py_dec_ref)(self.builtins.module);
-            (self.api.py_gil_state_release)(state);
         }
+        self.capture_owned_imports_with_gil(roots);
+        let paths_clean = self.clear_module_paths_with_gil();
+        let imports_clean = self.clear_owned_imports_with_gil();
+        let remaining = self.remaining_managed_import_with_gil(roots, names);
+        unsafe { (self.api.py_gil_state_release)(state) };
+        imports_clean && paths_clean && remaining.is_none()
     }
 
     pub(super) fn with_gil<T>(
@@ -211,13 +363,19 @@ impl Interpreter {
 
     pub(crate) fn with_callback_events<T>(
         &self,
-        events: mpsc::SyncSender<crate::object::PythonLaneEvent>,
+        events: crate::session::protocol::PythonLaneEventSink,
         operation: impl FnOnce() -> T,
     ) -> T {
-        let previous = self.active_callbacks.replace(Some(events));
-        let result = operation();
-        self.active_callbacks.replace(previous);
-        result
+        let _events = CallbackEventScope::install(&self.active_callbacks, Some(events));
+        operation()
+    }
+
+    /// A synchronous reentry caller cannot drive another callback while it
+    /// waits for this lane. Mask the inherited sink so a nested callback
+    /// fails instead of waiting for an unserviced event.
+    pub(crate) fn without_callback_events<T>(&self, operation: impl FnOnce() -> T) -> T {
+        let _events = CallbackEventScope::install(&self.active_callbacks, None);
+        operation()
     }
 
     pub(super) fn weak_reference(&self) -> Weak<Interpreter> {
@@ -248,38 +406,53 @@ impl Interpreter {
             )?
         };
         self.decref(tuple);
-        let type_name = unsafe {
-            let name = attr(&self.api, type_object, "__name__")?;
-            let text = unicode(&self.api, name);
-            self.decref(name);
-            text?
-        };
-        let module = unsafe {
-            let name = attr(&self.api, type_object, "__module__")?;
-            let text = unicode(&self.api, name);
-            self.decref(name);
-            text?
-        };
+        let metadata = (|| {
+            let type_name = unsafe {
+                let name = attr(&self.api, type_object, "__name__")?;
+                let text = unicode(&self.api, name);
+                self.decref(name);
+                text?
+            };
+            let module = unsafe {
+                let name = attr(&self.api, type_object, "__module__")?;
+                let text = unicode(&self.api, name);
+                self.decref(name);
+                text?
+            };
+            Ok(PythonObjectMetadata {
+                handle,
+                type_name,
+                module,
+                callable: unsafe { (self.api.py_callable_check)(object) != 0 },
+                iterable: self.iterator_slot_capability(type_object)?,
+                mapping: unsafe { (self.api.py_mapping_check)(object) != 0 },
+                sequence: unsafe { (self.api.py_sequence_check)(object) != 0 },
+                none: object == self.builtins.none,
+            })
+        })();
         self.decref(type_object);
-        Ok(PythonObjectMetadata {
-            handle,
-            type_name,
-            module,
-            callable: unsafe { (self.api.py_callable_check)(object) != 0 },
-            iterable: unsafe {
-                let iterator = (self.api.py_object_get_iter)(object);
-                if iterator.is_null() {
-                    (self.api.py_err_clear)();
-                    false
-                } else {
-                    (self.api.py_dec_ref)(iterator);
-                    true
-                }
-            },
-            mapping: unsafe { (self.api.py_mapping_check)(object) != 0 },
-            sequence: unsafe { (self.api.py_sequence_check)(object) != 0 },
-            none: object == self.builtins.none,
-        })
+        metadata
+    }
+
+    fn iterator_slot_capability(
+        &self,
+        type_object: *mut PyObject,
+    ) -> Result<Option<bool>, PythonError> {
+        // PyType_GetSlot accepts heap types in 3.9 and all types in 3.10+.
+        // Unknown is preferable to calling user __iter__ during metadata.
+        let flags = unsafe { (self.api.py_type_get_flags)(type_object) };
+        if !self.all_type_slots_inspectable && flags & PY_TPFLAGS_HEAPTYPE == 0 {
+            return Ok(None);
+        }
+        let iter = unsafe { (self.api.py_type_get_slot)(type_object, PY_TP_ITER) };
+        if iter.is_null() && !unsafe { (self.api.py_err_occurred)() }.is_null() {
+            return Err(unsafe { capture_error(&self.api, "inspect Python iterator slot") });
+        }
+        let item = unsafe { (self.api.py_type_get_slot)(type_object, PY_SQ_ITEM) };
+        if item.is_null() && !unsafe { (self.api.py_err_occurred)() }.is_null() {
+            return Err(unsafe { capture_error(&self.api, "inspect Python sequence slot") });
+        }
+        Ok(Some(!iter.is_null() || !item.is_null()))
     }
 
     pub(super) fn object(&self, handle: PythonObjectHandle) -> Result<*mut PyObject, PythonError> {

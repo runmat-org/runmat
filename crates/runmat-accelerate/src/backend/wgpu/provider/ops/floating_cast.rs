@@ -145,7 +145,8 @@ impl WgpuProvider {
                     after_allocation(&output)?;
                     if frozen.entry.precision == target {
                         if frozen.scalar_len != 0 {
-                            let mut encoder = emission.device().create_command_encoder(
+                            let mut encoder = pending.profiled_encoder(
+                                emission,
                                 &wgpu::CommandEncoderDescriptor {
                                     label: Some("runmat-logical-to-numeric-copy"),
                                 },

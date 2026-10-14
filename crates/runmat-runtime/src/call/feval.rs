@@ -1,6 +1,7 @@
 //! Callable forwarding retains typed output sequences until a language consumer
 //! selects or discards them.
 
+use crate::execution::RootedValueSequence;
 use crate::{
     build_runtime_error, callable_identity_for_handle_name,
     dispatch_callable_with_policy_in_runtime, runtime_descriptor_error,
@@ -12,13 +13,37 @@ use runmat_builtins::{
 };
 use runmat_value::{Value, ValueSequence};
 
+#[cfg(test)]
+#[path = "feval/roots_tests.rs"]
+mod roots_tests;
+
+/// Acquire the invocation's input roots when the public future is created.
+/// In particular, a bound closure's lexical activation must survive an
+/// unpolled future after its caller releases the original handle.
+pub(crate) fn admit_inputs(
+    target: &Value,
+    arguments: &[Value],
+) -> Result<
+    (
+        crate::execution::RootedValueLease,
+        crate::execution::RootedValueLease,
+    ),
+    crate::RuntimeError,
+> {
+    let target_root = crate::execution::RootedValueLease::for_traced(target)
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    let argument_roots = crate::execution::RootedValueLease::for_values(arguments.iter())
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    Ok((target_root, argument_roots))
+}
+
 pub(crate) async fn invoke(
     runtime: Option<&crate::context::RuntimeContext>,
     invocation_outputs: Option<usize>,
     f: Value,
     rest: Vec<Value>,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> crate::BuiltinResult<ValueSequence> {
+) -> crate::BuiltinResult<RootedValueSequence> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -31,7 +56,7 @@ pub(crate) async fn invoke(
         args: &[Value],
         requested_outputs: usize,
         input_callsite: Option<crate::callsite::CallsiteInfo>,
-    ) -> crate::BuiltinResult<ValueSequence> {
+    ) -> crate::BuiltinResult<RootedValueSequence> {
         dispatch_callable_with_policy_in_runtime(
             runtime,
             identity,
@@ -49,7 +74,7 @@ pub(crate) async fn invoke(
         args: &[Value],
         requested_outputs: usize,
         input_callsite: Option<crate::callsite::CallsiteInfo>,
-    ) -> crate::BuiltinResult<ValueSequence> {
+    ) -> crate::BuiltinResult<RootedValueSequence> {
         let normalized = normalize_feval_handle_name(name)
             .ok_or_else(|| runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID))?;
         let (identity, fallback_policy) = callable_identity_for_handle_name(&normalized);
@@ -131,20 +156,19 @@ pub(crate) async fn invoke(
             )
             .await
         }
-        Value::BoundFunctionHandle {
-            name,
-            function,
-            authority,
-            ..
-        } => {
+        Value::BoundFunctionHandle(handle) => {
+            let data = handle.into_data();
+            let function = data.function;
+            let name = data.name;
             let request = crate::user_functions::CallableRequest::bound(
                 runmat_value::BoundFunctionBinding {
                     function,
-                    authority,
+                    authority: data.authority,
                 },
                 rest.clone(),
                 requested_outputs,
             )
+            .with_selected_runtime(runtime)
             .with_function_input_callsite(input_callsite);
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
@@ -157,6 +181,7 @@ pub(crate) async fn invoke(
             ))
         }
         Value::Closure(c) => {
+            let c = c.into_data();
             if let Some(binding) = c.binding {
                 let function = binding.function;
                 let mut args = c.captures.clone();
@@ -166,6 +191,8 @@ pub(crate) async fn invoke(
                     args.clone(),
                     requested_outputs,
                 )
+                .with_lexical_environment(c.lexical_environment.clone())
+                .with_selected_runtime(runtime)
                 .with_function_input_callsite(input_callsite.clone());
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
@@ -204,14 +231,20 @@ pub(crate) async fn invoke(
                     method_args,
                 )
                 .await
-                .and_then(crate::call::arguments::adapt_legacy_builtin_result);
+                .and_then(|value| {
+                    value.try_map_owned(
+                        crate::call::arguments::adapt_legacy_builtin_result,
+                        crate::execution::ExecutionServiceError::into_runtime_error,
+                    )
+                });
             }
 
             let mut args = c.captures.clone();
             args.extend(rest);
             if let Some(result) = crate::callsite::with_function_input_callsite(
                 input_callsite.clone(),
-                crate::user_functions::try_call_semantic_function_by_name(
+                crate::user_functions::try_call_semantic_function_by_name_in_context(
+                    runtime,
                     &c.function_name,
                     &args,
                     requested_outputs,
@@ -265,15 +298,20 @@ pub(crate) async fn invoke(
                 }
             };
             use crate::sequence::ResolveValueSequence;
-            let mut values =
-                sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
-            if requested_outputs == 1 {
-                ValueSequence::single(values.remove(0))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
-            } else {
-                ValueSequence::comma_separated(values)
-                    .map_err(crate::sequence::sequence_error_to_runtime)
-            }
+            sequence.try_map_owned(
+                |sequence| {
+                    let mut values = sequence
+                        .resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
+                    if requested_outputs == 1 {
+                        ValueSequence::single(values.remove(0))
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    } else {
+                        ValueSequence::comma_separated(values)
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    }
+                },
+                |error| error.into_runtime_error(),
+            )
         }
         other => Err(runtime_descriptor_error_with_detail(
             "feval",

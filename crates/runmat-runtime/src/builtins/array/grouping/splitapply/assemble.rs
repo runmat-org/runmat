@@ -1,13 +1,13 @@
-use runmat_value::Value;
-
 use crate::BuiltinResult;
 
 use super::error;
 
-pub(super) async fn outputs(groups: Vec<Vec<Value>>) -> BuiltinResult<Vec<Value>> {
-    let mut outputs = Vec::with_capacity(groups.len());
+pub(super) async fn outputs(
+    groups: Vec<crate::execution::RootedValues>,
+) -> BuiltinResult<crate::execution::RootedValues> {
+    let mut outputs = crate::execution::RootedValuesBuilder::with_capacity(groups.len());
     for values in groups {
-        let output = crate::call_builtin_async("vertcat", &values)
+        let output = crate::call_builtin_async("vertcat", values.values())
             .await
             .map_err(|source| {
                 error::output(
@@ -15,7 +15,9 @@ pub(super) async fn outputs(groups: Vec<Vec<Value>>) -> BuiltinResult<Vec<Value>
                     Some(source),
                 )
             })?;
-        outputs.push(output);
+        output
+            .with_owned(|value| outputs.push(value))
+            .map_err(|error| error.into_runtime_error())?;
     }
-    Ok(outputs)
+    outputs.finish().map_err(|error| error.into_runtime_error())
 }

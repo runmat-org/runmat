@@ -21,7 +21,7 @@ fn timer_start_runs_function_callback_and_updates_state() {
                 };
                 assert!(event.fields.contains_key("Type"));
                 *invoker_calls.lock().unwrap() += 1;
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         })));
     let timer = block_on(timer_builtin(vec![
@@ -62,7 +62,7 @@ fn timer_stop_claims_stop_callback_once_and_wait_does_not_stop() {
             let name = format!("{function:?}");
             Box::pin(async move {
                 recorded.lock().unwrap().push(name);
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         },
     )));
@@ -100,7 +100,7 @@ fn fixed_rate_drop_counts_missed_slots_without_executing_them() {
                 if *calls.lock().unwrap() == 1 {
                     *clock.lock().unwrap() += Duration::from_millis(250);
                 }
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         },
     )));
@@ -149,7 +149,7 @@ fn fixed_delay_and_fixed_spacing_use_distinct_callback_anchors() {
                     if *count == 1 {
                         *clock.lock().unwrap() += Duration::from_millis(250);
                     }
-                    Ok(crate::sequence::ValueSequence::empty())
+                    rooted_empty_sequence()
                 })
             },
         )));
@@ -193,7 +193,7 @@ fn fixed_rate_queue_runs_due_work_and_error_reports_backlog() {
                     if *count == 1 {
                         *clock.lock().unwrap() += Duration::from_millis(250);
                     }
-                    Ok(crate::sequence::ValueSequence::empty())
+                    rooted_empty_sequence()
                 })
             },
         )));

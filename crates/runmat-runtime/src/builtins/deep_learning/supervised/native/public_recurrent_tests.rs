@@ -94,7 +94,7 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         CellArray::new(vec![input_layer, recurrent], 2, 1).unwrap(),
     )]))
     .unwrap();
-    let Value::Object(initial) = &network else {
+    let Value::Object(initial) = network.value() else {
         panic!("expected dlnetwork")
     };
     let initial_state = initial
@@ -131,17 +131,20 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         block_on(trainnet_builtin(vec![
             predictor,
             target,
-            network,
+            network.value().clone(),
             Value::String("mse".into()),
             options,
         ]))
     } else {
         block_on(train_network_builtin(vec![
-            predictor, target, network, options,
+            predictor,
+            target,
+            network.value().clone(),
+            options,
         ]))
     }
     .unwrap();
-    let Value::Object(trained) = trained else {
+    let Value::Object(trained) = trained.value() else {
         panic!("expected trained network")
     };
     assert_eq!(
@@ -162,11 +165,11 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         NumericDType::F64
     };
     for role in [ParameterRole::InputWeights, ParameterRole::RecurrentWeights] {
-        let value = parameter(&trained, role);
+        let value = parameter(trained, role);
         assert_eq!(value.numeric_dtype(), expected_dtype);
         assert!(value.materialize_f64().iter().all(|entry| *entry == 0.0));
     }
-    let bias = parameter(&trained, ParameterRole::Bias);
+    let bias = parameter(trained, ParameterRole::Bias);
     assert_eq!(bias.numeric_dtype(), expected_dtype);
     assert_eq!(bias.shape(), &[rows, 1]);
     let actual = bias.materialize_f64();

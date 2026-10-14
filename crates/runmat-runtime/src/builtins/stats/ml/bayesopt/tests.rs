@@ -274,7 +274,7 @@ fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
             let x = table_scalar_arg(args, "x");
             let y = table_scalar_arg(args, "y");
             Box::pin(async move {
-                crate::sequence::single_value_sequence(Value::Num(
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
                     (x - 0.25).powi(2) + (y + 0.5).powi(2),
                 ))
             })
@@ -334,11 +334,15 @@ fn bayesopt_honors_x_constraint_function() {
         |function, args, _requested_outputs| {
             assert!(matches!(function, 1 | 2));
             let x = table_scalar_arg(args, "x");
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 if function == 2 {
-                    Ok(Value::Bool(x >= 0.0))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Bool(
+                        x >= 0.0,
+                    ))
                 } else {
-                    Ok(Value::Num((x - 0.4).powi(2)))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        (x - 0.4).powi(2),
+                    ))
                 }
             })
         },
@@ -376,12 +380,14 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
             assert_eq!(function, 3);
             let n = table_scalar_arg(args, "n");
             let family = table_string_arg(args, "family");
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 let mut out = StructValue::new();
                 let family_penalty = if family == "rbf" { 0.0 } else { 1.0 };
                 out.insert("Objective", Value::Num((n - 2.0).powi(2) + family_penalty));
                 out.insert("ConstraintViolations", Value::Num(1.5 - n));
-                Ok(Value::Struct(out))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Struct(
+                    out,
+                ))
             })
         },
     )));
@@ -427,9 +433,11 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
         |function, args, _requested_outputs| {
             assert!(matches!(function, 10 | 11));
             let x = table_scalar_arg(args, "x");
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 if function == 11 {
-                    return Ok(poisoned_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]));
+                    return crate::user_functions::test_support::rooted_single_value_sequence(
+                        poisoned_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]),
+                    );
                 }
                 let mut out = StructValue::new();
                 out.insert("Objective", Value::Num((x - 1.0).powi(2)));
@@ -437,7 +445,9 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
                     "ConstraintViolations",
                     poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
                 );
-                Ok(Value::Struct(out))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Struct(
+                    out,
+                ))
             })
         },
     )));

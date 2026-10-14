@@ -20,19 +20,23 @@ use crate::builtins::math::symbolic::{
     symbolic_binary_broadcast, symbolic_named_binary_broadcast, SymbolicBinaryOp,
 };
 
+use crate::execution::{RootedValue, RootedValueLease};
 use errors::{runtime_error, ComparisonError};
 
 pub(super) async fn evaluate(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operator: RelationalOperator,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     let output_source = select_comparison_output_source(&lhs, &rhs, operator.name())?;
     if (matches!(lhs, Value::Tensor(_)) || matches!(rhs, Value::Tensor(_)))
         && super::integer_comparison::admit_numeric_pair(&lhs, &rhs)
             .map_err(|error| runtime_error(operator, ComparisonError::from(error)))?
     {
-        return preparation::execute(lhs, rhs, operator, |lhs, rhs| async move {
+        return preparation::execute(context, lhs, rhs, operator, |lhs, rhs| async move {
             evaluate_admitted(lhs, rhs, operator, output_source).await
         })
         .await;
@@ -45,17 +49,23 @@ async fn evaluate_admitted(
     rhs: Value,
     operator: RelationalOperator,
     output_source: Option<runmat_accelerate_api::GpuTensorHandle>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     if let (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) = (&lhs, &rhs) {
         if let Some(result) = compare_resident(lhs, rhs, operator).await {
-            return result;
+            return result.and_then(|value| {
+                RootedValue::new(value).map_err(|error| error.into_runtime_error())
+            });
         }
     }
 
     let lhs = gather(lhs, operator).await?;
     let rhs = gather(rhs, operator).await?;
-    let result = evaluate_host(lhs, rhs, operator)?;
-    restore_explicit_comparison_result(result, output_source.as_ref(), operator.name())
+    let result = RootedValue::new(evaluate_host(lhs, rhs, operator)?)
+        .map_err(|error| error.into_runtime_error())?;
+    result.try_map_owned(
+        |value| restore_explicit_comparison_result(value, output_source.as_ref(), operator.name()),
+        |error| error.into_runtime_error(),
+    )
 }
 
 async fn compare_resident(

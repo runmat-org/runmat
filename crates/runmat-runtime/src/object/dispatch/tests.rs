@@ -31,6 +31,7 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "RhsFailureFixture.plus".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });
@@ -103,6 +104,7 @@ fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "SelectedSessionRhs.plus".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });
@@ -120,8 +122,7 @@ fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
             ));
             observed_calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
-                crate::sequence::ValueSequence::single(Value::Num(12.0))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(12.0))
             })
         },
     )));
@@ -186,6 +187,7 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
                 access: runmat_types::MemberAccess::Public,
                 function_name: "SelectedSessionProperty.set.p".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });
@@ -209,8 +211,9 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
                 .properties
                 .insert("p_backing".into(), Value::Num(9.0));
             Box::pin(async move {
-                crate::sequence::ValueSequence::single(Value::Object(replacement))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Object(
+                    replacement,
+                ))
             })
         },
     )));
@@ -225,7 +228,7 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
         None,
     ))
     .expect("selected dependent setter");
-    let Value::Object(updated) = updated else {
+    let Value::Object(updated) = updated.value() else {
         panic!("dependent setter returns replacement object")
     };
     assert_eq!(updated.properties.get("p_backing"), Some(&Value::Num(9.0)));

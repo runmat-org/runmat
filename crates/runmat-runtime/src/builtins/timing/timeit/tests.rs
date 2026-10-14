@@ -6,14 +6,22 @@ fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
 }
 
+fn rooted_sequence(
+    sequence: runmat_value::ValueSequence,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    crate::execution::RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
+}
+
 fn inert_handle(name: &str, function: usize) -> Value {
-    Value::BoundFunctionHandle {
-        name: name.into(),
-        function,
-        authority: runmat_value::BoundFunctionAuthority::unavailable(function),
-        source_role: runmat_types::FunctionSourceRole::Unknown,
-        source_file: None,
-    }
+    Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+        runmat_value::BoundFunctionHandleData {
+            name: name.into(),
+            function,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(function),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
+        },
+    ))
 }
 
 #[test]
@@ -142,7 +150,9 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
             assert!(args.is_empty());
             assert_eq!(requested_outputs, 1);
             callback_ticks.fetch_add(1000, Ordering::SeqCst);
-            Box::pin(async { Ok(runmat_value::ValueSequence::single(Value::Num(1.0)).unwrap()) })
+            Box::pin(async {
+                rooted_sequence(runmat_value::ValueSequence::single(Value::Num(1.0)).unwrap())
+            })
         },
     )));
     let result = block_on(timeit_builtin(
@@ -169,7 +179,7 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
     struct PendingCallback(Arc<AtomicUsize>);
 
     impl Future for PendingCallback {
-        type Output = Result<runmat_value::ValueSequence, crate::RuntimeError>;
+        type Output = Result<crate::execution::RootedValueSequence, crate::RuntimeError>;
 
         fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
             Poll::Pending
@@ -270,7 +280,7 @@ fn install_test_callbacks(
             .collect(),
     )));
     let bound = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
-        move |_runtime, binding, arguments, outputs| {
+        move |runtime, binding, arguments, outputs, _lexical_environment| {
             let lease = binding
                 .authority
                 .local_definition()
@@ -280,7 +290,7 @@ fn install_test_callbacks(
             }));
             let invoker = crate::user_functions::current_semantic_function_invoker()
                 .expect("timeit fixture numeric callback");
-            let future = invoker(binding.function, arguments.values(), outputs);
+            let future = invoker(Some(runtime), binding.function, arguments.values(), outputs);
             Box::pin(async move {
                 let _arguments = arguments;
                 future.await
@@ -326,7 +336,7 @@ fn install_test_callbacks(
                 _ => panic!("unexpected test callback identity {function}"),
             }
             .map_err(crate::sequence::sequence_error_to_runtime);
-            Box::pin(async move { result })
+            Box::pin(async move { result.and_then(rooted_sequence) })
         },
     )));
     (resolver, invoker, catalog, bound)
@@ -384,20 +394,20 @@ fn timeit_declares_integer_output_count_compatibility_metadata() {
 #[test]
 fn timeit_accepts_external_function_handle() {
     let callable = prepare_callable(
-        Value::ExternalFunctionHandle("pkg.callback".to_string()),
+        Value::ExternalFunctionHandle("pkg.callback".into()),
         Some(2),
     )
     .expect("timeit should accept external function handle");
     assert_eq!(
         callable.handle,
-        Value::ExternalFunctionHandle("pkg.callback".to_string())
+        Value::ExternalFunctionHandle("pkg.callback".into())
     );
     assert_eq!(callable.num_outputs, Some(2));
 }
 
 #[test]
 fn timeit_rejects_empty_function_handle_name_value() {
-    let err = prepare_callable(Value::FunctionHandle("   ".to_string()), None)
+    let err = prepare_callable(Value::FunctionHandle("   ".into()), None)
         .expect_err("timeit should reject empty function-handle payload name");
     assert_timeit_error_contains(&err, "empty function handle");
     assert_timeit_error_identifier(&err, TIMEIT_ERROR_EMPTY_HANDLE.identifier.unwrap());
@@ -405,7 +415,7 @@ fn timeit_rejects_empty_function_handle_name_value() {
 
 #[test]
 fn timeit_rejects_empty_external_function_handle_name_value() {
-    let err = prepare_callable(Value::ExternalFunctionHandle("   ".to_string()), None)
+    let err = prepare_callable(Value::ExternalFunctionHandle("   ".into()), None)
         .expect_err("timeit should reject empty external function-handle payload name");
     assert_timeit_error_contains(&err, "empty function handle");
     assert_timeit_error_identifier(&err, TIMEIT_ERROR_EMPTY_HANDLE.identifier.unwrap());
@@ -418,7 +428,7 @@ fn timeit_trims_function_handle_name_for_semantic_resolution() {
             (name == "__timeit_helper_counter_default").then_some(188)
         })));
     let callable = prepare_callable(
-        Value::FunctionHandle("  __timeit_helper_counter_default  ".to_string()),
+        Value::FunctionHandle("  __timeit_helper_counter_default  ".into()),
         None,
     )
     .expect("timeit should normalize function-handle payload name");
@@ -446,6 +456,7 @@ fn timeit_callable_invoke_honors_multi_requested_outputs() {
                     Value::Num(3.0),
                 ])
                 .map_err(crate::sequence::sequence_error_to_runtime)
+                .and_then(rooted_sequence)
             })
         },
     )));
@@ -504,7 +515,7 @@ fn timeit_external_function_handle_prefers_semantic_resolver_identity() {
             (name == "pkg.callback").then_some(86)
         })));
     let callable = prepare_callable(
-        Value::ExternalFunctionHandle("pkg.callback".to_string()),
+        Value::ExternalFunctionHandle("pkg.callback".into()),
         Some(2),
     )
     .expect("timeit should accept external function handle");
@@ -527,50 +538,54 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
             (name == "__timeit_helper_counter_default").then_some(89)
         })));
     let callable = prepare_callable(
-        Value::Closure(Closure {
+        Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "__timeit_helper_counter_default".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        }),
+        })),
         None,
     )
     .expect("timeit should accept closure callback");
     assert_eq!(
         callable.handle,
-        Value::Closure(Closure {
+        Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "__timeit_helper_counter_default".into(),
             binding: Some(runmat_value::BoundFunctionBinding::unavailable(89)),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        })
+        }))
     );
 }
 
 #[test]
 fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
     let callable = prepare_callable(
-        Value::Closure(Closure {
+        Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "__timeit_helper_counter_default".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        }),
+        })),
         None,
     )
     .expect("timeit should accept closure callback");
     assert_eq!(
         callable.handle,
-        Value::Closure(Closure {
+        Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "__timeit_helper_counter_default".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        })
+        }))
     );
 }
 

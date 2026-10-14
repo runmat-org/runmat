@@ -20,11 +20,16 @@ pub(super) fn checkpoint(
     let Some(plan) = state.optimized_region(request) else {
         return Ok(None);
     };
-    let inputs = state.optimized_region_inputs(&plan)?;
+    // Refreshing canonical bindings mutably borrows the frame while the input
+    // views are live. Retain its shared runtime services without copying inputs.
+    let runtime = state.runtime.clone();
+    let Some(inputs) = state.optimized_region_inputs(&plan)? else {
+        return Ok(None);
+    };
     let Some(workload) = runmat_runtime::numeric_region::workload(&inputs) else {
         return Ok(None);
     };
-    let placement = match crate::region::choose_region(&state.runtime, &plan, &inputs, workload) {
+    let placement = match crate::region::choose_region(&runtime, &plan, &inputs, workload) {
         RegionPlacement::Unavailable => return Ok(None),
         RegionPlacement::Generic(observation) => {
             state.region_observation = Some(observation::GenericRegionObservation::new(
@@ -37,12 +42,8 @@ pub(super) fn checkpoint(
     };
     // The observation guard records failure on execution/publication errors,
     // cancellation or unwinding, and success only after publication completes.
-    match runmat_runtime::numeric_region::execute(
-        &plan.program,
-        &inputs,
-        &state.runtime.cancellation(),
-    )
-    .map_err(|error| crate::NativeExecutorError::Host(error.into()))?
+    match runmat_runtime::numeric_region::execute(&plan.program, &inputs, &runtime.cancellation())
+        .map_err(|error| crate::NativeExecutorError::Host(error.into()))?
     {
         runmat_runtime::numeric_region::NumericRegionExecution::Completed(outputs) => {
             state.publish_optimized_region(&plan, outputs)?;

@@ -314,7 +314,13 @@ fn encode_recipe(
         ));
     }
     encoder
-        .array(12)
+        .array(
+            if recipe.schema_version == crate::program::LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+                12
+            } else {
+                13
+            },
+        )
         .and_then(|encoder| encoder.u16(recipe.schema_version))
         .and_then(|encoder| {
             encoder.bytes(
@@ -358,12 +364,35 @@ fn encode_recipe(
         Some(id) => encoder.bytes(id.0.bytes()).map_err(encode_error)?,
         None => encoder.null().map_err(encode_error)?,
     };
+    if recipe.schema_version == crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+        match &recipe.foreign_policy {
+            Some(policy) => encode_descriptor_to(encoder, policy)?,
+            None => {
+                encoder.null().map_err(encode_error)?;
+            }
+        }
+    }
     Ok(())
 }
 
 fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe> {
-    require_len(decoder.array(), 12, "program recipe")?;
+    let recipe_length = decoder.array().map_err(decode_error)?;
     let schema_version = decoder.u16().map_err(decode_error)?;
+    if recipe_length
+        != Some(
+            if schema_version == crate::program::LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+                12
+            } else if schema_version == crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+                13
+            } else {
+                0
+            },
+        )
+    {
+        return Err(ArtifactError::Invalid(
+            "unsupported program recipe schema or length".into(),
+        ));
+    }
     let program_revision =
         ProgramRevision::from_canonical_bytes(decoder.bytes().map_err(decode_error)?)
             .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
@@ -419,6 +448,22 @@ fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe
             ))
         }
     };
+    let foreign_policy = if schema_version == crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+        match decoder.datatype().map_err(decode_error)? {
+            minicbor::data::Type::Null => {
+                decoder.null().map_err(decode_error)?;
+                None
+            }
+            minicbor::data::Type::Array => Some(decode_descriptor_from(decoder)?),
+            _ => {
+                return Err(ArtifactError::Invalid(
+                    "invalid foreign policy descriptor".into(),
+                ))
+            }
+        }
+    } else {
+        None
+    };
     let recipe = ProgramBuildRecipe {
         schema_version,
         program_revision,
@@ -431,6 +476,7 @@ fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe
         features,
         compile_options,
         source_objects,
+        foreign_policy,
         expected_artifact_id,
     };
     recipe.validate()?;
@@ -442,6 +488,7 @@ fn encode_capability(
     capability: &Capability,
 ) -> ArtifactResult<()> {
     match capability {
+        Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
@@ -462,6 +509,7 @@ fn decode_capability(decoder: &mut Decoder<'_>) -> ArtifactResult<Capability> {
     let length = definite_len(decoder.array(), "capability")?;
     let tag = decoder.u8().map_err(decode_error)?;
     match (tag, length) {
+        (5, 1) => Ok(Capability::GraphSelectedValuesV11),
         (0, 1) => Ok(Capability::ProcessIsolation),
         (1, 1) => Ok(Capability::BrowserWorker),
         (2, 1) => Ok(Capability::NetworkDenied),
@@ -487,6 +535,7 @@ fn decode_namespace(value: u8) -> ArtifactResult<ObjectNamespace> {
         6 => Ok(ObjectNamespace::Log),
         7 => Ok(ObjectNamespace::Checkpoint),
         8 => Ok(ObjectNamespace::ForeignArtifact),
+        9 => Ok(ObjectNamespace::ForeignPolicy),
         _ => Err(ArtifactError::Invalid("invalid object namespace".into())),
     }
 }

@@ -36,8 +36,9 @@ mod drive;
 pub use runmat_value::{GraphicsCallbackDisposition, GraphicsCallbackHostFailure};
 
 /// Host metadata only. The session-side adapter constructs callable arguments
-/// under the originating selected context; a numeric figure is never treated
-/// as a session capability or a native Figure/Axes object.
+/// under the registration's semantic context; a numeric figure is never
+/// treated as a session capability or a native Figure/Axes object. Host
+/// gestures do not carry a command-profiling origin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GraphicsCallbackHostEvent {
     pub figure: u32,
@@ -187,7 +188,9 @@ impl GraphicsCallbackIngress {
 
 /// The registration adapter owns the exact callable and constructs its
 /// documented `(source,event)` arguments on the session lane. This queue does
-/// not invent Figure/Axes objects from numeric handles.
+/// not invent Figure/Axes objects from numeric handles. An opaque handler may
+/// capture its own runtime context; the queue cannot certify that capture as
+/// an event's command-profiling origin.
 pub type GraphicsCallbackHandler =
     dyn Fn(GraphicsCallbackHostEvent) -> RuntimeServiceFuture<Result<(), RuntimeError>>;
 
@@ -437,7 +440,9 @@ impl RuntimeGraphicsCallbackQueue {
             let old = self.0.registrations.borrow_mut().insert(
                 id,
                 Registration {
-                    selected,
+                    // Property installation is not the later host event's
+                    // command origin. Retain its semantic session authority.
+                    selected: selected.with_cleanup_command_origin(None),
                     callback,
                     figure,
                     kind,
@@ -543,7 +548,9 @@ impl RuntimeGraphicsCallbackQueue {
         self.0.registrations.borrow_mut().insert(
             id,
             Registration {
-                selected,
+                // Registration-time command accounting must not be replayed
+                // by an unrelated host gesture or a later drain command.
+                selected: selected.with_cleanup_command_origin(None),
                 callback,
                 figure,
                 kind,
@@ -745,3 +752,7 @@ impl RuntimeGraphicsCallbackQueue {
 #[cfg(test)]
 #[path = "graphics_callbacks/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "graphics_callbacks/profiling_tests.rs"]
+mod profiling_tests;

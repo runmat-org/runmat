@@ -31,9 +31,11 @@ fn suspended_descendant_argument_defers_to_exact_child_without_replay() {
                         }
                     })
                     .await;
-                    Ok(ValueSequence::single(Value::Num(1.0)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Num(1.0)).unwrap())
+                        .map_err(|error| *error)
                 } else {
-                    Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                        .map_err(|error| *error)
                 }
             })
         }),
@@ -174,7 +176,8 @@ fn captured_empty_and_multi_cells_resume_without_effect_or_branch_replay() {
                             runmat_runtime::RuntimeError::new(error.to_string())
                         })?;
                     }
-                    Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                        .map_err(|error| *error)
                 })
             }),
         ));
@@ -248,7 +251,8 @@ fn caught_failure_clears_unconsumed_capture_before_next_short_circuit() {
                         "fixture failure",
                     ))
                 } else {
-                    Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                        .map_err(|error| *error)
                 }
             })
         }),
@@ -288,7 +292,8 @@ fn abandoning_suspended_rhs_drops_owned_future_without_replaying_effects() {
             Box::pin(async move {
                 let _probe = probe;
                 futures::future::pending::<()>().await;
-                Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                    .map_err(|error| *error)
             })
         }),
     ));

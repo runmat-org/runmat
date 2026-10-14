@@ -321,7 +321,7 @@ mod tests {
         });
     }
 
-    fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
+    fn tf(num: Vec<f64>, den: Vec<f64>) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async(
             "tf",
             &[
@@ -342,16 +342,32 @@ mod tests {
         tensor.materialize_f64().clone()
     }
 
-    fn assign_numerator(model: Value, numerator: Value) -> Value {
-        block_on(crate::object::resolve::store_member(
-            model,
-            "Numerator".into(),
-            numerator,
-            false,
-            None,
-            |_, _| {},
-        ))
-        .expect("public tf coefficient property assignment")
+    fn feedback_with_tf(
+        model: crate::execution::RootedValue,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
+        model.try_map_owned(
+            |model| block_on(feedback_builtin(model, rest)),
+            |error| error.into_runtime_error(),
+        )
+    }
+
+    fn assign_numerator(
+        model: crate::execution::RootedValue,
+        numerator: Value,
+    ) -> crate::execution::RootedValue {
+        model
+            .with_owned(|model| {
+                block_on(crate::object::resolve::store_member(
+                    model,
+                    "Numerator".into(),
+                    numerator,
+                    false,
+                    None,
+                    |_, _| {},
+                ))
+            })
+            .expect("public tf coefficient property assignment")
     }
 
     #[test]
@@ -371,7 +387,10 @@ mod tests {
                 assign_numerator(tf(vec![1.0], vec![1.0]), numerator),
             ),
         ] {
-            let error = block_on(feedback_builtin(sys1, vec![sys2]))
+            let error = sys1
+                .with_owned(|sys1| {
+                    sys2.with_owned(|sys2| block_on(feedback_builtin(sys1, vec![sys2])))
+                })
                 .expect_err("model coefficient must not use scalar-gain rounding");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
         }
@@ -393,7 +412,8 @@ mod tests {
                     .expect("resident integer coefficient");
                 let model = assign_numerator(tf(vec![1.0], vec![1.0]), Value::GpuTensor(resident));
                 provider.reset_telemetry();
-                let result = block_on(feedback_builtin(model, vec![Value::Num(0.0)]));
+                let result = model
+                    .with_owned(|model| block_on(feedback_builtin(model, vec![Value::Num(0.0)])));
                 if expected_valid {
                     assert_eq!(
                         coeff(&result.expect("exact coefficient"), "Numerator"),
@@ -415,18 +435,20 @@ mod tests {
                 })
                 .expect("resident coefficient");
             let model = assign_numerator(tf(vec![1.0], vec![1.0]), Value::GpuTensor(resident));
-            let Value::Object(mut object) = model else {
-                unreachable!()
-            };
-            object
-                .properties
-                .insert("Denominator".into(), Value::from("invalid"));
-            provider.reset_telemetry();
-            let error = block_on(feedback_builtin(
-                Value::Object(object),
-                vec![Value::Num(0.0)],
-            ))
-            .expect_err("host denominator preflight");
+            let error = model.with_owned(|value| {
+                let Value::Object(mut object) = value else {
+                    unreachable!()
+                };
+                object
+                    .properties
+                    .insert("Denominator".into(), Value::from("invalid"));
+                provider.reset_telemetry();
+                block_on(feedback_builtin(
+                    Value::Object(object),
+                    vec![Value::Num(0.0)],
+                ))
+                .expect_err("host denominator preflight")
+            });
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
@@ -435,7 +457,9 @@ mod tests {
     #[test]
     fn unity_negative_feedback_forms_closed_loop() {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
-        let out = block_on(feedback_builtin(g, vec![Value::Num(1.0)])).expect("feedback");
+        let out = g
+            .with_owned(|g| block_on(feedback_builtin(g, vec![Value::Num(1.0)])))
+            .expect("feedback");
         assert_eq!(coeff(&out, "Numerator"), vec![2.0]);
         assert_eq!(coeff(&out, "Denominator"), vec![1.0, 5.0]);
     }
@@ -443,7 +467,8 @@ mod tests {
     #[test]
     fn positive_feedback_subtracts_loop_gain() {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
-        let out = block_on(feedback_builtin(g, vec![Value::Num(1.0), Value::Num(1.0)]))
+        let out = g
+            .with_owned(|g| block_on(feedback_builtin(g, vec![Value::Num(1.0), Value::Num(1.0)])))
             .expect("feedback");
         assert_eq!(coeff(&out, "Numerator"), vec![2.0]);
         assert_eq!(coeff(&out, "Denominator"), vec![1.0, 1.0]);
@@ -480,10 +505,10 @@ mod tests {
             IntValue::U64(1),
         ];
         for gain in gains {
-            let out = block_on(feedback_builtin(
+            let out = feedback_with_tf(
                 tf(vec![2.0], vec![1.0, 3.0]),
                 vec![Value::Int(gain.clone()), Value::Int(gain)],
-            ))
+            )
             .expect("typed-integer gain and sign");
             assert_eq!(coeff(&out, "Denominator"), vec![1.0, 1.0]);
         }
@@ -495,28 +520,25 @@ mod tests {
         let wide = (1_u64 << 53) + 1;
         let gain = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("integer scalar tensor");
-        let out = block_on(feedback_builtin(
-            tf(vec![1.0], vec![1.0]),
-            vec![Value::Tensor(gain)],
-        ))
-        .expect("wide integer gain");
+        let out = feedback_with_tf(tf(vec![1.0], vec![1.0]), vec![Value::Tensor(gain)])
+            .expect("wide integer gain");
         assert_eq!(coeff(&out, "Denominator"), vec![(wide as f64) + 1.0]);
     }
 
     #[test]
     fn integer_sign_keeps_the_exact_plus_or_minus_one_contract() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let negative = block_on(feedback_builtin(
+        let negative = feedback_with_tf(
             tf(vec![2.0], vec![1.0, 3.0]),
             vec![Value::Num(1.0), Value::Int(IntValue::I64(-1))],
-        ))
+        )
         .expect("negative integer sign");
         assert_eq!(coeff(&negative, "Denominator"), vec![1.0, 5.0]);
 
-        let error = block_on(feedback_builtin(
+        let error = feedback_with_tf(
             tf(vec![2.0], vec![1.0, 3.0]),
             vec![Value::Num(1.0), Value::Int(IntValue::U64(0))],
-        ))
+        )
         .expect_err("zero is not a feedback sign");
         assert_eq!(error.identifier(), FEEDBACK_ERRORS[2].identifier);
     }
@@ -526,7 +548,7 @@ mod tests {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(feedback_builtin(g.clone(), vec![Value::Bool(true)]))
+            let error = block_on(feedback_builtin(g.value().clone(), vec![Value::Bool(true)]))
                 .expect_err("strict mode rejects logical gain");
             assert_eq!(
                 error.identifier(),
@@ -536,7 +558,11 @@ mod tests {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let logical = LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar");
-            let out = block_on(feedback_builtin(g, vec![Value::LogicalArray(logical)]))
+            let out = g
+                .try_map_owned(
+                    |g| block_on(feedback_builtin(g, vec![Value::LogicalArray(logical)])),
+                    |error| error.into_runtime_error(),
+                )
                 .expect("logical gain");
             assert_eq!(coeff(&out, "Denominator"), vec![1.0, 5.0]);
         }
@@ -546,22 +572,21 @@ mod tests {
     fn runmat_only_forms_have_stable_independent_guards() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
 
-        let documented = block_on(feedback_builtin(
+        let documented = feedback_with_tf(
             tf(vec![2.0], vec![1.0, 3.0]),
             vec![Value::Num(1.0), Value::Num(-1.0)],
-        ))
+        )
         .expect("tf plus ordinary double gain and sign remains admitted");
         assert_eq!(coeff(&documented, "Denominator"), vec![1.0, 5.0]);
 
-        let error = block_on(feedback_builtin(tf(vec![1.0], vec![1.0]), vec![]))
-            .expect_err("one-argument form");
+        let error =
+            feedback_with_tf(tf(vec![1.0], vec![1.0]), vec![]).expect_err("one-argument form");
         assert_eq!(error.identifier(), SINGLE_SYSTEM_EXTENSION.error_identifier);
 
-        let error = block_on(feedback_builtin(
-            Value::Num(1.0),
-            vec![tf(vec![1.0], vec![1.0])],
-        ))
-        .expect_err("scalar forward form");
+        let gain = tf(vec![1.0], vec![1.0]);
+        let error = gain
+            .with_owned(|gain| block_on(feedback_builtin(Value::Num(1.0), vec![gain])))
+            .expect_err("scalar forward form");
         assert_eq!(
             error.identifier(),
             SCALAR_FORWARD_EXTENSION.error_identifier
@@ -574,17 +599,14 @@ mod tests {
             SCALAR_SYSTEMS_EXTENSION.error_identifier
         );
 
-        let error = block_on(feedback_builtin(
-            tf(vec![1.0], vec![1.0]),
-            vec![Value::Int(IntValue::I16(1))],
-        ))
-        .expect_err("integer gain");
+        let error = feedback_with_tf(tf(vec![1.0], vec![1.0]), vec![Value::Int(IntValue::I16(1))])
+            .expect_err("integer gain");
         assert_eq!(error.identifier(), INTEGER_GAIN_EXTENSION.error_identifier);
 
-        let error = block_on(feedback_builtin(
+        let error = feedback_with_tf(
             tf(vec![1.0], vec![1.0]),
             vec![Value::Num(1.0), Value::Int(IntValue::I8(-1))],
-        ))
+        )
         .expect_err("integer sign");
         assert_eq!(error.identifier(), INTEGER_SIGN_EXTENSION.error_identifier);
 
@@ -594,20 +616,17 @@ mod tests {
             vec![1, 1],
         )
         .expect("complex integer scalar");
-        let error = block_on(feedback_builtin(
+        let error = feedback_with_tf(
             tf(vec![1.0], vec![1.0]),
             vec![Value::ComplexTensor(complex_integer)],
-        ))
+        )
         .expect_err("complex integer gain");
         assert_eq!(error.identifier(), INTEGER_GAIN_EXTENSION.error_identifier);
 
         let single = Tensor::new_with_dtype(vec![1.0], vec![1, 1], NumericDType::F32)
             .expect("single scalar");
-        let error = block_on(feedback_builtin(
-            tf(vec![1.0], vec![1.0]),
-            vec![Value::Tensor(single)],
-        ))
-        .expect_err("single gain");
+        let error = feedback_with_tf(tf(vec![1.0], vec![1.0]), vec![Value::Tensor(single)])
+            .expect_err("single gain");
         assert_eq!(
             error.identifier(),
             SINGLE_NUMERIC_EXTENSION.error_identifier
@@ -629,8 +648,8 @@ mod tests {
                 .is_none()
         );
         let resident = Value::GpuTensor(allocation.handle.clone());
-        let error = block_on(feedback_builtin(tf(vec![1.0], vec![1.0]), vec![resident]))
-            .expect_err("resident gate");
+        let error =
+            feedback_with_tf(tf(vec![1.0], vec![1.0]), vec![resident]).expect_err("resident gate");
         assert_eq!(
             error.identifier(),
             RESIDENT_NUMERIC_EXTENSION.error_identifier

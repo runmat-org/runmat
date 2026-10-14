@@ -13,7 +13,12 @@ fn assert_error_contains(err: &RuntimeError, expected: &str) {
 }
 
 fn run_and(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    block_on(super::and_builtin(lhs, rhs))
+    // Terminal projection is restricted to non-tabular logical results.
+    assert!(!matches!(
+        (&lhs, &rhs),
+        (Value::Object(_), _) | (_, Value::Object(_))
+    ));
+    block_on(super::and_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[cfg(feature = "wgpu")]
@@ -113,10 +118,11 @@ fn and_aligns_table_variables_by_identity() {
     )
     .unwrap();
 
-    let Value::Object(output) = run_and(left, right).expect("table and") else {
+    let output_owner = block_on(super::and_builtin(None, left, right)).expect("table and");
+    let Value::Object(output) = output_owner.value() else {
         panic!("expected table output")
     };
-    let variables = crate::builtins::table::table_variables(&output).unwrap();
+    let variables = crate::builtins::table::table_variables(output).unwrap();
     assert_eq!(variables.fields.keys().collect::<Vec<_>>(), vec!["A", "B"]);
     assert!(matches!(
         &variables.fields["A"],

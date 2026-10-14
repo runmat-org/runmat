@@ -357,6 +357,11 @@ where
     f(provider)
 }
 
+/// Keep the result's managed roots alive until the host tensor is produced.
+pub fn gather_rooted(value: crate::execution::RootedValue) -> Result<Tensor, crate::RuntimeError> {
+    value.with_owned(gather)
+}
+
 /// Gather a value (recursively) so assertions can operate on host tensors.
 pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     let gathered = block_on(crate::dispatcher::gather_if_needed_async(&value))?;

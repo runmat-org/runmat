@@ -3,18 +3,18 @@ use runmat_runtime::native::{
     NativeDeoptReason, NativeEntryPoint, NativeResumeKind, NativeResumeState, NativeValueRef,
 };
 
-use super::executor::NativeExecution;
+use super::executor::RootedNativeExecution;
 use super::state::HostState;
 use crate::deopt::MaterializedFrame;
 use crate::osr::OsrTarget;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 mod active;
+#[cfg(test)]
+mod cancellation_tests;
 mod lifecycle;
 #[cfg(test)]
 mod observation_tests;
-#[cfg(test)]
-mod cancellation_tests;
 
 use active::ActiveInvocation;
 use lifecycle::ExecutionLease;
@@ -28,7 +28,7 @@ pub struct NativeInvocation {
 
 #[derive(Debug, PartialEq)]
 pub enum NativeInvocationStep {
-    Completed(NativeExecution),
+    Completed(RootedNativeExecution),
     Suspended {
         continuation: u64,
         generation: u64,
@@ -73,6 +73,20 @@ impl NativeInvocation {
         self.active
             .as_ref()
             .map_or(self.last_resume, ActiveInvocation::resume_state)
+    }
+
+    /// The activation that owns the suspended native frame's shared lexical
+    /// bindings. It can differ from the parent activation supplied at entry.
+    pub fn deoptimized_lexical_environment(
+        &self,
+    ) -> NativeExecutorResult<Option<runmat_value::LexicalEnvironment>> {
+        let active = self.active()?;
+        if active.deoptimization_target != Some(NativeResumeKind::INTERPRETER) {
+            return Err(NativeExecutorError::Host(
+                "native invocation is not awaiting interpreter deoptimization".into(),
+            ));
+        }
+        Ok(active.state.lexical_environment.clone())
     }
 
     /// Invalid continuation identities leave the pending frame untouched.

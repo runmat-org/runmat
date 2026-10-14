@@ -1,6 +1,9 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+#[path = "functions/lexical_environment.rs"]
+mod lexical_environment;
+
 #[path = "support/captured_arguments.rs"]
 mod captured_arguments;
 #[path = "support/captured_arguments/dotted.rs"]
@@ -26,17 +29,20 @@ impl Drop for ProviderSelectionCleanup {
     }
 }
 
-fn execute_source(source: &str) -> Vec<runmat_value::Value> {
+fn execute_source(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
 
-fn execute_source_with_extensions(source: &str) -> Vec<runmat_value::Value> {
+fn execute_source_with_extensions(source: &str) -> runmat_runtime::execution::RootedValues {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(source)
 }
 
-fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Value> {
+fn execute_source_with_catalog(
+    source: &str,
+    name: &str,
+) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     test_helpers::interpret_with_program_source(&bytecode, name, source)
         .expect("execute bytecode with selected program source")
@@ -44,14 +50,14 @@ fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Va
 
 fn execute_source_result(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).map_err(Box::new)
 }
 
 fn execute_source_result_with_extensions(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source_result(source)
 }
@@ -565,7 +571,7 @@ fn nested_varargout_forwarding_with_nargout_slice_assignment_via_nested_feval() 
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
-            [varargout{1:nargout}] = feval('inner', x);
+            [varargout{1:nargout}] = feval(@inner, x);
             function varargout = inner(v)
                 varargout{1} = v + 10;
                 varargout{2} = v + 20;
@@ -584,7 +590,7 @@ fn nested_varargout_forwarding_with_nargout_slice_assignment_via_nested_feval() 
             instr,
             runmat_vm::Instr::CreateSemanticClosure(_, name, 1, _) if name == "inner"
         )),
-        "outer should lower string feval target to a captured semantic closure; instructions={:?}",
+        "outer should lower explicit nested handle to a captured semantic closure; instructions={:?}",
         entry.instructions
     );
     assert!(
@@ -2589,13 +2595,178 @@ fn recursive_feval_string_call_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
+            runmat_vm::Instr::LoadCharRow(name) if name == "fact"
+        )),
+        "textual feval callee should remain a runtime name"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "fact"
         )),
-        "recursive feval string callee should carry semantic function identity"
+        "textual feval must not acquire a static definition lease"
     );
 
     let vars = interpret(&bytecode).expect("execute recursive feval call");
     assert!(has_num(&vars, 120.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn local_textual_feval_constant_and_variable_use_name_dispatch() {
+    let program = r#"
+        result = call_names(2);
+        function y = call_names(x)
+            target = 'helper';
+            y = feval('helper', x) + feval(target, x);
+        end
+        function y = helper(x)
+            y = x + 1;
+        end
+    "#;
+    let bytecode = compile_source(program).expect("compile local textual feval calls");
+    let caller = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|function| function.display_name == "call_names")
+        .expect("local caller bytecode");
+    assert!(caller.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::LoadCharRow(name) if name == "helper"
+    )));
+    assert!(
+        !caller.instructions.iter().any(|instruction| matches!(
+            instruction,
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "helper"
+        )),
+        "neither textual name may acquire the helper's static lease"
+    );
+    let values = interpret(&bytecode).expect("execute both textual forms");
+    assert!(has_num(&values, 6.0), "unexpected values: {values:?}");
+}
+
+#[test]
+fn nested_explicit_handle_without_captures_keeps_lexical_identity() {
+    let program = r#"
+        result = outer(2);
+        function y = outer(x)
+            y = feval(@inner, x);
+            function z = inner(value)
+                z = value + 1;
+            end
+        end
+    "#;
+    let bytecode = compile_source(program).expect("compile nested lexical handle");
+    let outer = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|function| function.display_name == "outer")
+        .expect("outer bytecode");
+    assert!(outer.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::CreateSemanticClosure(
+            _,
+            name,
+            0,
+            runmat_types::FunctionSourceRole::Nested
+        ) if name == "inner"
+    )));
+    assert!(!outer.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inner"
+    )));
+    let values = interpret(&bytecode).expect("execute nested lexical handle");
+    assert!(has_num(&values, 3.0), "unexpected values: {values:?}");
+}
+
+#[test]
+fn nested_textual_literal_and_variable_names_do_not_acquire_lexical_identity() {
+    for mode in [
+        runmat_parser::CompatMode::Matlab,
+        runmat_parser::CompatMode::RunMat,
+    ] {
+        for captured in [false, true] {
+            for expression in ["feval('inner', x)", "feval(target, x)"] {
+                let body = if captured {
+                    "z = value + shared;"
+                } else {
+                    "z = value + 1;"
+                };
+                let program = format!(
+                    "result = outer(2);\n function y = outer(x)\n shared = 1;\n target = 'inner';\n y = {expression};\n function z = inner(value)\n {body}\n end\n end"
+                );
+                let ast = runmat_parser::parse_with_options(
+                    &program,
+                    runmat_parser::ParserOptions::new(mode),
+                )
+                .expect("parse textual nested name");
+                let hir = runmat_hir::lower(
+                    &ast,
+                    &runmat_hir::LoweringContext::empty()
+                        .with_runmat_extensions_enabled(mode.allows_runmat_extensions()),
+                )
+                .expect("lower textual nested name");
+                let mir = runmat_mir::lowering::lower_assembly(&hir.assembly)
+                    .expect("lower textual nested MIR");
+                let bytecode =
+                    runmat_vm::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+                        .expect("compile textual nested name");
+                assert!(
+                    !bytecode.function_registry.names.contains_key("inner"),
+                    "nested definition must not enter the textual function index"
+                );
+                let outer = bytecode
+                    .function_registry
+                    .functions
+                    .values()
+                    .find(|function| function.display_name == "outer")
+                    .expect("outer bytecode");
+                assert!(
+                    !outer.instructions.iter().any(|instruction| matches!(
+                        instruction,
+                        runmat_vm::Instr::CreateBoundFunctionHandle(
+                            _,
+                            name,
+                            runmat_types::FunctionSourceRole::Nested
+                        ) if name == "inner"
+                    )),
+                    "textual name acquired a nested definition handle"
+                );
+                let error = interpret(&bytecode)
+                    .expect_err("nested name must not resolve without an explicit handle");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:UndefinedFunction"),
+                    "unexpected {mode:?}/{captured}/{expression} error: {}",
+                    error.message()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_sibling_and_descendant_calls_propagate_mutable_shared_binding() {
+    let program = r#"
+        answer = outer();
+        function result = outer()
+            shared = 1;
+            function value = reader()
+                value = shared;
+            end
+            function value = writer()
+                function inner()
+                    shared = shared + 2;
+                end
+                inner();
+                value = reader();
+            end
+            result = writer() + shared;
+        end
+    "#;
+    let values = execute_source(program);
+    assert!(has_num(&values, 6.0), "unexpected values: {values:?}");
 }
 
 #[test]
@@ -3793,7 +3964,7 @@ fn cellfun_upper_function_handle_round_trip() {
     let vars = execute_source(input);
 
     let mut found = false;
-    for value in vars {
+    for value in vars.values() {
         if let runmat_value::Value::Cell(ca) = value {
             if ca.data.len() != 3 {
                 continue;
@@ -6136,7 +6307,7 @@ fn struct_isfield_multi_and_fieldnames() {
     // Expect r to be 2x2 logical matrix [[1,0];[1,1]] in column-major data [1,1,0,1]
     let mut found_r_ok = false;
     let mut found_f_ok = false;
-    for v in &vars {
+    for v in vars.values() {
         match v {
             runmat_value::Value::LogicalArray(arr) => {
                 if arr.shape == vec![2, 2] && arr.data == vec![1, 1, 0, 1] {
@@ -6276,7 +6447,7 @@ fn string_array_literal_concat_index_and_compare() {
     let mut saw_c = false;
     let mut saw_e1 = false;
     let mut saw_e2 = false;
-    for v in vars {
+    for v in vars.values() {
         match v {
             runmat_value::Value::StringArray(sa) => {
                 println!("SA shape={:?} data={:?}", sa.shape, sa.data);
@@ -6326,7 +6497,7 @@ fn string_literal_and_num2str_horzcat_promotes_and_runs() {
     "#;
     let vars = execute_source(program);
     let mut saw_label = false;
-    for value in vars {
+    for value in vars.values() {
         if let runmat_value::Value::StringArray(sa) = value {
             if sa.shape == vec![1, 3] && sa.data == vec!["wn = ", "6", " rad/s"] {
                 saw_label = true;
@@ -6351,7 +6522,7 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
 
     let mut saw_read = false;
     let mut saw_assign = false;
-    for value in &vars {
+    for value in vars.values() {
         if let runmat_value::Value::Tensor(t) = value {
             if t.shape() == vec![2, 1] && t.materialize_f64() == vec![2.0, 5.0] {
                 saw_read = true;

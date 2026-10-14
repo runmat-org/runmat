@@ -369,7 +369,7 @@ fn jsondecode_round_trip_with_jsonencode() {
         &[Value::Tensor(tensor.clone())],
     ))
     .expect("encode");
-    let decoded = block_on(jsondecode_builtin(encoded)).expect("decode");
+    let decoded = block_on(jsondecode_builtin(encoded.value().clone())).expect("decode");
     match decoded {
         Value::Tensor(result) => {
             assert_eq!(

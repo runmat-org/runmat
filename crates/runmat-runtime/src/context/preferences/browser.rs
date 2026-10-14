@@ -6,6 +6,8 @@ mod connection;
 mod store;
 #[path = "browser/transaction.rs"]
 mod transaction;
+#[path = "browser/retirement.rs"]
+mod retirement;
 
 use super::document::{DocumentMutation, DocumentMutationError, PreferenceDocumentError};
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
@@ -16,6 +18,7 @@ use crate::context::{
 use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
 use futures::lock::Mutex;
+use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_value::Value;
 use std::fmt;
 use std::sync::Arc;
@@ -49,10 +52,11 @@ impl BrowserPreferenceService {
     async fn read_document(
         &self,
         budget: &mut CpuCooperationBudget,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<super::document::PreferenceDocument, PreferenceServiceError> {
         checkpoint(budget, 0).await?;
         let database = budget
-            .await_cancellable(connection::open(&self.namespace))
+            .await_cancellable(connection::open(&self.namespace, profiling))
             .await
             .map_err(PreferenceServiceError::Execution)?
             .map_err(read_error)?;
@@ -67,29 +71,35 @@ impl BrowserPreferenceService {
         &self,
         budget: &mut CpuCooperationBudget,
         mutation: DocumentMutation,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
-        self.mutate_request(budget, transaction::BrowserMutation::Prepared(mutation))
-            .await
+        self.mutate_request(
+            budget,
+            transaction::BrowserMutation::Prepared(mutation),
+            profiling,
+        )
+        .await
     }
 
     async fn mutate_request(
         &self,
         budget: &mut CpuCooperationBudget,
         mutation: transaction::BrowserMutation,
+        profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
         let gate = budget
             .await_cancellable(self.gate.clone().lock_owned())
             .await
             .map_err(PreferenceServiceError::Execution)?;
         let database = budget
-            .await_cancellable(connection::open(&self.namespace))
+            .await_cancellable(connection::open(&self.namespace, profiling))
             .await
             .map_err(PreferenceServiceError::Execution)?
             .map_err(read_error)?;
         // The readwrite transaction starts only after the final cancellable
         // authorization checkpoint; its observer survives a dropped caller.
         checkpoint(budget, 0).await?;
-        transaction::mutate(database, mutation, gate)
+        transaction::mutate(database, mutation, gate, profiling)
             .await
             .map_err(commit_error)
     }
@@ -105,9 +115,12 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         runtime: RuntimeContext,
     ) -> RuntimeServiceFuture<Result<PreferenceGroups, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
-            let document = service.read_document(&mut budget).await?;
+            let document = service
+                .read_document(&mut budget, profiling.as_ref())
+                .await?;
             let mut output = PreferenceGroups::new();
             for (group, values) in document.groups {
                 let mut decoded = PreferenceValues::new();
@@ -128,9 +141,12 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         group: String,
     ) -> RuntimeServiceFuture<Result<Option<PreferenceValues>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
-            let document = service.read_document(&mut budget).await?;
+            let document = service
+                .read_document(&mut budget, profiling.as_ref())
+                .await?;
             let Some(values) = document.groups.get(&group) else {
                 return Ok(None);
             };
@@ -150,9 +166,12 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         names: Vec<String>,
     ) -> RuntimeServiceFuture<Result<Vec<bool>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
-            let document = service.read_document(&mut budget).await?;
+            let document = service
+                .read_document(&mut budget, profiling.as_ref())
+                .await?;
             let values = document.groups.get(&group);
             let mut output = Vec::with_capacity(names.len());
             for name in names {
@@ -171,6 +190,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         defaults: Option<Vec<Value>>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         let rooted_defaults = defaults
             .map(|values| {
                 super::input_roots::PreferenceInputRoots::for_values(&values)
@@ -193,7 +213,9 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                 return Ok(Vec::new());
             }
             let Some((defaults, roots)) = rooted_defaults else {
-                let document = service.read_document(&mut budget).await?;
+                let document = service
+                    .read_document(&mut budget, profiling.as_ref())
+                    .await?;
                 let mut output = Vec::with_capacity(names.len());
                 for name in names {
                     let payload = document
@@ -218,6 +240,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                         defaults,
                         _roots: roots,
                     },
+                    profiling.as_ref(),
                 )
                 .await?;
             prepared
@@ -236,6 +259,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         entries: Vec<(String, Value)>,
     ) -> RuntimeServiceFuture<Result<(), PreferenceServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         let roots = super::input_roots::PreferenceInputRoots::for_entries(&entries);
         Box::pin(async move {
             let _roots = roots?;
@@ -256,6 +280,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                         group,
                         entries: encoded,
                     },
+                    profiling.as_ref(),
                 )
                 .await?;
             Ok(())
@@ -269,9 +294,12 @@ impl RuntimeUserPathService for BrowserPreferenceService {
         runtime: RuntimeContext,
     ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let mut budget = runtime.cpu_cooperation();
-            let document = service.read_document(&mut budget).await?;
+            let document = service
+                .read_document(&mut budget, profiling.as_ref())
+                .await?;
             checkpoint(&mut budget, 1).await?;
             Ok(UserPathSnapshot {
                 setting: document.user_path,
@@ -286,12 +314,17 @@ impl RuntimeUserPathService for BrowserPreferenceService {
         mutation: UserPathMutation,
     ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
         let service = self.clone();
+        let profiling = runtime.command_profiling().cloned();
         Box::pin(async move {
             let setting = mutation.into_setting()?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             let prepared = service
-                .mutate(&mut budget, DocumentMutation::UserPath(setting))
+                .mutate(
+                    &mut budget,
+                    DocumentMutation::UserPath(setting),
+                    profiling.as_ref(),
+                )
                 .await?;
             Ok(prepared
                 .user_path

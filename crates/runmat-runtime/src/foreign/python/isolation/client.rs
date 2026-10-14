@@ -7,21 +7,29 @@ use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
 use runmat_process_host::ipc::{
     authenticate_driver, read_payload, write_payload, FrameLimits, HostHandshake, SessionSecret,
 };
-use runmat_process_host::shared_memory::SharedSnapshotStore;
-use runmat_process_host::{ChildProcess, HiddenMode, HostCommand};
+use runmat_process_host::private_bytes::PrivateByteLease;
+use runmat_process_host::shared_memory::{SharedSnapshotParent, SharedSnapshotStore};
+use runmat_process_host::{
+    BootstrapBoundChild, ContainedChildRetirement, HiddenMode, HostCommand, ProcessGroupPlacement,
+    ProcessRetirementLease, ProcessSpawnEvidence,
+};
 use runmat_python::{discover_python, PythonDiscoveryRequest};
 use runmat_value::{Value, WeakForeignRef};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::oneshot;
 
 use super::{
-    decode_portable, encode_portable, wire_error, PythonCallbackRequest, PythonCallbackResult,
-    PythonDriverMessage, PythonHostMessage, PythonInvocationRequest, PythonRemoteReference,
-    PythonShutdownResult, PythonWireError, PythonWireValue, PYTHON_HOST_CONFIG_ENV,
-    PYTHON_HOST_KIND, PYTHON_HOST_KIND_ENV, PYTHON_HOST_MAX_MESSAGE_BYTES, PYTHON_HOST_PROTOCOL,
-    PYTHON_HOST_SCHEMA_VERSION, PYTHON_HOST_SECRET_ENV, PYTHON_HOST_SNAPSHOT_ROOT_ENV,
+    decode_portable, encode_portable, root_plain_value, wire_error, PythonCallbackRequest,
+    PythonCallbackResult, PythonDriverMessage, PythonHostMessage, PythonInvocationRequest,
+    PythonRemoteReference, PythonShutdownResult, PythonWireError, PythonWireValue,
+    PYTHON_HOST_CONFIG_ENV, PYTHON_HOST_KIND, PYTHON_HOST_KIND_ENV, PYTHON_HOST_MAX_MESSAGE_BYTES,
+    PYTHON_HOST_PROTOCOL, PYTHON_HOST_SCHEMA_VERSION, PYTHON_HOST_SECRET_ENV,
+    PYTHON_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{ForeignCall, RuntimeContext};
+use crate::execution::{
+    RootedValue, RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder,
+};
 use crate::foreign::{
     foreign_callback_request, invoke_foreign_callback, ForeignHandleRegistry,
     ForeignResourceMetadata, PythonRuntimeConfiguration,
@@ -32,15 +40,38 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct NestedPythonCall {
     pub call: ForeignCall,
-    pub reply: oneshot::Sender<Result<Vec<Value>, RuntimeError>>,
+    pub reply: oneshot::Sender<Result<RootedValues, RuntimeError>>,
     pub(crate) ownership: Rc<()>,
 }
 
 pub type NestedPythonQueue = Rc<RefCell<VecDeque<NestedPythonCall>>>;
 
-pub struct IsolatedPythonClient {
-    child: ChildProcess,
+struct PythonChildResources {
     snapshots: SharedSnapshotStore,
+    byte_leases: Vec<PrivateByteLease>,
+}
+
+impl ProcessRetirementLease for PythonChildResources {
+    fn persist_unverified(&mut self, process_id: Option<u32>, reason: &str) -> Result<(), String> {
+        let mut errors = Vec::new();
+        if let Err(error) = self.snapshots.persist_unverified(process_id, reason) {
+            errors.push(error);
+        }
+        for lease in &self.byte_leases {
+            if let Err(error) = lease.persist_unverified(process_id, reason) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+}
+
+pub struct IsolatedPythonClient {
+    child: BootstrapBoundChild<PythonChildResources>,
     reader: tokio::process::ChildStdout,
     writer: tokio::process::ChildStdin,
     limits: FrameLimits,
@@ -48,8 +79,26 @@ pub struct IsolatedPythonClient {
     next_callback_id: u64,
     local_to_remote: BTreeMap<u64, u64>,
     remote_to_local: BTreeMap<u64, (u64, WeakForeignRef)>,
-    callbacks: BTreeMap<u64, Value>,
+    callbacks: BTreeMap<u64, RootedValue>,
     nested_aborted: bool,
+    shutdown_progress: ShutdownProgress,
+}
+
+enum ShutdownProgress {
+    Open,
+    Attempted,
+    Protocol(Result<(), PythonWireError>),
+}
+
+pub enum PythonClientRetirement {
+    Retained {
+        retirement: PythonWireError,
+        prior_protocol: Option<PythonWireError>,
+    },
+    Retired {
+        scope: ContainedChildRetirement,
+        result: Result<(), PythonWireError>,
+    },
 }
 
 impl IsolatedPythonClient {
@@ -57,11 +106,20 @@ impl IsolatedPythonClient {
     pub(crate) async fn pending_test_client() -> Self {
         let mut command = HostCommand::new("/bin/sh");
         command.arguments = vec!["-c".into(), "exec /bin/sleep 30".into()];
-        let mut child = command.spawn().await.expect("spawn owned pending host");
+        let unverified = ProcessSpawnEvidence::default();
+        let child = command
+            .spawn_observed(&unverified)
+            .await
+            .expect("spawn owned pending host");
+        let snapshots = SharedSnapshotStore::create().expect("test snapshots");
+        let resources = PythonChildResources {
+            snapshots,
+            byte_leases: Vec::new(),
+        };
+        let mut child = BootstrapBoundChild::new(child, resources, unverified);
         let stdio = child.take_stdio().expect("take pending host stdio");
         Self {
             child,
-            snapshots: SharedSnapshotStore::create().expect("test snapshots"),
             reader: stdio.stdout,
             writer: stdio.stdin,
             limits: FrameLimits {
@@ -73,6 +131,7 @@ impl IsolatedPythonClient {
             remote_to_local: BTreeMap::new(),
             callbacks: BTreeMap::new(),
             nested_aborted: false,
+            shutdown_progress: ShutdownProgress::Open,
         }
     }
 
@@ -82,6 +141,10 @@ impl IsolatedPythonClient {
 
     pub async fn spawn(
         configuration: &PythonRuntimeConfiguration,
+        process_group_placement: ProcessGroupPlacement,
+        snapshot_parent: Option<SharedSnapshotParent>,
+        unverified: ProcessSpawnEvidence,
+        byte_leases: Vec<PrivateByteLease>,
     ) -> Result<Self, PythonWireError> {
         let mut host_configuration = configuration.clone();
         if host_configuration.executable.is_none() {
@@ -101,9 +164,21 @@ impl IsolatedPythonClient {
         let executable = std::env::current_exe()
             .map_err(|error| wire_error("RunMat:Python:HostExecutable", error.to_string()))?;
         let secret = SessionSecret::generate();
-        let snapshots = SharedSnapshotStore::create()
-            .map_err(|error| wire_error("RunMat:Python:ValueSnapshot", error.to_string()))?;
+        let snapshots = match snapshot_parent.as_ref() {
+            Some(parent) => SharedSnapshotStore::create_in_parent(parent),
+            None => SharedSnapshotStore::create(),
+        }
+        .map_err(|error| wire_error("RunMat:Python:ValueSnapshot", error.to_string()))?;
+        if (process_group_placement == ProcessGroupPlacement::JoinAncestorGroup)
+            != snapshot_parent.is_some()
+        {
+            return Err(wire_error(
+                "RunMat:Python:ValueSnapshot",
+                "joined Python host requires parent-owned snapshot scratch",
+            ));
+        }
         let mut command = HostCommand::new(executable);
+        command.process_group_placement = process_group_placement;
         command.arguments = vec![HiddenMode::ExtensionHost.marker().into()];
         command.environment_policy =
             EnvironmentPolicy::Allow(EnvironmentAllowlist::platform_runtime());
@@ -127,10 +202,29 @@ impl IsolatedPythonClient {
         command
             .environment
             .insert(PYTHON_HOST_SNAPSHOT_ROOT_ENV.into(), snapshot_root.into());
-        let mut child = command
-            .spawn()
-            .await
-            .map_err(|error| wire_error("RunMat:Python:HostSpawn", error.to_string()))?;
+        let child = match command.spawn_observed(&unverified).await {
+            Ok(child) => child,
+            Err(error) => {
+                if unverified.is_unverified() {
+                    let mut resources = PythonChildResources {
+                        snapshots,
+                        byte_leases,
+                    };
+                    if let Err(marker_error) = resources.persist_unverified(
+                        None,
+                        "Python child was created but containment could not be proved",
+                    ) {
+                        eprintln!("Python snapshot bytes retained without recovery marker: {marker_error}");
+                    }
+                }
+                return Err(wire_error("RunMat:Python:HostSpawn", error.to_string()));
+            }
+        };
+        let resources = PythonChildResources {
+            snapshots,
+            byte_leases,
+        };
+        let mut child = BootstrapBoundChild::new(child, resources, unverified);
         let stdio = child
             .take_stdio()
             .map_err(|error| wire_error("RunMat:Python:HostTransport", error.to_string()))?;
@@ -150,7 +244,6 @@ impl IsolatedPythonClient {
         .map_err(|error| wire_error("RunMat:Python:HostAuthentication", error.to_string()))?;
         Ok(Self {
             child,
-            snapshots,
             reader,
             writer,
             limits: session.limits,
@@ -160,6 +253,7 @@ impl IsolatedPythonClient {
             remote_to_local: BTreeMap::new(),
             callbacks: BTreeMap::new(),
             nested_aborted: false,
+            shutdown_progress: ShutdownProgress::Open,
         })
     }
 
@@ -171,7 +265,15 @@ impl IsolatedPythonClient {
         host_identity: &str,
         released_local_handles: Vec<u64>,
         nested: &NestedPythonQueue,
-    ) -> Result<Vec<Value>, RuntimeError> {
+    ) -> Result<RootedValues, RuntimeError> {
+        if !matches!(self.shutdown_progress, ShutdownProgress::Open) {
+            return Err(runtime_error(wire_error(
+                "RunMat:Python:RetirementUnverified",
+                "isolated Python host has an unverified shutdown operation",
+            )));
+        }
+        let _input_roots = RootedValueLease::for_values(call.arguments.iter())
+            .map_err(|error| error.into_runtime_error())?;
         let request = self
             .request(call, released_local_handles)
             .await
@@ -189,6 +291,8 @@ impl IsolatedPythonClient {
         call: ForeignCall,
         released_local_handles: Vec<u64>,
     ) -> Result<PythonInvocationRequest, PythonWireError> {
+        let _input_roots = RootedValueLease::for_values(call.arguments.iter())
+            .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
         let request_id = self.take_request_id()?;
         let releases = self.translate_releases(released_local_handles);
         let mut arguments = Vec::with_capacity(call.arguments.len());
@@ -216,10 +320,10 @@ impl IsolatedPythonClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
         nested: &NestedPythonQueue,
-    ) -> Result<Vec<Value>, RuntimeError> {
+    ) -> Result<RootedValues, RuntimeError> {
         loop {
             if runtime.is_cancelled() {
-                let _ = self.child.terminate_tree().await;
+                let _ = self.child.terminate_contained_child().await;
                 return Err(runtime_error(wire_error(
                     "RunMat:Python:Cancelled",
                     "isolated Python invocation was cancelled",
@@ -299,47 +403,59 @@ impl IsolatedPythonClient {
                     "host requested an unknown Python callback",
                 ))
             })?;
-        let mut arguments = Vec::with_capacity(callback.arguments.len());
+        let mut arguments = RootedValuesBuilder::with_capacity(callback.arguments.len());
         for value in callback.arguments {
-            arguments.push(
+            arguments.push_rooted(
                 self.decode_driver_value(value, handles, host_identity)
                     .map_err(runtime_error)?,
             );
         }
+        let arguments = arguments
+            .finish()
+            .map_err(|error| error.into_runtime_error())?;
         let requested_outputs = usize::try_from(callback.requested_outputs).map_err(|_| {
             runtime_error(wire_error(
                 "RunMat:Python:CallbackProtocol",
                 "Python callback output count is not representable",
             ))
         })?;
-        let request = foreign_callback_request(&callable, arguments, requested_outputs)?;
-        let callback_future = invoke_foreign_callback(runtime.clone(), request);
-        tokio::pin!(callback_future);
-        let sequence = loop {
-            tokio::select! {
-                result = &mut callback_future => break result?,
-                _ = tokio::time::sleep(Duration::from_millis(1)) => {
-                    let queued = nested.borrow_mut().pop_front();
-                    if let Some(queued) = queued {
-                        self.dispatch_nested_call(
-                            runtime.clone(), queued, handles, host_identity, nested,
-                        ).await?;
+        let sequence = arguments
+            .with_owned_values_async(|arguments| async {
+                let request = foreign_callback_request(&callable, arguments, requested_outputs)?;
+                let callback_future = invoke_foreign_callback(runtime.clone(), request);
+                tokio::pin!(callback_future);
+                loop {
+                    tokio::select! {
+                        result = &mut callback_future => break result,
+                        _ = tokio::time::sleep(Duration::from_millis(1)) => {
+                            let queued = nested.borrow_mut().pop_front();
+                            if let Some(queued) = queued {
+                                self.dispatch_nested_call(
+                                    runtime.clone(), queued, handles, host_identity, nested,
+                                ).await?;
+                            }
+                        }
                     }
                 }
-            }
-        };
-        let values = crate::sequence::ResolveValueSequence::resolve(
-            sequence,
-            runmat_types::SequenceUse::SelectPrefix {
-                count: requested_outputs,
-            },
-            crate::sequence::SequenceResolutionContext::default(),
-        )?;
+            })
+            .await?;
+        let values = sequence.with_owned_sequence(|sequence| {
+            let values = crate::sequence::ResolveValueSequence::resolve(
+                sequence,
+                runmat_types::SequenceUse::SelectPrefix {
+                    count: requested_outputs,
+                },
+                crate::sequence::SequenceResolutionContext::default(),
+            )?;
+            crate::execution::RootedValues::new(values).map_err(|error| error.into_runtime_error())
+        })?;
         let mut encoded = Vec::with_capacity(values.len());
-        for value in values {
-            let gathered = crate::gather_if_needed_async(&value).await?;
+        for value in values.values() {
+            let gathered = crate::gather_if_needed_async(value).await?;
+            let gathered = crate::execution::RootedValue::new(gathered)
+                .map_err(|error| error.into_runtime_error())?;
             encoded.push(
-                self.encode_driver_value(&gathered)
+                self.encode_driver_value(gathered.value())
                     .await
                     .map_err(runtime_error)?,
             );
@@ -354,7 +470,9 @@ impl IsolatedPythonClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
         nested: &NestedPythonQueue,
-    ) -> Result<Vec<Value>, RuntimeError> {
+    ) -> Result<RootedValues, RuntimeError> {
+        let _input_roots = RootedValueLease::for_values(call.arguments.iter())
+            .map_err(|error| error.into_runtime_error())?;
         let request = self
             .request(call, Vec::new())
             .await
@@ -411,7 +529,9 @@ impl IsolatedPythonClient {
             self.next_callback_id = self.next_callback_id.checked_add(1).ok_or_else(|| {
                 wire_error("RunMat:Python:HostProtocol", "callback identity exhausted")
             })?;
-            self.callbacks.insert(id, value.clone());
+            let callable = RootedValue::new(value.clone())
+                .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
+            self.callbacks.insert(id, callable);
             return Ok(PythonWireValue::Callback { id });
         }
         match value {
@@ -442,7 +562,7 @@ impl IsolatedPythonClient {
                 let host = crate::gather_if_needed_async(value)
                     .await
                     .map_err(|error| wire_error("RunMat:Python:ValueGather", error.to_string()))?;
-                encode_portable(&host, &self.snapshots).map(PythonWireValue::Portable)
+                encode_portable(&host, &self.child.lease().snapshots).map(PythonWireValue::Portable)
             }
         }
     }
@@ -452,9 +572,11 @@ impl IsolatedPythonClient {
         value: PythonWireValue,
         handles: &ForeignHandleRegistry,
         host_identity: &str,
-    ) -> Result<Value, PythonWireError> {
+    ) -> Result<RootedValueMember, PythonWireError> {
         match value {
-            PythonWireValue::Portable(transfer) => decode_portable(&transfer, &self.snapshots),
+            PythonWireValue::Portable(transfer) => {
+                decode_portable(&transfer, &self.child.lease().snapshots)
+            }
             PythonWireValue::Foreign(remote) => {
                 let reference = if let Some((_, reference)) = self.remote_to_local.get(&remote.id) {
                     reference.upgrade().ok_or_else(|| {
@@ -485,7 +607,7 @@ impl IsolatedPythonClient {
                         .insert(remote.id, (reference.handle, weak));
                     reference
                 };
-                Ok(Value::Foreign(reference))
+                root_plain_value(Value::Foreign(reference))
             }
             PythonWireValue::Callback { .. } => Err(wire_error(
                 "RunMat:Python:HostProtocol",
@@ -499,11 +621,14 @@ impl IsolatedPythonClient {
         values: Vec<PythonWireValue>,
         handles: &ForeignHandleRegistry,
         host_identity: &str,
-    ) -> Result<Vec<Value>, PythonWireError> {
-        values
-            .into_iter()
-            .map(|value| self.decode_driver_value(value, handles, host_identity))
-            .collect()
+    ) -> Result<RootedValues, PythonWireError> {
+        let mut decoded = RootedValuesBuilder::with_capacity(values.len());
+        for value in values {
+            decoded.push_rooted(self.decode_driver_value(value, handles, host_identity)?);
+        }
+        decoded
+            .finish()
+            .map_err(|error| wire_error("RunMat:Python:ValueDecode", error.to_string()))
     }
 
     fn translate_releases(&mut self, local_handles: Vec<u64>) -> Vec<u64> {
@@ -518,6 +643,45 @@ impl IsolatedPythonClient {
     }
 
     pub async fn shutdown(&mut self, released: Vec<u64>) -> Result<(), PythonWireError> {
+        match self.shutdown_retirement(released).await {
+            PythonClientRetirement::Retired { result, .. } => result,
+            PythonClientRetirement::Retained { retirement, .. } => Err(retirement),
+        }
+    }
+
+    pub async fn shutdown_retirement(&mut self, released: Vec<u64>) -> PythonClientRetirement {
+        if matches!(self.shutdown_progress, ShutdownProgress::Open) {
+            // A cancelled shutdown cannot resend an unknown-effect record.
+            self.shutdown_progress = ShutdownProgress::Attempted;
+            let result = self.shutdown_protocol(released).await;
+            self.shutdown_progress = ShutdownProgress::Protocol(result);
+        }
+        match self.child.terminate_contained_child().await {
+            Ok(scope) => {
+                let result = match std::mem::replace(
+                    &mut self.shutdown_progress,
+                    ShutdownProgress::Attempted,
+                ) {
+                    ShutdownProgress::Protocol(result) => result,
+                    ShutdownProgress::Attempted => Err(wire_error(
+                        "RunMat:Python:ShutdownInterrupted",
+                        "isolated Python shutdown was interrupted before retirement",
+                    )),
+                    ShutdownProgress::Open => unreachable!("shutdown attempted before proof"),
+                };
+                PythonClientRetirement::Retired { scope, result }
+            }
+            Err(error) => PythonClientRetirement::Retained {
+                retirement: wire_error("RunMat:Python:RetirementUnverified", error.to_string()),
+                prior_protocol: match &self.shutdown_progress {
+                    ShutdownProgress::Protocol(Err(prior)) => Some(prior.clone()),
+                    _ => None,
+                },
+            },
+        }
+    }
+
+    async fn shutdown_protocol(&mut self, released: Vec<u64>) -> Result<(), PythonWireError> {
         let request_id = self.take_request_id()?;
         let releases = self.translate_releases(released);
         self.write(&PythonDriverMessage::Shutdown {
@@ -554,10 +718,14 @@ impl IsolatedPythonClient {
         }
         outcome?;
         self.callbacks.clear();
-        let exit = self
-            .child
-            .wait()
+        let exit = tokio::time::timeout(DEFAULT_SHUTDOWN_TIMEOUT, self.child.wait())
             .await
+            .map_err(|_| {
+                wire_error(
+                    "RunMat:Python:Timeout",
+                    "isolated Python host exit timed out",
+                )
+            })?
             .map_err(|error| wire_error("RunMat:Python:HostExit", error.to_string()))?;
         if !exit.success {
             return Err(wire_error(

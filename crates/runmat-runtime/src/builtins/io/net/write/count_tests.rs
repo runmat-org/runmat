@@ -2,8 +2,8 @@ use super::*;
 use crate::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts, RuntimeTcpBind, RuntimeTcpByteOrder,
     RuntimeTcpClient, RuntimeTcpClientStatus, RuntimeTcpCloseScope, RuntimeTcpConnect,
-    RuntimeTcpIssuer, RuntimeTcpReadMode, RuntimeTcpReadResult, RuntimeTcpServer,
-    RuntimeTcpService,
+    RuntimeTcpInvocation, RuntimeTcpIssuer, RuntimeTcpReadMode, RuntimeTcpReadResult,
+    RuntimeTcpServer, RuntimeTcpService,
 };
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 use runmat_value::{ForeignRef, ForeignResourceKey, ObjectInstance};
@@ -33,7 +33,7 @@ impl RuntimeTcpService for CountedWriteService {
 
     fn describe_client(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, TcpTransportError>> {
         Box::pin(async {
@@ -48,7 +48,7 @@ impl RuntimeTcpService for CountedWriteService {
 
     fn write(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Vec<u8>,
     ) -> RuntimeServiceFuture<Result<usize, TcpTransportError>> {
@@ -70,21 +70,21 @@ impl RuntimeTcpService for CountedWriteService {
 
     fn connect(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpConnect,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
         panic!("write-count test must not connect")
     }
     fn bind(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpBind,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpServer, TcpTransportError>> {
         panic!("write-count test must not bind")
     }
     fn accept(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
@@ -92,7 +92,7 @@ impl RuntimeTcpService for CountedWriteService {
     }
     fn read(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: RuntimeTcpReadMode,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, TcpTransportError>> {

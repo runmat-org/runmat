@@ -21,16 +21,21 @@ use crate::{build_runtime_error, make_cell, RuntimeError};
 async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let request = parse_request(&args, WorkspaceQueryOwner::Who)?;
 
-    let mut entries = match &request.source {
-        WorkspaceQuerySource::Workspace => crate::workspace::try_snapshot()
-            .map_err(who_flow)?
-            .unwrap_or_default(),
-        WorkspaceQuerySource::File(path) => read_mat_file_for_builtin(path, "who").await?,
+    let file_entries = match &request.source {
+        WorkspaceQuerySource::File(path) => Some(read_mat_file_for_builtin(path, "who").await?),
+        WorkspaceQuerySource::Workspace => None,
     };
-
-    if matches!(request.source, WorkspaceQuerySource::File(_)) {
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-    }
+    let workspace_entries = if file_entries.is_none() {
+        crate::workspace::try_snapshot()
+            .map_err(who_flow)?
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let entries = file_entries
+        .as_ref()
+        .map(|entries| entries.value().0.as_slice())
+        .unwrap_or(&workspace_entries);
 
     let global_names: std::collections::HashSet<String> =
         if matches!(request.source, WorkspaceQuerySource::Workspace) {
@@ -44,14 +49,14 @@ async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut names = Vec::new();
     for (name, _value) in entries {
-        if !request.matches(&name) {
+        if !request.matches(name) {
             continue;
         }
-        let is_global = global_names.contains(&name);
+        let is_global = global_names.contains(name);
         if request.only_global && !is_global {
             continue;
         }
-        names.push(name);
+        names.push(name.clone());
     }
 
     names.sort();
@@ -289,7 +294,8 @@ pub(crate) mod tests {
         test_support::with_test_provider(|_| {
             let resident = block_on(crate::call_builtin_async("gpuArray", &[Value::Num(7.0)]))
                 .expect("resident scalar");
-            let error = who_builtin(vec![resident]).expect_err("selector is not text");
+            let error =
+                who_builtin(vec![resident.value().clone()]).expect_err("selector is not text");
             assert_eq!(error.context.builtin.as_deref(), Some("who"));
             assert!(error.message().contains("who: selections must"));
         });
@@ -470,7 +476,10 @@ pub(crate) mod tests {
             ))
             .expect("gpu");
             shared_set_workspace(
-                &[("gpuVar", gpu_value.clone()), ("hostVar", Value::Num(5.0))],
+                &[
+                    ("gpuVar", gpu_value.value().clone()),
+                    ("hostVar", Value::Num(5.0)),
+                ],
                 &[],
             );
 
@@ -489,7 +498,10 @@ pub(crate) mod tests {
             shared_set_workspace(&[], &[]);
             let gpu_scalar =
                 block_on(crate::call_builtin_async("gpuArray", &[Value::Num(3.0)])).expect("gpu");
-            shared_set_workspace(&[("shared_gpu", gpu_scalar)], &["shared_gpu"]);
+            shared_set_workspace(
+                &[("shared_gpu", gpu_scalar.value().clone())],
+                &["shared_gpu"],
+            );
 
             let value = who_builtin(vec![Value::from("global")]).expect("who");
             let names = names_from_value(value);
@@ -513,7 +525,7 @@ pub(crate) mod tests {
             &[Value::Tensor(tensor)],
         ))
         .expect("gpuArray");
-        shared_set_workspace(&[("wgpuVar", gpu_value)], &[]);
+        shared_set_workspace(&[("wgpuVar", gpu_value.value().clone())], &[]);
 
         let value = who_builtin(Vec::new()).expect("who");
         let names = names_from_value(value);

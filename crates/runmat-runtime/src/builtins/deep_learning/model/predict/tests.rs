@@ -11,7 +11,7 @@ use crate::builtins::deep_learning::model::dlnetwork_builtin;
 #[path = "tests/complex.rs"]
 mod complex;
 
-fn network() -> Value {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -32,6 +32,7 @@ fn network() -> Value {
 #[test]
 fn invalid_observations_option_is_rejected_before_resident_access() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
+        let network = network();
         let handle = provider
             .upload(&HostTensorView {
                 data: &[1.0, 2.0],
@@ -42,7 +43,7 @@ fn invalid_observations_option_is_rejected_before_resident_access() {
             .unwrap();
         provider.reset_telemetry();
         let error = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-            network(),
+            network.value().clone(),
             Value::GpuTensor(handle),
             vec![
                 Value::String("ObservationsIn".into()),
@@ -72,7 +73,7 @@ fn excess_predict_outputs_fail_before_resident_access() {
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(3));
         let error = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-            network,
+            network.value().clone(),
             Value::GpuTensor(handle),
             vec![],
         ))
@@ -87,7 +88,8 @@ fn excess_predict_outputs_fail_before_resident_access() {
 #[test]
 fn direct_network_predict_rejects_excess_outputs_before_provider_access() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let Value::Object(network) = network() else {
+        let network_owner = network();
+        let Value::Object(network) = network_owner.value() else {
             panic!("network object expected")
         };
         let handle = provider
@@ -101,7 +103,7 @@ fn direct_network_predict_rejects_excess_outputs_before_provider_access() {
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(3));
         let error = block_on(predict_deep_learning_object(
-            network,
+            network.clone(),
             Value::GpuTensor(handle),
             vec![],
         ))
@@ -118,7 +120,7 @@ fn two_output_network_predict_returns_state() {
     let network = network();
     let _outputs = crate::output_count::push_output_count(Some(2));
     let value = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        network,
+        network.value().clone(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         vec![],
     ))
@@ -136,6 +138,7 @@ fn two_output_network_predict_returns_state() {
 #[test]
 fn explicit_resident_prediction_keeps_rows_and_never_downloads() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
+        let network = network();
         let source = [1.0, 3.0, 5.0, 2.0, 4.0, 6.0];
         let handle = provider
             .upload(&HostTensorView {
@@ -147,7 +150,7 @@ fn explicit_resident_prediction_keeps_rows_and_never_downloads() {
             .unwrap();
         provider.reset_telemetry();
         let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-            network(),
+            network.value().clone(),
             Value::GpuTensor(handle),
             vec![],
         ))
@@ -166,6 +169,7 @@ fn explicit_resident_prediction_keeps_rows_and_never_downloads() {
 #[test]
 fn explicit_column_observations_return_batch_major_scores_without_download() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
+        let network = network();
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let handle = provider
             .upload(&HostTensorView {
@@ -177,7 +181,7 @@ fn explicit_column_observations_return_batch_major_scores_without_download() {
             .unwrap();
         provider.reset_telemetry();
         let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-            network(),
+            network.value().clone(),
             Value::GpuTensor(handle),
             vec![
                 Value::String("ObservationsIn".into()),
@@ -198,12 +202,13 @@ fn explicit_column_observations_return_batch_major_scores_without_download() {
 
 #[test]
 fn documented_integer_predictors_do_not_inherit_forward_extension_gate() {
+    let network = network();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let input = Value::Tensor(
         Tensor::new_integer(IntegerStorage::I32(vec![1, 3, 2, 4]), vec![2, 2]).unwrap(),
     );
     let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        network(),
+        network.value().clone(),
         input,
         vec![],
     ))
@@ -217,6 +222,7 @@ fn documented_integer_predictors_do_not_inherit_forward_extension_gate() {
 
 #[test]
 fn formatted_predictor_keeps_its_typed_axis_order() {
+    let network = network();
     let input = object(
         "dlarray",
         vec![
@@ -229,7 +235,7 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
         ],
     );
     let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        network(),
+        network.value().clone(),
         input,
         vec![],
     ))
@@ -255,6 +261,7 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
 
 #[test]
 fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
+    let network = network();
     let input = object(
         "dlarray",
         vec![
@@ -267,7 +274,7 @@ fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
         ],
     );
     let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        network(),
+        network.value().clone(),
         input,
         vec![],
     ))

@@ -14,6 +14,7 @@ pub use contract::{
 };
 
 pub const DE2BI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "de2bi" },
     category: "comms/conversion",

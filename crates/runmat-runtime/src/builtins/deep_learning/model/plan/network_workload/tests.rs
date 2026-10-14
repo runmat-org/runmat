@@ -10,7 +10,7 @@ use super::*;
 use crate::builtins::deep_learning::model::execution::{NetworkCaller, NetworkOutputLayout};
 use crate::builtins::deep_learning::{layers::*, model::dlnetwork_builtin, object};
 
-fn network() -> runmat_value::ObjectInstance {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -22,10 +22,14 @@ fn network() -> runmat_value::ObjectInstance {
         ],
     ))
     .unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, dense], 2, 1).unwrap(),
     )]))
-    .unwrap() else {
+    .unwrap()
+}
+
+fn network_object(owner: &crate::execution::RootedValue) -> &runmat_value::ObjectInstance {
+    let Value::Object(network) = owner.value() else {
         panic!("network object expected")
     };
     network
@@ -33,7 +37,8 @@ fn network() -> runmat_value::ObjectInstance {
 
 #[test]
 fn admitted_host_projection_retains_actual_input_class_and_canonical_resources() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = object(
         "dlarray",
         vec![
@@ -47,7 +52,7 @@ fn admitted_host_projection_retains_actual_input_class_and_canonical_resources()
             ("Labels", Value::String("CB".into())),
         ],
     );
-    let plan = HostNetworkPlan::admit(&network, &input, "predict").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "predict").unwrap();
     let target = AxisPlan::new(
         runmat_builtins::DeepLearningAxisLayout::from_axes(&[
             DeepLearningAxisLabel::Batch,
@@ -76,9 +81,10 @@ fn admitted_host_projection_retains_actual_input_class_and_canonical_resources()
 
 #[test]
 fn projection_rejects_a_target_shape_not_derived_from_admitted_axes() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let wrong = AxisPlan::new(plan.output_axes().layout().clone(), &[99, 1]).unwrap();
     let error = NetworkWorkload::from_admitted(&plan, &wrong)
         .err()
@@ -88,13 +94,14 @@ fn projection_rejects_a_target_shape_not_derived_from_admitted_axes() {
 
 #[test]
 fn projection_binds_the_original_input_not_a_same_shape_substitution() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let original = Value::Tensor(
         Tensor::new_integer(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2]).unwrap(),
     );
     let replacement = Value::Tensor(Tensor::from_f32(vec![1.0; 4], vec![2, 2]).unwrap());
-    let admitted = HostNetworkPlan::admit(&network, &original, "predict").unwrap();
-    let alternative = HostNetworkPlan::admit(&network, &replacement, "predict").unwrap();
+    let admitted = HostNetworkPlan::admit(network, &original, "predict").unwrap();
+    let alternative = HostNetworkPlan::admit(network, &replacement, "predict").unwrap();
     let admitted_work = NetworkWorkload::from_admitted(&admitted, admitted.output_axes()).unwrap();
     let alternative_work =
         NetworkWorkload::from_admitted(&alternative, alternative.output_axes()).unwrap();
@@ -111,10 +118,11 @@ fn projection_binds_the_original_input_not_a_same_shape_substitution() {
 
 #[test]
 fn selected_resources_are_exact_plan_rows_not_same_shaped_substitutes() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-    let admitted = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
-    let alternative = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let admitted = HostNetworkPlan::admit(network, &input, "forward").unwrap();
+    let alternative = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let selected = [&admitted.parameter_views()[0]];
     let work =
         NetworkWorkload::from_selected(&admitted, admitted.output_axes(), &selected, &[]).unwrap();
@@ -156,8 +164,9 @@ fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation()
                 ("Labels", Value::String("CB".into())),
             ],
         );
-        let network = network();
-        let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+        let network_owner = network();
+        let network = network_object(&network_owner);
+        let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
         let work = NetworkWorkload::from_admitted(&plan, plan.output_axes()).unwrap();
         assert_eq!(work.input.logical_bytes, 32);
         assert_eq!(work.input.kind, PayloadKind::Real(NumericDType::F64));
@@ -221,9 +230,10 @@ fn resident_origin(identity: AllocationIdentity) -> PayloadOrigin {
 
 #[test]
 fn semantic_timing_digest_retains_alias_pattern_without_allocation_numbers() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let mut work = NetworkWorkload::from_admitted(&plan, plan.output_axes()).unwrap();
     let first = AllocationIdentity::new(1, 10, 1);
     let second = AllocationIdentity::new(1, 20, 1);
@@ -243,9 +253,10 @@ fn semantic_timing_digest_retains_alias_pattern_without_allocation_numbers() {
 
 #[test]
 fn semantic_timing_digest_distinguishes_invocation_and_admitted_resource_facts() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let mut work = NetworkWorkload::from_admitted(&plan, plan.output_axes()).unwrap();
     let baseline = work.semantic_timing_digest(invocation());
     assert_ne!(
@@ -284,9 +295,10 @@ fn semantic_timing_digest_distinguishes_invocation_and_admitted_resource_facts()
 
 #[test]
 fn semantic_timing_digest_uses_typed_role_not_user_layer_label() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let mut work = NetworkWorkload::from_admitted(&plan, plan.output_axes()).unwrap();
     let baseline = work.semantic_timing_digest(invocation());
     let renamed = crate::builtins::deep_learning::model::parameters::ParameterKey {

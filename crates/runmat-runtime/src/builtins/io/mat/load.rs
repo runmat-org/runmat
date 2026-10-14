@@ -7,12 +7,16 @@ use std::rc::Rc;
 
 use regex::Regex;
 use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_gc::{Trace, Tracer};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
-use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
+use crate::builtins::introspection::object_serialization::{
+    classify_mat_load_restoration, restore_value_from_mat_load, MatLoadRestoration,
+};
 use crate::context::host_effect::HostEffectResourceLivenessLease;
+use crate::execution::{RootedResult, RootedValue};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_builtins::{
@@ -31,7 +35,7 @@ use crate::context::host_effect::{HostEffectReceipt, MatDecodeOutput};
 async fn load_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let requested_outputs = match crate::output_count::current_output_scope() {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
         crate::output_count::InvocationOutputScope::Implicit => None,
@@ -73,12 +77,13 @@ async fn load_builtin(
                 )
             })?;
             target.assign_all(eval.variables(), receipt.as_ref())?;
-            Ok(Value::OutputList(Vec::new()))
+            RootedValue::new(Value::OutputList(Vec::new()))
+                .map_err(|error| error.into_runtime_error())
         } else {
             if let Some(receipt) = receipt.as_ref() {
                 receipt.checkpoint()?;
             }
-            Ok(eval.first_output())
+            eval.first_output()
         }
     })()
     .and_then(|value| {
@@ -93,23 +98,42 @@ async fn load_builtin(
 
 #[derive(Clone, Debug)]
 pub struct LoadEval {
-    variables: Vec<(String, Value)>,
+    variables: RootedMatEntries,
 }
 
+#[derive(Clone, Debug)]
+pub struct MatEntries(pub(crate) Vec<(String, Value)>);
+
+impl MatEntries {
+    pub fn as_slice(&self) -> &[(String, Value)] {
+        &self.0
+    }
+}
+
+impl Trace for MatEntries {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for (_, value) in &self.0 {
+            value.trace(tracer);
+        }
+    }
+}
+
+pub type RootedMatEntries = RootedResult<MatEntries>;
+
 impl LoadEval {
-    pub fn first_output(&self) -> Value {
+    pub fn first_output(&self) -> BuiltinResult<RootedValue> {
         let mut st = StructValue::new();
-        for (name, value) in &self.variables {
+        for (name, value) in &self.variables.value().0 {
             st.fields.insert(name.clone(), value.clone());
         }
-        Value::Struct(st)
+        RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
     }
 
     pub fn variables(&self) -> &[(String, Value)] {
-        &self.variables
+        &self.variables.value().0
     }
 
-    pub fn into_variables(self) -> Vec<(String, Value)> {
+    pub fn into_variables(self) -> RootedMatEntries {
         self.variables
     }
 }
@@ -301,7 +325,10 @@ async fn evaluate_with_context(
                 .map(|selected| selected.resource_liveness_lease()),
         )
         .await?;
-        let selected = select_variables(&entries, &request)?;
+        let selected = entries.try_map_owned(
+            |entries| select_variables(&entries.0, &request).map(MatEntries),
+            |error| error.into_runtime_error(),
+        )?;
         Ok(LoadEval {
             variables: selected,
         })

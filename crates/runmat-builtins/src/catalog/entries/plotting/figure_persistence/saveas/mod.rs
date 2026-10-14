@@ -83,6 +83,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     super::infer_fixed(request, entry, vec![super::status_fact()], 2, 3)
 }
 pub const SAVEAS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "saveas" },
     category: "plotting",

@@ -11,7 +11,7 @@ use runmat_value::{
 const EPS: f64 = 1e-12;
 
 fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::rdivide_builtin(lhs, rhs, rest))
+    block_on(super::rdivide_builtin(None, lhs, rhs, rest)).map(|owned| owned.value().clone())
 }
 
 fn double_values(tensor: &Tensor) -> &[f64] {

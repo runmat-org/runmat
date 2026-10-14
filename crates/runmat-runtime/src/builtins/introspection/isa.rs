@@ -71,7 +71,7 @@ fn value_is_a(value: &Value, requested: &Option<IsaTypeDesignator>) -> bool {
             Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_)
         ),
         IsaTypeDesignator::GpuArray => false,

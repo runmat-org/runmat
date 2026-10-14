@@ -6,6 +6,7 @@ use runmat_accelerate_api::{
     HostNumericTensorView, ProviderPrecision,
 };
 use runmat_runtime::call_builtin;
+use runmat_runtime::execution::RootedValues;
 use runmat_value::{CellArray, Value};
 
 pub(super) fn device() -> &'static WgpuProvider {
@@ -66,7 +67,7 @@ pub(super) fn forward(
     input: &GpuTensorHandle,
     input_format: &str,
     output_format: &str,
-    layers: Vec<Value>,
+    layers: RootedValues,
     expected_shape: &[usize],
     expected_provenance: GpuHandleProvenance,
 ) -> GpuTensorHandle {
@@ -78,15 +79,20 @@ pub(super) fn forward(
         ],
     )
     .unwrap();
-    let count = layers.len();
-    let network = call_builtin(
-        "dlnetwork",
-        &[Value::Cell(CellArray::new(layers, count, 1).unwrap())],
-    )
-    .unwrap();
+    let count = layers.values().len();
+    let network = layers.with_owned_values(|layers| {
+        call_builtin(
+            "dlnetwork",
+            &[Value::Cell(CellArray::new(layers, count, 1).unwrap())],
+        )
+        .unwrap()
+    });
     provider.reset_telemetry();
-    let output = call_builtin("forward", &[network, input_value]).unwrap();
-    let Value::Object(output) = output else {
+    let output = network.with_owned(|network| {
+        input_value
+            .with_owned(|input_value| call_builtin("forward", &[network, input_value]).unwrap())
+    });
+    let Value::Object(output) = output.value() else {
         panic!("formatted forward output must be a dlarray")
     };
     assert_eq!(

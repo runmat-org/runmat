@@ -21,7 +21,7 @@ fn canonicalize_callback_handle(handle: &Value) -> Value {
 pub(crate) async fn call_function(
     handle: &Value,
     args: impl AsRef<[Value]>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let callback = canonicalize_callback_handle(handle);
     crate::call_feval_async_with_outputs(callback, args.as_ref(), 1).await
 }
@@ -63,7 +63,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
         Value::Num(x)
     };
     let value = call_function(handle, vec![argument]).await?;
-    let output_single = match &value {
+    let output_single = match value.value() {
         Value::Tensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_integer_type(handle).is_none()
@@ -73,35 +73,39 @@ pub(crate) async fn call_scalar_function_with_precision_info(
         }
         _ => false,
     };
-    let value = match solver {
-        OptimSolver::Fminbnd => {
-            prepare_floating_value(
-                name,
-                value,
-                &runmat_builtins::FMINBND_CALLBACK_NUMERIC_EXTENSION,
-                &runmat_builtins::FMINBND_RESIDENT_EXTENSION,
-                "objective value",
-            )
-            .await?
-        }
-        OptimSolver::Fzero => {
-            prepare_floating_value(
-                name,
-                value,
-                &runmat_builtins::FZERO_CALLBACK_NUMERIC_EXTENSION,
-                &runmat_builtins::FZERO_RESIDENT_EXTENSION,
-                "function value",
-            )
-            .await?
-        }
-        _ => {
-            return Err(optim_error(
-                name,
-                "unsupported scalar solver callback identity",
-            ))
-        }
-    };
-    value_to_scalar(name, value).map(|value| (value, output_single))
+    value
+        .with_owned_async(|value| async move {
+            let value = match solver {
+                OptimSolver::Fminbnd => {
+                    prepare_floating_value(
+                        name,
+                        value,
+                        &runmat_builtins::FMINBND_CALLBACK_NUMERIC_EXTENSION,
+                        &runmat_builtins::FMINBND_RESIDENT_EXTENSION,
+                        "objective value",
+                    )
+                    .await?
+                }
+                OptimSolver::Fzero => {
+                    prepare_floating_value(
+                        name,
+                        value,
+                        &runmat_builtins::FZERO_CALLBACK_NUMERIC_EXTENSION,
+                        &runmat_builtins::FZERO_RESIDENT_EXTENSION,
+                        "function value",
+                    )
+                    .await?
+                }
+                _ => {
+                    return Err(optim_error(
+                        name,
+                        "unsupported scalar solver callback identity",
+                    ))
+                }
+            };
+            value_to_scalar(name, value).map(|value| (value, output_single))
+        })
+        .await
 }
 
 pub(crate) fn is_typed_integer_value(value: &Value) -> bool {
@@ -863,16 +867,18 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(42)
             })));
-        let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".to_string()));
+        let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".into()));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "decay".into(),
-                function: 42,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(42),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "decay".into(),
+                    function: 42,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(42),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -883,16 +889,18 @@ mod tests {
                 (name == "pkg.decay").then_some(43)
             })));
         let canonical =
-            canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".to_string()));
+            canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".into()));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "pkg.decay".into(),
-                function: 43,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(43),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "pkg.decay".into(),
+                    function: 43,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(43),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -902,7 +910,7 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg..decay").then_some(44)
             })));
-        let raw = Value::ExternalFunctionHandle("pkg..decay".to_string());
+        let raw = Value::ExternalFunctionHandle("pkg..decay".into());
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(canonical, raw);
     }
@@ -916,13 +924,15 @@ mod tests {
         let canonical = canonicalize_callback_handle(&Value::String("@decay".to_string()));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "decay".into(),
-                function: 45,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(45),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "decay".into(),
+                    function: 45,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(45),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -935,13 +945,15 @@ mod tests {
         let canonical = canonicalize_callback_handle(&Value::String("  @decay  ".to_string()));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "decay".into(),
-                function: 145,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(145),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "decay".into(),
+                    function: 145,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(145),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -956,13 +968,15 @@ mod tests {
         ));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "pkg.decay".into(),
-                function: 46,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(46),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "pkg.decay".into(),
+                    function: 46,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(46),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -977,13 +991,15 @@ mod tests {
         ));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "pkg.decay".into(),
-                function: 146,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(146),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "pkg.decay".into(),
+                    function: 146,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(146),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -997,13 +1013,15 @@ mod tests {
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay")));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "decay".into(),
-                function: 47,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(47),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "decay".into(),
+                    function: 47,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(47),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -1017,13 +1035,15 @@ mod tests {
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")));
         assert_eq!(
             canonical,
-            Value::BoundFunctionHandle {
-                name: "decay".into(),
-                function: 147,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(147),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "decay".into(),
+                    function: 147,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(147),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                }
+            ))
         );
     }
 
@@ -1033,35 +1053,38 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(48)
             })));
-        let raw = Value::Closure(Closure {
+        let raw = Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "decay".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        });
+        }));
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(
             canonical,
-            Value::Closure(Closure {
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                lexical_environment: None,
                 function_name: "decay".into(),
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(48)),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],
-            })
+            }))
         );
     }
 
     #[test]
     fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
-        let raw = Value::Closure(Closure {
+        let raw = Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "decay".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
-        });
+        }));
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(canonical, raw);
     }

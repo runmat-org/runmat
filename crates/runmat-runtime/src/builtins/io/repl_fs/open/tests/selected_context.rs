@@ -4,7 +4,10 @@ use crate::context::document_test_support::{
 };
 use crate::context::{HostDocumentRequest, RuntimeContext};
 
-async fn dispatch(runtime: &RuntimeContext, args: &[Value]) -> BuiltinResult<Value> {
+async fn dispatch(
+    runtime: &RuntimeContext,
+    args: &[Value],
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::call_builtin_async_with_outputs_in_context(runtime, BUILTIN_NAME, args, 0).await
 }
 

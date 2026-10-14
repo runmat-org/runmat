@@ -13,6 +13,16 @@ mod builtin {
     pub type RuntimeBuiltinFuture =
         Pin<Box<dyn Future<Output = Result<ValueSequence, String>> + 'static>>;
 
+    pub trait CanonicalBuiltinOutput {
+        fn into_rooted_sequence(self) -> Result<ValueSequence, String>;
+    }
+
+    impl CanonicalBuiltinOutput for ValueSequence {
+        fn into_rooted_sequence(self) -> Result<ValueSequence, String> {
+            Ok(self)
+        }
+    }
+
     #[derive(Clone, Copy)]
     #[repr(C)]
     pub struct RuntimeBuiltinBinding {
@@ -33,6 +43,34 @@ mod builtin {
     }
 
     runmat_builtins::inventory::collect!(RuntimeBuiltinBinding);
+}
+
+mod execution {
+    use super::Value;
+    use std::future::Future;
+
+    pub struct RootedValues(Vec<Value>);
+
+    pub struct RootError;
+
+    impl RootError {
+        pub fn into_runtime_error(self) -> String {
+            "root admission failed".into()
+        }
+    }
+
+    impl RootedValues {
+        pub fn new(values: Vec<Value>) -> Result<Self, RootError> {
+            Ok(Self(values))
+        }
+
+        pub async fn with_owned_values_async<R, F>(self, consume: impl FnOnce(Vec<Value>) -> F) -> R
+        where
+            F: Future<Output = R>,
+        {
+            consume(self.0).await
+        }
+    }
 }
 
 #[runtime_builtin(

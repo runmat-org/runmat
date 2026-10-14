@@ -246,7 +246,7 @@ fn integer_static_names_are_registered() {
             &[Value::Num(0.0), Value::Num(7.0)],
         ))
         .unwrap_or_else(|error| panic!("joined dispatch of {name} failed: {error}"));
-        let Value::Tensor(result) = result else {
+        let Value::Tensor(result) = result.value() else {
             panic!("expected typed empty for {name}");
         };
         assert_eq!(result.shape(), vec![0, 7]);
@@ -267,7 +267,7 @@ fn dotted_integer_static_dispatch_preserves_wide_shape_and_class() {
         ],
     ))
     .unwrap();
-    let Value::Tensor(value) = value else {
+    let Value::Tensor(value) = value.value() else {
         panic!("expected uint64 tensor");
     };
     assert_eq!(value.shape(), vec![0, usize::MAX]);

@@ -9,7 +9,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use js_sys::{Array, Object, Promise, Reflect};
-use runmat_runtime::context::RuntimeHttpService;
+use runmat_runtime::context::{RuntimeContext, RuntimeHttpService};
+use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::http::{BrowserHttpService, HttpMethod, HttpRequest, TransportErrorKind};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -17,6 +18,10 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::{AbortSignal, ReadableStream, Request, Response, WorkerGlobalScope};
 
 wasm_bindgen_test_configure!(run_in_worker);
+
+fn runtime() -> RuntimeContext {
+    RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+}
 
 fn worker_scope() -> WorkerGlobalScope {
     assert!(web_sys::window().is_none(), "test must execute in a Worker");
@@ -88,7 +93,7 @@ async fn worker_global_scope_fetches_bounded_response_stream() {
     let _scope = worker_scope();
     let (request, url) = blob_request("RunMat worker stream");
     let mut stream = BrowserHttpService::new()
-        .open_bounded(request, 1024)
+        .open_bounded(runtime(), request, 1024)
         .await
         .expect("WorkerGlobalScope response stream");
     let mut bytes = Vec::new();
@@ -103,7 +108,10 @@ async fn worker_global_scope_fetches_bounded_response_stream() {
 async fn worker_body_cap_rejects_before_excess_bytes_escape() {
     let _scope = worker_scope();
     let (request, url) = blob_request("five!");
-    match BrowserHttpService::new().open_bounded(request, 4).await {
+    match BrowserHttpService::new()
+        .open_bounded(runtime(), request, 4)
+        .await
+    {
         Err(error) => assert!(matches!(
             error.kind,
             TransportErrorKind::BodyLimitExceeded(4)
@@ -144,9 +152,9 @@ fn worker_unpolled_and_pending_head_drop_have_one_abortable_fetch() {
         *signal_for_fetch.borrow_mut() = Some(request.signal());
         Promise::new(&mut |_, _| {})
     }));
-    drop(BrowserHttpService::new().open_bounded(request.clone(), 1024));
+    drop(BrowserHttpService::new().open_bounded(runtime(), request.clone(), 1024));
     assert_eq!(calls.get(), 0, "unpolled call must not Fetch");
-    let mut pending = BrowserHttpService::new().open_bounded(request, 1024);
+    let mut pending = BrowserHttpService::new().open_bounded(runtime(), request, 1024);
     let waker = futures::task::noop_waker();
     assert!(matches!(
         Pin::as_mut(&mut pending).poll(&mut Context::from_waker(&waker)),
@@ -180,7 +188,7 @@ async fn worker_pending_body_drop_aborts_and_releases_reader() {
         Promise::resolve(&response)
     }));
     let mut body = BrowserHttpService::new()
-        .open_bounded(request, 1024)
+        .open_bounded(runtime(), request, 1024)
         .await
         .expect("Worker response head");
     let mut next = Box::pin(body.next_chunk());
@@ -226,7 +234,7 @@ async fn worker_real_timer_aborts_pending_fetch_with_timeout_source() {
         })
     }));
     let error = BrowserHttpService::new()
-        .open_bounded(request, 1024)
+        .open_bounded(runtime(), request, 1024)
         .await
         .err()
         .expect("Worker timer must reject pending Fetch");

@@ -24,6 +24,12 @@ pub enum ProgramCallable {
     SpmdRegion {
         region: ParallelRegionId,
     },
+    /// Scheduler identity for an exact graph callable root. V8 reconstructs
+    /// and admits the target from its graph; this label never authorizes a
+    /// semantic function or substitutes for the executable-unit entrypoint.
+    GraphTarget {
+        identity: Digest,
+    },
 }
 
 impl ProgramCallable {
@@ -50,6 +56,10 @@ impl ProgramCallable {
         Self::SpmdRegion { region }
     }
 
+    pub fn graph_target(identity: Digest) -> Self {
+        Self::GraphTarget { identity }
+    }
+
     pub fn validate(&self) -> Result<(), ContractError> {
         match self {
             Self::Semantic { display_name, .. } => {
@@ -72,6 +82,7 @@ impl ProgramCallable {
             Self::Builtin { .. } => {}
             Self::ParallelRegion { .. } => {}
             Self::SpmdRegion { .. } => {}
+            Self::GraphTarget { .. } => {}
         }
         Ok(())
     }
@@ -81,7 +92,7 @@ impl ProgramCallable {
             Self::Semantic { function, .. } => Some(*function),
             Self::ParallelRegion { region } => Some(region.0.function),
             Self::SpmdRegion { region } => Some(region.0.function),
-            Self::Builtin { .. } => None,
+            Self::Builtin { .. } | Self::GraphTarget { .. } => None,
         }
     }
 
@@ -96,6 +107,7 @@ impl ProgramCallable {
             Self::SpmdRegion { region } => {
                 format!("spmd-region:{}:{}", region.0.function.0, region.0.ordinal)
             }
+            Self::GraphTarget { identity } => format!("graph-target:{identity}"),
         }
     }
 
@@ -114,6 +126,7 @@ impl ProgramCallable {
             Self::SpmdRegion { region } => {
                 format!("spmd region {}:{}", region.0.function.0, region.0.ordinal)
             }
+            Self::GraphTarget { identity } => format!("graph target {identity}"),
         }
     }
 

@@ -13,6 +13,7 @@ pub use contract::{
 };
 
 pub const BI2DE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "bi2de" },
     category: "comms/conversion",

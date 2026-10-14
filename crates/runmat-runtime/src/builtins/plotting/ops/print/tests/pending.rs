@@ -42,6 +42,6 @@ fn selected_runtime() -> crate::context::RuntimeContext {
 async fn dispatch_print(
     runtime: &crate::context::RuntimeContext,
     args: &[Value],
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::call_builtin_async_with_outputs_in_context(runtime, "print", args, 0).await
 }

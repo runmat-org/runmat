@@ -3,6 +3,7 @@
 use super::fixture::{assert_values, device, forward, read, upload};
 use runmat_accelerate_api::{AccelProvider, GpuHandleProvenance, ThreadProviderGuard};
 use runmat_runtime::call_builtin;
+use runmat_runtime::execution::{RootedValue, RootedValuesBuilder};
 use runmat_value::{Tensor, Value};
 
 #[derive(Clone, Copy, Debug)]
@@ -13,7 +14,7 @@ enum Activation {
 }
 
 impl Activation {
-    fn layer(self) -> Value {
+    fn layer(self) -> RootedValue {
         match self {
             Self::Relu => call_builtin("reluLayer", &[]),
             Self::Elu => call_builtin("eluLayer", &[Value::Num(1.5)]),
@@ -70,11 +71,11 @@ fn nonsquare_lazy_cb_normalization_activation_preserves_layout_and_values() {
         };
         assert_eq!(input.shape(), [2, 3]);
         for activation in [Activation::Relu, Activation::Elu, Activation::Softmax] {
-            let layers = vec![
-                call_builtin("featureInputLayer", &[Value::Num(2.0)]).unwrap(),
-                call_builtin("layerNormalizationLayer", &[]).unwrap(),
-                activation.layer(),
-            ];
+            let mut layers = RootedValuesBuilder::with_capacity(3);
+            layers.push_owned(call_builtin("featureInputLayer", &[Value::Num(2.0)]).unwrap());
+            layers.push_owned(call_builtin("layerNormalizationLayer", &[]).unwrap());
+            layers.push_owned(activation.layer());
+            let layers = layers.finish().unwrap();
             let output = forward(
                 provider,
                 &input,
@@ -151,9 +152,10 @@ fn cbt_pool_dense_activation_keeps_exact_axes_and_consumed_parameter_intent() {
                 || Value::Tensor(Tensor::new(vec![-0.25, 0.25], vec![2, 1]).unwrap()),
                 |(_, bias)| Value::GpuTensor(bias.clone()),
             );
-            let layers = vec![
-                call_builtin("sequenceInputLayer", &[Value::Num(2.0)]).unwrap(),
-                call_builtin("globalAveragePooling1dLayer", &[]).unwrap(),
+            let mut layers = RootedValuesBuilder::with_capacity(4);
+            layers.push_owned(call_builtin("sequenceInputLayer", &[Value::Num(2.0)]).unwrap());
+            layers.push_owned(call_builtin("globalAveragePooling1dLayer", &[]).unwrap());
+            layers.push_owned(
                 call_builtin(
                     "fullyConnectedLayer",
                     &[
@@ -165,8 +167,9 @@ fn cbt_pool_dense_activation_keeps_exact_axes_and_consumed_parameter_intent() {
                     ],
                 )
                 .unwrap(),
-                activation.layer(),
-            ];
+            );
+            layers.push_owned(activation.layer());
+            let layers = layers.finish().unwrap();
             let output = forward(
                 provider,
                 &input,

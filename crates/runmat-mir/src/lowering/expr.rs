@@ -128,7 +128,7 @@ pub(crate) fn lower_expr_with_replacements(
                     args,
                     arg_spans,
                 )?
-            } else if call.callee.is_feval_builtin_like() {
+            } else if call.callee.is_feval_builtin_like() && call.workspace_first_name.is_none() {
                 if args.is_empty() {
                     return Err(HirError::new("feval: missing function argument"));
                 }
@@ -990,8 +990,7 @@ fn call_rvalue(
             current_class,
             super_class,
         } => MirCallee::SuperConstructor {
-            current_class: runmat_types::ClassIdentity::new(current_class.0.clone())
-                .map_err(|error| HirError::new(error.to_string()))?,
+            current_class: current_class.clone(),
             super_class: runmat_types::ClassIdentity::from_qualified_name(super_class)
                 .map_err(|error| HirError::new(error.to_string()))?,
         },
@@ -1000,8 +999,7 @@ fn call_rvalue(
             super_class,
             method,
         } => MirCallee::SuperMethod {
-            current_class: runmat_types::ClassIdentity::new(current_class.0.clone())
-                .map_err(|error| HirError::new(error.to_string()))?,
+            current_class: current_class.clone(),
             super_class: runmat_types::ClassIdentity::from_qualified_name(super_class)
                 .map_err(|error| HirError::new(error.to_string()))?,
             method: method.0.clone().into(),

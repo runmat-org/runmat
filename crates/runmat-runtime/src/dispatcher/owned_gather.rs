@@ -90,7 +90,7 @@ fn is_host_leaf(value: &Value) -> bool {
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_) => true,
         Value::Cell(_)
@@ -243,13 +243,14 @@ mod tests {
         structure.insert("payload", transient());
         let mut object = ObjectInstance::new("GatherFixture");
         object.properties.insert("Payload".into(), transient());
-        let closure = Closure {
+        let closure = Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "f".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![transient()],
-        };
+        });
         for input in [
             Value::Struct(structure),
             Value::Object(object),

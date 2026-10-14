@@ -234,13 +234,13 @@ mod tests {
         BuiltinIntegerInputAvailability, DAMP_DESCRIPTOR, DAMP_INTEGER_CAPABILITIES,
     };
 
-    fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> Value {
+    fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> crate::execution::RootedValue {
         let mut args = vec![numerator, denominator];
         args.extend_from_slice(rest);
         block_on(crate::call_builtin_async("tf", &args)).expect("tf")
     }
 
-    fn ss(a: Value, b: Value, c: Value, d: Value, rest: &[Value]) -> Value {
+    fn ss(a: Value, b: Value, c: Value, d: Value, rest: &[Value]) -> crate::execution::RootedValue {
         let mut args = vec![a, b, c, d];
         args.extend_from_slice(rest);
         block_on(crate::call_builtin_async("ss", &args)).expect("ss")
@@ -281,7 +281,7 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         let wn = tensor_data(&outputs[0]);
         let zeta = tensor_data(&outputs[1]);
         assert_eq!(wn.len(), 2);
@@ -320,7 +320,7 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         assert!((tensor_data(&outputs[0])[0] - 2.0).abs() < 1.0e-12);
         assert!((tensor_data(&outputs[1])[0] - 1.0).abs() < 1.0e-12);
         assert_eq!(tensor_data(&outputs[2]), &[-2.0]);
@@ -334,7 +334,7 @@ mod tests {
             &[Value::Num(0.1)],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         assert!((tensor_data(&outputs[0])[0] - 6.931471805599453).abs() < 1.0e-10);
         assert!((tensor_data(&outputs[1])[0] - 1.0).abs() < 1.0e-12);
         assert!((tensor_data(&outputs[2])[0] - 0.5).abs() < 1.0e-12);
@@ -461,7 +461,7 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         for value in tensor_data(&outputs[0]) {
             assert!((value - 2.0).abs() < 1.0e-8);
         }
@@ -474,76 +474,84 @@ mod tests {
     #[test]
     fn damp_gathers_only_consumed_tf_properties() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
-            let Value::Object(mut object) = tf(
+            let model = tf(
                 Value::Num(1.0),
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
                 &[],
-            ) else {
-                panic!("tf constructor must return an object");
-            };
-            let denominator = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 2.0],
-                    shape: &[1, 2],
-                })
-                .unwrap();
-            let unused = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[9.0],
-                    shape: &[1, 1],
-                })
-                .unwrap();
-            object
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(denominator));
-            object
-                .properties
-                .insert("Unused".into(), Value::GpuTensor(unused));
-            provider.reset_telemetry();
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("tf constructor must return an object"),
+                };
+                let denominator = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let unused = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[9.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                object
+                    .properties
+                    .insert("Denominator".into(), Value::GpuTensor(denominator));
+                object
+                    .properties
+                    .insert("Unused".into(), Value::GpuTensor(unused));
+                provider.reset_telemetry();
 
-            let outputs = damp_outputs(Value::Object(object), 3);
-            assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
-            assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
-            assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
-            assert_eq!(provider.telemetry_snapshot().download_bytes, 2 * 8);
+                let outputs = damp_outputs(Value::Object(object), 3);
+                assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
+                assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
+                assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 2 * 8);
+            });
         });
     }
 
     #[test]
     fn damp_gathers_only_consumed_ss_properties() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
-            let Value::Object(mut object) = ss(
+            let model = ss(
                 Value::Tensor(Tensor::new(vec![-2.0], vec![1, 1]).unwrap()),
                 Value::Num(1.0),
                 Value::Num(1.0),
                 Value::Num(0.0),
                 &[],
-            ) else {
-                panic!("ss constructor must return an object");
-            };
-            let a = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[-2.0],
-                    shape: &[1, 1],
-                })
-                .unwrap();
-            let unused_b = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[9.0],
-                    shape: &[1, 1],
-                })
-                .unwrap();
-            object.properties.insert("A".into(), Value::GpuTensor(a));
-            object
-                .properties
-                .insert("B".into(), Value::GpuTensor(unused_b));
-            provider.reset_telemetry();
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("ss constructor must return an object"),
+                };
+                let a = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[-2.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                let unused_b = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[9.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                object.properties.insert("A".into(), Value::GpuTensor(a));
+                object
+                    .properties
+                    .insert("B".into(), Value::GpuTensor(unused_b));
+                provider.reset_telemetry();
 
-            let outputs = damp_outputs(Value::Object(object), 3);
-            assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
-            assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
-            assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
-            assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+                let outputs = damp_outputs(Value::Object(object), 3);
+                assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
+                assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
+                assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+            });
         });
     }
 
@@ -601,29 +609,33 @@ mod tests {
     #[test]
     fn damp_output_count_error_precedes_nested_provider_access() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
-            let Value::Object(mut object) = tf(
+            let model = tf(
                 Value::Num(1.0),
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
                 &[],
-            ) else {
-                panic!("tf constructor must return an object");
-            };
-            let denominator = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 2.0],
-                    shape: &[1, 2],
-                })
-                .unwrap();
-            object
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(denominator));
-            provider.reset_telemetry();
-            let _guard = crate::output_count::push_output_count(Some(4));
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("tf constructor must return an object"),
+                };
+                let denominator = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                object
+                    .properties
+                    .insert("Denominator".into(), Value::GpuTensor(denominator));
+                provider.reset_telemetry();
+                let _guard = crate::output_count::push_output_count(Some(4));
 
-            let error = block_on(damp_builtin(Value::Object(object)))
-                .expect_err("output count must reject before nested gather");
-            assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
-            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+                let error = block_on(damp_builtin(Value::Object(object)))
+                    .expect_err("output count must reject before nested gather");
+                assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            });
         });
     }
 
@@ -636,7 +648,9 @@ mod tests {
         );
 
         let _guard = crate::output_count::push_output_count(Some(4));
-        let err = block_on(damp_builtin(sys)).expect_err("too many outputs should fail");
+        let err = sys
+            .with_owned(|sys| block_on(damp_builtin(sys)))
+            .expect_err("too many outputs should fail");
         assert_eq!(err.identifier(), Some("RunMat:damp:OutputCount"));
     }
 }

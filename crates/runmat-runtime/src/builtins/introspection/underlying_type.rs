@@ -393,18 +393,17 @@ pub(crate) mod tests {
         test_support::with_test_provider(|_| {
             let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
             let tensor = Tensor::new(vec![1.2, -3.7, 123456.0], vec![3, 1]).unwrap();
-            let handle = match crate::dispatcher::call_builtin(
+            let output = crate::dispatcher::call_builtin(
                 "gpuArray",
                 &[Value::Tensor(tensor), Value::from("int32")],
             )
-            .expect("gpuArray int32 native upload")
-            {
-                Value::GpuTensor(handle) => handle,
-                other => panic!("expected gpu tensor, got {other:?}"),
+            .expect("gpuArray int32 native upload");
+            let Value::GpuTensor(handle) = output.value() else {
+                panic!("expected gpu tensor, got {:?}", output.value());
             };
 
             assert_eq!(
-                runmat_accelerate_api::handle_integer_type(&handle),
+                runmat_accelerate_api::handle_integer_type(handle),
                 Some(runmat_accelerate_api::IntegerElementType::I32)
             );
             assert_eq!(
@@ -412,7 +411,7 @@ pub(crate) mod tests {
                 "int32"
             );
             assert_eq!(
-                is_underlying_type_builtin(Value::GpuTensor(handle), Value::from("int32"))
+                is_underlying_type_builtin(Value::GpuTensor(handle.clone()), Value::from("int32"))
                     .expect("predicate"),
                 Value::Bool(true)
             );

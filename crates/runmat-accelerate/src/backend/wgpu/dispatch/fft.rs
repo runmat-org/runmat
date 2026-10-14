@@ -8,9 +8,10 @@ pub(crate) fn run(
     workgroups_x: u32,
     label: &str,
 ) -> anyhow::Result<()> {
-    let device = emission.device();
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+    let mut encoder = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor { label: Some(label) },
+    );
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-fft-pass"),

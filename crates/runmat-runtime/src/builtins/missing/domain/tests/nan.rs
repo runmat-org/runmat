@@ -1,8 +1,18 @@
 use super::super::entrypoints::{
-    nanmean_builtin, nanmedian_builtin, nanmin_builtin, nanstd_builtin, nansum_builtin,
-    nanvar_builtin,
+    nanmean_builtin, nanmedian_builtin, nanmin_builtin, nanstd_builtin,
+    nansum_builtin as nansum_owned, nanvar_builtin,
 };
 use super::*;
+
+async fn nansum_builtin(
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    nansum_owned(None, observation, value, rest)
+        .await
+        .map(|owned| owned.value().clone())
+}
 
 #[test]
 fn nanmean_alias_uses_omitnan() {

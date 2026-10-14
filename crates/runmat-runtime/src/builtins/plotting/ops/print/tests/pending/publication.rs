@@ -40,7 +40,7 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
         .expect("clear ambient scene during pending call");
     sender.send(()).expect("retained stage receiver");
     assert!(matches!(
-        futures::executor::block_on(call).expect("public print completes"),
+        futures::executor::block_on(call).expect("public print completes").value(),
         Value::OutputList(values) if values.is_empty()
     ));
     assert_eq!(

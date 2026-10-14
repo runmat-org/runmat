@@ -8,7 +8,7 @@ fn maps_builtin_over_one_cell_array() {
         &[1, 2],
     );
     let result = call(Value::FunctionHandle("strlength".into()), vec![input]).unwrap();
-    assert_eq!(tensor_values(result), vec![3.0, 5.0]);
+    assert_eq!(tensor_values(result.value()), vec![3.0, 5.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -17,7 +17,7 @@ fn maps_equal_cell_arrays_in_lockstep() {
     let left = cell(vec![Value::Num(1.0), Value::Num(2.0)], &[2, 1]);
     let right = cell(vec![Value::Num(10.0), Value::Num(20.0)], &[2, 1]);
     let result = call(Value::FunctionHandle("plus".into()), vec![left, right]).unwrap();
-    assert_eq!(tensor_values(result), vec![11.0, 22.0]);
+    assert_eq!(tensor_values(result.value()), vec![11.0, 22.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -35,7 +35,7 @@ fn passes_constant_arguments_after_cell_inputs() {
         vec![matrices, Value::Num(2.0)],
     )
     .unwrap();
-    assert_eq!(tensor_values(result), vec![2.0, 2.0]);
+    assert_eq!(tensor_values(result.value()), vec![2.0, 2.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -54,7 +54,7 @@ fn nonuniform_output_preserves_each_callback_value() {
         ],
     )
     .unwrap();
-    let Value::Cell(output) = result else {
+    let Value::Cell(output) = result.value() else {
         panic!("expected cell output")
     };
     assert_eq!(output.shape, vec![1, 2]);
@@ -72,7 +72,7 @@ fn empty_inputs_preserve_shape_in_both_output_modes() {
         vec![cell(Vec::new(), &[0, 3])],
     )
     .unwrap();
-    let Value::Tensor(uniform) = uniform else {
+    let Value::Tensor(uniform) = uniform.value() else {
         panic!("expected an empty numeric array")
     };
     assert_eq!(uniform.shape(), vec![0, 3]);
@@ -87,7 +87,7 @@ fn empty_inputs_preserve_shape_in_both_output_modes() {
         ],
     )
     .unwrap();
-    let Value::Cell(nonuniform) = nonuniform else {
+    let Value::Cell(nonuniform) = nonuniform.value() else {
         panic!("expected an empty cell array")
     };
     assert_eq!(nonuniform.shape, vec![0, 3]);
@@ -131,7 +131,7 @@ fn supports_closed_cellfun_shorthands() {
         vec![input, Value::String("int32".into())],
     )
     .unwrap();
-    let Value::LogicalArray(output) = result else {
+    let Value::LogicalArray(output) = result.value() else {
         panic!("expected logical output")
     };
     assert_eq!(output.data, vec![1, 0]);
@@ -144,5 +144,5 @@ fn supports_closed_cellfun_shorthands() {
         )],
     )
     .unwrap();
-    assert_eq!(tensor_values(sizes), vec![4.0]);
+    assert_eq!(tensor_values(sizes.value()), vec![4.0]);
 }

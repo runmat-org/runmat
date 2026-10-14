@@ -14,7 +14,7 @@ fn resident_data_is_materialized_once_before_group_slicing() {
             vec![tensor(vec![1.0, 2.0, 1.0, 2.0], vec![4, 1])],
         )
         .unwrap();
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("expected integer output");
         };
         assert_eq!(

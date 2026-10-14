@@ -14,23 +14,21 @@ impl MappedCallable {
             Value::StringArray(value) if value.data.len() == 1 => Self::parse_text(&value.data[0]),
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::FunctionHandle(name) => Self::parse_text(&name),
-            Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name)),
-            Value::BoundFunctionHandle {
-                name,
-                function,
-                authority,
-                source_role,
-                source_file,
-            } => Ok(Self::Closure(Closure {
-                function_name: name,
-                binding: Some(runmat_value::BoundFunctionBinding {
-                    function,
-                    authority,
-                }),
-                source_role,
-                source_file,
-                captures: Vec::new(),
-            })),
+            Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name.into_name())),
+            Value::BoundFunctionHandle(handle) => {
+                let data = handle.into_data();
+                Ok(Self::Closure(Closure::new(
+                    data.name,
+                    Some(runmat_value::BoundFunctionBinding {
+                        function: data.function,
+                        authority: data.authority,
+                    }),
+                    data.source_role,
+                    data.source_file,
+                    Vec::new(),
+                    None,
+                )))
+            }
             Value::Closure(closure) => Ok(Self::bind_closure(closure)),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(CallableParseError::ScalarValue),
             value => Err(CallableParseError::UnsupportedValue(value)),
@@ -52,14 +50,15 @@ impl MappedCallable {
 
     fn resolve_name(name: String) -> Self {
         if let Some(function) = user_functions::resolve_semantic_function_by_name(&name) {
-            return Self::Closure(Closure {
-                function_name: name,
-                binding: Some(user_functions::bound_function_binding_for(function)),
-                source_role: user_functions::source_function_for(function)
+            return Self::Closure(Closure::new(
+                name,
+                Some(user_functions::bound_function_binding_for(function)),
+                user_functions::source_function_for(function)
                     .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
-                source_file: user_functions::source_file_for(function),
-                captures: Vec::new(),
-            });
+                user_functions::source_file_for(function),
+                Vec::new(),
+                None,
+            ));
         }
         if crate::is_well_formed_qualified_name(&name) {
             return Self::ExternalName { name };
@@ -71,21 +70,19 @@ impl MappedCallable {
             .unwrap_or(Self::DynamicName { name })
     }
 
-    fn bind_closure(mut closure: Closure) -> Self {
+    fn bind_closure(closure: Closure) -> Self {
         if closure.binding.is_none() {
-            closure.binding =
+            if let Some(function) =
                 user_functions::resolve_semantic_function_by_name(&closure.function_name)
-                    .map(user_functions::bound_function_binding_for);
-            if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
-                closure.source_role = closure
-                    .bound_function()
-                    .and_then(user_functions::source_function_for)
-                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
-            }
-            if closure.source_file.is_none() {
-                closure.source_file = closure
-                    .bound_function()
-                    .and_then(user_functions::source_file_for);
+            {
+                return Self::Closure(
+                    closure.bind_resolved(
+                        user_functions::bound_function_binding_for(function),
+                        user_functions::source_function_for(function)
+                            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+                        user_functions::source_file_for(function),
+                    ),
+                );
             }
         }
         Self::Closure(closure)

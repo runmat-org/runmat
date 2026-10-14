@@ -390,7 +390,12 @@ pub(crate) fn reconcile_workspace_frame(
             .names
             .iter()
             .filter_map(|(name, slot)| {
-                (!incoming.contains(name.as_str())
+                // The canonical projection contains assigned values only.
+                // A compiler-reserved, still-unassigned name has no value to
+                // project, but its exact slot remains the VM's later-read
+                // authority (including an eval assignment in this frame).
+                (frame.state.assigned.contains(name)
+                    && !incoming.contains(name.as_str())
                     && frame.global_aliases.binding_for_slot(*slot).is_none())
                 .then_some(name.clone())
             })
@@ -412,4 +417,53 @@ pub(crate) fn reconcile_workspace_frame(
         Ok(())
     })
     .ok_or_else(|| "workspace frame is closed".to_string())?
+}
+
+#[cfg(test)]
+mod reconciliation_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_refresh_preserves_unassigned_compiler_slot() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime_id = runtime.local_identity();
+        let reserved = reserve_workspace_service_frame(runtime_id, None);
+        let activation = frame_activation(runtime_id, reserved.id);
+        futures::executor::block_on(activation.scope(runtime.scope(async {
+            let mut vars = vec![Value::Num(41.0), Value::Num(9.0), Value::Num(0.0)];
+            let _guard = set_workspace_state(
+                HashMap::from([
+                    ("warm".to_string(), 0),
+                    ("removed".to_string(), 1),
+                    ("later".to_string(), 2),
+                ]),
+                HashSet::from(["warm".to_string(), "removed".to_string()]),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+
+            reconcile_workspace_frame(frame, vec![("warm".into(), Value::Num(41.0))]).unwrap();
+            let (_, state) = capture_workspace_target(WorkspaceTarget::Current).unwrap();
+            assert_eq!(state.names.get("later"), Some(&2));
+            assert!(!state.assigned.contains("later"));
+            assert!(!state.names.contains_key("removed"));
+
+            workspace_frame_assign_from_executor(frame, "later", Value::Num(43.0)).unwrap();
+            assert_eq!(
+                workspace_frame_lookup(frame, "later"),
+                Some(Value::Num(43.0))
+            );
+            assert_eq!(
+                capture_workspace_target(WorkspaceTarget::Current)
+                    .unwrap()
+                    .1
+                    .names
+                    .get("later"),
+                Some(&2)
+            );
+        })));
+    }
 }

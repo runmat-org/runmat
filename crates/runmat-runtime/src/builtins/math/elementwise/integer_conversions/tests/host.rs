@@ -5,7 +5,7 @@ use runmat_value::{
 
 use crate::builtins::common::integer_conversion::IntegerClassExt;
 
-fn call(name: &str, value: Value) -> Value {
+fn call(name: &str, value: Value) -> crate::execution::RootedValue {
     crate::dispatcher::call_builtin(name, &[value]).expect("integer conversion")
 }
 
@@ -57,16 +57,16 @@ fn singleton_symbolic_storage_inference_matches_runtime_for_integer_and_float() 
 fn every_identity_rounds_saturates_and_retains_its_typed_scalar() {
     for (class, name) in classes() {
         assert_eq!(
-            call(name, Value::Num(3.5)),
-            Value::Int(class.cast_scalar(3.5))
+            call(name, Value::Num(3.5)).value(),
+            &Value::Int(class.cast_scalar(3.5))
         );
         assert_eq!(
-            call(name, Value::Num(f64::INFINITY)),
-            Value::Int(class.cast_scalar(f64::INFINITY))
+            call(name, Value::Num(f64::INFINITY)).value(),
+            &Value::Int(class.cast_scalar(f64::INFINITY))
         );
         assert_eq!(
-            call(name, Value::Num(f64::NEG_INFINITY)),
-            Value::Int(class.cast_scalar(f64::NEG_INFINITY))
+            call(name, Value::Num(f64::NEG_INFINITY)).value(),
+            &Value::Int(class.cast_scalar(f64::NEG_INFINITY))
         );
     }
 }
@@ -75,7 +75,8 @@ fn every_identity_rounds_saturates_and_retains_its_typed_scalar() {
 fn every_identity_preserves_tensor_shape_and_uses_authoritative_storage() {
     let input = Tensor::new(vec![-2.5, 1.5, 300.0, 4.0], vec![2, 2]).expect("input");
     for (class, name) in classes() {
-        let Value::Tensor(output) = call(name, Value::Tensor(input.clone())) else {
+        let result = call(name, Value::Tensor(input.clone()));
+        let Value::Tensor(output) = result.value() else {
             panic!("{name} must return a tensor");
         };
         assert_eq!(output.shape(), vec![2, 2]);
@@ -93,7 +94,8 @@ fn exact_wide_integer_input_never_rounds_through_binary64() {
         vec![1, 3],
     )
     .expect("input");
-    let Value::Tensor(output) = call("int64", Value::Tensor(input)) else {
+    let result = call("int64", Value::Tensor(input));
+    let Value::Tensor(output) = result.value() else {
         panic!("int64 must return a tensor");
     };
     assert_eq!(
@@ -111,7 +113,8 @@ fn logical_and_character_arrays_convert_for_every_identity() {
             (Value::LogicalArray(logical.clone()), vec![1.0, 0.0]),
             (Value::CharArray(chars.clone()), vec![65.0, 122.0]),
         ] {
-            let Value::Tensor(output) = call(name, input) else {
+            let result = call(name, input);
+            let Value::Tensor(output) = result.value() else {
                 panic!("{name} must return a tensor");
             };
             assert_eq!(output.shape(), vec![1, 2]);
@@ -132,7 +135,8 @@ fn symbolic_constants_convert_and_symbolic_variables_are_rejected() {
     )
     .expect("constants");
     for (class, name) in classes() {
-        let Value::Tensor(output) = call(name, Value::SymbolicArray(constants.clone())) else {
+        let result = call(name, Value::SymbolicArray(constants.clone()));
+        let Value::Tensor(output) = result.value() else {
             panic!("{name} must return a tensor");
         };
         assert_eq!(
@@ -150,7 +154,8 @@ fn symbolic_constants_convert_and_symbolic_variables_are_rejected() {
 #[test]
 fn paired_complex_input_stays_complex_for_every_identity() {
     for (class, name) in classes() {
-        let Value::ComplexTensor(output) = call(name, Value::Complex(1.0, 1e-48)) else {
+        let result = call(name, Value::Complex(1.0, 1e-48));
+        let Value::ComplexTensor(output) = result.value() else {
             panic!("{name} must preserve the complex domain");
         };
         let storage = output.integer_storage().expect("integer complex storage");

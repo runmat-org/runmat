@@ -229,6 +229,7 @@ async fn save_builtin(
                 unique_entries,
                 runtime.as_ref(),
                 &mut cooperation,
+                &mut workspace_read,
             )
             .await?;
             workspace_read.retain_values(unique_entries.iter().map(|(_, value)| value))?;
@@ -240,17 +241,18 @@ async fn save_builtin(
             let value = cooperation
                 .await_io(prepare_value_for_mat_save(value))
                 .await??;
-            workspace_read.retain_values(std::iter::once(&value))?;
+            workspace_read.retain_values(std::iter::once(value.value()))?;
             cooperation.completed(0).await?;
-            mat_vars.push(MatVar {
-                name,
-                array: convert_value_with_cooperation(
-                    value,
-                    MatEncodingOwner::Save,
-                    Some(&mut cooperation),
-                )
-                .await?,
-            });
+            let array = value
+                .with_owned_async(|value| {
+                    convert_value_with_cooperation(
+                        value,
+                        MatEncodingOwner::Save,
+                        Some(&mut cooperation),
+                    )
+                })
+                .await?;
+            mat_vars.push(MatVar { name, array });
             cooperation.completed(0).await?;
         }
 

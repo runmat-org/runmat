@@ -8,6 +8,7 @@ pub use contract::FINDEDGE_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FINDEDGE_CATALOG_ENTRY];
 
 pub const FINDEDGE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "findedge" },
     category: "graph",

@@ -277,7 +277,7 @@ fn fread_wgpu_like_uploads_gpu() {
         Value::Num(1.0),
         Value::from("double"),
         Value::from("like"),
-        gpu_proto,
+        gpu_proto.value().clone(),
     ];
     let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
     match eval.data() {

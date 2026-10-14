@@ -8,6 +8,7 @@ pub(super) struct MaterializedRequest {
     pub subscripts: Value,
     pub data: Value,
     pub options: Vec<Value>,
+    pub roots: crate::execution::RootedValueLease,
 }
 
 pub(super) async fn materialize(
@@ -15,14 +16,26 @@ pub(super) async fn materialize(
     data: Value,
     options: Vec<Value>,
 ) -> BuiltinResult<MaterializedRequest> {
+    let _inputs_root = crate::execution::RootedValueLease::for_values(
+        [&subscripts, &data].into_iter().chain(options.iter()),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     reject_resident_integer(&data, "input data")?;
     if let Some(fill) = options.get(2) {
         reject_resident_integer(fill, "fill value")?;
     }
+    let subscripts = gather_if_needed_async(&subscripts).await?;
+    let data = gather_if_needed_async(&data).await?;
+    let options = gather_all(options).await?;
+    let roots = crate::execution::RootedValueLease::for_values(
+        [&subscripts, &data].into_iter().chain(options.iter()),
+    )
+    .map_err(|error| error.into_runtime_error())?;
     Ok(MaterializedRequest {
-        subscripts: gather_if_needed_async(&subscripts).await?,
-        data: gather_if_needed_async(&data).await?,
-        options: gather_all(options).await?,
+        subscripts,
+        data,
+        options,
+        roots,
     })
 }
 

@@ -100,6 +100,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     text_inference::infer(request, entry, TextConversion::Dec2Bin)
 }
 pub const DEC2BIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dec2bin" },
     category: "comms/conversion",

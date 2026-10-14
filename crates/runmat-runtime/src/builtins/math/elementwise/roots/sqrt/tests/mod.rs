@@ -5,5 +5,5 @@ use super::*;
 use futures::executor::block_on;
 
 fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
-    block_on(super::sqrt_builtin(value))
+    block_on(super::sqrt_builtin(None, value)).map(|owned| owned.value().clone())
 }

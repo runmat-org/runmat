@@ -141,13 +141,13 @@ fn supported_and_typed_unsupported_sinc_preserve_resident_shape_class_and_values
                 let input = input(provider, complex, explicit);
                 let args = [Value::GpuTensor(input.clone())];
                 let result = block_on(call_builtin_async("sinc", &args)).unwrap();
-                let Value::GpuTensor(output) = result else {
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("supported resident restoration required")
                 };
                 assert_eq!(output.shape(), input.shape());
-                assert_eq!(handle_precision(&output), Some(ProviderPrecision::F64));
-                assert_eq!(handle_storage(&output), handle_storage(&input));
-                assert_eq!(handle_provenance(&output), handle_provenance(&input));
+                assert_eq!(handle_precision(output), Some(ProviderPrecision::F64));
+                assert_eq!(handle_storage(output), handle_storage(&input));
+                assert_eq!(handle_provenance(output), handle_provenance(&input));
                 assert!(!output.shares_allocation_with(&input));
                 let expected_trace = if matches!(mode, Mode::Supported) {
                     vec!["sinc"]
@@ -155,7 +155,7 @@ fn supported_and_typed_unsupported_sinc_preserve_resident_shape_class_and_values
                     vec!["sinc", "download", "upload"]
                 };
                 assert_eq!(*provider.trace.lock().unwrap(), expected_trace);
-                let values = block_on(provider.inner.download(&output)).unwrap().data;
+                let values = block_on(provider.inner.download(output)).unwrap().data;
                 let expected = if complex {
                     let a = std::f64::consts::PI * 0.5;
                     let b = std::f64::consts::PI * 0.25;
@@ -173,7 +173,7 @@ fn supported_and_typed_unsupported_sinc_preserve_resident_shape_class_and_values
                 for (actual, expected) in values.into_iter().zip(expected) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
-                drop(output);
+                drop(result);
                 drop(args);
                 input.allocation_lease().validate_live().unwrap();
                 assert_eq!(

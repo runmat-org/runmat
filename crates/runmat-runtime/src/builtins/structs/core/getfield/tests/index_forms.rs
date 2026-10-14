@@ -14,7 +14,7 @@ fn getfield_supports_end_index() {
         vec![Value::from("values"), Value::Cell(idx_cell)],
     )
     .expect("end index");
-    assert_eq!(result, Value::Num(3.0));
+    assert_eq!(result.value(), &Value::Num(3.0));
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn getfield_nd_end_collapses_dimensions_into_final_selector() {
         vec![Value::Cell(index), Value::from("payload")],
     )
     .expect("collapsed end index");
-    assert_eq!(result, Value::Num(23.0));
+    assert_eq!(result.value(), &Value::Num(23.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -56,7 +56,7 @@ fn getfield_char_array_single_element() {
         vec![Value::from("name"), Value::Cell(index)],
     )
     .expect("char indexing");
-    match result {
+    match result.value() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 1);
@@ -80,5 +80,5 @@ fn getfield_complex_tensor_index() {
         vec![Value::from("vals"), Value::Cell(index)],
     )
     .expect("complex index");
-    assert_eq!(result, Value::Complex(3.0, 4.0));
+    assert_eq!(result.value(), &Value::Complex(3.0, 4.0));
 }

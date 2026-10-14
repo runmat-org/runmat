@@ -12,10 +12,14 @@ use std::{rc::Rc, sync::Arc};
 pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
     let runtime = runtime(probe);
     let function = NativeFunction {
+        lexical_bindings: Vec::new(),
+        inherited_storage_bindings: Vec::new(),
+        creates_lexical_environment: false,
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "observation".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        lexical_parent: None,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {
@@ -40,6 +44,7 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
         runtime: runtime.clone(),
         program_capture: None,
         captures: vec![],
+        lexical_environment: None,
         deoptimization: Default::default(),
         interpreter_resume_points: Default::default(),
         coverage_sites: Default::default(),

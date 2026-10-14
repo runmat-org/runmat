@@ -7,6 +7,7 @@ use runmat_runtime::call::descriptor::{
     execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
     CallableDescriptor, CallableTarget,
 };
+use runmat_runtime::execution::RootedValueSequence;
 use runmat_value::{Closure, StringArray, Tensor, Value, ValueSequence, ValueSequenceKind};
 use runmat_vm::FunctionRegistry;
 use std::sync::Arc;
@@ -26,8 +27,11 @@ fn method_identity(name: &str) -> CallableIdentity {
     CallableIdentity::Method(MethodId(name.to_string()))
 }
 
-fn single_sequence(value: Value) -> ValueSequence {
-    ValueSequence::single(value).expect("test output is a valid single-value sequence")
+fn single_sequence(value: Value) -> RootedValueSequence {
+    RootedValueSequence::new(
+        ValueSequence::single(value).expect("test output is a valid single-value sequence"),
+    )
+    .expect("root test output before producer returns")
 }
 
 fn assert_single(sequence: &ValueSequence, expected: Value) {
@@ -350,7 +354,7 @@ fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver(
         }),
     ));
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::FunctionHandle("sqrt".to_string()),
+        Value::function_handle("sqrt".to_string()),
         vec![Value::Num(9.0)],
         1,
         &FunctionRegistry::default(),
@@ -363,7 +367,7 @@ fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver(
 #[test]
 fn feval_function_handle_qualified_name_classifies_as_external_boundary() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::FunctionHandle("pkg.remote_inc".to_string()),
+        Value::function_handle("pkg.remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -382,7 +386,7 @@ fn feval_function_handle_qualified_name_classifies_as_external_boundary() {
 #[test]
 fn feval_method_function_handle_classifies_as_method_identity() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::MethodFunctionHandle("resolved_method".to_string()),
+        Value::method_function_handle("resolved_method".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -416,7 +420,7 @@ fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolve
     ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::MethodFunctionHandle("resolved_method".to_string()),
+        Value::method_function_handle("resolved_method".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -441,7 +445,7 @@ fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
     ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::FunctionHandle("pkg.remote_inc".to_string()),
+        Value::function_handle("pkg.remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -466,13 +470,14 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
     ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::Closure(Closure {
-            function_name: "inc".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::Num(10.0)],
-        }),
+        Value::Closure(Closure::new(
+            "inc".into(),
+            None,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            vec![Value::Num(10.0)],
+            None,
+        )),
         vec![Value::Num(2.0)],
         1,
         &registry,
@@ -495,23 +500,25 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     );
     let expected = binding.clone();
 
-    let _invoker_guard = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |_runtime, actual, args, requested_outputs| {
-            assert_eq!(actual, expected);
-            assert_eq!(requested_outputs, 1);
-            assert_eq!(args.values(), &[Value::Num(10.0), Value::Num(2.0)]);
-            Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
-        }),
-    );
+    let _invoker_guard =
+        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+            move |_runtime, actual, args, requested_outputs, _lexical_environment| {
+                assert_eq!(actual, expected);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args.values(), &[Value::Num(10.0), Value::Num(2.0)]);
+                Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
+            },
+        ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::Closure(Closure {
-            function_name: "inc".into(),
-            binding: Some(binding),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::Num(10.0)],
-        }),
+        Value::Closure(Closure::new(
+            "inc".into(),
+            Some(binding),
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            vec![Value::Num(10.0)],
+            None,
+        )),
         vec![Value::Num(2.0)],
         1,
         &registry,
@@ -524,7 +531,7 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
 #[test]
 fn malformed_qualified_function_handle_remains_dynamic_name() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::FunctionHandle("pkg..remote_inc".to_string()),
+        Value::function_handle("pkg..remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -549,7 +556,7 @@ fn malformed_qualified_function_handle_remains_dynamic_name() {
 #[test]
 fn malformed_qualified_external_function_handle_remains_dynamic_name() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::ExternalFunctionHandle("pkg..remote_inc".to_string()),
+        Value::external_function_handle("pkg..remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -574,7 +581,7 @@ fn malformed_qualified_external_function_handle_remains_dynamic_name() {
 #[test]
 fn single_segment_external_function_handle_uses_runtime_name_resolution() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::ExternalFunctionHandle("origin".to_string()),
+        Value::external_function_handle("origin".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -697,7 +704,7 @@ fn feval_external_function_handle_can_use_semantic_resolver() {
     ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::ExternalFunctionHandle("pkg.remote_inc".to_string()),
+        Value::external_function_handle("pkg.remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -726,7 +733,7 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
         .insert("pkg.remote_inc".to_string(), FunctionId(8181));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::ExternalFunctionHandle("pkg.remote_inc".to_string()),
+        Value::external_function_handle("pkg.remote_inc".to_string()),
         vec![Value::Num(2.0)],
         1,
         &registry,
@@ -747,23 +754,24 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     };
     let binding = runmat_value::BoundFunctionBinding::portable(4242, origin);
     let expected_binding = binding.clone();
-    let _invoker_guard = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |_runtime, actual, args, requested_outputs| {
-            assert_eq!(actual, expected_binding);
-            assert_eq!(requested_outputs, 1);
-            assert_eq!(args.values(), &[Value::Num(2.0)]);
-            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
-        }),
-    );
+    let _invoker_guard =
+        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+            move |_runtime, actual, args, requested_outputs, _lexical_environment| {
+                assert_eq!(actual, expected_binding);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args.values(), &[Value::Num(2.0)]);
+                Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
+            },
+        ));
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::BoundFunctionHandle {
-            name: "inc".into(),
-            function: 4242,
-            authority: binding.authority,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        },
+        Value::bound_function_handle(
+            "inc".into(),
+            4242,
+            binding.authority,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+        ),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),

@@ -37,6 +37,7 @@ pub(crate) fn standard_runtime_methods(
                     access: method.attributes.access,
                     function_name,
                     implicit_class_argument: method.implicit_class_argument,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )
         })

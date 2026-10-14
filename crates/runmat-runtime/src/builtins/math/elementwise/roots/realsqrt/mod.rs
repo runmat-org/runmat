@@ -1,4 +1,5 @@
 mod errors;
+mod evaluation;
 mod host;
 mod provider;
 mod specs;
@@ -10,10 +11,11 @@ pub(crate) use specs::{
     __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
 };
 
-use runmat_builtins::REALSQRT_ERROR_INVALID_INPUT;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 
 pub(super) const BUILTIN_NAME: &str = "realsqrt";
@@ -21,40 +23,29 @@ pub(super) const BUILTIN_NAME: &str = "realsqrt";
 #[runtime_builtin(
     name = "realsqrt",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::roots::realsqrt"
 )]
-async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
+async fn realsqrt_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::REALSQRT_DESCRIPTOR,
         &runmat_builtins::REALSQRT_ERROR_TOO_MANY_OUTPUTS,
         "realsqrt",
     )?;
     crate::builtins::common::real_unary_preparation::execute(
+        runtime.as_ref(),
         &runmat_builtins::REALSQRT_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::Nonnegative,
         value,
-        evaluate_admitted,
+        |value| async move {
+            let output = evaluation::evaluate_admitted(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
-}
-
-async fn evaluate_admitted(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => provider::evaluate(handle).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(errors::with_detail(
-            &REALSQRT_ERROR_INVALID_INPUT,
-            "complex input is not supported",
-        )),
-        Value::SparseTensor(sparse) => host::evaluate_sparse(sparse),
-        Value::Int(_)
-        | Value::Bool(_)
-        | Value::LogicalArray(_)
-        | Value::CharArray(_)
-        | Value::String(_)
-        | Value::StringArray(_) => Err(errors::with_detail(
-            &REALSQRT_ERROR_INVALID_INPUT,
-            "expected real single or double input",
-        )),
-        other => host::evaluate(other),
-    }
 }

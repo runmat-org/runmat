@@ -4,6 +4,7 @@ use runmat_accelerate_api::observation::{
     ProviderExecutionDisposition, ProviderObservationSupport, ProviderOperationReceipt,
     ProviderOperationRecorder,
 };
+use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
 
 #[derive(Default)]
 pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
@@ -29,6 +30,7 @@ pub struct BuiltinCallObservation {
     host_inputs: bool,
     started: Instant,
     receipt: Option<ProviderOperationReceipt>,
+    command_contribution: Option<CommandProviderContribution>,
     completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
 }
 
@@ -36,6 +38,7 @@ struct BackendCompletedCall {
     binding: runmat_builtins::BuiltinBindingIdentity,
     feedback: Box<LocalPlacementFeedback>,
     receipt: Option<ProviderOperationReceipt>,
+    command_contribution: Option<CommandProviderContribution>,
     status: runmat_runtime::context::preparation::PreparedCallStatus,
 }
 
@@ -53,10 +56,18 @@ impl runmat_runtime::context::preparation::PreparedCallCompletion for BackendCom
         let Self {
             feedback,
             receipt,
+            command_contribution,
             status,
             ..
         } = *self;
         if feedback.runtime.is_cancelled() {
+            return;
+        }
+        if status == PreparedCallStatus::CompletedFailure {
+            if let Some(contribution) = command_contribution {
+                contribution.complete(ProviderObservationTerminal::Failed);
+            }
+            feedback.observe(elapsed_ns, false);
             return;
         }
         if status == PreparedCallStatus::Succeeded {
@@ -66,7 +77,12 @@ impl runmat_runtime::context::preparation::PreparedCallCompletion for BackendCom
                 let Some(prelude) = receipt.default_clock_prelude_since(outer_started) else {
                     return;
                 };
-                crate::placement::publish_provider_feedback_full_call(receipt, *feedback, prelude);
+                crate::placement::publish_provider_feedback_full_call(
+                    receipt,
+                    *feedback,
+                    prelude,
+                    command_contribution,
+                );
                 return;
             }
         }
@@ -90,6 +106,7 @@ impl BuiltinCallObservation {
                 .any(runmat_runtime::dispatcher::value_contains_gpu),
             started: Instant::now(),
             receipt: None,
+            command_contribution: None,
             completion: None,
         }
     }
@@ -112,6 +129,7 @@ impl BuiltinCallObservation {
                 binding,
                 feedback,
                 receipt: None,
+                command_contribution: self.command_contribution.take(),
                 status: runmat_runtime::context::preparation::PreparedCallStatus::CompletedFailure,
             }));
         }
@@ -136,6 +154,11 @@ impl BuiltinCallObservation {
                 provider.begin_operation_observation(query)
             {
                 receipt.require_provider_execution(provider.device_id(), query.operation.clone());
+                self.command_contribution = self
+                    .feedback
+                    .as_ref()
+                    .and_then(|feedback| feedback.runtime.command_profiling())
+                    .and_then(|command| command.begin_provider_operation());
                 self.receipt = Some(receipt);
             }
         }
@@ -152,6 +175,7 @@ impl BuiltinCallObservation {
             recorder.execution_disposition(ProviderExecutionDisposition::SharedRuntimeFallback);
         }
         self.receipt = None;
+        self.command_contribution = None;
         if self.completion.take().is_some() {
             // Selected provider preparation did not become the promised route.
             // Do not treat its host fallback as a completed v3 candidate.
@@ -181,6 +205,9 @@ impl BuiltinCallObservation {
             receipt.fail(reason);
         }
         if !self.deposit_failure() {
+            if let Some(contribution) = self.command_contribution.take() {
+                contribution.complete(ProviderObservationTerminal::Failed);
+            }
             self.report(false);
         }
         if let Some(trace) = self.trace.take() {
@@ -198,6 +225,9 @@ impl BuiltinCallObservation {
             receipt.fail(reason);
         }
         if !self.deposit_failure() {
+            if let Some(contribution) = self.command_contribution.take() {
+                contribution.complete(ProviderObservationTerminal::Failed);
+            }
             self.report(false);
         }
         if let Some(trace) = self.trace.take() {
@@ -212,7 +242,7 @@ impl BuiltinCallObservation {
         }
     }
 
-    pub fn finish(mut self, result: &Result<Value, RuntimeError>) {
+    pub fn finish(mut self, result: Result<&Value, &RuntimeError>) {
         if self.cancelled() {
             if let Some(receipt) = self.receipt.as_mut() {
                 receipt.fail(
@@ -257,6 +287,7 @@ impl BuiltinCallObservation {
                     } else {
                         None
                     },
+                    command_contribution: self.command_contribution.take(),
                     status,
                 }));
             }
@@ -283,6 +314,9 @@ impl BuiltinCallObservation {
                     runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
                 );
             }
+            if let Some(contribution) = self.command_contribution.take() {
+                contribution.complete(ProviderObservationTerminal::Failed);
+            }
             self.report(false);
             return;
         };
@@ -291,7 +325,11 @@ impl BuiltinCallObservation {
             if let (Some(receipt), Some(feedback)) = (self.receipt.take(), self.feedback.take()) {
                 // The receipt independently requires explicit operation-owner
                 // route evidence. Resident/host result shape proves nothing.
-                crate::placement::publish_provider_feedback(receipt, *feedback);
+                crate::placement::publish_provider_feedback(
+                    receipt,
+                    *feedback,
+                    self.command_contribution.take(),
+                );
             }
             // A returned value may follow asynchronous submission or the
             // dispatcher's host retry. Neither proves provider completion.

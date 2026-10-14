@@ -91,13 +91,17 @@ fn zero_outputs_still_validate_numeric_carriers_rank_and_pair_size() {
         &[Value::Complex(1.0, 2.0)],
         0,
     ));
-    assert!(matches!(valid_complex, Ok(Value::OutputList(values)) if values.is_empty()));
+    assert!(
+        matches!(valid_complex.as_ref().map(|root| root.value()), Ok(Value::OutputList(values)) if values.is_empty())
+    );
     for carrier in [
         Value::Bool(true),
         Value::Int(runmat_value::IntValue::U64(3)),
     ] {
         let result = block_on(call_builtin_async_with_outputs("corrcoef", &[carrier], 0));
-        assert!(matches!(result, Ok(Value::OutputList(values)) if values.is_empty()));
+        assert!(
+            matches!(result.as_ref().map(|root| root.value()), Ok(Value::OutputList(values)) if values.is_empty())
+        );
     }
 }
 
@@ -115,7 +119,7 @@ fn zero_outputs_reject_invalid_resident_ownership_or_lease_without_provider_work
         0,
     ))
     .unwrap();
-    assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+    assert!(matches!(result.value(), Value::OutputList(values) if values.is_empty()));
     assert!(valid.handle.allocation_lease().validate_live().is_ok());
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let logical = provider
@@ -127,7 +131,9 @@ fn zero_outputs_reject_invalid_resident_ownership_or_lease_without_provider_work
         &[Value::GpuTensor(logical.handle.clone())],
         0,
     ));
-    assert!(matches!(discarded_logical, Ok(Value::OutputList(values)) if values.is_empty()));
+    assert!(
+        matches!(discarded_logical.as_ref().map(|root| root.value()), Ok(Value::OutputList(values)) if values.is_empty())
+    );
     assert!(logical.handle.allocation_lease().validate_live().is_ok());
 
     let foreign_owner = TestAllocationOwner::new();

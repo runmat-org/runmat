@@ -157,8 +157,8 @@ fn parse_grpstats_stat_list(value: &Value) -> BuiltinResult<Vec<GrpStat>> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(vec![GrpStat::parse(name)?]),
+        | Value::MethodFunctionHandle(name) => Ok(vec![GrpStat::parse(name)?]),
+        Value::BoundFunctionHandle(handle) => Ok(vec![GrpStat::parse(&handle.name)?]),
         Value::Closure(_) => Err(invalid_argument(
             "grpstats: custom function-handle summary statistics are not supported yet",
         )),

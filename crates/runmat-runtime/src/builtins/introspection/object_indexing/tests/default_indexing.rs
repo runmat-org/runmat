@@ -44,7 +44,7 @@ fn public_subsref_and_subsasgn_use_default_numeric_indexing() {
 
     let updated =
         block_on(subsasgn_builtin(source, descriptor, Value::Num(99.0))).expect("subsasgn");
-    let Value::Tensor(updated) = updated else {
+    let Value::Tensor(updated) = updated.value() else {
         panic!("numeric parentheses assignment must preserve tensor storage");
     };
     assert_eq!(

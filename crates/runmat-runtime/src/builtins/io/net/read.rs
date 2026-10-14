@@ -9,7 +9,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::context::{RuntimeTcpByteOrder, RuntimeTcpIssuer, RuntimeTcpReadMode};
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpInvocation, RuntimeTcpReadMode};
 use crate::tcp::TcpTransportErrorKind;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -81,7 +81,7 @@ pub(super) async fn read_builtin(
     };
     let read_result = work
         .await_service(service.read(
-            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
             authority,
             mode,
         ))

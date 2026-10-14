@@ -1,16 +1,9 @@
 use super::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-fn workspace_runtime_error(error: RuntimeError) -> anyhow::Error {
-    anyhow::Error::new(error)
-}
+#[path = "workspace/bindings.rs"]
+mod bindings;
 
-#[cfg(target_arch = "wasm32")]
-fn workspace_runtime_error(error: RuntimeError) -> anyhow::Error {
-    // Browser-local error sources need not be Send + Sync, while anyhow's
-    // source chain does. Keep the diagnostic at this public workspace boundary.
-    anyhow::anyhow!(error.to_string())
-}
+use super::error_conversion::into_anyhow as workspace_runtime_error;
 
 impl RunMatSession {
     pub(crate) fn base_workspace_snapshot(
@@ -26,9 +19,14 @@ impl RunMatSession {
     }
 
     pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
-        if self.workspace_bindings.get(name).is_some_and(|binding| {
-            matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
-        }) {
+        if self
+            .workspace_bindings
+            .borrow()
+            .get(name)
+            .is_some_and(|binding| {
+                matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
+            })
+        {
             return self.global_workspace_binding_key(name);
         }
         let binding = runmat_hir::BindingName(name.to_string());
@@ -70,69 +68,8 @@ impl RunMatSession {
     pub(crate) fn bind_workspace_slot(&mut self, name: String, slot: usize) {
         let key = self.workspace_binding_key(&name);
         self.workspace_bindings
+            .borrow_mut()
             .insert(name, SessionWorkspaceBinding { key, slot });
-    }
-
-    /// Refresh compiler/VM slot metadata from a completed invocation without
-    /// treating the register file as a second base-workspace authority.
-    pub(crate) fn refresh_workspace_binding_slots(
-        &mut self,
-        completed: &HashMap<String, (usize, Value)>,
-        global_names: &std::collections::HashSet<String>,
-    ) {
-        self.workspace_bindings.clear();
-        for (name, (slot, _)) in completed {
-            let key = if global_names.contains(name) {
-                self.global_workspace_binding_key(name)
-            } else {
-                self.workspace_binding_key(name)
-            };
-            self.workspace_bindings
-                .insert(name.clone(), SessionWorkspaceBinding { key, slot: *slot });
-        }
-    }
-
-    pub(crate) fn reconcile_workspace_global_binding_keys(
-        &mut self,
-        execution_slots: &HashMap<String, usize>,
-        global_names: &std::collections::HashSet<String>,
-    ) -> std::result::Result<(), RuntimeError> {
-        for name in global_names {
-            let Some(slot) = execution_slots.get(name).copied().or_else(|| {
-                self.workspace_bindings
-                    .get(name)
-                    .map(|binding| binding.slot)
-            }) else {
-                continue;
-            };
-            let key = self.global_workspace_binding_key(name);
-            self.workspace_bindings
-                .insert(name.clone(), SessionWorkspaceBinding { key, slot });
-        }
-
-        let retired = self
-            .workspace_bindings
-            .iter()
-            .filter(|(name, binding)| {
-                matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
-                    && !global_names.contains(*name)
-            })
-            .map(|(name, binding)| (name.clone(), binding.slot))
-            .collect::<Vec<_>>();
-        for (name, slot) in retired {
-            if self
-                .base_workspace
-                .lookup(&name)
-                .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
-                .is_some()
-            {
-                self.workspace_bindings.remove(&name);
-                self.bind_workspace_slot(name, slot);
-            } else {
-                self.workspace_bindings.remove(&name);
-            }
-        }
-        Ok(())
     }
 
     pub(crate) fn logical_workspace_values(
@@ -171,6 +108,7 @@ impl RunMatSession {
 
     pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
         self.workspace_bindings
+            .borrow()
             .iter()
             .map(|(name, binding)| (name.clone(), binding.slot))
             .collect()
@@ -182,7 +120,7 @@ impl RunMatSession {
         self.base_workspace
             .apply(delta)
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
-        self.workspace_bindings.clear();
+        self.workspace_bindings.borrow_mut().clear();
         self.workspace_preview_tokens.clear();
         Ok(())
     }
@@ -223,13 +161,13 @@ impl RunMatSession {
 
     pub fn import_workspace_state(&mut self, bytes: &[u8]) -> Result<()> {
         let entries = runtime_import_workspace_state(bytes).map_err(workspace_runtime_error)?;
-        for (_, value) in &entries {
+        for (_, value) in entries.as_slice() {
             runmat_runtime::execution::validate_storable_value(value)
                 .map_err(workspace_runtime_error)?;
         }
         let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
         delta.clear();
-        for (name, value) in &entries {
+        for (name, value) in entries.as_slice() {
             delta
                 .assign(name.clone(), value.clone())
                 .map_err(base_workspace_error)?;
@@ -237,9 +175,12 @@ impl RunMatSession {
         self.base_workspace
             .apply(delta)
             .map_err(base_workspace_error)?;
-        self.workspace_bindings.clear();
-        for (index, (name, _)) in entries.into_iter().enumerate() {
-            self.bind_workspace_slot(name.clone(), index);
+        self.workspace_bindings.borrow_mut().clear();
+        for (index, (name, _)) in entries.as_slice().iter().enumerate() {
+            let key = self.interactive_workspace_binding_key(name);
+            self.workspace_bindings
+                .borrow_mut()
+                .insert(name.clone(), SessionWorkspaceBinding { key, slot: index });
         }
 
         self.workspace_preview_tokens.clear();
@@ -390,6 +331,10 @@ impl RunMatSession {
         values
     }
 }
+
+#[cfg(test)]
+#[path = "workspace/tests.rs"]
+mod tests;
 
 fn base_workspace_error(error: runmat_runtime::workspace::BaseWorkspaceError) -> anyhow::Error {
     workspace_runtime_error(runmat_runtime::workspace::base_workspace_error_to_runtime(

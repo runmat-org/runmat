@@ -51,8 +51,7 @@ impl crate::context::RuntimeBuiltinService for Override {
                 let value = invocation.args[0].clone();
                 assert!(matches!(value, Value::Tensor(_)));
                 Box::pin(async {
-                    runmat_value::ValueSequence::single(value)
-                        .map_err(crate::sequence::sequence_error_to_runtime)
+                    crate::user_functions::test_support::rooted_single_value_sequence(value)
                 })
             },
         )]
@@ -129,6 +128,7 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
             access: runmat_types::MemberAccess::Public,
             function_name: "preparation_fixture_mean".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -145,7 +145,9 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
         std::sync::Arc::new(|_, args, _| {
             assert!(matches!(&args[0], Value::Object(_)));
             assert!(matches!(&args[1], Value::Tensor(_)));
-            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.)) })
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(9.))
+            })
         }),
     ));
     let args = [

@@ -40,9 +40,12 @@ pub(super) async fn dispatch(
                     member: member.clone(),
                 },
             )
-            .await?
-            .resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
-            sequence_register.capture(*sequence_slot, stack, values)?;
+            .await?;
+            values.with_owned_sequence(|sequence| {
+                let values =
+                    sequence.resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
+                sequence_register.capture(*sequence_slot, stack, values)
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::CaptureMemberDynamicSequence { sequence_slot } => {
@@ -63,9 +66,12 @@ pub(super) async fn dispatch(
                     member,
                 },
             )
-            .await?
-            .resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
-            sequence_register.capture(*sequence_slot, stack, values)?;
+            .await?;
+            values.with_owned_sequence(|sequence| {
+                let values =
+                    sequence.resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
+                sequence_register.capture(*sequence_slot, stack, values)
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::CaptureCellContentsSequence {
@@ -95,9 +101,12 @@ pub(super) async fn dispatch(
                     expand_all: *expand_all,
                 },
             )
-            .await?
-            .resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
-            sequence_register.capture(*sequence_slot, stack, values)?;
+            .await?;
+            values.with_owned_sequence(|sequence| {
+                let values =
+                    sequence.resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
+                sequence_register.capture(*sequence_slot, stack, values)
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::CaptureReturnedOutputsSequence { sequence_slot } => {
@@ -112,9 +121,12 @@ pub(super) async fn dispatch(
                     runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?,
                 ),
             )
-            .await?
-            .resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
-            sequence_register.capture(*sequence_slot, stack, values)?;
+            .await?;
+            values.with_owned_sequence(|sequence| {
+                let values =
+                    sequence.resolve(runmat_types::SequenceUse::ExpandAll, Default::default())?;
+                sequence_register.capture(*sequence_slot, stack, values)
+            })?;
             Ok(true)
         }
         _ => Ok(false),

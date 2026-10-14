@@ -1,5 +1,7 @@
 use super::*;
-use std::{collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+use std::{path::PathBuf, rc::Rc, sync::Arc};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -14,6 +16,7 @@ fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
                 path: PathBuf::from("selected.mexa64"),
                 origin: None,
                 installed: true,
+                installed_artifact: None,
             }))
         })
     })));
@@ -27,7 +30,7 @@ fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
             panic!("observation must not invoke a candidate")
         })));
     let _scoped =
-        crate::user_functions::install_scoped_name_target_resolver(Some(Arc::new(|name| {
+        crate::user_functions::install_scoped_name_target_resolver(Some(Rc::new(|name| {
             (name == "private_name").then_some(
                 crate::user_functions::ScopedSemanticNameTarget::Published(
                     runmat_types::FunctionId(17),
@@ -131,6 +134,7 @@ fn registered_constructor_precedes_native_and_source_but_builtin_collision_wins(
                 path: PathBuf::from(format!("{name}.mexa64")),
                 origin: None,
                 installed: true,
+                installed_artifact: None,
             }))
         })
     })));
@@ -203,6 +207,7 @@ fn registered_static_method_is_later_than_native_and_source_name_routes() {
                 path: PathBuf::from("ObservedClass.zero.mexa64"),
                 origin: None,
                 installed: true,
+                installed_artifact: None,
             }))
         })
     })));
@@ -218,6 +223,7 @@ fn registered_static_method_is_later_than_native_and_source_name_routes() {
             access: runmat_types::MemberAccess::Public,
             function_name: "__observed_static_body__".to_owned(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -378,6 +384,7 @@ fn changed_path_revision_never_publishes_stale_native_selection() {
                 path: PathBuf::from("fixture.mexa64"),
                 origin: None,
                 installed: true,
+                installed_artifact: None,
             }))
         })
     })));

@@ -43,9 +43,12 @@ impl RuntimeSourceEvaluationService for RecordingSourceEvaluator {
         &self,
         _: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<BuiltinResult<crate::sequence::ValueSequence>> {
+    ) -> RuntimeServiceFuture<BuiltinResult<crate::execution::RootedValueSequence>> {
         self.0.lock().unwrap().push(request.source().to_string());
-        Box::pin(async { Ok(crate::sequence::ValueSequence::empty()) })
+        Box::pin(async {
+            crate::execution::RootedValueSequence::new(crate::sequence::ValueSequence::empty())
+                .map_err(|error| error.into_runtime_error())
+        })
     }
 }
 
@@ -181,7 +184,7 @@ pub(in crate::builtins::timing::timer) fn test_supervisor() -> Rc<RuntimeLocalTa
 }
 
 pub(in crate::builtins::timing::timer) fn install_timer_invoker(
-    invoker: Option<Arc<crate::user_functions::FunctionInvoker>>,
+    invoker: Option<Arc<crate::user_functions::UnscopedFunctionInvoker>>,
 ) -> TimerInvokerGuards {
     let _scope = test_runtime().enter();
     let semantic = crate::user_functions::install_semantic_function_invoker(invoker);

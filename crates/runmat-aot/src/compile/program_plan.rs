@@ -9,7 +9,7 @@ use crate::{
 
 use super::CompilationPolicy;
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 3;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +30,8 @@ pub struct ProgramLinkPlan {
     pub catalog_fingerprint: String,
     pub runtime_capabilities: RuntimeArchiveCapabilities,
     pub reachability: ReachabilityReport,
+    /// Canonical MIR identities; report node strings are presentation only.
+    pub retained_function_ids: BTreeSet<runmat_types::ProgramFunctionId>,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub interop: runmat_types::InteropManifest,
     pub retained_runtime_families: Vec<RuntimeFamilyRetention>,
@@ -38,11 +40,7 @@ pub struct ProgramLinkPlan {
 
 impl ProgramLinkPlan {
     pub fn retained_functions(&self) -> BTreeSet<runmat_types::ProgramFunctionId> {
-        self.reachability
-            .retained_function_ids()
-            .filter_map(|function| u32::try_from(function).ok())
-            .map(runmat_types::ProgramFunctionId)
-            .collect()
+        self.retained_function_ids.clone()
     }
 }
 
@@ -76,7 +74,20 @@ pub fn build_program_link_plan_with_interop(
     runtime
         .manifest
         .validate_environment(&unit.revision().program_revision.environment())?;
-    let reachability = unit.reachability_report();
+    let (reachability, retained_functions) = unit.reachability_analysis();
+    let retained_function_ids = retained_functions
+        .into_iter()
+        .map(|function| {
+            u32::try_from(function.0)
+                .map(runmat_types::ProgramFunctionId)
+                .map_err(|_| {
+                    AotError::contract(
+                        "aot.compile.function_identity",
+                        "reachable function identity exceeds portable bounds",
+                    )
+                })
+        })
+        .collect::<AotResult<BTreeSet<_>>>()?;
     if policy == CompilationPolicy::ClosedWorld && reachability.has_unknown_edges {
         return Err(AotError::contract(
             "aot.compile.reachability_unknown",
@@ -100,6 +111,7 @@ pub fn build_program_link_plan_with_interop(
         catalog_fingerprint: runtime.manifest.catalog_fingerprint.to_string(),
         runtime_capabilities: runtime.manifest.capabilities.clone(),
         reachability,
+        retained_function_ids,
         retained_builtin_bindings,
         interop,
         retained_runtime_families,
@@ -269,12 +281,17 @@ fn family(module: &str, reason: &str) -> RuntimeFamilyRetention {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use runmat_mir::analysis::{
         ReachabilityCertainty, ReachabilityNode, ReachabilityNodeKind, ReachabilityReport,
         REACHABILITY_SCHEMA_VERSION,
     };
 
-    use super::{retained_builtin_bindings, CompilationPolicy};
+    use super::{
+        retained_builtin_bindings, CompilationPolicy, ProgramLinkPlan,
+        PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+    };
 
     fn builtin_report(name: &str) -> ReachabilityReport {
         ReachabilityReport {
@@ -346,5 +363,46 @@ mod tests {
             "certainty": "definite"
         });
         assert!(serde_json::from_value::<ReachabilityNode>(legacy_untyped).is_err());
+    }
+
+    #[test]
+    fn link_plan_retention_uses_typed_wire_field_not_report_spelling() {
+        let retained = BTreeSet::from([runmat_types::ProgramFunctionId(7)]);
+        let plan = ProgramLinkPlan {
+            schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+            policy: CompilationPolicy::NativeSpecialized,
+            program_graph_digest: "graph".into(),
+            program_source_digest: "sources".into(),
+            target_triple: "test-target".into(),
+            runtime_archive_digest: "archive".into(),
+            catalog_fingerprint: "catalog".into(),
+            runtime_capabilities: super::RuntimeArchiveCapabilities::standalone_host(),
+            reachability: ReachabilityReport {
+                schema_version: REACHABILITY_SCHEMA_VERSION,
+                nodes: vec![ReachabilityNode {
+                    id: "function:not-an-ordinal".into(),
+                    kind: ReachabilityNodeKind::Function,
+                    module: "test".into(),
+                    symbol: "presentation".into(),
+                    certainty: ReachabilityCertainty::Definite,
+                }],
+                edges: Vec::new(),
+                has_unknown_edges: false,
+            },
+            retained_function_ids: retained.clone(),
+            retained_builtin_bindings: Vec::new(),
+            interop: runmat_types::InteropManifest::empty(),
+            retained_runtime_families: Vec::new(),
+            omitted_runtime_families: Vec::new(),
+        };
+        assert_eq!(plan.retained_functions(), retained);
+        let mut wire = serde_json::to_value(&plan).expect("serialize typed plan");
+        let decoded: ProgramLinkPlan =
+            serde_json::from_value(wire.clone()).expect("decode current plan");
+        assert_eq!(decoded.retained_functions(), retained);
+        wire.as_object_mut()
+            .expect("plan object")
+            .remove("retained_function_ids");
+        assert!(serde_json::from_value::<ProgramLinkPlan>(wire).is_err());
     }
 }

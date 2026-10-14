@@ -8,25 +8,33 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod artifact;
+#[cfg(not(target_arch = "wasm32"))]
 mod cpython;
 mod environment;
 mod error;
 mod object;
+#[cfg(not(target_arch = "wasm32"))]
 mod session;
 mod value;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use artifact::InstalledPythonArtifacts;
 pub use artifact::{
-    InstalledPythonArtifacts, PythonArtifactBundle, PythonArtifactBundleEntry, PythonArtifactError,
-    PythonArtifactIdentity, PythonEnvironmentIdentity, PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE,
-    PYTHON_WHEEL_MEDIA_TYPE,
+    PythonArtifactBundle, PythonArtifactBundleEntry, PythonArtifactError, PythonArtifactIdentity,
+    PythonEnvironmentIdentity, PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE, PYTHON_WHEEL_MEDIA_TYPE,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use environment::discover_python;
 pub use environment::{
-    discover_python, PythonDiscoveryRequest, PythonExecutionMode, PythonInstallation, PythonStatus,
-    PythonVersion,
+    PythonDiscoveryRequest, PythonExecutionMode, PythonInstallation, PythonStatus, PythonVersion,
 };
 pub use error::{PythonError, PythonFrame};
 pub use object::{PythonCallbackInvocation, PythonObjectHandle, PythonObjectMetadata};
-pub use session::{PythonCall, PythonSession, PythonSessionConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use session::{
+    PythonCall, PythonLaneObservation, PythonLaneObserver, PythonReentryAuthority, PythonSession,
+    PythonSessionConfig,
+};
 pub use value::{
     PythonArray, PythonBufferOwner, PythonDType, PythonDateTime, PythonTimeDelta, PythonValue,
 };

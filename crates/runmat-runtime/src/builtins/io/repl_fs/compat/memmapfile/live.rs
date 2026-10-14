@@ -12,6 +12,7 @@ use runmat_types::MemberAccess;
 use runmat_value::{MemmapReceiverAuthority, Value};
 
 use super::{format_error, MemmapFormat};
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::object::indexing::{ObjectIndexKind, ObjectIndexSelector, ObjectSubscript};
 use crate::{BuiltinResult, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
 
@@ -64,6 +65,7 @@ pub(in crate::builtins::io::repl_fs::compat) fn ensure_class_registered() {
                     access: MemberAccess::Public,
                     function_name: function_name.into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }
@@ -87,7 +89,7 @@ pub async fn subsref(
     runtime: Option<crate::context::RuntimeContext>,
     receiver: Value,
     subscript: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &MEMMAPFILE_SUBSREF_DESCRIPTOR,
         &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
@@ -128,7 +130,7 @@ pub async fn subsasgn(
     receiver: Value,
     subscript: Value,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &MEMMAPFILE_SUBSASGN_DESCRIPTOR,
         &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
@@ -198,7 +200,9 @@ async fn read_first(
     runtime: Option<&crate::context::RuntimeContext>,
     receiver: Value,
     step: ObjectSubscript,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _receiver_root = RootedValueLease::for_values(std::iter::once(&receiver))
+        .map_err(|error| error.into_runtime_error())?;
     let property = member(&step)?;
     let Value::Object(object) = receiver else {
         return Err(format_error("memmapfile: receiver is not an object"));
@@ -213,7 +217,7 @@ async fn read_first(
         MemmapReceiverAuthority::Opened(_) => Some(super::authority::resolve(runtime, state)?),
         MemmapReceiverAuthority::Detached(_) => None,
     };
-    match property {
+    let value = match property {
         Property::Filename => object
             .properties
             .get("Filename")
@@ -234,7 +238,8 @@ async fn read_first(
             (MemmapReceiverAuthority::Detached(snapshot), None) => Ok((**snapshot).clone()),
             _ => unreachable!("typed mapped authority and backing agree"),
         },
-    }
+    }?;
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 async fn write_first(
@@ -242,7 +247,9 @@ async fn write_first(
     receiver: Value,
     step: ObjectSubscript,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _input_roots = RootedValueLease::for_values([&receiver, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     let property = member(&step)?;
     let Value::Object(mut object) = receiver else {
         return Err(format_error("memmapfile: receiver is not an object"));
@@ -277,6 +284,8 @@ async fn write_first(
     } else {
         crate::gather_if_needed_async(&rhs).await?
     };
+    let _gathered_root = RootedValueLease::for_values(std::iter::once(&rhs))
+        .map_err(|error| error.into_runtime_error())?;
     let opened = if let Some(runtime) = runtime {
         runtime
             .cpu_cooperation()
@@ -333,5 +342,5 @@ async fn write_first(
         }
         Property::Filename => return Err(format_error("memmapfile: property is not assignable")),
     }
-    Ok(Value::Object(object))
+    RootedValue::new(Value::Object(object)).map_err(|error| error.into_runtime_error())
 }

@@ -12,7 +12,7 @@ pub(super) fn struct_array(
     value: &StructArray,
     path: &str,
     purpose: CodecPurpose,
-    runtime: Option<&crate::context::RuntimeContext>,
+    runtime: Option<&dyn super::InlineSourceAuthority>,
 ) -> Result<DurableStructArray, ValueCodecError> {
     let fields = value
         .field_names()
@@ -46,7 +46,7 @@ pub(super) fn object_array(
     value: &ObjectArray,
     path: &str,
     purpose: CodecPurpose,
-    runtime: Option<&crate::context::RuntimeContext>,
+    runtime: Option<&dyn super::InlineSourceAuthority>,
 ) -> Result<DurableObjectArray, ValueCodecError> {
     let elements = value
         .data()
@@ -73,7 +73,7 @@ pub(super) fn plain_object(
     value: &ObjectInstance,
     path: &str,
     purpose: CodecPurpose,
-    runtime: Option<&crate::context::RuntimeContext>,
+    runtime: Option<&dyn super::InlineSourceAuthority>,
 ) -> Result<DurablePlainObject, ValueCodecError> {
     if value.persistence_payload_kind() != ObjectPersistencePayloadKind::PlainValue {
         return Err(ValueCodecError::unsupported(

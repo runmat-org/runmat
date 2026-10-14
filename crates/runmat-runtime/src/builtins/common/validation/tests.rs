@@ -1363,9 +1363,12 @@ fn validate_function_signatures_json_checks_json_syntax() {
 }
 
 // Tests exercise canonical runtime binding selection, not a validator name switch.
-async fn invoke_validator_async(name: &str, args: Vec<Value>) -> BuiltinResult<Value> {
+async fn invoke_validator_async(
+    name: &str,
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::call_builtin_async(name, &args).await
 }
-fn invoke_validator(name: &str, args: Vec<Value>) -> BuiltinResult<Value> {
+fn invoke_validator(name: &str, args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     futures::executor::block_on(invoke_validator_async(name, args))
 }

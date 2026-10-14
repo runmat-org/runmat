@@ -23,27 +23,56 @@ use super::{
     statement_pc::{project_statement_pcs, StatementPcProjectionError, StatementPcRange},
 };
 
+#[path = "program/constructor_handles.rs"]
+mod constructor_handles;
 #[path = "program/definition_dependencies.rs"]
 mod definition_dependencies;
+#[path = "program/owner_index.rs"]
+mod owner_index;
+#[path = "program/selected_class_product.rs"]
+mod selected_class_product;
+#[path = "program/selected_executable_product.rs"]
+mod selected_executable_product;
+pub use selected_executable_product::{
+    SelectedExecutableProduct, SelectedStaticCapture, SelectedStaticProductDependency,
+    SelectedStaticProductTarget, SelectedStaticSiteOwner,
+};
+#[path = "program/selected_registry.rs"]
+mod selected_registry;
+#[path = "program/super_constructor_dependencies.rs"]
+mod super_constructor_dependencies;
+pub(crate) use super_constructor_dependencies::{instruction_classes, same_class_registration};
+pub use super_constructor_dependencies::{
+    RetainedImplicitSuperConstructorTarget, SuperConstructorDependencyError,
+};
+#[cfg(feature = "native-accel")]
+#[path = "program/function_fusion.rs"]
+mod function_fusion;
 #[path = "program/function_remap.rs"]
 pub(crate) mod function_remap;
 #[path = "program/private_resolution.rs"]
 mod private_resolution;
 #[cfg(feature = "native-accel")]
-#[path = "program/function_fusion.rs"]
-mod function_fusion;
-#[cfg(feature = "native-accel")]
 pub use function_fusion::FunctionFusionScaffold;
 #[cfg(feature = "native-accel")]
-pub(crate) use function_fusion::{FunctionFusionCertificateIndex, FunctionPrivateSlotLayout};
+pub(crate) use function_fusion::{
+    selected_function_windows, FunctionFusionCertificateIndex, FunctionPrivateSlotLayout,
+};
+pub use private_resolution::PublishedNameResolutionView;
 #[cfg(feature = "native-accel")]
 #[path = "program/vm_fusion_plan.rs"]
 mod vm_fusion_plan;
 pub use function_remap::{
-    rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
+    instruction_reference_sites, remap_reference_sites, FunctionReferenceKind,
+};
+pub use function_remap::{
+    rebind_session_source, remap_closed_session_function, remap_decorated_session_definitions,
+    remap_session_entrypoint, remap_session_function, SessionCallableBinding,
 };
 #[cfg(feature = "native-accel")]
 pub(crate) use vm_fusion_plan::VmFusionPlanInstallation;
+#[path = "program/bound_binding.rs"]
+mod bound_binding;
 #[path = "program/retained_artifacts.rs"]
 pub(crate) mod retained_artifacts;
 #[path = "program/semantic_fingerprint.rs"]
@@ -56,6 +85,7 @@ pub use source_projection::FunctionSourceProjectionError;
 
 #[cfg(feature = "native-accel")]
 pub(crate) use semantic_fingerprint::fusion_stage_source_fingerprint;
+pub(crate) use semantic_fingerprint::local_bytecode_semantic_fingerprint;
 pub use semantic_fingerprint::semantic_definition_fingerprint;
 
 #[derive(Debug, Clone)]
@@ -73,6 +103,18 @@ pub struct ExecutionContext {
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
+    /// Explicit activation selected by this frame, never inferred from a name
+    /// or the ambient runtime context.
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    pub lexical_binding_slots: Vec<LexicalBindingSlot>,
+    pub inherited_storage_slots: Vec<InheritedStorageSlot>,
+    /// Exact worker product selected at the owning invocation. Bare VM
+    /// execution cannot infer it from ambient or latest-session state.
+    pub(crate) graph_program: Option<runmat_runtime::execution::DeferredGraphProgram>,
+    pub(crate) process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
+    /// Only an explicitly admitted Core invocation may install this port.
+    pub(crate) dynamic_eval_admission:
+        Option<crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort>,
 }
 
 impl Default for ExecutionContext {
@@ -84,6 +126,12 @@ impl Default for ExecutionContext {
             runtime: runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             )),
+            lexical_environment: None,
+            lexical_binding_slots: Vec::new(),
+            inherited_storage_slots: Vec::new(),
+            graph_program: None,
+            process_driver: None,
+            dynamic_eval_admission: None,
         }
     }
 }
@@ -169,6 +217,41 @@ impl PrivateSourceDirectory {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LexicalBindingKind {
+    Owned,
+    Inherited,
+    /// Carry the activation to nested descendants while preserving this
+    /// anonymous frame's own captured value as a snapshot.
+    Transit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LexicalBindingSlot {
+    pub binding: runmat_types::BindingId,
+    pub slot: usize,
+    pub kind: LexicalBindingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InheritedStorageKind {
+    Global,
+    Persistent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InheritedStorageSlot {
+    pub binding: runmat_types::BindingId,
+    pub slot: usize,
+    /// Selected function identity and its compiler ordinal, both required
+    /// before an imported child can delegate to ancestor session storage.
+    pub owner: FunctionId,
+    pub portable_owner: runmat_types::ProgramFunctionId,
+    pub name: String,
+    pub owner_function: String,
+    pub kind: InheritedStorageKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionBytecode {
     pub function: FunctionId,
@@ -182,6 +265,24 @@ pub struct FunctionBytecode {
     pub private_owner_scope: String,
     #[serde(default)]
     pub source_id: Option<BytecodeSourceRef>,
+    /// Exact issued source leases retained with this definition after its
+    /// publishing invocation ends. This local owner never enters wire code.
+    #[serde(skip)]
+    pub selected_source_owner: Option<runmat_runtime::source_context::SelectedProgramSourceOwner>,
+    /// Checked unit-owned foreign archive; never serialized as bytecode.
+    #[serde(skip)]
+    pub selected_interop_receipt: Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
+    /// Invocation-local selected class ancestry retained with this exact
+    /// definition owner, never serialized as source or registry authority.
+    #[serde(skip)]
+    pub selected_class_product: Option<std::rc::Rc<crate::SelectedClassProduct>>,
+    /// Exact code/source product retained by this definition. Its optional
+    /// local admission port is serde-skipped and has no strong body or registry backedge.
+    #[serde(skip)]
+    pub selected_executable_product: Option<std::rc::Rc<SelectedExecutableProduct>>,
+    /// Immutable site-qualified import closure captured by this exact body.
+    #[serde(skip)]
+    pub selected_static_capture: Option<std::rc::Rc<SelectedStaticCapture>>,
     /// Original display file attached by the publishing source-map owner.
     /// Retired callable values never reconstruct it from a reused SourceId.
     #[serde(default)]
@@ -193,8 +294,15 @@ pub struct FunctionBytecode {
     pub private_source_owner: Option<PrivateSourceDirectory>,
     #[serde(default)]
     pub source_role: runmat_types::FunctionSourceRole,
+    /// Session identity of the containing function, remapped with the body.
+    #[serde(default)]
+    pub lexical_parent: Option<FunctionId>,
     /// Compiler ordinal before Core assigns a session-local function ID.
     pub portable_function: runmat_types::ProgramFunctionId,
+    /// Stable compiler ordinal of the containing function. Definition
+    /// fingerprints use this rather than the session-local parent ID.
+    #[serde(default)]
+    pub portable_lexical_parent: Option<runmat_types::ProgramFunctionId>,
     /// Immutable origin set by the publishing owner before session-ID remap.
     /// None is a legacy or unpublished function, never portable binding proof.
     pub binding_origin: Option<runmat_execution::FunctionBindingOrigin>,
@@ -229,6 +337,15 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub implicit_nargout_slot: Option<usize>,
     pub capture_slots: Vec<usize>,
+    /// Only bindings shared with a nested descendant or inherited from an
+    /// ancestor. Child-local bindings remain private to each invocation.
+    #[serde(default)]
+    pub lexical_binding_slots: Vec<LexicalBindingSlot>,
+    /// Nested access to an ancestor's canonical global/persistent storage.
+    #[serde(default)]
+    pub inherited_storage_slots: Vec<InheritedStorageSlot>,
+    #[serde(default)]
+    pub creates_lexical_environment: bool,
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
     #[serde(default)]
@@ -258,10 +375,17 @@ impl Default for FunctionBytecode {
             class_method_owner: None,
             private_owner_scope: String::new(),
             source_id: None,
+            selected_source_owner: None,
+            selected_interop_receipt: None,
+            selected_class_product: None,
+            selected_executable_product: None,
+            selected_static_capture: None,
             source_file: None,
             private_source_owner: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            lexical_parent: None,
             portable_function: runmat_types::ProgramFunctionId(0),
+            portable_lexical_parent: None,
             binding_origin: None,
             capabilities: Default::default(),
             #[cfg(feature = "native-accel")]
@@ -281,6 +405,9 @@ impl Default for FunctionBytecode {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            lexical_binding_slots: Vec::new(),
+            inherited_storage_slots: Vec::new(),
+            creates_lexical_environment: false,
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
@@ -470,10 +597,10 @@ pub struct FunctionArgumentValidation {
 
 /// Cheap immutable execution snapshots; authoring mutations copy on write.
 /// The serialized representation remains the prior registry record, not an
-/// Arc or a process-local owner token.
+/// Rc or a process-local owner token.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionRegistry {
-    data: std::sync::Arc<FunctionRegistryData>,
+    data: std::rc::Rc<FunctionRegistryData>,
     static_overlay: Option<std::sync::Arc<StaticDefinitionOverlay>>,
 }
 
@@ -483,6 +610,15 @@ pub struct FunctionRegistry {
 struct StaticDefinitionOverlay {
     authority: runmat_value::BoundFunctionAuthority,
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
+}
+
+/// A source snapshot is code storage, not definition authority. The counted
+/// root lease lives on an escaped value; this raw owner only permits pruning
+/// snapshots after that lease has retired.
+#[derive(Debug, Clone)]
+struct SelectedSiteView {
+    registry: FunctionRegistry,
+    root_owner: std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -496,6 +632,15 @@ pub struct FunctionRegistryData {
     /// name-resolvable or serialized into a portable executable artifact.
     #[serde(skip)]
     retired: HashMap<FunctionId, Vec<FunctionBytecode>>,
+    /// Unnamed immutable source views for site-qualified selected targets.
+    /// Each view shares its code storage; only an exact owner lease may open a
+    /// body from it, and no source/name lookup consults this collection.
+    #[serde(skip)]
+    selected_site_views: Vec<SelectedSiteView>,
+    /// Rebuilt from current and retired bodies after unrestricted mutation;
+    /// never serialized as an independent definition authority.
+    #[serde(skip)]
+    owner_index: std::cell::RefCell<Option<std::sync::Arc<owner_index::OwnerIndex>>>,
     #[serde(skip)]
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
     #[cfg(feature = "native-accel")]
@@ -514,7 +659,8 @@ impl std::ops::Deref for FunctionRegistry {
 impl std::ops::DerefMut for FunctionRegistry {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.static_overlay = None;
-        let data = std::sync::Arc::make_mut(&mut self.data);
+        let data = std::rc::Rc::make_mut(&mut self.data);
+        data.owner_index.get_mut().take();
         data.execution_stacks.take();
         #[cfg(feature = "native-accel")]
         data.admitted_fusion_scaffolds.take();
@@ -532,8 +678,14 @@ impl<'de> Deserialize<'de> for FunctionRegistry {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         FunctionRegistryData::deserialize(deserializer).map(|mut data| {
             data.source_functions = source_index(&data.functions);
+            let functions = &data.functions;
+            data.names.retain(|_, function| {
+                functions.get(function).is_some_and(|body| {
+                    body.source_role != runmat_types::FunctionSourceRole::Nested
+                })
+            });
             Self {
-                data: std::sync::Arc::new(data),
+                data: std::rc::Rc::new(data),
                 static_overlay: None,
             }
         })
@@ -555,6 +707,113 @@ fn source_index(
 }
 
 impl FunctionRegistry {
+    /// Exact immutable execution-view identity, including any site-qualified
+    /// static overlay. Derived lookup caches are intentionally excluded.
+    pub fn same_immutable_execution_view(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.data, &other.data)
+            && match (&self.static_overlay, &other.static_overlay) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.authority.shares_local_graph(&right.authority),
+                _ => false,
+            }
+    }
+
+    pub fn selected_runtime_origin_fingerprints(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<runmat_execution::FunctionBindingOrigin, String>,
+        retained_artifacts::RetainedCallableStageError,
+    > {
+        retained_artifacts::selected_runtime_origin_fingerprints(self)
+    }
+
+    pub fn selected_runtime_body_fingerprint(
+        &self,
+        function: FunctionId,
+    ) -> Result<
+        (runmat_execution::FunctionBindingOrigin, String),
+        retained_artifacts::RetainedCallableStageError,
+    > {
+        retained_artifacts::selected_runtime_body_fingerprint(self, function)
+    }
+
+    pub fn selected_runtime_body_fingerprints(
+        &self,
+        functions: &[FunctionId],
+    ) -> Result<
+        std::collections::HashMap<FunctionId, (runmat_execution::FunctionBindingOrigin, String)>,
+        retained_artifacts::RetainedCallableStageError,
+    > {
+        retained_artifacts::selected_runtime_body_fingerprints(self, functions)
+    }
+
+    pub fn selected_runtime_body_fingerprints_with_imports(
+        &self,
+        functions: &[FunctionId],
+        imports: &[runmat_execution::executable::ExecutableStaticImport],
+    ) -> Result<
+        std::collections::HashMap<FunctionId, (runmat_execution::FunctionBindingOrigin, String)>,
+        retained_artifacts::RetainedCallableStageError,
+    > {
+        retained_artifacts::selected_runtime_body_fingerprints_with_imports(
+            self, functions, imports,
+        )
+    }
+
+    pub fn selected_runtime_body_fingerprints_by_product(
+        &self,
+        inputs: &[(
+            FunctionId,
+            &[runmat_execution::executable::ExecutableStaticImport],
+        )],
+    ) -> Result<
+        std::collections::HashMap<FunctionId, (runmat_execution::FunctionBindingOrigin, String)>,
+        retained_artifacts::RetainedCallableStageError,
+    > {
+        retained_artifacts::selected_runtime_body_fingerprints_by_product(self, inputs)
+    }
+
+    /// Retain one already-issued source table on selected, immutable bodies.
+    /// Validate every member before changing the registry so a mismatched
+    /// product cannot leave a partially source-owned publication behind.
+    pub fn attach_selected_program_source_owner(
+        &mut self,
+        ids: impl IntoIterator<Item = FunctionId>,
+        program: runmat_execution::Digest,
+        owner: &runmat_runtime::source_context::SelectedProgramSourceOwner,
+    ) -> Result<(), &'static str> {
+        let ids = ids.into_iter().collect::<Vec<_>>();
+        for id in &ids {
+            let body = self
+                .functions
+                .get(id)
+                .ok_or("selected source owner has no matching function body")?;
+            if body.binding_origin.map(|origin| origin.program) != Some(program) {
+                return Err("selected source owner differs from the function product");
+            }
+            let Some(BytecodeSourceRef::Runtime(source)) = body.source_id else {
+                return Err("selected source owner requires an issued runtime source");
+            };
+            if !owner.owns_source(source) {
+                return Err("selected source owner differs from the function source lease");
+            }
+            if body
+                .selected_source_owner
+                .as_ref()
+                .is_some_and(|previous| !previous.same_issuance(owner))
+            {
+                return Err("selected source owner differs from the previous issuance");
+            }
+        }
+        for id in ids {
+            self.functions
+                .get_mut(&id)
+                .expect("selected source owner was validated above")
+                .selected_source_owner = Some(owner.clone());
+        }
+        Ok(())
+    }
+
     pub fn validate_selected_source_owners(
         &self,
         runtime: &runmat_runtime::context::RuntimeContext,
@@ -578,10 +837,10 @@ impl FunctionRegistry {
     }
 
     /// Consume the authoring registry at publication boundaries. Executing
-    /// snapshots retain their own immutable Arc; only shared publication
+    /// snapshots retain their own immutable Rc; only shared publication
     /// inputs require a copy of the map here.
     pub fn into_functions(self) -> HashMap<FunctionId, FunctionBytecode> {
-        std::sync::Arc::try_unwrap(self.data)
+        std::rc::Rc::try_unwrap(self.data)
             .unwrap_or_else(|data| (*data).clone())
             .functions
     }
@@ -593,18 +852,22 @@ impl FunctionRegistry {
         ids.sort_by_key(|id| id.0);
         for id in ids {
             if let Some(function) = functions.get(&id) {
-                names.entry(function.display_name.clone()).or_insert(id);
+                if function.source_role != runmat_types::FunctionSourceRole::Nested {
+                    names.entry(function.display_name.clone()).or_insert(id);
+                }
                 if let Some(source_id) = function.source_id {
                     source_functions.entry(source_id).or_default().push(id);
                 }
             }
         }
         Self {
-            data: std::sync::Arc::new(FunctionRegistryData {
+            data: std::rc::Rc::new(FunctionRegistryData {
                 functions,
                 names,
                 source_functions,
                 retired: HashMap::new(),
+                selected_site_views: Vec::new(),
+                owner_index: std::cell::RefCell::new(None),
                 execution_stacks: OnceLock::new(),
                 #[cfg(feature = "native-accel")]
                 admitted_fusion_scaffolds: OnceLock::new(),
@@ -629,7 +892,7 @@ impl FunctionRegistry {
 
     pub fn current_view(&self) -> Self {
         Self {
-            data: std::sync::Arc::clone(&self.data),
+            data: std::rc::Rc::clone(&self.data),
             static_overlay: None,
         }
     }
@@ -671,10 +934,81 @@ impl FunctionRegistry {
         // A reused session number is not authority for the new body. The
         // bound lease selects its retained immutable body; owned_view also
         // overlays every leased static callee before that body runs.
-        self.retired
-            .get(&function)?
-            .iter()
-            .find(|body| lease.matches(&body.definition_owner))
+        if let Some(body) = self.retired.get(&function).and_then(|bodies| {
+            bodies
+                .iter()
+                .find(|body| lease.matches(&body.definition_owner))
+        }) {
+            return Some(body);
+        }
+        // Source views form an older-to-newer admission DAG. Searching their
+        // private body maps by the exact owner does not expose names/current.
+        let mut pending = self.selected_site_views.iter().collect::<Vec<_>>();
+        let mut visited = std::collections::HashSet::new();
+        while let Some(selected) = pending.pop() {
+            let view = &selected.registry;
+            if !visited.insert(std::rc::Rc::as_ptr(&view.data)) {
+                continue;
+            }
+            if let Some(body) = view
+                .functions
+                .get(&function)
+                .filter(|body| lease.matches(&body.definition_owner))
+                .or_else(|| {
+                    view.retired.get(&function).and_then(|bodies| {
+                        bodies
+                            .iter()
+                            .find(|body| lease.matches(&body.definition_owner))
+                    })
+                })
+            {
+                return Some(body);
+            }
+            pending.extend(view.selected_site_views.iter());
+        }
+        None
+    }
+
+    /// Retain an exact precompile target body without publishing its name or
+    /// copying its bytecode payload. The caller must still carry a counted
+    /// site lease; this view only supplies immutable code for that lease.
+    pub fn retain_selected_site_view(
+        &mut self,
+        candidate: &Self,
+        binding: &runmat_value::BoundFunctionBinding,
+    ) -> Result<(), &'static str> {
+        let lease = binding
+            .authority
+            .local_definition()
+            .ok_or("selected site target has no exact definition lease")?;
+        let body = candidate
+            .get_owned(FunctionId(binding.function), lease)
+            .ok_or("selected site target is absent from its exact source view")?;
+        let source = body
+            .selected_source_owner
+            .as_ref()
+            .ok_or("selected site target has no issued source owner")?;
+        if !source.is_live()
+            || body
+                .selected_executable_product
+                .as_ref()
+                .is_none_or(|product| !product.source_owner().same_issuance(source))
+        {
+            return Err("selected site target differs from its admitted source");
+        }
+        if self
+            .get_owned(FunctionId(binding.function), lease)
+            .is_some()
+        {
+            return Ok(());
+        }
+        // Strip the candidate's invocation overlay. Keeping it here would
+        // retain its counted leases even after every escaped value is gone.
+        self.selected_site_views.push(SelectedSiteView {
+            registry: candidate.current_view(),
+            root_owner: std::sync::Arc::clone(lease.owner_arc()),
+        });
+        Ok(())
     }
 
     /// Build the executable view for an authorized local callable. Retired
@@ -707,7 +1041,7 @@ impl FunctionRegistry {
         }
         authority.local_lease(function.0)?;
         Some(Self {
-            data: std::sync::Arc::clone(&self.data),
+            data: std::rc::Rc::clone(&self.data),
             static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
                 authority: authority.clone(),
                 execution_stacks: OnceLock::new(),
@@ -726,6 +1060,21 @@ impl FunctionRegistry {
             std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
         )>,
     > {
+        self.definition_dependency_owners_checked(function).ok()
+    }
+
+    /// Preserve typed superclass graph failures for consumers that need to
+    /// distinguish an ambiguous admitted target from a missing definition.
+    pub(crate) fn definition_dependency_owners_checked(
+        &self,
+        function: FunctionId,
+    ) -> Result<
+        Vec<(
+            FunctionId,
+            std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
+        )>,
+        SuperConstructorDependencyError,
+    > {
         if let Some(overlay) = &self.static_overlay {
             let runmat_value::BoundFunctionAuthority::Local {
                 definition,
@@ -733,20 +1082,27 @@ impl FunctionRegistry {
                 ..
             } = &overlay.authority
             else {
-                return None;
+                return Err(SuperConstructorDependencyError::MissingOrigin);
             };
-            let selected = overlay.authority.local_lease(function.0)?;
-            let body = self.get_owned(function, selected)?;
+            let selected = overlay
+                .authority
+                .local_lease(function.0)
+                .ok_or(SuperConstructorDependencyError::MissingOrigin)?;
+            let body = self
+                .get_owned(function, selected)
+                .ok_or(SuperConstructorDependencyError::MissingOrigin)?;
             let mut owners = vec![(function, std::sync::Arc::clone(&body.definition_owner))];
             for lease in std::iter::once(definition).chain(dependencies.iter()) {
                 if lease.function() == function.0 {
                     continue;
                 }
                 let id = FunctionId(lease.function());
-                let body = self.get_owned(id, lease)?;
+                let body = self
+                    .get_owned(id, lease)
+                    .ok_or(SuperConstructorDependencyError::MissingOrigin)?;
                 owners.push((id, std::sync::Arc::clone(&body.definition_owner)));
             }
-            return Some(owners);
+            return Ok(owners);
         }
         definition_dependencies::owners(self, function)
     }
@@ -820,6 +1176,19 @@ impl FunctionRegistry {
     ) -> std::collections::HashSet<runmat_execution::FunctionBindingOrigin> {
         self.execution_stacks.take();
         self.prune_retired();
+        self.selected_site_views
+            .retain(|view| view.root_owner.has_handles());
+        for view in &candidate.selected_site_views {
+            if !view.root_owner.has_handles() {
+                continue;
+            }
+            if !self.selected_site_views.iter().any(|existing| {
+                std::rc::Rc::ptr_eq(&existing.registry.data, &view.registry.data)
+                    && std::sync::Arc::ptr_eq(&existing.root_owner, &view.root_owner)
+            }) {
+                self.selected_site_views.push(view.clone());
+            }
+        }
         let mut origins = std::collections::HashSet::new();
         for body in candidate
             .functions
@@ -842,7 +1211,11 @@ impl FunctionRegistry {
     }
 
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
-        self.names.get(name).copied()
+        self.names.get(name).copied().filter(|function| {
+            self.functions
+                .get(function)
+                .is_some_and(|body| body.source_role != runmat_types::FunctionSourceRole::Nested)
+        })
     }
 
     pub fn resolve_name_in_private_scope(
@@ -854,67 +1227,154 @@ impl FunctionRegistry {
             return None;
         }
         let scoped_name = format!("{private_owner_scope}.__private__.{name}");
-        self.names.get(&scoped_name).copied()
+        self.resolve_name(&scoped_name)
     }
 
     pub fn insert_replacing_name(&mut self, mut function: FunctionBytecode) {
-        self.execution_stacks.take();
-        self.prune_retired();
-        if let Some(previous) = self.resolve_name(&function.display_name) {
-            if previous != function.function {
-                self.remove(previous);
+        self.static_overlay = None;
+        let data = std::rc::Rc::make_mut(&mut self.data);
+        data.execution_stacks.take();
+        #[cfg(feature = "native-accel")]
+        data.admitted_fusion_scaffolds.take();
+        let mut pruned = false;
+        data.retired.retain(|_, bodies| {
+            let old_len = bodies.len();
+            bodies.retain(|body| body.definition_owner.has_handles());
+            pruned |= bodies.len() != old_len;
+            !bodies.is_empty()
+        });
+        if pruned {
+            data.owner_index.get_mut().take();
+        }
+        // An ordinary fresh owner cannot alias this registry. A cloned owner
+        // uses the derived pointer index before any name removal can retire a
+        // body; only the current/retired bodies authorize the index entries.
+        if std::sync::Arc::strong_count(&function.definition_owner) > 1
+            && self.owner_index_conflicts(&function)
+        {
+            function.definition_owner = fresh_definition_owner();
+        }
+        if function.source_role != runmat_types::FunctionSourceRole::Nested {
+            if let Some(previous) = self.resolve_name(&function.display_name) {
+                if previous != function.function {
+                    self.remove(previous);
+                }
             }
         }
         let function_id = function.function;
         if let Some(previous) = self.functions.get(&function_id) {
             if previous.binding_origin.is_some()
                 && previous.binding_origin == function.binding_origin
+                && (std::sync::Arc::strong_count(&previous.definition_owner) == 1
+                    || !self.owner_index_conflicts(previous))
             {
-                // Identical immutable publication keeps value leases valid.
+                // A binding origin includes the complete program revision and
+                // function ordinal. Re-publishing that immutable definition
+                // keeps existing value leases valid across its decoration.
                 function.definition_owner = std::sync::Arc::clone(&previous.definition_owner);
             }
         }
         // Refreshing an existing identity does not retire its live aliases,
         // but its previous source membership must still be detached.
-        if let Some(old) = self.detach_definition(function_id) {
-            if old.definition_owner.has_handles() {
-                self.retired.entry(function_id).or_default().push(old);
+        {
+            let data = std::rc::Rc::make_mut(&mut self.data);
+            if let Some(old) = data.detach_definition(function_id) {
+                if old.definition_owner.has_handles() {
+                    data.retain_definition(old);
+                }
             }
         }
-        self.names
-            .insert(function.display_name.clone(), function_id);
+        let data = std::rc::Rc::make_mut(&mut self.data);
+        // A nested definition cannot inherit textual aliases previously
+        // published under the same ID. A named replacement keeps its other
+        // published aliases while refreshing its display name.
+        if function.source_role == runmat_types::FunctionSourceRole::Nested {
+            data.names.retain(|_, target| *target != function_id);
+        } else {
+            data.names
+                .insert(function.display_name.clone(), function_id);
+        }
         if let Some(source_id) = function.source_id {
-            let functions = self.source_functions.entry(source_id).or_default();
+            let functions = data.source_functions.entry(source_id).or_default();
             if !functions.contains(&function_id) {
                 functions.push(function_id);
             }
         }
-        self.functions.insert(function_id, function);
+        if let Some(index) = data.owner_index.get_mut().as_mut() {
+            std::sync::Arc::make_mut(index).insert(&function);
+        }
+        data.functions.insert(function_id, function);
+    }
+
+    /// Stage a freshly admitted anonymous body for one closure issuance.
+    /// It is current by its compiler-assigned numeric ID only within this
+    /// provisional view; no display-name alias is published or displaced.
+    /// Escaped bindings retain the exact owner when that view rolls back.
+    pub fn insert_selected_unnamed(
+        &mut self,
+        function: FunctionBytecode,
+    ) -> Result<(), &'static str> {
+        if !matches!(
+            function.source_role,
+            runmat_types::FunctionSourceRole::Anonymous | runmat_types::FunctionSourceRole::Nested
+        ) {
+            return Err("unnamed selected body is not a closure definition");
+        }
+        if self.functions.contains_key(&function.function)
+            || self.owner_index_conflicts(&function)
+            || function
+                .selected_source_owner
+                .as_ref()
+                .is_none_or(|owner| !owner.is_live())
+            || function
+                .selected_executable_product
+                .as_ref()
+                .is_none_or(|product| {
+                    function
+                        .selected_source_owner
+                        .as_ref()
+                        .is_none_or(|owner| !product.source_owner().same_issuance(owner))
+                })
+        {
+            return Err("unnamed selected body conflicts with its exact admission");
+        }
+        self.static_overlay = None;
+        let data = std::rc::Rc::make_mut(&mut self.data);
+        data.execution_stacks.take();
+        #[cfg(feature = "native-accel")]
+        data.admitted_fusion_scaffolds.take();
+        if let Some(source) = function.source_id {
+            data.source_functions
+                .entry(source)
+                .or_default()
+                .push(function.function);
+        }
+        if let Some(index) = data.owner_index.get_mut().as_mut() {
+            std::sync::Arc::make_mut(index).insert(&function);
+        }
+        data.functions.insert(function.function, function);
+        Ok(())
+    }
+
+    fn owner_index_conflicts(&self, function: &FunctionBytecode) -> bool {
+        let mut cached = self.data.owner_index.borrow_mut();
+        let index = cached.get_or_insert_with(|| {
+            std::sync::Arc::new(owner_index::OwnerIndex::from_bodies(
+                self.functions
+                    .values()
+                    .chain(self.retired.values().flatten()),
+            ))
+        });
+        index.conflicts(function)
     }
 
     pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         self.execution_stacks.take();
         self.prune_retired();
-        let removed = self.detach_definition(function)?;
+        let removed = std::rc::Rc::make_mut(&mut self.data).detach_definition(function)?;
         self.names.retain(|_, target| *target != function);
         if removed.definition_owner.has_handles() {
-            self.retired
-                .entry(function)
-                .or_default()
-                .push(removed.clone());
-        }
-        Some(removed)
-    }
-
-    fn detach_definition(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
-        let removed = self.functions.remove(&function)?;
-        if let Some(source_id) = removed.source_id {
-            if let Some(functions) = self.source_functions.get_mut(&source_id) {
-                functions.retain(|id| *id != function);
-                if functions.is_empty() {
-                    self.source_functions.remove(&source_id);
-                }
-            }
+            std::rc::Rc::make_mut(&mut self.data).retain_definition(removed.clone());
         }
         Some(removed)
     }
@@ -1901,10 +2361,17 @@ mod function_registry_tests {
             class_method_owner: None,
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
+            selected_source_owner: None,
+            selected_interop_receipt: None,
+            selected_class_product: None,
+            selected_executable_product: None,
+            selected_static_capture: None,
             source_file: None,
             private_source_owner: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            lexical_parent: None,
             portable_function: runmat_types::ProgramFunctionId(0),
+            portable_lexical_parent: None,
             binding_origin: None,
             capabilities: Default::default(),
             #[cfg(feature = "native-accel")]
@@ -1924,6 +2391,9 @@ mod function_registry_tests {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            lexical_binding_slots: Vec::new(),
+            inherited_storage_slots: Vec::new(),
+            creates_lexical_environment: false,
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
@@ -1933,6 +2403,51 @@ mod function_registry_tests {
             spmd_regions: Vec::new(),
             distributed_values: Vec::new(),
             collective_contracts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn nested_replacement_never_inherits_a_textual_name_alias() {
+        let id = FunctionId(17);
+        let mut original = test_function(id.0, "inner", "");
+        original.source_role = runmat_types::FunctionSourceRole::Local;
+        let mut registry = FunctionRegistry::new(HashMap::from([(id, original)]));
+        assert_eq!(registry.resolve_name("inner"), Some(id));
+
+        let mut nested = test_function(id.0, "inner", "");
+        nested.source_role = runmat_types::FunctionSourceRole::Nested;
+        nested.lexical_parent = Some(FunctionId(1));
+        registry.insert_replacing_name(nested);
+        assert_eq!(registry.resolve_name("inner"), None);
+        assert!(!registry.names.contains_key("inner"));
+
+        let mut encoded = serde_json::to_value(&registry).expect("serialize registry");
+        encoded["names"]["inner"] = serde_json::json!(id.0);
+        let decoded: FunctionRegistry =
+            serde_json::from_value(encoded).expect("deserialize registry");
+        assert_eq!(decoded.resolve_name("inner"), None);
+        assert!(!decoded.names.contains_key("inner"));
+    }
+
+    #[test]
+    fn named_replacement_keeps_published_aliases() {
+        for role in [
+            runmat_types::FunctionSourceRole::Primary,
+            runmat_types::FunctionSourceRole::Local,
+            runmat_types::FunctionSourceRole::Unknown,
+        ] {
+            let id = FunctionId(17);
+            let mut original = test_function(id.0, "original", "");
+            original.source_role = role;
+            let mut registry = FunctionRegistry::new(HashMap::from([(id, original)]));
+            registry.names.insert("published_alias".into(), id);
+
+            let mut replacement = test_function(id.0, "replacement", "");
+            replacement.source_role = role;
+            registry.insert_replacing_name(replacement);
+
+            assert_eq!(registry.resolve_name("published_alias"), Some(id));
+            assert_eq!(registry.resolve_name("replacement"), Some(id));
         }
     }
 
@@ -2045,6 +2560,7 @@ mod function_registry_tests {
                 methods: vec![crate::bytecode::instr::BytecodeClassMethod {
                     name: "plus".into(),
                     function_name: "Example.plus".into(),
+                    role: runmat_types::ClassMethodRole::Ordinary,
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -2088,6 +2604,7 @@ mod function_registry_tests {
                 methods: vec![crate::bytecode::instr::BytecodeClassMethod {
                     name: "get.data".into(),
                     function_name: "Example.get.data".into(),
+                    role: runmat_types::ClassMethodRole::Ordinary,
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,

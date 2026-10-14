@@ -1,9 +1,13 @@
 use runmat_execution::identity::AttemptId;
+use runmat_execution::identity::{PoolId, WorkerId};
+use runmat_execution::resource::Capability;
 use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
 use runmat_execution_runner::AttemptReport;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
+use runmat_execution_transport_native::control::DriverArtifactDownload;
 use runmat_execution_transport_native::transfer::ObjectChunk;
 
 use super::{RemoteAttempt, RemoteBundleReceipt};
@@ -42,6 +46,21 @@ pub enum RemoteWorkerCommand {
     },
     ActivateBundle {
         bundle_digest: Digest,
+    },
+    BeginGraphProgram {
+        attempt_id: AttemptId,
+        encrypted_manifest: Vec<u8>,
+        maximum_program_bytes: u64,
+    },
+    StageGraphProgramChunk {
+        attempt_id: AttemptId,
+        program_digest: Digest,
+        ordinal: u32,
+        download: DriverArtifactDownload,
+    },
+    FinishGraphProgram {
+        attempt_id: AttemptId,
+        program_digest: Digest,
     },
     PutValue {
         reference: ValueRef,
@@ -83,11 +102,35 @@ pub struct RemoteWorkerReply {
     pub outcome: RemoteWorkerOutcome,
 }
 
+/// Software capabilities issued by the worker executable, not by an
+/// allocation request or node-agent inventory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerReady {
+    pub run_identity: String,
+    pub session_id: [u8; 16],
+    pub driver_fence: u64,
+    pub worker_id: WorkerId,
+    pub pool_id: PoolId,
+    pub capabilities: BTreeSet<Capability>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteWorkerOutcome {
+    WorkerReady {
+        ready: WorkerReady,
+    },
     BundleStored {
         receipt: RemoteBundleReceipt,
+    },
+    GraphProgramStaged {
+        receipt: super::RemoteGraphProgramReceipt,
+    },
+    GraphProgramPrepared {
+        program_digest: Digest,
+        program_length: u64,
+        chunk_count: u32,
     },
     ValueStored {
         receipt: super::RemoteValueReceipt,

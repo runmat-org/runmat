@@ -23,7 +23,7 @@ impl BuiltinPreparationObservation for Observer {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -67,18 +67,20 @@ impl RuntimeAccelerationService for Service {
         assert_eq!(request.operands().len(), 1);
         self.events.borrow_mut().push("prepare");
         let mode = self.mode;
-        let values = if matches!(mode, Mode::Invalid) {
-            vec![Value::String("invalid service result".into())]
-        } else {
-            request.into_operands()
-        };
-        let prepared =
-            PreparedBuiltinOperands::new(values, Some(Box::new(Observer(self.events.clone()))));
+        let observation = Some(Box::new(Observer(self.events.clone())) as Box<_>);
+        let prepared = request.into_operands().with_owned_values(|values| {
+            let values = if matches!(mode, Mode::Invalid) {
+                vec![Value::String("invalid service result".into())]
+            } else {
+                values
+            };
+            PreparedBuiltinOperands::new(values, observation)
+        });
         Box::pin(async move {
             if matches!(mode, Mode::Pending) {
                 std::future::pending::<()>().await;
             }
-            Ok(prepared)
+            prepared
         })
     }
 }
@@ -149,7 +151,7 @@ fn floating_trig_preparation_preserves_empty_nd_shape_single_and_values() {
                 &[Value::Tensor(tensor)],
             ))
             .unwrap();
-            let Value::Tensor(result) = result else {
+            let Value::Tensor(result) = result.value() else {
                 panic!("typed tensor expected")
             };
             assert_eq!(result.shape(), shape.as_slice());

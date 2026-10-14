@@ -1,6 +1,6 @@
 use super::{
-    execute_subscript_path, frame_access, materialize_subscript_path, write_sequence_register,
-    ObjectDispatchContext, SubscriptPathReadContext,
+    execute_subscript_path, frame_access, materialize_subscript_path,
+    write_rooted_sequence_register, ObjectDispatchContext, SubscriptPathReadContext,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -28,7 +28,7 @@ pub(super) async fn dispatch(
                 runtime,
                 root,
                 path,
-                frame_access(bytecode)?,
+                frame_access(bytecode, runtime)?,
             )
             .await?;
             let stack_index = stack.len();
@@ -47,7 +47,7 @@ pub(super) async fn dispatch(
                 *component_count,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::FinishSubscriptEndReceiver {
@@ -109,16 +109,16 @@ pub(super) async fn dispatch(
                 SubscriptPathReadContext {
                     selection: *selection,
                     indexing: *context,
-                    access: frame_access(bytecode)?,
+                    access: frame_access(bytecode, runtime)?,
                     invocation_arity,
                 },
                 sequence_register,
             )
             .await?;
             if *to_sequence_register {
-                write_sequence_register(stack, sequence_register, values)?;
+                write_rooted_sequence_register(stack, sequence_register, values)?;
             } else {
-                stack.extend(values);
+                values.with_owned_values(|values| stack.extend(values));
             }
             Ok(true)
         }
@@ -134,13 +134,15 @@ pub(super) async fn dispatch(
                 SubscriptPathReadContext {
                     selection: runmat_types::SequenceUse::ExpandAll,
                     indexing: *context,
-                    access: frame_access(bytecode)?,
+                    access: frame_access(bytecode, runtime)?,
                     invocation_arity,
                 },
                 sequence_register,
             )
             .await?;
-            sequence_register.capture(*sequence_slot, stack, values)?;
+            values.with_owned_values(|values| {
+                sequence_register.capture(*sequence_slot, stack, values)
+            })?;
             Ok(true)
         }
         _ => Ok(false),

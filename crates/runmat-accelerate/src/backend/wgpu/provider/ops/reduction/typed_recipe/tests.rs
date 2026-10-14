@@ -19,19 +19,19 @@ fn published_output_retains_exact_submission_and_retires() {
                 BufferUsageClass::FusionOut,
                 4,
             )?;
-            let first_encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("typed-reduction-tracking-prior"),
-                    });
+            let first_encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("typed-reduction-tracking-prior"),
+                },
+            );
             let first_id = provider.submit(emission, pending, first_encoder)?;
-            let encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("typed-reduction-tracking-test"),
-                    });
+            let encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("typed-reduction-tracking-test"),
+                },
+            );
             let id = provider.submit(emission, pending, encoder)?;
             Ok((buffer, first_id, id))
         })

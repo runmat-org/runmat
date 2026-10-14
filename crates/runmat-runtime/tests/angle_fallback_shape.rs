@@ -6,14 +6,14 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{ComplexTensor, Tensor, Value};
 
-fn call(name: &str, input: Value) -> Value {
+fn call(name: &str, input: Value) -> runmat_runtime::execution::RootedValue {
     block_on(runmat_runtime::call_builtin_async(name, &[input])).unwrap()
 }
 
-fn values(value: Value) -> Vec<f64> {
+fn values(value: &Value) -> Vec<f64> {
     match value {
-        Value::Num(value) => vec![value],
-        Value::Complex(re, im) => vec![re, im],
+        Value::Num(value) => vec![*value],
+        Value::Complex(re, im) => vec![*re, *im],
         Value::Tensor(tensor) => tensor.materialize_f64(),
         Value::ComplexTensor(tensor) => tensor
             .materialize_f64()
@@ -63,17 +63,24 @@ fn angle_fallback_preserves_full_rank_class_complexity_and_input_ownership() {
             .unwrap()
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
-            let expected = values(call(name, host));
-            let Value::GpuTensor(output) = call(name, Value::GpuTensor(input.clone())) else {
+            let host_result = call(name, host);
+            let expected = values(host_result.value());
+            let resident_result = call(name, Value::GpuTensor(input.clone()));
+            let Value::GpuTensor(output) = resident_result.value() else {
                 panic!("{name} must preserve explicit resident output");
             };
             assert_eq!(output.shape(), &[1, 1, 1], "{name}");
             assert_eq!(output.physical().element_type(), element);
-            assert_eq!(runmat_accelerate_api::handle_storage(&output), storage);
+            assert_eq!(runmat_accelerate_api::handle_storage(output), storage);
             assert_eq!(output.device_id(), input.device_id());
-            let downloaded = block_on(provider.download(&output)).unwrap();
+            let downloaded = block_on(provider.download(output)).unwrap();
             assert_eq!(downloaded.data, expected, "{name}");
-            output.release().unwrap();
+            resident_result.with_owned(|value| {
+                let Value::GpuTensor(output) = value else {
+                    unreachable!("resident output was checked above")
+                };
+                output.release().unwrap();
+            });
             input.allocation_lease().validate_live().unwrap();
         }
 
@@ -101,17 +108,24 @@ fn angle_fallback_preserves_full_rank_class_complexity_and_input_ownership() {
                     assert!(result.is_err(), "strict {name} logical admission");
                     continue;
                 }
-                let expected = values(call(name, Value::Bool(true)));
-                let Value::GpuTensor(output) = result.unwrap() else {
+                let host_result = call(name, Value::Bool(true));
+                let expected = values(host_result.value());
+                let resident_result = result.unwrap();
+                let Value::GpuTensor(output) = resident_result.value() else {
                     panic!("resident logical {name} output required");
                 };
                 assert_eq!(output.shape(), shape);
                 assert_eq!(output.physical().element_type(), NumericElementType::F64);
-                assert!(!runmat_accelerate_api::handle_is_logical(&output));
+                assert!(!runmat_accelerate_api::handle_is_logical(output));
                 assert_eq!(output.device_id(), input.device_id());
-                let downloaded = block_on(provider.download(&output)).unwrap();
+                let downloaded = block_on(provider.download(output)).unwrap();
                 assert_eq!(downloaded.data, vec![expected[0]; logical.len()]);
-                output.release().unwrap();
+                resident_result.with_owned(|value| {
+                    let Value::GpuTensor(output) = value else {
+                        unreachable!("resident output was checked above")
+                    };
+                    output.release().unwrap();
+                });
                 input.allocation_lease().validate_live().unwrap();
             }
         }

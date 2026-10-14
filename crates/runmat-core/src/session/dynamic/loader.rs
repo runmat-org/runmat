@@ -2,6 +2,12 @@ use super::super::*;
 use std::rc::Rc;
 use tracing::Instrument;
 
+#[path = "loader/compile.rs"]
+mod compile;
+#[path = "loader/dependencies.rs"]
+mod dependencies;
+use dependencies::selected_constructor_dependencies;
+
 pub(in crate::session) async fn load_dynamic_function(
     runtime: runmat_runtime::context::RuntimeContext,
     name: String,
@@ -10,7 +16,7 @@ pub(in crate::session) async fn load_dynamic_function(
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
     environment: DynamicFunctionEnvironment,
-) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
+) -> Option<Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>> {
     #[cfg(target_arch = "wasm32")]
     let _ = &runtime;
     let DynamicFunctionEnvironment {
@@ -24,15 +30,31 @@ pub(in crate::session) async fn load_dynamic_function(
     } = environment;
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
-        if let Some(result) = mex_runtime
-            .load_and_call(
-                &name,
-                args.values().to_vec(),
-                requested_outputs,
-                runtime.clone(),
-            )
-            .await
-        {
+        use runmat_runtime::user_functions::NativeResolutionScope;
+        let native = match runtime.native_resolution_scope() {
+            NativeResolutionScope::Selected(route) => {
+                route
+                    .invoke(
+                        runtime.clone(),
+                        name.clone(),
+                        args.values().to_vec(),
+                        requested_outputs,
+                    )
+                    .await
+            }
+            NativeResolutionScope::SelectedClosed => None,
+            NativeResolutionScope::Session => {
+                mex_runtime
+                    .load_and_call(
+                        &name,
+                        args.values().to_vec(),
+                        requested_outputs,
+                        runtime.clone(),
+                    )
+                    .await
+            }
+        };
+        if let Some(result) = native {
             return Some(result);
         }
     }
@@ -45,17 +67,26 @@ pub(in crate::session) async fn load_dynamic_function(
         source_kind = "m-file"
     );
     let source_search_span = info_span!("runtime.source_search", resolution_purpose = "call");
-    let path_result = async {
-        runmat_runtime::builtins::common::path_search::find_file_with_extensions_with_origin(
-            &name,
-            &[".m"],
-            "function resolution",
-        )
-        .await
-    }
-    .instrument(source_search_span)
-    .instrument(resolve_span)
-    .await;
+    let path_result = if let runmat_runtime::user_functions::DynamicFunctionLoadPhase::Handle {
+        selected_source: Some(selected),
+        ..
+    } = &phase
+    {
+        Ok(Some(selected.clone()))
+    } else {
+        runtime
+            .scope(async {
+                runmat_runtime::builtins::common::path_search::find_file_with_extensions_with_origin(
+                    &name,
+                    &[".m"],
+                    "function resolution",
+                )
+                .await
+            })
+            .instrument(source_search_span)
+            .instrument(resolve_span)
+            .await
+    };
     let selected = match path_result {
         Ok(Some(selected)) => selected,
         Ok(None) => return None,
@@ -103,9 +134,6 @@ pub(in crate::session) async fn load_dynamic_function(
                 .with_identifier("RunMat:ProjectComposition")
                 .build()
             })?;
-            let source_catalog = project_context
-                .as_ref()
-                .and_then(|context| context.source_catalog.clone());
             let inventory_revision = project_context
                 .as_ref()
                 .map(|context| context.dynamic_inventory_revision())
@@ -126,13 +154,43 @@ pub(in crate::session) async fn load_dynamic_function(
                 None
             };
 
-            let (selected_runtime, binding, admission_guard) = if let Some(entry) = cached {
+            let invocation = if let Some(entry) = cached {
+                let constructor_owner = super::constructor::retained_constructor_owner(
+                    entry.admitted.as_ref(),
+                    entry.entrypoint_origin,
+                )?;
+                super::constructor::require_requested_source_constructor(
+                    &phase,
+                    constructor_owner.as_ref(),
+                )?;
+                let (super_dependencies, super_dependency_origins, metadata_units) = if let Some(owner) = constructor_owner.as_ref() {
+                    runtime.scope(selected_constructor_dependencies(
+                        &cache, entry.admitted.as_ref(), &runtime, owner,
+                        compat, top_level_await_enabled, project_handoff.as_ref(),
+                    )).await?
+                } else {
+                    (Vec::new(), HashSet::new(), Vec::new())
+                };
                 debug!(
                     cache = "hit",
                     "reusing dynamically compiled function source"
                 );
-                if source_evaluator.retains_binding(&entry.binding)? {
-                    (runtime, entry.binding, None)
+                if entry.super_dependency_origins == super_dependency_origins
+                    && source_evaluator.retains_binding(&entry.binding)?
+                {
+                    let selected_runtime = runtime
+                        .with_retained_super_constructors(
+                            entry.super_constructors.clone(),
+                            entry.entrypoint_origin,
+                        )?;
+                    (
+                        selected_runtime,
+                        entry.binding,
+                        None,
+                        constructor_owner,
+                        entry.admitted,
+                        metadata_units,
+                    )
                 } else {
                     let bound = entry
                         .admitted
@@ -152,247 +210,59 @@ pub(in crate::session) async fn load_dynamic_function(
                         entry.unit_bytes.as_ref(),
                         entry.entrypoint_origin,
                         bound,
+                        super_dependencies,
                     )?;
                     let binding = admission.binding().clone();
-                    cache.replace_binding(&path, binding.clone());
-                    (selected_runtime, binding, Some(admission))
+                    let super_constructors = admission.super_constructors().to_vec();
+                    let selected_runtime = selected_runtime
+                        .with_retained_super_constructors(
+                            super_constructors.clone(),
+                            entry.entrypoint_origin,
+                        )?;
+                    cache.replace_binding(
+                        &path,
+                        binding.clone(),
+                        super_constructors,
+                        super_dependency_origins,
+                    );
+                    (
+                        selected_runtime,
+                        binding,
+                        Some(admission),
+                        constructor_owner,
+                        entry.admitted,
+                        metadata_units,
+                    )
                 }
             } else {
                 // A failed revision probe recomposes the selected source set.
                 // Loose private and companion files have no frozen project
                 // revision, so primary text and path identity alone cannot
                 // prove that a cached executable still represents the program.
-                let mut ast = parse_with_options(&source_text, ParserOptions::new(compat))
-                    .map_err(|error| {
-                        build_runtime_error(format!(
-                            "Could not parse function source '{}': {error}",
-                            path.display()
-                        ))
-                        .with_identifier("RunMat:FunctionParseError")
-                        .build()
-                    })?;
-                let mut companion = if let Some(context) = project_context.as_ref() {
-                    super::super::compile::compose_project_compilation_context_async(
-                        context, compat,
-                    )
-                    .await
-                    .map_err(|error| {
-                        build_runtime_error(format!(
-                            "Could not compose function source '{}': {error}",
-                            path.display()
-                        ))
-                        .with_identifier("RunMat:FunctionCompositionError")
-                        .build()
-                    })?
-                } else {
-                    super::super::compile::CompanionSourceDiscovery::default()
-                };
-                let primary_function_names =
-                    super::super::compile::source_context_function_names_in_statements(&ast.body)
-                        .into_iter()
-                        .collect::<HashSet<_>>();
-                companion.apply_function_precedence(&primary_function_names);
-                let primary_statement_count = ast.body.len();
-                let executable_source =
-                    super::super::compile::program_sources::ProgramSourceTable::dynamic_root(
-                        path_name.as_ref(),
-                        &source_text,
-                        project_handoff.as_ref(),
-                        path_origin,
-                    )
-                    .map_err(|error| {
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build()
-                    })?;
-                let source_table =
-                    super::super::compile::program_sources::ProgramSourceTable::build_dynamic(
-                        &executable_source,
-                        path_name.as_ref(),
-                        &companion,
-                        primary_statement_count,
-                        project_handoff.as_ref(),
-                        path_origin,
-                    )
-                    .map_err(|error| {
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build()
-                    })?;
-                if !companion.statements.is_empty() {
-                    ast.body
-                        .extend(companion.statements.drain(..).map(|entry| entry.statement));
-                }
-                let revision = super::dynamic_executable_revision(
-                    &executable_source,
-                    &source_table.source_map,
+                let compile::CompiledDynamicProduct {
+                    unit, unit_bytes, admitted, source_records, selection, dependencies,
+                } = compile::compile_dynamic_product(compile::DynamicCompileRequest {
+                    name: &name,
+                    path: &path,
+                    path_origin,
+                    source_text: &source_text,
+                    project_context: project_context.as_ref(),
                     compat,
-                )?;
-                debug!(
-                    cache = "miss",
-                    "compiling dynamically resolved function source"
-                );
-                let dynamic_compile_span =
-                    info_span!("runtime.dynamic_compile", source_kind = "m-file");
-                let _dynamic_compile_guard = dynamic_compile_span.enter();
-                let known_project_symbols = source_catalog
-                    .as_ref()
-                    .map(|catalog| &catalog.symbols)
-                    .cloned()
-                    .unwrap_or_default();
-                let primary_source = source_table.primary_source();
-                let mut frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
-                    &ast,
-                    &LoweringContext::new(&HashMap::new())
-                        .with_known_project_symbols(&known_project_symbols)
-                        .with_project_symbol_aliases(&companion.project_symbol_aliases)
-                        .with_private_functions(
-                            &companion.private_function_owners,
-                            &companion.private_function_aliases,
+                    top_level_await_enabled,
+                    project_handoff: project_handoff.as_ref(),
+                    phase: &phase,
+                    dependency_only: false,
+                }).await?;
+                let entrypoint_origin = match selection {
+                    super::super::DynamicDependencyIdentity::Callable(origin) => origin,
+                    super::super::DynamicDependencyIdentity::DeclarationOnly { .. } => {
+                        return Err(build_runtime_error(
+                            "declaration-only product cannot be invoked as a function source",
                         )
-                        .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
-                        .with_top_level_await_enabled(top_level_await_enabled)
-                        .with_top_level_sources(&source_table.statement_sources)
-                        .with_primary_source(primary_source),
-                    source_catalog.as_ref(),
-                );
-                if let Some(error) = frontend.lowering_failure {
-                    return Err(build_runtime_error(format!(
-                        "Could not lower function source '{}': {error}",
-                        path.display()
-                    ))
-                    .with_identifier(
-                        error
-                            .identifier
-                            .as_deref()
-                            .unwrap_or("RunMat:FunctionLoweringError"),
-                    )
-                    .build());
-                }
-                if let Some(error) = frontend.compile_failure {
-                    return Err(error.into());
-                }
-                if frontend.has_errors() {
-                    let diagnostic = frontend
-                        .diagnostics
-                        .iter()
-                        .find(|diagnostic| {
-                            diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error
-                        })
-                        .map(|diagnostic| diagnostic.message.clone())
-                        .unwrap_or_else(|| "static analysis failed".to_string());
-                    return Err(build_runtime_error(format!(
-                        "Could not compile function source '{}': {diagnostic}",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompileError")
-                    .build());
-                }
-                let mut bytecode = frontend.bytecode.take().ok_or_else(|| {
-                    build_runtime_error(format!(
-                        "Canonical frontend produced no bytecode for '{}'",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompileError")
-                    .build()
-                })?;
-                let lowering = frontend.lowering.as_ref().ok_or_else(|| {
-                    build_runtime_error(format!(
-                        "Canonical frontend produced no source lowering for '{}'",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompileError")
-                    .build()
-                })?;
-                source_table
-                    .validate_compiled_sources(&bytecode, &lowering.assembly)
-                    .map_err(|error| {
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build()
-                    })?;
-                let dependencies = super::dynamic_product_dependencies(&companion.observed_sources);
-                let source_map = source_table.source_map;
-                let source_records =
-                    Arc::<[runmat_runtime::source_context::ProgramSourceRecord]>::from(
-                        source_map.runtime_records(),
-                    );
-                super::attach_dynamic_function_origins(
-                    &mut bytecode,
-                    &revision.program_revision,
-                    &source_map,
-                )
-                .map_err(|error| {
-                    build_runtime_error(error.to_string())
-                        .with_identifier("RunMat:ExecutableFunctionIdentity")
-                        .with_source(error)
-                        .build()
-                })?;
-                let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
-                bytecode.bound_functions = bytecode.function_registry.functions.clone();
-                let mir = frontend.mir.take().ok_or_else(|| {
-                    build_runtime_error(format!(
-                        "Canonical frontend produced no MIR for '{}'",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompileError")
-                    .build()
-                })?;
-                let analysis = frontend.facts.take().ok_or_else(|| {
-                    build_runtime_error(format!(
-                        "Canonical frontend produced no analysis for '{}'",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompileError")
-                    .build()
-                })?;
-                crate::ExecutableUnit::retain_vm_layout(&mut bytecode, &lowering.assembly, &mir)
-                    .map_err(|error| {
-                        build_runtime_error(format!(
-                            "failed to retain executable VM layout: {error:?}"
-                        ))
-                        .with_identifier("RunMat:ExecutableLayout")
-                        .build()
-                    })?;
-                let unit = crate::ExecutableUnit::new(
-                    executable_source,
-                    revision,
-                    source_map,
-                    mir,
-                    analysis,
-                    bytecode,
-                )
-                .map_err(|error| {
-                    build_runtime_error(error)
-                        .with_identifier("RunMat:ExecutableProduct")
-                        .build()
-                })?;
-                let unit_bytes = unit
-                    .portable_envelope_for(Some(leaf_name))
-                    .and_then(|envelope| {
-                        envelope
-                            .canonical_bytes()
-                            .map_err(|error| error.to_string())
-                    })
-                    .map_err(|error| {
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
-                            .build()
-                    })?;
-                let admitted = runmat_vm::admit_executable_unit(&unit_bytes).map_err(|error| {
-                    build_runtime_error(error.to_string())
                         .with_identifier("RunMat:CallableArtifact:ExecutableAdmission")
-                        .with_source(error)
-                        .build()
-                })?;
-                let entrypoint_origin = admitted.entrypoint_origin().map_err(|error| {
-                    build_runtime_error(error.to_string())
-                        .with_identifier("RunMat:CallableArtifact:ExecutableAdmission")
-                        .with_source(error)
-                        .build()
-                })?;
-                let unit_bytes = Arc::<[u8]>::from(unit_bytes);
-                let admitted = Rc::new(admitted);
+                        .build());
+                    }
+                };
                 let bound = admitted
                     .as_ref()
                     .clone()
@@ -403,15 +273,39 @@ pub(in crate::session) async fn load_dynamic_function(
                             .with_source(error)
                             .build()
                     })?;
+                let constructor_owner = super::constructor::admitted_constructor_owner(
+                    &unit,
+                    &bound,
+                    entrypoint_origin,
+                )?;
+                super::constructor::require_requested_source_constructor(
+                    &phase,
+                    constructor_owner.as_ref(),
+                )?;
                 let selected_runtime = bound.runtime().clone();
+                let (super_dependencies, super_dependency_origins, metadata_units) = if let Some(owner) = constructor_owner.as_ref() {
+                    selected_runtime.scope(selected_constructor_dependencies(
+                        &cache, admitted.as_ref(), &selected_runtime, owner,
+                        compat, top_level_await_enabled, project_handoff.as_ref(),
+                    )).await?
+                } else {
+                    (Vec::new(), HashSet::new(), Vec::new())
+                };
                 let admission = super::super::source_evaluation::admit_dynamic_callable(
                     &source_evaluator,
                     &selected_runtime,
                     unit_bytes.as_ref(),
                     entrypoint_origin,
                     bound,
+                    super_dependencies,
                 )?;
                 let binding = admission.binding().clone();
+                let super_constructors = admission.super_constructors().to_vec();
+                let selected_runtime = selected_runtime
+                    .with_retained_super_constructors(
+                        super_constructors.clone(),
+                        entrypoint_origin,
+                    )?;
                 let publish_span =
                     info_span!("runtime.function_registry.publish", source_kind = "m-file");
                 let _publish_guard = publish_span.enter();
@@ -428,27 +322,161 @@ pub(in crate::session) async fn load_dynamic_function(
                         source_records,
                         entrypoint_origin,
                         binding: binding.clone(),
+                        super_constructors,
+                        super_dependency_origins,
                         dependencies,
                     },
                 );
-                (selected_runtime, binding, Some(admission))
+                (
+                    selected_runtime,
+                    binding,
+                    Some(admission),
+                    constructor_owner,
+                    admitted,
+                    metadata_units,
+                )
             };
+            let (
+                selected_runtime,
+                binding,
+                admission_guard,
+                constructor_owner,
+                admitted_unit,
+                metadata_units,
+            ) = invocation;
+            if matches!(phase, runmat_runtime::user_functions::DynamicFunctionLoadPhase::Handle { .. }) {
+                let function = runmat_hir::FunctionId(binding.function);
+                let selected = source_evaluator
+                    .selected_binding_view(&binding)?
+                    .ok_or_else(|| {
+                        build_runtime_error("selected handle lacks its exact admitted definition")
+                            .with_identifier("RunMat:SelectedHandle:MissingDefinition")
+                            .build()
+                    })?;
+                let lease = binding.authority.local_lease(binding.function).ok_or_else(|| {
+                    build_runtime_error("selected handle lacks its exact definition lease")
+                        .with_identifier("RunMat:SelectedHandle:MissingDefinition")
+                        .build()
+                })?;
+                let body = selected.get_owned(function, lease).ok_or_else(|| {
+                    build_runtime_error("selected handle lacks its exact admitted definition")
+                        .with_identifier("RunMat:SelectedHandle:MissingDefinition")
+                        .build()
+                })?;
+                let missing_source = || {
+                    build_runtime_error("selected handle lacks its exact issued source")
+                        .with_identifier("RunMat:SelectedHandle:MissingSource")
+                        .build()
+                };
+                let source_owner = body.selected_source_owner.as_ref().ok_or_else(missing_source)?;
+                if !source_owner.is_live() {
+                    return Err(missing_source());
+                }
+                let ordinal = body
+                    .source_id
+                    .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                    .and_then(|source| source_owner.source_ordinal_for(source))
+                    .ok_or_else(missing_source)?;
+                let issued = source_owner
+                    .issued_source_info_for(ordinal)
+                    .ok_or_else(missing_source)?;
+                let source_file = issued
+                    .fullpath_name
+                    .as_ref()
+                    .map(|path| path.to_string())
+                    .or_else(|| body.source_file.clone());
+                let handle = Value::bound_function_handle(
+                    name,
+                    binding.function,
+                    binding.authority,
+                    body.source_role,
+                    source_file,
+                );
+                let sequence = runmat_value::ValueSequence::single(handle).map_err(|error| {
+                    build_runtime_error(error.to_string())
+                        .with_identifier("RunMat:SelectedHandle:InvalidOutput")
+                        .build()
+                })?;
+                let rooted = runmat_runtime::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())?;
+                return super::finish_dynamic_invocation(Ok(rooted), admission_guard, |error| {
+                    runmat_runtime::execution::preserve_source_call_stack_in_context(
+                        error,
+                        &selected_runtime,
+                    );
+                });
+            }
+            #[cfg(test)]
+            let constructor_trace = std::env::var("RUNMAT_CONSTRUCTOR_TRACE").as_deref() == Ok("1")
+                && constructor_owner.is_some();
+            #[cfg(test)]
+            if constructor_trace {
+                let entrypoint = admitted_unit.entrypoint_function();
+                let body = entrypoint.and_then(|function| admitted_unit.registry().get(function));
+                eprintln!(
+                    "[constructor-source] selected={:?} entrypoint={:?} body={:?} before_globals={:?}",
+                    constructor_owner,
+                    entrypoint,
+                    body.map(|body| (
+                        &body.display_name,
+                        &body.class_method_owner,
+                        &body.binding_origin,
+                        &body.instructions,
+                    )),
+                    selected_runtime.session_global_names(),
+                );
+            }
             let result =
                 runmat_runtime::callsite::with_function_input_callsite(input_callsite, async {
-                    runmat_runtime::user_functions::try_call_bound_function_in_context(
-                        &selected_runtime,
-                        binding,
-                        args.values(),
-                        requested_outputs,
-                    )
-                    .await
-                    .ok_or_else(|| {
-                        build_runtime_error("selected runtime has no exact bound invoker")
-                            .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
-                            .build()
-                    })?
+                    selected_runtime
+                        .clone()
+                        .scope(async {
+                            let mut selected_units = Vec::with_capacity(metadata_units.len() + 1);
+                            selected_units.extend(metadata_units.iter().map(|unit| unit.as_ref()));
+                            selected_units.push(admitted_unit.as_ref());
+                            if let Some(owner) = constructor_owner {
+                                runmat_vm::prepare_admitted_execution_metadata_for_class_batch(
+                                    &selected_units, &owner.declaring_class,
+                                )?;
+                                runmat_runtime::dispatcher::call_bound_constructor_sequence_in_context(
+                                    &selected_runtime,
+                                    owner,
+                                    binding,
+                                    args.values(),
+                                    requested_outputs,
+                                )
+                                .await
+                            } else {
+                                runmat_runtime::user_functions::try_call_bound_function_in_context(
+                                    &selected_runtime,
+                                    binding,
+                                    args.values(),
+                                    requested_outputs,
+                                )
+                                .await
+                                .ok_or_else(|| {
+                                    build_runtime_error("selected runtime has no exact bound invoker")
+                                        .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                                        .build()
+                                })?
+                            }
+                        })
+                        .await
                 })
                 .await;
+            #[cfg(test)]
+            if constructor_trace {
+                let names = selected_runtime.session_global_names();
+                eprintln!("[constructor-source] after_globals={names:?}");
+                if let Ok(names) = names {
+                    for name in names {
+                        eprintln!(
+                            "[constructor-source] global {name}={:?}",
+                            selected_runtime.session_global_value(&name)
+                        );
+                    }
+                }
+            }
             super::finish_dynamic_invocation(result, admission_guard, |error| {
                 runmat_runtime::execution::preserve_source_call_stack_in_context(
                     error,

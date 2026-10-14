@@ -24,7 +24,10 @@ use crate::builtins::common::{
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod nan_probe;
 mod preparation;
+
+use nan_probe::provider_input_contains_nan;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -72,9 +75,14 @@ fn logical_error_with_message(
 #[runtime_builtin(
     name = "logical",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::logical::ops"
 )]
-async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn logical_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(logical_error_with_message(
             runmat_builtins::LOGICAL_ERROR_TOO_MANY_OUTPUTS.message,
@@ -90,11 +98,17 @@ async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     match value {
         Value::Tensor(tensor) => {
             validate_tensor(&tensor)?;
-            preparation::execute(tensor).await
+            preparation::execute(runtime.as_ref(), tensor).await
         }
         // Specialized sparse, symbolic, text, scalar and explicit-resident
         // routes retain their existing conversion/provider admission.
-        value => convert_value_to_logical(value).await,
+        value => {
+            // Every accepted non-prepared representation below publishes a
+            // scalar, logical array, sparse numeric, or GPU tensor handle.
+            // None can contain a managed GC child.
+            let output = convert_value_to_logical(value).await?;
+            crate::execution::RootedValue::new(output).map_err(|error| error.into_runtime_error())
+        }
     }
 }
 
@@ -141,7 +155,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_)
@@ -271,59 +285,6 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_gpu(buffer, provider, &handle)
-}
-
-async fn provider_input_contains_nan(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    source: &GpuTensorHandle,
-) -> BuiltinResult<Option<bool>> {
-    if source.shape().contains(&0) || runmat_accelerate_api::handle_integer_type(source).is_some() {
-        return Ok(Some(false));
-    }
-    let mask = match provider.logical_isnan(source) {
-        Ok(mask) => mask,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(logical_provider_error(error.into())),
-    };
-    if !valid_logical_gpu_output(&mask, source, provider) {
-        return Err(gpu_helpers::reject_gpu_output(
-            mask,
-            logical_error_with_message(
-                "logical: provider returned a malformed NaN mask",
-                &LOGICAL_ERROR_INTERNAL,
-            ),
-        ));
-    }
-    let maximum = match provider.reduce_max(&mask).await {
-        Ok(maximum) => maximum,
-        Err(error) => return Err(logical_provider_error(error.after_effect())),
-    };
-    if maximum.shares_allocation_with(source)
-        || maximum.shares_allocation_with(&mask)
-        || !maximum.shape().iter().all(|dim| *dim == 1)
-        || maximum.device_id() != source.device_id()
-        || !gpu_helpers::exact_provider_for_handle(&maximum)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-    {
-        return Err(gpu_helpers::reject_gpu_output(
-            maximum,
-            logical_error_with_message(
-                "logical: provider returned a malformed NaN reduction",
-                &LOGICAL_ERROR_INTERNAL,
-            ),
-        ));
-    }
-    let downloaded = provider
-        .download(&maximum)
-        .await
-        .map_err(|error| logical_provider_error(error.into()))?;
-    if downloaded.data.len() != 1 || !downloaded.shape.iter().all(|dim| *dim == 1) {
-        return Err(logical_error_with_message(
-            "logical: invalid NaN reduction payload",
-            &LOGICAL_ERROR_INTERNAL,
-        ));
-    }
-    Ok(Some(downloaded.data[0] != 0.0))
 }
 
 fn value_contains_nan(value: &Value) -> bool {

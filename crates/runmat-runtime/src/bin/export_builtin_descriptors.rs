@@ -3,9 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor, BuiltinOutputMode,
-    BuiltinSignatureDescriptor,
+    BuiltinCatalogAudience, BuiltinCatalogEntry, BuiltinCompletionPolicy, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor,
+    BuiltinOutputMode, BuiltinSignatureDescriptor,
 };
 use serde::Serialize;
 
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .filter_map(|entry| {
             let descriptor = entry.descriptor;
-            if !exports_policy(descriptor.completion_policy, include_non_public) {
+            if !exports_entry(entry, include_non_public) {
                 return None;
             }
             Some(BuiltinDescriptorExport {
@@ -113,6 +113,11 @@ fn exports_policy(policy: BuiltinCompletionPolicy, include_non_public: bool) -> 
     include_non_public || policy == BuiltinCompletionPolicy::Public
 }
 
+fn exports_entry(entry: &BuiltinCatalogEntry, include_non_public: bool) -> bool {
+    entry.audience == BuiltinCatalogAudience::Public
+        && exports_policy(entry.descriptor.completion_policy, include_non_public)
+}
+
 fn validate_unique_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for name in names {
@@ -125,7 +130,7 @@ fn validate_unique_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{exports_policy, validate_unique_names, BuiltinCompletionPolicy};
+    use super::{exports_entry, exports_policy, validate_unique_names, BuiltinCompletionPolicy};
 
     #[test]
     fn default_export_is_public_only_and_explicit_export_includes_all_policies() {
@@ -137,6 +142,14 @@ mod tests {
             assert_eq!(exports_policy(policy, false), publicly_exported);
             assert!(exports_policy(policy, true));
         }
+    }
+
+    #[test]
+    fn fixture_descriptors_remain_private_even_with_non_public_export() {
+        let fixture = runmat_builtins::builtin_catalog_entry_by_name("OverIdx.subsref")
+            .expect("canonical fixture descriptor");
+        assert!(!exports_entry(fixture, false));
+        assert!(!exports_entry(fixture, true));
     }
 
     #[test]

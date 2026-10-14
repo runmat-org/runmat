@@ -22,6 +22,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atanh";
@@ -111,9 +113,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atanh",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
-async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn atanh_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -128,10 +136,14 @@ async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::ATANH_ERROR_INVALID_INPUT,
     )?;
     crate::builtins::common::real_unary_preparation::execute(
+        runtime.as_ref(),
         &runmat_builtins::ATANH_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::ClosedUnitInterval,
         value,
-        atanh_execute,
+        |value| async move {
+            let output = atanh_execute(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
 }
@@ -313,35 +325,36 @@ pub(crate) mod tests {
 
     fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::atanh_builtin(value))
+        block_on(super::atanh_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[test]
     fn atanh_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::atanh_builtin(Value::Int(
-            runmat_value::IntValue::I8(1),
-        )))
+        let integer = block_on(super::atanh_builtin(
+            None,
+            Value::Int(runmat_value::IntValue::I8(1)),
+        ))
         .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             ATANH_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::atanh_builtin(Value::Bool(true)))
+        let logical = block_on(super::atanh_builtin(None, Value::Bool(true)))
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ATANH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::atanh_builtin(Value::CharArray(chars)))
+        let character = block_on(super::atanh_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             ATANH_CHARACTER_INPUT_EXTENSION.error_identifier
         );
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity = block_on(super::atanh_builtin(Value::Num(0.0)))
+        let arity = block_on(super::atanh_builtin(None, Value::Num(0.0)))
             .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ATANH_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
@@ -773,7 +786,7 @@ pub(crate) mod tests {
                 shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let error = block_on(super::atanh_builtin(Value::GpuTensor(handle)))
+            let error = block_on(super::atanh_builtin(None, Value::GpuTensor(handle)))
                 .expect_err("real resident input requiring complex output must be gated");
             assert_eq!(
                 error.identifier(),

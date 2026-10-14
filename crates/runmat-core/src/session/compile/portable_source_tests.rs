@@ -1,3 +1,6 @@
+#[path = "portable_source_tests/graph_codec.rs"]
+mod graph_codec;
+
 #[test]
 fn portable_source_ordinals_ignore_unrelated_session_source_allocations() {
     let source = crate::ExecutableSource::new(
@@ -178,10 +181,22 @@ fn definition_only_public_source_exports_exact_multi_function_artifact() {
     );
     assert!(definition.diagnostics.is_empty());
     for name in ["retainedFirst", "retainedSecond"] {
-        assert!(
-            source.function_registry.resolve_name(name).is_some(),
-            "definition-only execution publishes {name}"
-        );
+        let id = source
+            .function_registry
+            .resolve_name(name)
+            .expect("definition-only execution publishes each function");
+        let body = source.function_registry.get(id).expect("published body");
+        let owner = body
+            .selected_source_owner
+            .as_ref()
+            .expect("published definition retains its admitted source table");
+        assert!(owner.is_live());
+        assert!(owner.owns_source(
+            body.source_id
+                .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                .expect("published body uses its durable source pool lease")
+        ));
+        assert_eq!(owner.durable_aliases().count(), 1);
     }
     let capture = execute(&mut source, "capture.m", "saved = @retainedSecond;");
     assert!(capture.diagnostics.is_empty());
@@ -251,20 +266,16 @@ fn definition_only_public_source_exports_exact_multi_function_artifact() {
     ))
     .expect("prepare exact retained function import");
     let committed = prepared.commit().expect("commit retained function import");
-    let Value::BoundFunctionHandle {
-        function,
-        authority,
-        ..
-    } = committed.values()[0].clone()
-    else {
+    let Value::BoundFunctionHandle(handle) = committed.values()[0].clone() else {
         panic!("imported function retains a bound handle");
     };
+    let data = handle.into_data();
     let result = futures::executor::block_on(
         runmat_runtime::user_functions::try_call_bound_function_in_context(
             &destination_runtime,
             runmat_value::BoundFunctionBinding {
-                function,
-                authority,
+                function: data.function,
+                authority: data.authority,
             },
             &[],
             1,
@@ -488,6 +499,7 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("source-projection-worker"),
         interop: envelope.manifest.interop.clone(),
+        foreign_policy: None,
         accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
@@ -504,7 +516,10 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        callable: ProgramCallable::semantic(envelope.manifest.identity.entrypoint_function, None),
+        callable: ProgramCallable::semantic(
+            envelope.manifest.identity.entrypoint_function.unwrap(),
+            None,
+        ),
         context: ProgramInvocationContext::Direct,
         assignment: None,
         job_id: None,

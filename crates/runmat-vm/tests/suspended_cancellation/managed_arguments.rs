@@ -8,6 +8,7 @@ use runmat_runtime::builtin::{
     RuntimeBuiltinBinding, RuntimeBuiltinFuture, RuntimeBuiltinInvocation,
 };
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
+use runmat_runtime::execution::{RootedValue, RootedValueSequence};
 use runmat_value::{HandleRef, Value, ValueSequence};
 use std::{
     cell::RefCell,
@@ -51,27 +52,40 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         let mut state = state.borrow_mut();
         state.target = Some(target);
         state.probe = Some(allocation.probe);
-        root.unroot().unwrap();
         let value = if state.cell_output {
             Value::Cell(runmat_value::CellArray::new(vec![value], 1, 1).unwrap())
         } else {
             value
         };
-        ValueSequence::single(value).map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        let output = RootedValueSequence::new(
+            ValueSequence::single(value)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        )
+        .map_err(|error| error.into_runtime_error())?;
+        drop(state);
+        root.unroot().unwrap();
+        Ok(output)
     })
 }
 
 fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    let argument = invocation.args.first().expect("managed argument").clone();
+    let argument = RootedValue::new(invocation.args.first().expect("managed argument").clone())
+        .map_err(|error| error.into_runtime_error());
     let receiver = state()
         .borrow_mut()
         .receiver
         .take()
         .expect("single invocation");
     Box::pin(async move {
+        let argument = argument?;
         if receiver.await.expect("test sender") {
-            ValueSequence::single(argument)
-                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+            argument.try_map_owned(
+                |argument| {
+                    ValueSequence::single(argument)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            )
         } else {
             Err(runmat_runtime::RuntimeError::new(
                 "expected managed argument failure",

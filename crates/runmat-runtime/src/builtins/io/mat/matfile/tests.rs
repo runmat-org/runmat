@@ -267,7 +267,11 @@ async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Val
     super::matfile_builtin(None, filename, rest).await
 }
 
-async fn matfile_subsref(obj: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
+async fn matfile_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::matfile_subsref(None, obj, subscript).await
 }
@@ -277,7 +281,7 @@ async fn matfile_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::matfile_subsasgn(None, obj, subscript, rhs).await
 }
@@ -339,7 +343,7 @@ fn matfile_constructs_properties_and_reads_whole_variables() {
         Value::String("Properties".into()),
     ))
     .expect("properties");
-    let Value::Struct(props) = props else {
+    let Value::Struct(props) = props.value() else {
         panic!("expected Properties struct");
     };
     assert_eq!(props.fields.get("Writable"), Some(&Value::Bool(false)));
@@ -424,29 +428,32 @@ fn matfile_writable_assignment_replaces_and_appends_variables() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("write");
     write_sample(&path);
-    let mut object = block_on(matfile_builtin(
+    let object = block_on(matfile_builtin(
         Value::String(path.to_string_lossy().into_owned()),
         vec![Value::String("Writable".into()), Value::Bool(true)],
     ))
     .expect("matfile writable");
 
-    object = block_on(matfile_subsasgn(
+    let object = block_on(matfile_subsasgn(
         object,
         ".".to_string(),
         Value::String("A".into()),
         tensor(&[9.0, 8.0], vec![1, 2]),
     ))
     .expect("replace A");
-    block_on(matfile_subsasgn(
-        object,
-        ".".to_string(),
-        Value::String("B".into()),
-        Value::Num(42.0),
-    ))
-    .expect("append B");
+    object
+        .with_owned(|object| {
+            block_on(matfile_subsasgn(
+                object,
+                ".".to_string(),
+                Value::String("B".into()),
+                Value::Num(42.0),
+            ))
+        })
+        .expect("append B");
 
     let entries = block_on(read_mat_file_for_builtin(&path, "matfile")).expect("read back");
-    let by_name: HashMap<_, _> = entries.into_iter().collect();
+    let by_name: HashMap<_, _> = entries.value().0.iter().cloned().collect();
     assert_eq!(by_name.get("A"), Some(&tensor(&[9.0, 8.0], vec![1, 2])));
     assert_eq!(by_name.get("B"), Some(&Value::Num(42.0)));
     assert_eq!(by_name.get("flag"), Some(&Value::Bool(true)));
@@ -516,8 +523,8 @@ fn matfile_receiver_keeps_original_provider_and_cwd_after_swap() {
         .expect("decode original");
     let competing = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&competing)
         .expect("decode replacement");
-    assert_eq!(original, vec![("A".into(), Value::Num(11.0))]);
-    assert_eq!(competing, vec![("A".into(), Value::Num(9.0))]);
+    assert_eq!(original.value().0, vec![("A".into(), Value::Num(11.0))]);
+    assert_eq!(competing.value().0, vec![("A".into(), Value::Num(9.0))]);
 }
 
 #[test]
@@ -541,14 +548,17 @@ fn matfile_writable_assignment_preserves_exact_integer_storage() {
         input,
     ))
     .expect("write integer variable");
-    let value = block_on(matfile_subsref(
-        object,
-        ".".to_string(),
-        Value::String("limits".into()),
-    ))
-    .expect("read integer variable");
+    let value = object
+        .with_owned(|object| {
+            block_on(matfile_subsref(
+                object,
+                ".".to_string(),
+                Value::String("limits".into()),
+            ))
+        })
+        .expect("read integer variable");
 
-    assert!(matches!(value, Value::Tensor(tensor)
+    assert!(matches!(value.value(), Value::Tensor(tensor)
             if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))));
     let _ = std::fs::remove_file(path);
 }

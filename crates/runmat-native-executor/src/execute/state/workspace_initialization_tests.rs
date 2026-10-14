@@ -4,10 +4,12 @@ use runmat_native_codegen::*;
 use runmat_types::{BindingId, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
 use std::{rc::Rc, sync::Arc};
 
-#[path = "workspace_initialization_tests/sync_completion.rs"]
-mod sync_completion;
 #[path = "workspace_initialization_tests/edge_global.rs"]
 mod edge_global;
+#[path = "workspace_initialization_tests/numeric_region_inputs.rs"]
+mod numeric_region_inputs;
+#[path = "workspace_initialization_tests/sync_completion.rs"]
+mod sync_completion;
 
 #[test]
 fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {
@@ -105,6 +107,94 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
     });
 }
 
+#[test]
+fn inherited_persistent_local_delegates_to_ancestor_named_storage() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let runtime = state.runtime.clone();
+        let _scope = runtime.enter();
+        let authority = runtime.session_variable_authority();
+        authority
+            .store_persistent_named("outer", "P", Value::Num(5.0))
+            .unwrap();
+        authority
+            .store_persistent_slot("outer", 0, Value::Num(33.0))
+            .unwrap();
+
+        state
+            .declare_persistent_for_owner(0, "P".into(), "outer".into())
+            .unwrap();
+        let reference = state.local_reference(0).unwrap();
+        assert_eq!(state.arena.get(reference).unwrap(), &Value::Num(5.0));
+
+        let updated = state.arena.insert(Value::Num(7.0));
+        state.set_local(0, updated).unwrap();
+        assert_eq!(
+            authority.persistent_named_value("outer", "P").unwrap(),
+            Some(Value::Num(7.0))
+        );
+        assert_eq!(
+            authority.persistent_slot_value("outer", 0).unwrap(),
+            Some(Value::Num(33.0))
+        );
+
+        authority
+            .store_persistent_named("outer", "P", Value::Num(8.0))
+            .unwrap();
+        let refreshed = state.local_reference(0).unwrap();
+        assert_eq!(state.arena.get(refreshed).unwrap(), &Value::Num(8.0));
+    });
+}
+
+#[test]
+fn returned_child_capture_cannot_replay_older_canonical_storage() {
+    runmat_gc::gc_test_context(|| {
+        let mut global_state = omitted_input_state();
+        let runtime = global_state.runtime.clone();
+        let _scope = runtime.enter();
+        let authority = runtime.session_variable_authority();
+        global_state.declare_global(0, "G".into()).unwrap();
+        authority.store_global("G", Value::Num(9.0)).unwrap();
+        global_state
+            .apply_lexical_captures(vec![runmat_runtime::call::lexical::LexicalCapture {
+                binding: BindingId(0),
+                value: Value::Num(1.0),
+            }])
+            .unwrap();
+        assert_eq!(authority.global_value("G").unwrap(), Some(Value::Num(9.0)));
+
+        let mut persistent_state = omitted_input_state_with(runtime.clone(), None);
+        persistent_state
+            .declare_persistent_for_owner(0, "P".into(), "outer".into())
+            .unwrap();
+        authority
+            .store_persistent_named("outer", "P", Value::Num(9.0))
+            .unwrap();
+        persistent_state
+            .apply_lexical_captures(vec![runmat_runtime::call::lexical::LexicalCapture {
+                binding: BindingId(0),
+                value: Value::Num(1.0),
+            }])
+            .unwrap();
+        assert_eq!(
+            authority.persistent_named_value("outer", "P").unwrap(),
+            Some(Value::Num(9.0))
+        );
+        authority.clear_persistent_function("outer").unwrap();
+        persistent_state
+            .apply_lexical_captures(vec![runmat_runtime::call::lexical::LexicalCapture {
+                binding: BindingId(0),
+                value: Value::Num(1.0),
+            }])
+            .unwrap();
+        assert_eq!(
+            authority.persistent_named_value("outer", "P").unwrap(),
+            None,
+            "a returned child capture cannot resurrect a cleared persistent"
+        );
+    });
+}
+
 fn omitted_input_state() -> HostState {
     omitted_input_state_with(
         RuntimeContext::new(Rc::new(
@@ -128,10 +218,14 @@ fn omitted_input_state_with(
         span: ProgramSpan { start: 0, end: 0 },
     };
     let function = NativeFunction {
+        lexical_bindings: Vec::new(),
+        inherited_storage_bindings: Vec::new(),
+        creates_lexical_environment: false,
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "omitted_input".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        lexical_parent: None,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {
@@ -187,6 +281,7 @@ fn omitted_input_state_with(
         runtime,
         program_capture: None,
         captures: vec![],
+        lexical_environment: None,
         deoptimization: Default::default(),
         interpreter_resume_points: Default::default(),
         coverage_sites: Default::default(),
@@ -295,9 +390,12 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                         )
                         .into())
                     } else {
-                        Ok(crate::execute::call_suspension::CallCompletion::Values(
-                            vec![],
-                        ))
+                        Ok(
+                            crate::execute::call_suspension::CallCompletion::RootedArguments(
+                                runmat_runtime::execution::RootedValues::new(vec![])
+                                    .map_err(|error| error.into_runtime_error())?,
+                            ),
+                        )
                     }
                 }),
             });
@@ -386,9 +484,12 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
                         )
                         .into())
                     } else {
-                        Ok(crate::execute::call_suspension::CallCompletion::Values(
-                            vec![],
-                        ))
+                        Ok(
+                            crate::execute::call_suspension::CallCompletion::RootedArguments(
+                                runmat_runtime::execution::RootedValues::new(vec![])
+                                    .map_err(|error| error.into_runtime_error())?,
+                            ),
+                        )
                     }
                 }),
             });

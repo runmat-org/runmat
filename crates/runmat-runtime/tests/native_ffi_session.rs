@@ -1,5 +1,6 @@
 #![cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -8,10 +9,28 @@ use runmat_native_ffi::NativeInterfaceArtifactManifest;
 use runmat_runtime::context::{ForeignCall, RuntimeContext, RuntimeServicePorts};
 use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{
-    ForeignPlatform, ForeignRuntime, NativeFfiAdapter, NATIVE_FFI_ADAPTER_ID,
+    ForeignPlatform, ForeignRuntime, NativeFfiAdapter, NativeFfiIsolationPolicy,
+    NATIVE_FFI_ADAPTER_ID,
 };
 use runmat_types::ForeignOwnership;
 use runmat_value::{IntValue, Tensor, Value};
+
+fn main() {
+    if std::env::args_os().nth(1).as_deref()
+        == Some(OsStr::new(
+            runmat_process_host::HiddenMode::ExtensionHost.marker(),
+        ))
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("native extension host runtime")
+            .block_on(runmat_runtime::foreign::run_extension_host())
+            .expect("native extension host");
+        return;
+    }
+    library_and_pointer_state_are_owned_by_one_runtime_session();
+}
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
     let source =
@@ -44,15 +63,18 @@ fn invoke(
     symbol: &str,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
-    let mut outputs = invoke_outputs(context, symbol, arguments, requested_outputs)?;
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
+    let outputs = invoke_outputs(context, symbol, arguments, requested_outputs)?;
     if outputs.len() != 1 {
         return Err(Box::new(runmat_runtime::RuntimeError::new(format!(
             "test helper expected one output, received {}",
             outputs.len()
         ))));
     }
-    Ok(outputs.pop().expect("one output"))
+    outputs.with_owned_values(|mut values| {
+        runmat_runtime::execution::RootedValue::new(values.pop().expect("one output"))
+            .map_err(|error| Box::new(error.into_runtime_error()))
+    })
 }
 
 fn invoke_outputs(
@@ -60,7 +82,7 @@ fn invoke_outputs(
     symbol: &str,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let service = context
         .service_ports()
         .require_foreign(symbol)
@@ -75,11 +97,13 @@ fn invoke_outputs(
             requested_outputs,
         },
     )))
-    .map(runmat_value::ValueSequence::into_values)
-    .map_err(Box::new)
+    .map_err(Box::new)?
+    .with_owned_sequence(|sequence| {
+        runmat_runtime::execution::RootedValues::new(sequence.into_values())
+            .map_err(|error| Box::new(error.into_runtime_error()))
+    })
 }
 
-#[test]
 fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     if Command::new("clang").arg("--version").output().is_err() {
         eprintln!("skipping native FFI session test because clang is unavailable");
@@ -121,7 +145,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         1,
     )
     .unwrap();
-    let Value::Cell(signatures) = signatures else {
+    let Value::Cell(signatures) = signatures.value() else {
         panic!("full function metadata must be returned as a cell array");
     };
     assert!(signatures
@@ -287,12 +311,12 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             1,
         )
         .expect("nullable pointer return");
-        let Value::Foreign(reference) = returned else {
+        let Value::Foreign(reference) = returned.value() else {
             panic!("pointer returns must remain typed foreign resources");
         };
         assert_eq!(reference.ownership, ForeignOwnership::Borrowed);
         if present == 1 {
-            let pointer = Value::Foreign(reference);
+            let pointer = Value::Foreign(reference.clone());
             let retyped = invoke(
                 &context,
                 "invoke_member",
@@ -306,7 +330,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
                 1,
             )
             .expect("opaque pointer type declaration");
-            let Value::Foreign(retyped_reference) = &retyped else {
+            let Value::Foreign(retyped_reference) = retyped.value() else {
                 panic!("setdatatype must preserve the foreign reference");
             };
             let Value::Foreign(original_reference) = &pointer else {
@@ -320,7 +344,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
                 1,
             )
             .expect("typed opaque pointer copy");
-            let Value::Tensor(copied) = copied else {
+            let Value::Tensor(copied) = copied.value() else {
                 panic!("typed pointer copy must retain integer tensor storage");
             };
             assert_eq!(copied.shape(), &[1, 1]);
@@ -342,7 +366,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "get_member",
-            vec![pointer.clone(), Value::String("dAtAtYpE".into())],
+            vec![pointer.value().clone(), Value::String("dAtAtYpE".into())],
             1,
         )
         .unwrap(),
@@ -352,7 +376,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "invoke_member",
-            vec![pointer.clone(), Value::String("IsNuLl".into())],
+            vec![pointer.value().clone(), Value::String("IsNuLl".into())],
             1,
         )
         .unwrap(),
@@ -364,34 +388,34 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         vec![
             Value::String("session_fixture".into()),
             Value::String("fixture_increment".into()),
-            pointer.clone(),
+            pointer.value().clone(),
         ],
         1,
     )
     .unwrap();
-    let Value::Foreign(updated_reference) = &updated else {
+    let Value::Foreign(updated_reference) = updated.value() else {
         panic!("mutable pointer output must retain foreign identity");
     };
-    let Value::Foreign(original_reference) = &pointer else {
+    let Value::Foreign(original_reference) = pointer.value() else {
         panic!("pointer constructor must return a foreign reference");
     };
     assert!(updated_reference.is_same_resource(original_reference));
     assert_eq!(
-        invoke(&context, "pointer_value", vec![pointer.clone()], 1).unwrap(),
+        invoke(&context, "pointer_value", vec![pointer.value().clone()], 1).unwrap(),
         Value::Int(IntValue::I32(41))
     );
     let assigned = invoke(
         &context,
         "set_member",
         vec![
-            pointer.clone(),
+            pointer.value().clone(),
             Value::String("Value".into()),
             Value::Int(IntValue::I32(50)),
         ],
         1,
     )
     .unwrap();
-    let Value::Foreign(assigned_reference) = &assigned else {
+    let Value::Foreign(assigned_reference) = assigned.value() else {
         panic!("member assignment must retain foreign identity");
     };
     assert!(assigned_reference.is_same_resource(original_reference));
@@ -399,7 +423,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "get_member",
-            vec![pointer.clone(), Value::String("Value".into())],
+            vec![pointer.value().clone(), Value::String("Value".into())],
             1,
         )
         .unwrap(),
@@ -409,7 +433,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "get_member",
-            vec![pointer.clone(), Value::String("DataType".into())],
+            vec![pointer.value().clone(), Value::String("DataType".into())],
             1,
         )
         .unwrap(),
@@ -419,7 +443,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "set_member",
         vec![
-            pointer,
+            pointer.value().clone(),
             Value::String("Value".into()),
             Value::Tensor(Tensor::new(vec![50.0, 51.0], vec![1, 2]).unwrap()),
         ],
@@ -429,12 +453,15 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     assert_eq!(shape_error.identifier(), Some("RunMat:Foreign:InvalidCall"));
 
     let null_pointer = invoke(&context, "pointer", Vec::new(), 1).unwrap();
-    assert!(matches!(null_pointer, Value::Foreign(_)));
+    assert!(matches!(null_pointer.value(), Value::Foreign(_)));
     assert_eq!(
         invoke(
             &context,
             "get_member",
-            vec![null_pointer, Value::String("DataType".into())],
+            vec![
+                null_pointer.value().clone(),
+                Value::String("DataType".into())
+            ],
             1,
         )
         .unwrap(),
@@ -452,7 +479,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "get_member",
-            vec![typed_null.clone(), Value::String("Value".into())],
+            vec![typed_null.value().clone(), Value::String("Value".into())],
             1,
         )
         .unwrap(),
@@ -462,7 +489,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "set_member",
         vec![
-            typed_null.clone(),
+            typed_null.value().clone(),
             Value::String("Value".into()),
             Value::Int(IntValue::I32(7)),
         ],
@@ -473,7 +500,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         invoke(
             &context,
             "get_member",
-            vec![typed_null, Value::String("Value".into())],
+            vec![typed_null.value().clone(), Value::String("Value".into())],
             1,
         )
         .unwrap(),
@@ -492,7 +519,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             &context,
             "set_member",
             vec![
-                record.clone(),
+                record.value().clone(),
                 Value::String(field.into()),
                 Value::Int(IntValue::I32(value)),
             ],
@@ -507,7 +534,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             vec![
                 Value::String("session_fixture".into()),
                 Value::String("fixture_record_sum".into()),
-                record,
+                record.value().clone(),
             ],
             1,
         )
@@ -539,4 +566,86 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         .unwrap(),
         Value::Bool(false)
     );
+    drop(context);
+
+    isolated_direct_capture_retirement_replays(&library_path, &manifest_path, temporary.path());
+}
+
+fn isolated_direct_capture_retirement_replays(
+    library_path: &Path,
+    manifest_path: &Path,
+    scratch: &Path,
+) {
+    // This same executable is the authenticated hidden-mode child. The
+    // public prepared install deliberately has no attached private root;
+    // it must capture one before the original paths disappear.
+    let isolated = ForeignRuntime::new(ForeignPlatform::Native);
+    let isolated_adapter = NativeFfiAdapter::new(isolated.handles().clone()).unwrap();
+    isolated_adapter
+        .set_isolation_policy(NativeFfiIsolationPolicy::isolated(None))
+        .unwrap();
+    isolated_adapter
+        .install_prepared_artifact(library_path, manifest_path)
+        .expect("direct isolated install captures private bytes");
+    isolated.register_adapter(isolated_adapter.clone()).unwrap();
+    let isolated_context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_foreign(Rc::new(isolated)));
+    let append_library = scratch.join("append-library.bin");
+    std::fs::copy(library_path, &append_library).unwrap();
+    std::fs::remove_file(library_path).unwrap();
+    std::fs::remove_file(manifest_path).unwrap();
+    assert!(isolated_adapter
+        .install_prepared_artifact(&append_library, &scratch.join("missing-manifest.json"))
+        .is_err());
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("isolated native fixture runtime");
+    runtime.block_on(async {
+        assert_eq!(
+            isolated_add(&isolated_context).await,
+            Value::Int(IntValue::I32(42))
+        );
+        let staged = isolated_adapter
+            .prepare_project_replacement(std::iter::empty())
+            .expect("stage exact old native owner");
+        let verified = staged.retire_owner().await.expect("retire exact child");
+        drop(verified);
+        drop(staged);
+        assert_eq!(
+            isolated_add(&isolated_context).await,
+            Value::Int(IntValue::I32(42))
+        );
+        isolated_adapter
+            .shutdown()
+            .await
+            .expect("retire replayed child");
+    });
+}
+
+async fn isolated_add(context: &RuntimeContext) -> Value {
+    let service = context
+        .service_ports()
+        .require_foreign("call")
+        .expect("native service")
+        .clone();
+    context
+        .scope(service.invoke(
+            context.clone(),
+            ForeignCall {
+                adapter: NATIVE_FFI_ADAPTER_ID.into(),
+                symbol: "call".into(),
+                arguments: vec![
+                    Value::String("prepared_fixture".into()),
+                    Value::String("fixture_add".into()),
+                    Value::Int(IntValue::I32(20)),
+                    Value::Int(IntValue::I32(22)),
+                ],
+                requested_outputs: 1,
+            },
+        ))
+        .await
+        .expect("isolated native fixture call")
+        .with_owned_sequence(|sequence| sequence.into_values().pop().expect("one native output"))
 }

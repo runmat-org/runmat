@@ -6417,8 +6417,11 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-config",
  "runmat-core",
  "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-gc",
  "runmat-java",
  "runmat-mex",
  "runmat-native-codegen",
@@ -6565,6 +6568,7 @@ dependencies = [
  "minicbor",
  "runmat-execution",
  "runmat-package",
+ "runmat-process-host",
  "runmat-types",
  "serde",
  "serde_json",
@@ -6598,6 +6602,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-config",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
@@ -6779,7 +6784,9 @@ dependencies = [
 name = "runmat-java"
 version = "0.6.2"
 dependencies = [
+ "futures",
  "jni 0.21.1",
+ "runmat-process-host",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7070,6 +7077,7 @@ dependencies = [
  "cranelift-object",
  "runmat-builtins",
  "runmat-execution",
+ "runmat-execution-artifact",
  "runmat-hir",
  "runmat-mir",
  "runmat-runtime",
@@ -7106,6 +7114,7 @@ version = "0.6.2"
 dependencies = [
  "libffi",
  "libloading 0.8.9",
+ "runmat-process-host",
  "runmat-types",
  "runmat-value",
  "serde",
@@ -7271,11 +7280,12 @@ dependencies = [
 name = "runmat-python"
 version = "0.6.2"
 dependencies = [
+ "futures",
  "libloading 0.8.9",
+ "runmat-process-host",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "tempfile",
  "thiserror 1.0.69",
  "zip",
 ]
@@ -7555,6 +7565,7 @@ dependencies = [
  "log",
  "miette",
  "once_cell",
+ "pin-project-lite",
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",

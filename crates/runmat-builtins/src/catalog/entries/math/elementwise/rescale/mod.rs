@@ -21,6 +21,7 @@ pub use contract::{
 };
 
 pub const RESCALE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rescale" },
     category: "math/elementwise",

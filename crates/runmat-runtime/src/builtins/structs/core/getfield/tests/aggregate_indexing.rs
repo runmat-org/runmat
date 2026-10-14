@@ -17,7 +17,7 @@ fn getfield_cell_field_parentheses_indexing_preserves_cell_container() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("cell parentheses index");
-    let Value::Cell(cell) = result else {
+    let Value::Cell(cell) = result.value() else {
         panic!("expected one-element cell result");
     };
     assert_eq!((cell.rows, cell.cols), (1, 1));
@@ -47,7 +47,7 @@ fn getfield_logical_cell_indexing_uses_column_major_linear_positions() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("logical cell index");
-    let Value::Cell(cell) = result else {
+    let Value::Cell(cell) = result.value() else {
         panic!("expected cell result");
     };
     assert_eq!((cell.rows, cell.cols), (2, 1));
@@ -81,7 +81,7 @@ fn getfield_matrix_shaped_cell_selection_rebuilds_row_major_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("matrix-shaped cell selection");
-    let Value::Cell(cell) = result else {
+    let Value::Cell(cell) = result.value() else {
         panic!("expected cell result");
     };
     assert_eq!(cell.shape, vec![2, 2]);
@@ -124,7 +124,7 @@ fn getfield_linear_cell_selection_accounts_for_nd_page_offsets() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("N-D page selection");
-    let Value::Cell(cell) = result else {
+    let Value::Cell(cell) = result.value() else {
         panic!("expected cell result");
     };
     assert_eq!(cell.shape, vec![1, 2]);

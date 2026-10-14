@@ -42,6 +42,10 @@ pub(crate) fn observation_capability(
             * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
         clear_commands: submissions,
         map_callbacks: submissions,
+        wgpu_compute_query: crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+            submissions,
+            submissions,
+        ),
     })
 }
 
@@ -192,6 +196,14 @@ mod tests {
                     && estimate.transient_bytes == Some(80)
                     && estimate.dispatches == Some(2)
         ));
+        #[cfg(feature = "wgpu")]
+        {
+            let ProviderObservationCapability::Supported(overhead) = observation_capability(&query)
+            else {
+                panic!("audited two-pass reduction");
+            };
+            assert_eq!(overhead.wgpu_compute_query.unwrap().max_query_sets, 2);
+        }
         query.workload.preparation_route = Some(
             runmat_accelerate_api::ProviderPreparationRoute::FloatingCast {
                 target: runmat_accelerate_api::ProviderPrecision::F64,

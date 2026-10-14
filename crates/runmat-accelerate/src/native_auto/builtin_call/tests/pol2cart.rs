@@ -50,20 +50,19 @@ fn pol2cart_actual_nary_preparation_preserves_all_outputs_and_provider_feedback(
                     })
                     .await
                     .unwrap();
-                let Value::OutputList(values) = output else {
+                let Value::OutputList(values) = output.value() else {
                     panic!("requested coordinate outputs")
                 };
                 assert_eq!(values.len(), outputs);
-                for (index, value) in values.into_iter().enumerate() {
+                for (index, value) in values.iter().enumerate() {
                     let (shape, data) = match value {
                         Value::GpuTensor(handle) => {
                             assert!(use_provider);
                             assert_eq!(
-                                runmat_accelerate_api::handle_provenance(&handle),
+                                runmat_accelerate_api::handle_provenance(handle),
                                 Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                             );
-                            let host = provider.download(&handle).await.unwrap();
-                            drop(handle);
+                            let host = provider.download(handle).await.unwrap();
                             (host.shape, host.data)
                         }
                         Value::Tensor(tensor) => {

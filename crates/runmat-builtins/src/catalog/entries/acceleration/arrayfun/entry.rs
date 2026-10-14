@@ -20,6 +20,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const ARRAYFUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "arrayfun" },
     category: "acceleration/gpu",

@@ -2,12 +2,14 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::rc::Rc;
 
 use runmat_native_ffi::{
     invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks, prepare_header,
     CallbackBinding, HeaderPreparation, InvocationValue, LoadedLibrary, NativePointerResource,
     NativeType, PointerBinding,
 };
+use runmat_process_host::private_bytes::PrivateByteLease;
 use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
@@ -45,8 +47,10 @@ fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
 
 #[test]
 fn pointer_resources_keep_a_stable_typed_value_across_calls() {
-    let temporary = tempfile::tempdir().unwrap();
-    let Some(library_path) = compile_fixture(temporary.path()) else {
+    let private_bytes = PrivateByteLease::new_private("runmat-native-pointer-")
+        .expect("private native fixture root");
+    let private_path = private_bytes.path().to_path_buf();
+    let Some(library_path) = compile_fixture(&private_path) else {
         eprintln!("skipping native fixture because the C compiler is unavailable");
         return;
     };
@@ -75,10 +79,21 @@ fn pointer_resources_keep_a_stable_typed_value_across_calls() {
         &metadata,
     )
     .unwrap();
-    let library = LoadedLibrary::open(&library_path).unwrap();
+    let mut library = LoadedLibrary::open(&library_path).unwrap();
+    library
+        .attach_private_byte_lease(private_bytes.clone())
+        .expect("loaded fixture owns its private bytes");
+    let library = Rc::new(library);
+    let retained_library = Rc::clone(&library);
+    drop(library);
+    drop(private_bytes);
+    assert!(
+        private_path.exists(),
+        "retained library keeps its private root"
+    );
     for expected in [41, 42] {
         invoke_symbol_with_bindings(
-            &library,
+            &retained_library,
             prototype,
             &[Value::Int(IntValue::I32(0))],
             &metadata,
@@ -91,6 +106,11 @@ fn pointer_resources_keep_a_stable_typed_value_across_calls() {
             Value::Int(IntValue::I32(expected))
         );
     }
+    drop(retained_library);
+    assert!(
+        !private_path.exists(),
+        "private root retires after the last loaded library owner"
+    );
 }
 
 #[test]
@@ -265,7 +285,7 @@ fn callbacks_reenter_through_an_explicit_dispatch_contract() {
         apply,
         &[
             Value::Int(IntValue::I32(5)),
-            Value::FunctionHandle("callback".into()),
+            Value::function_handle("callback".into()),
         ],
         &metadata,
         &[CallbackBinding {
@@ -285,7 +305,7 @@ fn callbacks_reenter_through_an_explicit_dispatch_contract() {
         apply,
         &[
             Value::Int(IntValue::I32(5)),
-            Value::FunctionHandle("callback".into()),
+            Value::function_handle("callback".into()),
         ],
         &metadata,
         &[CallbackBinding {

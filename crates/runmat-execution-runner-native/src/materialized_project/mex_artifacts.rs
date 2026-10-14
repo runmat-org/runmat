@@ -10,6 +10,7 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 pub(crate) struct MaterializedMexArtifact {
     pub(crate) manifest: MexArtifactManifest,
     pub(crate) module_path: PathBuf,
+    pub(crate) manifest_path: PathBuf,
 }
 
 pub(crate) fn discover(
@@ -41,9 +42,8 @@ pub(crate) fn discover(
             )));
         };
         let module_path = root.join(&module.descriptor.logical_name);
-        if MexArtifactManifest::path_for_module(&module_path)
-            != root.join(&sidecar.descriptor.logical_name)
-        {
+        let manifest_path = root.join(&sidecar.descriptor.logical_name);
+        if MexArtifactManifest::path_for_module(&module_path) != manifest_path {
             return Err(protocol(format!(
                 "MEX artifact {} manifest is not adjacent to its module",
                 manifest.identity
@@ -57,6 +57,7 @@ pub(crate) fn discover(
                 MaterializedMexArtifact {
                     manifest,
                     module_path,
+                    manifest_path,
                 },
             )
             .is_some()

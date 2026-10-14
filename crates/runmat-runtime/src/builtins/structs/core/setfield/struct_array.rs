@@ -1,6 +1,8 @@
 use super::assignment::assign_into_value;
+use super::assignment::root;
 use super::errors;
 use crate::builtins::structs::core::field_path::{self, FieldStep, IndexSelector};
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_builtins::{SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS, SETFIELD_ERROR_INDEX_SHAPE};
 use runmat_value::{StructArray, Tensor, Value};
@@ -10,7 +12,11 @@ pub(super) async fn assign_into_struct_array(
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _aggregate_root =
+        RootedValueLease::for_traced(&array).map_err(|error| error.into_runtime_error())?;
+    let _rhs_root =
+        RootedValueLease::for_traced(&rhs).map_err(|error| error.into_runtime_error())?;
     let plan = field_path::build_plan(&Value::StructArray(array.clone()), selector, false)
         .map_err(|error| errors::remap_index(error, Some("setfield: ")))?;
     let [position] = plan.indices.as_slice() else {
@@ -30,7 +36,7 @@ pub(super) async fn assign_into_struct_array(
             )
         })?;
     let updated = assign_into_value(Value::Struct(current), steps, rhs).await?;
-    let Value::Struct(updated) = updated else {
+    let Value::Struct(updated) = updated.value() else {
         return Err(errors::internal(
             "structure-array element update did not produce a structure",
         ));
@@ -50,7 +56,7 @@ pub(super) async fn assign_into_struct_array(
             .map_err(errors::internal)?;
     }
     array = array
-        .replace_linear_scalar(&[position], updated)
+        .replace_linear_scalar(&[position], updated.clone())
         .map_err(errors::internal)?;
-    Ok(Value::StructArray(array))
+    root(Value::StructArray(array))
 }

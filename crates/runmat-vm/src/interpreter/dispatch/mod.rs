@@ -6,6 +6,7 @@ mod control_flow;
 mod exceptions;
 mod future;
 mod indexing;
+mod lexical;
 mod object;
 mod parallel;
 mod prepared_outputs;
@@ -27,6 +28,7 @@ use std::future::Future;
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };
+pub(crate) use calls::checked_class_registration;
 pub use calls::{
     build_builtin_expand_multi_args, build_feval_expand_multi_args,
     build_user_function_expand_multi_args, handle_builtin_call_multi, handle_create_closure,
@@ -167,7 +169,7 @@ impl SequenceState {
         }
         self.destination_builder = Some((
             root_slot,
-            runmat_runtime::sequence::SequenceDestinationBuilder::new(root),
+            runmat_runtime::sequence::SequenceDestinationBuilder::new(root)?,
         ));
         Ok(())
     }
@@ -708,6 +710,7 @@ fn dispatch_immediate(
     let DispatchMeta {
         instr,
         var_names,
+        function_registry,
         current_function_name,
         ..
     } = meta;
@@ -771,6 +774,21 @@ fn dispatch_immediate(
         }
         Instr::LoadLocal(offset) => {
             if context.call_stack.last().is_none() {
+                if !lexical::refresh(context, vars, *offset)? {
+                    let mut error = crate::interpreter::errors::mex(
+                        "UndefinedVariable",
+                        &format!(
+                            "Undefined variable: {}",
+                            var_names
+                                .get(offset)
+                                .map(String::as_str)
+                                .unwrap_or("<lexical binding>")
+                        ),
+                    );
+                    error.failure_origin =
+                        runmat_runtime::runtime_error::RuntimeFailureOrigin::LanguageEvaluation;
+                    return Err(error);
+                }
                 persistent::refresh(
                     persistent_aliases,
                     vars,
@@ -801,6 +819,21 @@ fn dispatch_immediate(
                 current_function_name,
                 *index,
             )?;
+            if !lexical::refresh(context, vars, *index)? {
+                let mut error = crate::interpreter::errors::mex(
+                    "UndefinedVariable",
+                    &format!(
+                        "Undefined variable: {}",
+                        var_names
+                            .get(index)
+                            .map(String::as_str)
+                            .unwrap_or("<lexical binding>")
+                    ),
+                );
+                error.failure_origin =
+                    runmat_runtime::runtime_error::RuntimeFailureOrigin::LanguageEvaluation;
+                return Err(error);
+            }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
@@ -853,27 +886,37 @@ fn dispatch_immediate(
                 current_function_name,
                 *index,
             )?;
+            let lexical_assigned = lexical::refresh(context, vars, *index)?;
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
                     "Not enough input arguments.",
                 ));
             }
-            if let (Some(false), Some(slot_name), Some(var_name)) = (
-                workspace_slot_assigned(*index),
-                workspace_slot_name(*index),
-                var_names.get(index),
-            ) {
-                if slot_name == *var_name {
-                    if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
-                        let empty = Value::Struct(runmat_value::StructValue::new());
-                        debug::trace_load_var(*pc, *index, &empty);
-                        stack.push(empty);
-                        return Ok(Some(DispatchHandled::Generic(
-                            DispatchDecision::FallThrough,
-                        )));
+            let unassigned_name = if !lexical_assigned {
+                var_names.get(index).cloned()
+            } else {
+                match (
+                    workspace_slot_assigned(*index),
+                    workspace_slot_name(*index),
+                    var_names.get(index),
+                ) {
+                    (Some(false), Some(slot_name), Some(var_name)) if slot_name == *var_name => {
+                        Some(slot_name)
                     }
-                    let empty = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
+                    _ => None,
+                }
+            };
+            if let Some(slot_name) = unassigned_name {
+                if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
+                    let empty = Value::Struct(runmat_value::StructValue::new());
+                    debug::trace_load_var(*pc, *index, &empty);
+                    stack.push(empty);
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::FallThrough,
+                    )));
+                }
+                let empty = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
                         crate::interpreter::errors::mex(
                             "IndexAssignmentBaseInit",
                             &format!(
@@ -881,12 +924,11 @@ fn dispatch_immediate(
                             ),
                         )
                     })?;
-                    debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
-                    stack.push(Value::Tensor(empty));
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::FallThrough,
-                    )));
-                }
+                debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
+                stack.push(Value::Tensor(empty));
+                return Ok(Some(DispatchHandled::Generic(
+                    DispatchDecision::FallThrough,
+                )));
             }
             let value = vars[*index].clone();
             debug::trace_load_var(*pc, *index, &value);
@@ -920,6 +962,7 @@ fn dispatch_immediate(
                 current_function_name,
                 *index,
             )?;
+            lexical::publish(context, vars, *index)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -944,6 +987,7 @@ fn dispatch_immediate(
                     current_function_name,
                     *offset,
                 )?;
+                lexical::publish(context, vars, *offset)?;
             } else {
                 store_local(
                     stack,
@@ -1181,44 +1225,76 @@ fn dispatch_immediate(
             )))
         }
         Instr::CreateSemanticClosure(function, display_name, capture_count, source_role) => {
+            let inherits_shared_bindings = *source_role
+                == runmat_types::FunctionSourceRole::Anonymous
+                && function_registry.get(*function).is_some_and(|target| {
+                    target.lexical_binding_slots.iter().any(|binding| {
+                        binding.kind == crate::bytecode::program::LexicalBindingKind::Transit
+                    })
+                });
             handle_create_semantic_closure(
                 stack,
                 *function,
                 display_name.clone(),
                 *capture_count,
                 *source_role,
+                (source_role == &runmat_types::FunctionSourceRole::Nested
+                    || inherits_shared_bindings)
+                    .then(|| context.lexical_environment.clone())
+                    .flatten(),
             )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateFunctionHandle(name) => {
-            stack.push(Value::FunctionHandle(name.clone()));
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateExternalFunctionHandle(name) => {
-            stack.push(Value::ExternalFunctionHandle(name.clone()));
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CreateMethodFunctionHandle(name) => {
-            stack.push(Value::MethodFunctionHandle(name.clone()));
+            stack.push(Value::method_function_handle(name.clone()));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CreateBoundFunctionHandle(function, name, source_role)
         | Instr::CreateExternalBoundFunctionHandle(function, name, source_role) => {
-            stack.push(Value::BoundFunctionHandle {
-                name: name.clone(),
-                function: function.0,
-                authority: runmat_runtime::user_functions::bound_function_authority_for(function.0),
-                source_role: *source_role,
-                source_file: runmat_runtime::user_functions::source_file_for(function.0),
-            });
+            let site = runmat_execution::value::GraphStaticReferenceSite {
+                instruction: u32::try_from(*pc).map_err(|_| {
+                    crate::interpreter::errors::mex(
+                        "StaticSiteInvalid",
+                        "instruction site exceeds selected graph domain",
+                    )
+                })?,
+                occurrence: 0,
+            };
+            let selected = context
+                .runtime
+                .selected_static_binding(site)
+                .map_err(|message| {
+                    crate::interpreter::errors::mex("StaticImportUnavailable", message)
+                })?;
+            if selected.is_none()
+                && context.runtime.has_selected_static_site_resolver()
+                && matches!(instr, Instr::CreateExternalBoundFunctionHandle(..))
+            {
+                return Err(crate::interpreter::errors::mex(
+                    "StaticImportUnavailable",
+                    "external handle has no exact selected graph target",
+                ));
+            }
+            let (selected_function, authority, source_file) = if let Some(binding) = selected {
+                (binding.function, binding.authority, None)
+            } else {
+                (
+                    function.0,
+                    runmat_runtime::user_functions::bound_function_authority_for(function.0),
+                    runmat_runtime::user_functions::source_file_for(function.0),
+                )
+            };
+            stack.push(Value::bound_function_handle(
+                name.clone(),
+                selected_function,
+                authority,
+                *source_role,
+                source_file,
+            ));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

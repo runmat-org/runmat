@@ -147,6 +147,7 @@ fn ensure_decomposition_class_registered() {
                     access: MemberAccess::Public,
                     function_name: format!("{CLASS_IDENTITY}.{method_name}"),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }
@@ -239,7 +240,10 @@ fn is_nonfloating_coefficient_matrix(value: &Value) -> bool {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
-async fn decomposition_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
+async fn decomposition_subsref(
+    obj: Value,
+    subscript: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     validate_output_count()?;
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(obj, path, decomposition_read_step, None).await
@@ -248,7 +252,7 @@ async fn decomposition_subsref(obj: Value, subscript: Value) -> BuiltinResult<Va
 async fn decomposition_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
         return Err(invalid(
             "decomposition objects only support property indexing",
@@ -259,7 +263,8 @@ async fn decomposition_read_step(
     let spec = object_to_spec(&obj)?;
     ensure_nonfloating_object_enabled(&spec)?;
     let object = expect_object(&obj)?;
-    public_property_value(object, &field)
+    let value = public_property_value(object, &field)?;
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(

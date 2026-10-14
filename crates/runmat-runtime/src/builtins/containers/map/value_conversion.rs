@@ -46,7 +46,7 @@ pub(super) fn normalize_numeric_value(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -113,7 +113,7 @@ pub(super) fn normalize_logical_value(value: Value, builtin: &'static str) -> Bu
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

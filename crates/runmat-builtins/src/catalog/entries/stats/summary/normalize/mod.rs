@@ -15,6 +15,7 @@ pub use contract::{
 pub use options::NormalizeKeyword;
 
 pub const NORMALIZE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "normalize" },
     category: "stats/summary",

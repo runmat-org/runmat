@@ -6,6 +6,7 @@ pub use contract::*;
 
 pub const CONVERT_CONTAINED_STRINGS_TO_CHARS_CATALOG_ENTRY: BuiltinCatalogEntry =
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity {
             name: "convertContainedStringsToChars",

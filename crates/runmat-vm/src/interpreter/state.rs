@@ -5,6 +5,7 @@ use log::debug;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::FusionPlanRef;
+use runmat_gc::{Trace, Tracer};
 use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_value::Value;
@@ -12,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum InterpreterOutcome {
-    Completed(InterpreterCompletion),
+    Completed(runmat_runtime::execution::RootedResult<InterpreterCompletion>),
 }
 
 /// Final VM frame together with the slots that are semantically assigned.
@@ -25,6 +26,14 @@ pub enum InterpreterOutcome {
 pub struct InterpreterCompletion {
     pub values: Vec<Value>,
     pub assigned_slots: HashSet<usize>,
+}
+
+impl Trace for InterpreterCompletion {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in &self.values {
+            value.trace(tracer);
+        }
+    }
 }
 
 /// Compiler-owned point at which a resumed region completes without executing
@@ -191,6 +200,7 @@ impl InterpreterState {
         #[cfg(feature = "native-accel")]
         let (fusion_plan, fusion_accel_graph, fusion_installation) =
             bytecode.prepare_vm_fusion_plan_with_installation(&runtime);
+        let graph_program = runtime.selected_graph_program().cloned();
         Self {
             stack: Vec::new(),
             context: ExecutionContext {
@@ -198,6 +208,12 @@ impl InterpreterState {
                 locals: Vec::new(),
                 instruction_pointer: 0,
                 runtime: runtime.with_invocation_arity(invocation_arity),
+                lexical_environment: None,
+                lexical_binding_slots: Vec::new(),
+                inherited_storage_slots: Vec::new(),
+                graph_program,
+                process_driver: None,
+                dynamic_eval_admission: None,
             },
             try_stack: Vec::new(),
             last_exception: None,

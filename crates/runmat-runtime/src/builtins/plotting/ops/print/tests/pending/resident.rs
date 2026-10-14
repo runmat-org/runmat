@@ -78,7 +78,7 @@ fn resident_handle_selects_scene_after_pending_gather_then_retains_it_through_ex
         .expect("clear ambient figure after resolved scene was captured");
     stage_sender.send(()).expect("retained stage receiver");
     assert!(matches!(
-        futures::executor::block_on(call).expect("public resident print"),
+        futures::executor::block_on(call).expect("public resident print").value(),
         Value::OutputList(values) if values.is_empty()
     ));
     assert_eq!(
@@ -157,7 +157,7 @@ fn wide_resident_integer_handle_uses_one_authenticated_download() {
     );
     stage_sender.send(()).expect("retained stage receiver");
     assert!(matches!(
-        futures::executor::block_on(call).expect("resident integer print"),
+        futures::executor::block_on(call).expect("resident integer print").value(),
         Value::OutputList(values) if values.is_empty()
     ));
     assert_eq!(

@@ -48,7 +48,7 @@ pub(in crate::session) struct ProgramSourceTable {
         HashMap<runmat_runtime::source_context::RuntimeSourceRef, ProgramSourceId>,
 }
 
-pub(super) struct SourceCompileProjection {
+pub(crate) struct SourceCompileProjection {
     pub runtime_to_program:
         HashMap<runmat_runtime::source_context::RuntimeSourceRef, ProgramSourceId>,
     pub program_to_runtime:
@@ -56,7 +56,7 @@ pub(super) struct SourceCompileProjection {
 }
 
 impl SourceCompileProjection {
-    pub fn program_ref_for_runtime_ref(
+    pub(crate) fn program_ref_for_runtime_ref(
         &self,
         source: runmat_vm::BytecodeSourceRef,
     ) -> Option<runmat_vm::BytecodeSourceRef> {
@@ -67,7 +67,7 @@ impl SourceCompileProjection {
             .map(runmat_vm::BytecodeSourceRef::Program)
     }
 
-    pub fn runtime_ref_for_program_ref(
+    pub(crate) fn runtime_ref_for_program_ref(
         &self,
         source: runmat_vm::BytecodeSourceRef,
     ) -> Option<runmat_vm::BytecodeSourceRef> {
@@ -210,15 +210,20 @@ impl ProgramSourceTable {
         pool: &mut crate::source_pool::SourcePool,
         runtime_context: &runmat_runtime::context::RuntimeContext,
     ) -> Result<SourceCompileProjection, String> {
+        let admitted = runmat_runtime::source_context::ValidatedPortableSourceMap::new(Arc::new(
+            self.source_map.portable_v2()?,
+        ))
+        .map_err(|error| error.to_string())?;
         let mut program_to_runtime = HashMap::new();
         let mut runtime_to_program = HashMap::new();
         for entry in self.source_map.entries() {
             let program = entry.source_id;
-            let runtime = pool.intern_with_fullpath(
-                &entry.display_name,
-                entry.full_path.as_deref(),
-                &entry.text,
-            );
+            let selected = admitted.record(program).ok_or_else(|| {
+                "portable source ordinal is absent from its admitted map".to_string()
+            })?;
+            let runtime = pool
+                .intern_portable_entry(entry, selected)
+                .map_err(|error| error.to_string())?;
             let issued = pool
                 .issued_source_ref(runtime, runtime_context)
                 .map_err(|error| error.to_string())?;
@@ -254,6 +259,7 @@ impl ProgramSourceTable {
         retained: &[(
             runmat_runtime::source_context::RuntimeSourceRef,
             SourceContextData,
+            runmat_runtime::source_context::PortableSourceIdentity,
         )],
     ) -> Result<Self, String> {
         Self::build_with_origin(
@@ -296,6 +302,7 @@ impl ProgramSourceTable {
         retained: &[(
             runmat_runtime::source_context::RuntimeSourceRef,
             SourceContextData,
+            runmat_runtime::source_context::PortableSourceIdentity,
         )],
     ) -> Result<Self, String> {
         let source_identity = |context: &SourceContextData| {
@@ -362,8 +369,16 @@ impl ProgramSourceTable {
             root.text.clone(),
         );
         let mut retained_keys = HashMap::new();
-        for (runtime_id, context) in retained {
-            let (owner_identity, relative_path) = source_identity(context)?;
+        for (runtime_id, context, identity) in retained {
+            if identity.content_revision
+                != runmat_execution::Digest::sha256(context.text.as_bytes())
+            {
+                return Err(
+                    "retained source text disagrees with its issued portable identity".into(),
+                );
+            }
+            let owner_identity = identity.owner_identity.clone();
+            let relative_path = identity.relative_path.clone();
             let key = SourceKey::new(
                 owner_identity.clone(),
                 relative_path.clone(),

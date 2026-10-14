@@ -9,6 +9,7 @@ mod tests;
 pub use contract::{INTEGER_CAPABILITIES as QAMMOD_INTEGER_CAPABILITIES, QAMMOD_DESCRIPTOR};
 
 pub const QAMMOD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "qammod" },
     category: "comms/modulation",

@@ -440,6 +440,8 @@ fn only_the_admitted_wgpu_vector_route_claims_completion_fences() {
             requested_peak_buffer_bytes: 8,
             clear_commands: 1,
             map_callbacks: 1,
+            wgpu_compute_query:
+                crate::backend::wgpu::dispatch::observation::prospective_encoder_query(1, 1),
         })
     );
     let matrix = query(

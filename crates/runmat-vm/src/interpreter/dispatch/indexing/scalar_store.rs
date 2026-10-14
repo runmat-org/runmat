@@ -21,6 +21,7 @@ pub(super) async fn dispatch(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _rhs_roots = crate::call::root_values([&rhs])?;
             let mut indices: Vec<usize> = Vec::new();
             for _ in 0..*num_indices {
                 let value = stack.pop().ok_or(crate::interpreter::errors::mex(
@@ -49,6 +50,7 @@ pub(super) async fn dispatch(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             match base {
                 Value::Foreign(reference) => {
                     if delete {
@@ -61,41 +63,37 @@ pub(super) async fn dispatch(
                         .into_iter()
                         .map(|index| Value::Int(IntValue::U64(index as u64)))
                         .collect();
-                    stack.push(
-                        runmat_runtime::foreign::assign_foreign_resource_index(
-                            reference, indices, rhs,
-                        )
-                        .await?,
-                    );
+                    runmat_runtime::foreign::assign_foreign_resource_index(reference, indices, rhs)
+                        .await?
+                        .with_owned(|value| stack.push(value));
                 }
-                Value::Object(obj) => stack.push(
+                Value::Object(obj) => {
                     assign_object_scalar_indices(runtime, Value::Object(obj), indices, rhs, delete)
-                        .await?,
-                ),
-                Value::HandleObject(handle) => stack.push(
-                    assign_object_scalar_indices(
-                        runtime,
-                        Value::HandleObject(handle),
-                        indices,
-                        rhs,
-                        delete,
-                    )
-                    .await?,
-                ),
-                Value::ObjectArray(array) => stack.push(
-                    assign_object_scalar_indices(
-                        runtime,
-                        Value::ObjectArray(array),
-                        indices,
-                        rhs,
-                        delete,
-                    )
-                    .await?,
-                ),
+                        .await?
+                        .with_owned(|value| stack.push(value))
+                }
+                Value::HandleObject(handle) => assign_object_scalar_indices(
+                    runtime,
+                    Value::HandleObject(handle),
+                    indices,
+                    rhs,
+                    delete,
+                )
+                .await?
+                .with_owned(|value| stack.push(value)),
+                Value::ObjectArray(array) => assign_object_scalar_indices(
+                    runtime,
+                    Value::ObjectArray(array),
+                    indices,
+                    rhs,
+                    delete,
+                )
+                .await?
+                .with_owned(|value| stack.push(value)),
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(
                         "UnsupportedFunctionHandleSelector",

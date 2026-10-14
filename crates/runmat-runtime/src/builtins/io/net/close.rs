@@ -230,7 +230,7 @@ mod tests {
     fn native_service_closes_exact_session_objects_and_preserves_second_status() {
         use crate::context::{
             RuntimeServicePorts, RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpConnect,
-            RuntimeTcpService,
+            RuntimeTcpInvocation, RuntimeTcpService,
         };
         use crate::tcp::NativeTcpService;
         use std::rc::Rc;
@@ -244,10 +244,9 @@ mod tests {
         let runtime =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
                 .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
-        let issuer = RuntimeTcpIssuer::from_context(Some(&runtime));
         let server = driver
             .block_on(service.bind(
-                issuer.clone(),
+                RuntimeTcpInvocation::from_context(Some(&runtime)),
                 RuntimeTcpBind {
                     address: "127.0.0.1".into(),
                     port: 0,
@@ -258,7 +257,7 @@ mod tests {
             .expect("bind");
         let client = driver
             .block_on(service.connect(
-                issuer,
+                RuntimeTcpInvocation::from_context(Some(&runtime)),
                 RuntimeTcpConnect {
                     host: "127.0.0.1".into(),
                     port: server.local_addr.port(),
@@ -282,7 +281,7 @@ mod tests {
             .is_err());
         let foreign = driver
             .block_on(service.connect(
-                RuntimeTcpIssuer::from_context(Some(&other_session)),
+                RuntimeTcpInvocation::from_context(Some(&other_session)),
                 RuntimeTcpConnect {
                     host: "127.0.0.1".into(),
                     port: server.local_addr.port(),

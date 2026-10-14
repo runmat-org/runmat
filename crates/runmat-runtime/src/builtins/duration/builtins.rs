@@ -43,7 +43,7 @@ pub(super) async fn compare_duration(
 pub(super) async fn duration_indexing(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let Value::Object(object) = obj else {
         return Err(duration_error(
             DurationErrorKind::InvalidArgument,
@@ -61,7 +61,8 @@ pub(super) async fn duration_indexing(
         ));
     };
     if components.is_empty() {
-        return duration_object_from_days_tensor(days, format);
+        return crate::execution::RootedValue::new(duration_object_from_days_tensor(days, format)?)
+            .map_err(|error| error.into_runtime_error());
     }
     for component in components {
         if let crate::object::indexing::ObjectIndexComponent::Value(value) = component {
@@ -88,7 +89,8 @@ pub(super) async fn duration_indexing(
             duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
         })?;
     let indexed_days = tensor_from_numeric(indexed, "duration index")?;
-    duration_object_from_days_tensor(indexed_days, format)
+    crate::execution::RootedValue::new(duration_object_from_days_tensor(indexed_days, format)?)
+        .map_err(|error| error.into_runtime_error())
 }
 
 #[runmat_macros::runtime_builtin(
@@ -244,7 +246,10 @@ pub(super) fn isduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
-pub(super) async fn duration_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn duration_subsref(
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(obj, path, duration_read_step, None).await
 }
@@ -252,7 +257,7 @@ pub(super) async fn duration_subsref(obj: Value, subscript: Value) -> crate::Bui
 pub(super) async fn duration_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     match step.kind() {
         crate::object::indexing::ObjectIndexKind::Paren => duration_indexing(obj, step).await,
         crate::object::indexing::ObjectIndexKind::Member => {
@@ -270,7 +275,10 @@ pub(super) async fn duration_read_step(
             }
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
-                FORMAT_FIELD => Ok(Value::String(format_for_object(&object))),
+                FORMAT_FIELD => {
+                    crate::execution::RootedValue::new(Value::String(format_for_object(&object)))
+                        .map_err(|error| error.into_runtime_error())
+                }
                 _ => Err(duration_error(
                     DurationErrorKind::InvalidIndex,
                     format!("duration.subsref: unsupported duration property '{field}'"),
@@ -293,7 +301,7 @@ pub(super) async fn duration_subsasgn(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsasgn(
         obj,
@@ -318,7 +326,7 @@ pub(super) async fn duration_write_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
     let Value::Object(mut object) = obj else {
         return Err(duration_error(
@@ -332,7 +340,7 @@ pub(super) async fn duration_write_step(
             "duration.subsasgn: receiver must be a duration object",
         ));
     }
-    match step.kind() {
+    let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
@@ -354,7 +362,8 @@ pub(super) async fn duration_write_step(
             DurationErrorKind::InvalidIndex,
             "duration.subsasgn: only member assignment is supported",
         )),
-    }
+    }?;
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 #[runmat_macros::runtime_builtin(

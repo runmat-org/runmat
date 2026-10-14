@@ -121,7 +121,7 @@ fn classify(value: &runmat_value::Value) -> RunMatValueKind {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => RunMatValueKind::Callable,
         Value::Foreign(_) => RunMatValueKind::Foreign,
         _ => RunMatValueKind::Unknown,

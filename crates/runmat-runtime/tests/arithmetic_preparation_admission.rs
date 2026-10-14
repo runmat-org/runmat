@@ -36,9 +36,9 @@ impl RuntimeAccelerationService for Recorder {
             [Value::Tensor(_), Value::Tensor(_)]
         ));
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -75,7 +75,7 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
                 ),
             ))
             .unwrap();
-            let Value::Tensor(value) = result else {
+            let Value::Tensor(value) = result.value() else {
                 panic!("{name}: expected tensor")
             };
             assert_eq!(value.shape(), &[1, 2]);

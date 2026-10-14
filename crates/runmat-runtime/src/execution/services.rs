@@ -11,6 +11,13 @@ use runmat_value::Value;
 
 use super::{CpuCooperationPolicy, ExecutionServiceError};
 
+#[path = "services/deferred_program.rs"]
+mod deferred_program;
+pub use deferred_program::{
+    DeferredGraphCapture, DeferredGraphProgram, DeferredGraphSnapshot, DeferredProgram,
+    GraphResultReceipt,
+};
+
 static NEXT_SERVICE_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,23 +31,25 @@ pub enum DeferredInvocation {
     },
 }
 
+#[cfg(test)]
+#[path = "services/deferred_roots_tests.rs"]
+mod deferred_roots_tests;
+
 impl DeferredInvocation {
-    /// Values retained by this invocation, including a forwarded callable's captures.
+    /// Values retained by this invocation, including its callable target graph.
     pub fn visit_retained_values(
         &self,
         visitor: &mut dyn FnMut(&Value) -> Option<()>,
     ) -> Option<()> {
-        for value in self.arguments() {
-            visitor(value)?;
+        match self {
+            Self::Callable(descriptor) => descriptor.visit_retained_values(visitor),
+            Self::Program { arguments, .. } => {
+                for value in arguments {
+                    visitor(value)?;
+                }
+                Some(())
+            }
         }
-        if let Self::Callable(crate::call::descriptor::CallableDescriptor {
-            target: crate::call::descriptor::CallableTarget::FevalForward(value),
-            ..
-        }) = self
-        {
-            visitor(value)?;
-        }
-        Some(())
     }
 
     pub fn requested_outputs(&self) -> usize {
@@ -75,7 +84,7 @@ pub struct DeferredCall {
     ///
     /// The serial service does not inspect this payload. Execution adapters may
     /// require it to reproduce the callable in an isolated worker.
-    pub program: Option<Vec<u8>>,
+    pub program: DeferredProgram,
 }
 
 /// Exact compiler-bound SPMD program submitted as one gang operation.
@@ -146,7 +155,7 @@ pub enum AwaitAction {
         handle: FutureHandle,
         call: Box<DeferredCall>,
     },
-    Completed(runmat_value::ValueSequence),
+    Completed(super::RootedValueSequence),
 }
 
 pub trait RuntimeExecutionServices {
@@ -252,10 +261,20 @@ pub trait RuntimeExecutionServices {
         ))
     }
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError>;
+
+    /// Decode an admitted graph result under the caller's exact session and
+    /// source authority. Direct callers retain their existing fast path.
+    fn begin_await_in_context(
+        &self,
+        value: Value,
+        _runtime: &crate::context::RuntimeContext,
+    ) -> Result<AwaitAction, ExecutionServiceError> {
+        self.begin_await(value)
+    }
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
+        result: Result<super::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError>;
     fn cancel(
         &self,
@@ -576,7 +595,9 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             let value = self.await_job(handle)?;
             let sequence = runmat_value::ValueSequence::single(value)
                 .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-            return Ok(AwaitAction::Completed(sequence));
+            return Ok(AwaitAction::Completed(super::RootedValueSequence::new(
+                sequence,
+            )?));
         }
         let future = match value {
             Value::Future(handle) => handle,
@@ -621,7 +642,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             )),
             FutureState::Completed(result) => {
                 let result = result.clone();
-                result.map(|value| AwaitAction::Completed(value.value().clone()))
+                result.map(|value| AwaitAction::Completed(value.clone()))
             }
             FutureState::Cancelled => Err(ExecutionServiceError::Cancelled),
         }
@@ -630,7 +651,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
+        result: Result<super::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("execution service state poisoned");
@@ -641,10 +662,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         if !matches!(record, FutureState::Running) {
             return Err(ExecutionServiceError::UnknownHandle);
         }
-        *record = FutureState::Completed(match result {
-            Ok(value) => super::RootedValueSequence::new(value),
-            Err(error) => Err(error),
-        });
+        *record = FutureState::Completed(result);
         record_completion(&mut state, future.id);
         Ok(())
     }
@@ -655,15 +673,16 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         _reason: CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
         let mut state = self.state.lock().expect("execution service state poisoned");
-        match value {
+        let retired = match value {
             Value::Future(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let record = state
                     .futures
                     .get_mut(&handle.id)
                     .ok_or(ExecutionServiceError::UnknownHandle)?;
-                *record = FutureState::Cancelled;
+                let retired = std::mem::replace(record, FutureState::Cancelled);
                 record_completion(&mut state, handle.id);
+                Some(retired)
             }
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
@@ -678,13 +697,17 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                     record.cancelled = true;
                     record.future_id
                 };
-                if let Some(future) = state.futures.get_mut(&future_id) {
-                    *future = FutureState::Cancelled;
-                }
+                let retired = state
+                    .futures
+                    .get_mut(&future_id)
+                    .map(|future| std::mem::replace(future, FutureState::Cancelled));
                 record_completion(&mut state, future_id);
+                retired
             }
             _ => return Err(ExecutionServiceError::UnknownHandle),
-        }
+        };
+        drop(state);
+        drop(retired);
         Ok(())
     }
 
@@ -743,6 +766,7 @@ fn future_state(state: &FutureState) -> ExecutionHandleState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::RootedValueSequence;
 
     impl RuntimeExecutionService {
         fn retained_values(&self) -> Option<Vec<Value>> {
@@ -783,7 +807,7 @@ mod tests {
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
             capabilities: Default::default(),
-            program: None,
+            program: DeferredProgram::Local,
         }
     }
 
@@ -812,7 +836,10 @@ mod tests {
         service
             .complete_future(
                 &future,
-                Ok(runmat_value::ValueSequence::single(Value::String("output".into())).unwrap()),
+                Ok(RootedValueSequence::new(
+                    runmat_value::ValueSequence::single(Value::String("output".into())).unwrap(),
+                )
+                .unwrap()),
             )
             .unwrap();
         assert_eq!(
@@ -870,13 +897,19 @@ mod tests {
         service
             .complete_future(
                 &future,
-                Ok(runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()),
+                Ok(RootedValueSequence::new(
+                    runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap(),
+                )
+                .unwrap()),
             )
             .unwrap();
         assert_eq!(
             service.begin_await(Value::Task(task)),
             Ok(AwaitAction::Completed(
-                runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()
+                RootedValueSequence::new(
+                    runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()
+                )
+                .unwrap()
             ))
         );
     }
@@ -899,7 +932,10 @@ mod tests {
             service
                 .complete_future(
                     &future,
-                    Ok(runmat_value::ValueSequence::comma_separated(values.clone()).unwrap()),
+                    Ok(RootedValueSequence::new(
+                        runmat_value::ValueSequence::comma_separated(values.clone()).unwrap(),
+                    )
+                    .unwrap()),
                 )
                 .expect("complete future");
             let AwaitAction::Completed(sequence) = service
@@ -908,7 +944,7 @@ mod tests {
             else {
                 panic!("expected completed future");
             };
-            assert_eq!(sequence.into_values(), values);
+            assert_eq!(sequence.value().as_slice(), values.as_slice());
         }
     }
 
@@ -937,7 +973,10 @@ mod tests {
             service
                 .complete_future(
                     &future,
-                    Ok(runmat_value::ValueSequence::single(output).expect("valid output")),
+                    Ok(RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(output).expect("valid output"),
+                    )
+                    .expect("root output")),
                 )
                 .expect("complete future");
             initial.unroot().expect("transfer root to service state");
@@ -951,6 +990,90 @@ mod tests {
             drop(service);
             runmat_gc::gc_collect_major().expect("collect after service discard");
             assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn completed_await_owns_output_after_state_cancel_and_observer_collection() {
+        thread_local! {
+            static CLAIMED_RESULT_HANDLE: std::cell::Cell<Option<runmat_gc::GcHandle>> = const {
+                std::cell::Cell::new(None)
+            };
+        }
+        runmat_gc::gc_test_context(|| {
+            let service = RuntimeExecutionService::new();
+            let future = service
+                .create_future(deferred_call(1, Vec::new()))
+                .expect("create future");
+            assert!(matches!(
+                service.begin_await(Value::Future(future.clone())),
+                Ok(AwaitAction::ExecuteFuture { .. })
+            ));
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("awaited".into()))
+                .expect("allocate managed result");
+            let handle = initial.handle();
+            let result = RootedValueSequence::new(
+                runmat_value::ValueSequence::single(Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "AwaitedHandle".into(),
+                    target: handle,
+                    valid: true,
+                }))
+                .expect("single result"),
+            )
+            .expect("root result");
+            service
+                .complete_future(&future, Ok(result))
+                .expect("publish completion");
+            initial.unroot().expect("transfer initial root");
+
+            let AwaitAction::Completed(claimed) = service
+                .begin_await(Value::Future(future.clone()))
+                .expect("claim completed result")
+            else {
+                panic!("expected completed result")
+            };
+            let control =
+                runmat_gc::gc_allocate_rooted(Value::Num(1.0)).expect("allocate observer trigger");
+            let control_handle = control.handle();
+            let control_identity = (control_handle.addr(), control_handle.epoch());
+            CLAIMED_RESULT_HANDLE.with(|slot| slot.set(Some(handle)));
+            let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed_callback = std::sync::Arc::clone(&observed);
+            let _observer =
+                runmat_gc::RootRetirementObserver::register(std::sync::Arc::new(move |event| {
+                    let runmat_gc::RootRetirement::Explicit(trigger) = event else {
+                        return;
+                    };
+                    let Some(handle) = CLAIMED_RESULT_HANDLE.with(std::cell::Cell::get) else {
+                        return;
+                    };
+                    if (trigger.addr(), trigger.epoch()) != control_identity
+                        || observed_callback.swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        return;
+                    }
+                    runmat_gc::gc_collect_major().expect("collect during state cancellation");
+                    assert_eq!(
+                        runmat_gc::gc_clone_value(&handle)
+                            .expect("claimed result is rooted during cancellation"),
+                        Value::String("awaited".into())
+                    );
+                }))
+                .expect("register collecting observer");
+            service
+                .cancel(&Value::Future(future), CancellationReason::User)
+                .expect("retire service state");
+            control.unroot().expect("trigger collecting observer");
+            assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+            runmat_gc::gc_collect_major().expect("collect while claimant owns result");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("claimed result remains live"),
+                Value::String("awaited".into())
+            );
+            drop(claimed);
+            runmat_gc::gc_collect_major().expect("collect after claimant release");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+            CLAIMED_RESULT_HANDLE.with(|slot| slot.set(None));
         });
     }
 

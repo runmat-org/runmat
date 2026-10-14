@@ -30,16 +30,18 @@ fn properties_expose_type_size_and_flags() {
         Value::String(MATRIX_SIZE_FIELD.to_string()),
     ))
     .expect("MatrixSize");
-    assert_eq!(approx_vec(size), vec![2.0, 2.0]);
+    assert_eq!(approx_vec_rooted(size), vec![2.0, 2.0]);
 }
 #[test]
 fn registered_constructor_and_ctranspose_dispatch_work_together() {
     let a = tensor(&[1.0, 0.0, 2.0, 1.0], 2, 2);
     let d = block_on(crate::call_builtin_async("decomposition", &[a])).expect("constructor");
-    let dt = block_on(crate::call_builtin_async("ctranspose", &[d])).expect("dispatch");
+    let dt = d
+        .with_owned(|d| block_on(crate::call_builtin_async("ctranspose", &[d])))
+        .expect("dispatch");
     let b = tensor(&[3.0, 1.0], 2, 1);
 
-    let result = call_mldivide(dt, b).expect("solve");
+    let result = dt.with_owned(|dt| call_mldivide(dt, b)).expect("solve");
 
     let values = approx_vec(result);
     assert!((values[0] - 3.0).abs() < 1e-12);
@@ -86,7 +88,7 @@ fn ctranspose_updates_rectangular_matrix_size_property() {
     ))
     .expect("MatrixSize");
 
-    assert_eq!(approx_vec(size), vec![3.0, 2.0]);
+    assert_eq!(approx_vec_rooted(size), vec![3.0, 2.0]);
 }
 
 #[test]

@@ -1,8 +1,9 @@
 pub mod runtime_error;
 pub use runtime_error::{
-    runtime_error, CallFrame, DiagnosticAllocationLease, ErrorContext, GpuGatherRetry,
-    RetainedDiagnosticAllocation, RuntimeError, RuntimeErrorBuilder, RuntimeErrorOwner,
-    RuntimeErrorSourceBound, RuntimeFailureOrigin, SharedRuntimeErrorSource,
+    runtime_error, CallFrame, CallFrameDiagnosticSource, CallFrameSourceOwner,
+    DiagnosticAllocationLease, ErrorContext, GpuGatherRetry, RetainedDiagnosticAllocation,
+    RuntimeError, RuntimeErrorBuilder, RuntimeErrorOwner, RuntimeErrorSourceBound,
+    RuntimeFailureOrigin, SharedRuntimeErrorSource,
 };
 
 /// Narrow set of interaction kinds used for host I/O hooks.

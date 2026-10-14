@@ -35,24 +35,19 @@ pub(super) async fn dispatch(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _operand_roots = crate::call::root_values(numeric.iter().chain([&base, &rhs]))?;
             match base {
                 base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
                     let resolution =
                         resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
-                    if matches!(
-                        resolution,
-                        runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-                    ) {
+                    if resolution.is_some() {
                         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
                             object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
                         ));
-                        let runmat_runtime::object::protocol::ProtocolResolution::Method(method) =
-                            resolution
-                        else {
+                        let Some(method) = resolution else {
                             unreachable!()
                         };
-                        stack.push(
-                            runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+                        runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
                                 runtime,
                                 &method,
                                 base,
@@ -60,8 +55,8 @@ pub(super) async fn dispatch(
                                 runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?
                                     .into_values(),
                             )
-                            .await?,
-                        );
+                            .await?
+                            .with_owned(|value| stack.push(value));
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -77,7 +72,7 @@ pub(super) async fn dispatch(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(
                         "UnsupportedFunctionHandleSelector",

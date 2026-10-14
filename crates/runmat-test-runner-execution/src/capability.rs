@@ -105,6 +105,7 @@ pub(crate) fn host_requirement(
             runmat_types::CapabilityRequirement::HostRuntime,
         ])),
         interop: runmat_types::InteropManifest::empty(),
+        additional_units: Vec::new(),
         execution_stack: runmat_types::ExecutionStackRequirement::Any,
         permitted_trust_tiers: BTreeSet::from([
             runmat_execution::security::ExecutionTrustTier::CustomerTrusted,

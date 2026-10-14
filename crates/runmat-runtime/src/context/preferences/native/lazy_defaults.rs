@@ -10,6 +10,7 @@ pub(super) async fn read_or_create(
     group: String,
     names: Vec<String>,
     defaults: Vec<Value>,
+    profiling: Option<&CommandProfilingReceipt>,
 ) -> Result<Vec<Value>, PreferenceServiceError> {
     checkpoint(&mut budget, 0).await?;
     let permit = budget
@@ -17,7 +18,7 @@ pub(super) async fn read_or_create(
         .await
         .map_err(cancelled)?
         .map_err(|source| operational("preference write gate closed", source))?;
-    let write = service.acquire_write(&mut budget).await?;
+    let write = service.acquire_write(&mut budget, profiling).await?;
     let (needed_tx, needed_rx) = oneshot::channel();
     let (mutation_tx, mutation_rx) = mpsc::channel();
     let (prepared_tx, prepared_rx) = oneshot::channel();
@@ -33,10 +34,14 @@ pub(super) async fn read_or_create(
         authorized_rx,
         finished_tx,
     };
-    service.driver.spawn_blocking(move || {
-        let _permit = permit;
-        work.run();
-    });
+    let work = BlockingWork::new(
+        move || {
+            let _permit = permit;
+            work.run();
+        },
+        profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+    );
+    service.driver.spawn_blocking(move || work.run());
     let needed = budget
         .await_cancellable(needed_rx)
         .await

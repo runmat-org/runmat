@@ -31,11 +31,15 @@ fn exact_named_binding_rejects_wrong_and_ended_sessions_before_invocation() {
     let calls = Rc::new(Cell::new(0));
     let observed = Rc::clone(&calls);
     let entry = second.enter();
-    let _invoker =
-        super::super::super::install_local_bound_function_invoker(Rc::new(move |_, _, _, _| {
+    let _invoker = super::super::super::install_local_bound_function_invoker(Rc::new(
+        move |_, _, _, _, _lexical_environment| {
             observed.set(observed.get() + 1);
-            Box::pin(async { Ok(runmat_value::ValueSequence::empty()) })
-        }));
+            Box::pin(async {
+                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
+            })
+        },
+    ));
     drop(entry);
 
     let wrong = futures::executor::block_on(

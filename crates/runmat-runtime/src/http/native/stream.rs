@@ -10,15 +10,18 @@ use url::Url;
 
 use super::{prepare_request, request_error, AbortOnDrop};
 use crate::context::RuntimeServiceFuture;
+use crate::execution::native_task;
 use crate::http::{
     HttpBodyStream, HttpRequest, HttpResponseHead, TransportError, TransportErrorKind,
 };
+use runmat_execution::profiling::CommandProfilingReceipt;
 
 pub(super) fn open_bounded(
     driver: tokio::runtime::Handle,
     clients: Arc<OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>>,
     request: HttpRequest,
     accepted_limit: u64,
+    profiling: Option<CommandProfilingReceipt>,
 ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
     Box::pin(async move {
         // Creating channels has no network effect. Submission begins only on
@@ -26,13 +29,11 @@ pub(super) fn open_bounded(
         let url = request.url.clone();
         let (head_tx, head_rx) = oneshot::channel();
         let (body_tx, body_rx) = mpsc::channel(1);
-        let task = AbortOnDrop(driver.spawn(open_impl(
-            request,
-            clients,
-            accepted_limit,
-            head_tx,
-            body_tx,
-        )));
+        let task = AbortOnDrop(native_task::spawn(
+            &driver,
+            open_impl(request, clients, accepted_limit, head_tx, body_tx),
+            profiling,
+        ));
         let head = match head_rx.await {
             Ok(Ok(head)) => head,
             Ok(Err(error)) => return Err(error),

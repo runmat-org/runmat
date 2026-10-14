@@ -205,6 +205,7 @@ fn closed_world_native_callback_reuses_local_strcmp_feedback() {
                         binding.identity.variant,
                     ),
                 }],
+                foreign_policy: None,
                 native_interfaces: br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
                 mex_artifacts: br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
                 java_artifacts: br#"{"schema_version":1,"environment":null,"artifacts":[]}"#

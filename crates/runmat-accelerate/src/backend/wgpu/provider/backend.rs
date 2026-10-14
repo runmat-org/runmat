@@ -64,7 +64,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 use tracing::info_span;
-use wgpu::util::DeviceExt;
 
 #[path = "ops/comms.rs"]
 mod comms;

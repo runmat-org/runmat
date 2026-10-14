@@ -26,6 +26,7 @@ use crate::builtins::math::elementwise::integer_arithmetic::{
 use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::elementwise::sparse_integer::try_typed_sparse_integer_binary;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -131,7 +132,9 @@ async fn plus_builtin(
     lhs: Value,
     rhs: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter().chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::PLUS_DESCRIPTOR,
         &runmat_builtins::PLUS_ERROR_TOO_MANY_OUTPUTS,
@@ -166,12 +169,8 @@ async fn plus_builtin(
                 (Value::GpuTensor(la), Value::GpuTensor(lb)) => {
                     (plus_gpu_pair(la, lb).await?, false)
                 }
-                (Value::GpuTensor(la), rhs) => {
-                    (plus_gpu_host_left(la, rhs).await?, false)
-                }
-                (lhs, Value::GpuTensor(rb)) => {
-                    (plus_gpu_host_right(lhs, rb).await?, false)
-                }
+                (Value::GpuTensor(la), rhs) => (plus_gpu_host_left(la, rhs).await?, false),
+                (lhs, Value::GpuTensor(rb)) => (plus_gpu_host_right(lhs, rb).await?, false),
                 (lhs, rhs) => {
                     let typed_host_pair = matches!((&lhs, &rhs),
                         (Value::Tensor(left), Value::Tensor(right))
@@ -180,21 +179,14 @@ async fn plus_builtin(
                     (plus_host(lhs, rhs)?, typed_host_pair)
                 }
             };
-            let value = apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await?;
-            if unqualified_template
-                && host_branch
-                && matches!(&value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
-            {
-                if let Some(runtime) = branch_runtime.as_ref() {
-                    if let Some(route) = runtime.vm_fusion_host_route() {
-                        route.confirm_host_branch(
-                            runtime,
-                            crate::context::VmFusionHostInstruction::ElementwiseBinary,
-                        );
-                    }
-                }
-            }
-            Ok(value)
+            publication::finish(
+                base,
+                &template,
+                host_branch,
+                unqualified_template,
+                branch_runtime.as_ref(),
+            )
+            .await
         },
     )
     .await
@@ -202,9 +194,7 @@ async fn plus_builtin(
 
 #[cfg(test)]
 use super::output_prototype::real_to_complex;
-use super::output_prototype::{
-    apply_output_template, parse_output_template, OutputPrototypeContext, OutputTemplate,
-};
+use super::output_prototype::{parse_output_template, OutputPrototypeContext, OutputTemplate};
 
 const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext {
     identity: PLUS_CATALOG_ENTRY.identity,
@@ -214,6 +204,8 @@ const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext 
 
 mod provider;
 use provider::{plus_gpu_host_left, plus_gpu_host_right, plus_gpu_pair};
+
+mod publication;
 
 mod host;
 use host::{is_real_integer_operand, plus_host};

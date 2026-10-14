@@ -93,18 +93,23 @@ pub async fn submit(
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?;
     let mut session = create_session(false, false, config, "create remote compilation session")?;
-    session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))?;
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
+        .await?;
     let source_text = std::fs::read_to_string(&file)
         .with_context(|| format!("read remote job source {}", file.display()))?;
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("root", file.to_string_lossy(), source_text),
+            crate::commands::package::executable_source(Some(frozen), &file, source_text)?,
             Some(revision.clone()),
         )
         .await?;
     let python_required = unit.requires_python_runtime();
     let foreign_artifacts =
         crate::commands::package::prepare_foreign_artifacts(frozen, config, python_required)?;
+    let foreign_policy =
+        runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)
+            .map_err(anyhow::Error::msg)?;
     let interop = foreign_artifacts.interop.clone();
     let foreign_accelerators = foreign_artifacts.accelerators.clone();
     let executable = unit
@@ -123,7 +128,10 @@ pub async fn submit(
     {
         bail!("remote script jobs do not accept positional function arguments");
     }
-    let executable_function = usize::try_from(identity.entrypoint_function.0)
+    let callable_function = identity.entrypoint_function.ok_or_else(|| {
+        anyhow::anyhow!("declaration-only executables cannot be submitted as callable jobs")
+    })?;
+    let executable_function = usize::try_from(callable_function.0)
         .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
     let form = ExecutableForm::ExecutableUnitV3;
@@ -137,6 +145,7 @@ pub async fn submit(
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
         interop,
+        foreign_policy: Some(foreign_policy.descriptor.clone()),
         accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
@@ -145,7 +154,8 @@ pub async fn submit(
     };
     let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
         .with_compiled_package_closure()
-        .with_materialized_program(recipe, form, executable_bytes);
+        .with_materialized_program(recipe, form, executable_bytes)
+        .with_foreign_policy_object(foreign_policy)?;
     for object in foreign_artifacts.objects {
         builder = builder.with_foreign_object(object)?;
     }

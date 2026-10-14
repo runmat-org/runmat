@@ -9,7 +9,7 @@ use super::RemoteBundleReceipt;
 use crate::materialized_project::MaterializedProject;
 
 pub(super) struct InstalledBundle {
-    pub(super) bundle: ExecutionBundle,
+    pub(super) bundle: Arc<ExecutionBundle>,
     pub(super) materialized_project: Option<Arc<MaterializedProject>>,
     pub(super) digest: Digest,
     pub(super) receipt: RemoteBundleReceipt,
@@ -57,7 +57,7 @@ fn materialize(
         stored_bytes,
     };
     Ok(InstalledBundle {
-        bundle,
+        bundle: Arc::new(bundle),
         materialized_project,
         digest: bundle_digest,
         receipt,

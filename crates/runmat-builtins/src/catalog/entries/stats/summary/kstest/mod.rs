@@ -17,6 +17,7 @@ pub use contract::{
 pub use options::{KstestNamedCdf, KstestOptionName, KstestTail};
 
 pub const KSTEST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "kstest" },
     category: "stats/summary",

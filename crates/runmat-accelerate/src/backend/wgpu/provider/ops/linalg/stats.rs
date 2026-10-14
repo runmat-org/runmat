@@ -1044,13 +1044,11 @@ impl WgpuProvider {
                         "runmat-cov2corr-validation",
                     )?;
                     let error_buffer =
-                        emission
-                            .device()
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-cov2corr-error"),
-                                contents: bytes_of(&0u32),
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                            });
+                        emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-cov2corr-error"),
+                            contents: bytes_of(&0u32),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        });
                     let shader = covariance_to_correlation_shader(self.precision);
                     let shader_module =
                         emission
@@ -1093,13 +1091,12 @@ impl WgpuProvider {
                             offset: offset as u32,
                             chunk: chunk_len as u32,
                         };
-                        let params_buffer = emission.device().create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
+                        let params_buffer =
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-cov2corr-params"),
                                 contents: bytes_of(&params),
                                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            },
-                        );
+                            });
                         let bind_group =
                             emission
                                 .device()
@@ -1160,12 +1157,12 @@ impl WgpuProvider {
                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     });
-                    let mut encoder =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-cov2corr-error-copy"),
-                            });
+                    let mut encoder = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-cov2corr-error-copy"),
+                        },
+                    );
                     encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
                     self.submit(emission, pending, encoder)?;
                     Ok((staging, error_size))

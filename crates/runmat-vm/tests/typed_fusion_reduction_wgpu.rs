@@ -48,7 +48,7 @@ fn assert_actual_folded_full_call_shape_with_dtype(
     expected_shape: &[usize],
     expected: &[f64],
     expected_dtype: NumericDType,
-) -> Vec<Value> {
+) -> runmat_runtime::execution::RootedValues {
     let session = Rc::new(PlacementSession::default());
     let placement = Rc::new(CapturingPlacement {
         session: session.clone(),
@@ -62,13 +62,13 @@ fn assert_actual_folded_full_call_shape_with_dtype(
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(placement.clone()));
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    block_on(runmat_vm::interpret_with_vars_in_context(
-        bytecode,
-        &mut vars,
-        None,
-        runtime.clone(),
-    ))
+    let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
+        runmat_vm::interpret_with_vars_in_context(bytecode, &mut vars, None, runtime.clone()),
+    )
     .expect("actual VM typed folded reduction");
+    let vars = completion
+        .with_owned(|completion| runmat_runtime::execution::RootedValues::new(completion.values))
+        .expect("root published folded reduction values");
     let slot = bytecode
         .var_names
         .iter()

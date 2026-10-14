@@ -5,7 +5,9 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor};
 
 fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::all_builtin(value, rest))
+    // The reduction's fixed result family is logical-only; inspect it while
+    // the producer owner is still live rather than consuming an unrooted ABI.
+    block_on(super::all_builtin(None, value, rest)).map(|owned| owned.value().clone())
 }
 
 fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {

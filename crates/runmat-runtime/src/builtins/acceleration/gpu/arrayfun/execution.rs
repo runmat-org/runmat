@@ -1,3 +1,4 @@
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 use runmat_value::Value;
 
@@ -12,7 +13,9 @@ pub(super) async fn execute(
     context: Option<&crate::context::RuntimeContext>,
     func: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs_root = RootedValueLease::for_values(std::iter::once(&func).chain(rest.iter()))
+        .map_err(|error| error.into_runtime_error())?;
     let invocation = Invocation::parse(func, rest)?;
     let Invocation {
         callable,
@@ -45,10 +48,17 @@ pub(super) async fn execute(
     if total_len == 0 {
         if uniform_output {
             let contract = OutputContract::infer(&callable, &prepared_inputs);
-            return maybe_upload_uniform(empty_uniform(&base_shape, contract)?, &resident_inputs);
+            return RootedValue::new(maybe_upload_uniform(
+                empty_uniform(&base_shape, contract)?,
+                &resident_inputs,
+            )?)
+            .map_err(|error| error.into_runtime_error());
         } else {
-            return make_cell_with_shape(Vec::new(), base_shape)
-                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")));
+            return RootedValue::new(
+                make_cell_with_shape(Vec::new(), base_shape)
+                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?,
+            )
+            .map_err(|error| error.into_runtime_error());
         }
     }
 
@@ -58,7 +68,7 @@ pub(super) async fn execute(
         None
     };
 
-    let mut cell_outputs: Vec<Value> = Vec::new();
+    let mut cell_outputs = RootedValuesBuilder::with_capacity(total_len);
     let mut args: Vec<Value> = Vec::with_capacity(prepared_inputs.len());
 
     for idx in 0..total_len {
@@ -88,20 +98,31 @@ pub(super) async fn execute(
             }
         };
 
-        let host_result = gather_if_needed_async(&result).await?;
+        let host_result = gather_if_needed_async(result.value()).await?;
 
         if let Some(collector) = collector.as_mut() {
             collector.push(&host_result)?;
         } else {
-            cell_outputs.push(host_result);
+            cell_outputs
+                .push(host_result)
+                .map_err(|error| error.into_runtime_error())?;
         }
     }
 
     if let Some(collector) = collector {
         let uniform = collector.finish(&base_shape)?;
-        maybe_upload_uniform(uniform, &resident_inputs)
+        RootedValue::new(maybe_upload_uniform(uniform, &resident_inputs)?)
+            .map_err(|error| error.into_runtime_error())
     } else {
-        make_cell_with_shape(cell_outputs, base_shape)
-            .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
+        cell_outputs
+            .finish()
+            .map_err(|error| error.into_runtime_error())?
+            .with_owned_values(|values| {
+                RootedValue::new(
+                    make_cell_with_shape(values, base_shape)
+                        .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?,
+                )
+                .map_err(|error| error.into_runtime_error())
+            })
     }
 }

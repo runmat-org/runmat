@@ -1,9 +1,12 @@
 mod calendar;
+mod thread_cpu;
 
 use super::RuntimeTimingService;
 use crate::context::RuntimeServiceFuture;
 use calendar::CapturedCalendar;
+use runmat_execution::profiling::CommandThreadCpuSampler;
 use runmat_time::Instant;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) struct PlatformTimingService {
@@ -41,6 +44,10 @@ impl RuntimeTimingService for PlatformTimingService {
 
     fn process_cpu_seconds(&self) -> Option<f64> {
         process_cpu_seconds()
+    }
+
+    fn command_thread_cpu_sampler(&self) -> Option<Arc<dyn CommandThreadCpuSampler>> {
+        thread_cpu::platform_sampler()
     }
 
     fn sleep(&self, duration: Duration) -> RuntimeServiceFuture<Result<(), crate::RuntimeError>> {

@@ -107,6 +107,7 @@ fn register_test_case() {
                     access: MemberAccess::Public,
                     function_name: format!("{TEST_CASE_CLASS}.{name}"),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )
         })
@@ -176,6 +177,7 @@ fn register_class_with_methods(
                         access: MemberAccess::Public,
                         function_name: format!("{name}.{method_name}"),
                         implicit_class_argument: None,
+                        role: runmat_types::ClassMethodRole::Ordinary,
                     },
                 )
             })

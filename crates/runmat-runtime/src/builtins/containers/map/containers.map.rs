@@ -304,7 +304,10 @@ async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinRes
     binding_variant = "default",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-async fn containers_map_subsref(map: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+async fn containers_map_subsref(
+    map: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let _root = root_map_receiver(&map, BUILTIN_SUBSREF)?;
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(map, path, containers_map_read_step, None).await
@@ -313,7 +316,7 @@ async fn containers_map_subsref(map: Value, subscript: Value) -> crate::BuiltinR
 async fn containers_map_read_step(
     map: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
     ensure_resident_extension(&payload, &MAP_RESIDENT_SUBSREF_EXTENSION, BUILTIN_SUBSREF)?;
     if !matches!(map, Value::HandleObject(_)) {
@@ -322,7 +325,7 @@ async fn containers_map_read_step(
             BUILTIN_SUBSREF,
         ));
     }
-    match step.kind() {
+    let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Paren => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSREF)?;
             if args.is_empty() {
@@ -378,7 +381,8 @@ async fn containers_map_read_step(
             "containers.Map: curly-brace indexing is not supported.",
             BUILTIN_SUBSREF,
         )),
-    }
+    }?;
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -390,7 +394,7 @@ async fn containers_map_subsasgn(
     map: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let _root = root_map_receiver(&map, BUILTIN_SUBSASGN)?;
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsasgn(
@@ -416,7 +420,7 @@ async fn containers_map_write_step(
     map: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
     if contains_resident_value(&payload) || contains_resident_value(&rhs) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -430,7 +434,7 @@ async fn containers_map_write_step(
             BUILTIN_SUBSASGN,
         ));
     }
-    match step.kind() {
+    let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Paren => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSASGN)?;
             if args.is_empty() {
@@ -510,7 +514,8 @@ async fn containers_map_write_step(
             "containers.Map: curly-brace assignment is not supported.",
             BUILTIN_SUBSASGN,
         )),
-    }
+    }?;
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 fn build_store(args: ConstructorArgs, builtin: &'static str) -> BuiltinResult<MapStore> {

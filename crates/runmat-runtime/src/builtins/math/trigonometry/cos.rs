@@ -22,6 +22,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::SymbolicFunction;
 
@@ -87,9 +89,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cos",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
-async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cos_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::COS_DESCRIPTOR,
         &runmat_builtins::COS_ERROR_TOO_MANY_OUTPUTS,
@@ -99,7 +108,9 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = admit_output_template(template)?;
     ensure_cos_extensions(&value, &rest).await?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
-        return apply_output_template(symbolic, &template, &[]).await;
+        let symbolic = RootedValue::new(symbolic).map_err(|cause| cause.into_runtime_error())?;
+        let output = apply_output_template(symbolic.value().clone(), &template, &[]).await?;
+        return RootedValue::new(output).map_err(|cause| cause.into_runtime_error());
     }
     let original = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -107,6 +118,7 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
     let signature = usize::from(!rest.is_empty());
     super::inverse_helpers::preparation::unary_form(
+        runtime.as_ref(),
         runmat_builtins::COS_CATALOG_ENTRY.identity,
         value,
         signature,
@@ -119,7 +131,10 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                 cos_admitted,
                 |result, protected| {
                     let template = &template;
-                    async move { apply_output_template(result, template, &protected).await }
+                    async move {
+                        let output = apply_output_template(result, template, &protected).await?;
+                        RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+                    }
                 },
             )
             .await
@@ -128,7 +143,7 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     .await
 }
 
-async fn cos_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinResult<Value> {
+async fn cos_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinResult<RootedValue> {
     let base = match value {
         Value::GpuTensor(handle) => cos_gpu(handle, &protected).await?,
         Value::Complex(re, im) => Value::Complex(cos_complex_re(re, im), cos_complex_im(re, im)),
@@ -142,7 +157,7 @@ async fn cos_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinR
         }
         other => cos_real(other)?,
     };
-    Ok(base)
+    RootedValue::new(base).map_err(|cause| cause.into_runtime_error())
 }
 
 async fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
@@ -343,7 +358,7 @@ pub(crate) mod tests {
 
     fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::cos_builtin(value, rest))
+        block_on(super::cos_builtin(None, value, rest)).map(|owned| owned.value().clone())
     }
 
     struct MalformedCosProvider {
@@ -493,8 +508,13 @@ pub(crate) mod tests {
     #[test]
     fn cos_integer_gate_all_classes_boundary_and_single_precision() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let err = block_on(super::cos_builtin(Value::Int(IntValue::I8(1)), Vec::new()))
-            .expect_err("strict mode rejects integer extension");
+        let err = block_on(super::cos_builtin(
+            None,
+            Value::Int(IntValue::I8(1)),
+            Vec::new(),
+        ))
+        .map(|owned| owned.value().clone())
+        .expect_err("strict mode rejects integer extension");
         assert_eq!(
             err.identifier(),
             COS_INTEGER_INPUT_EXTENSION.error_identifier
@@ -512,31 +532,43 @@ pub(crate) mod tests {
             IntValue::U32(1),
             IntValue::U64(1),
         ] {
-            assert!(block_on(super::cos_builtin(Value::Int(value), Vec::new())).is_ok());
+            assert!(
+                block_on(super::cos_builtin(None, Value::Int(value), Vec::new()))
+                    .map(|owned| owned.value().clone())
+                    .is_ok()
+            );
         }
         assert!(block_on(super::cos_builtin(
+            None,
             Value::Int(IntValue::U64((1_u64 << 53) + 1)),
             Vec::new(),
         ))
+        .map(|owned| owned.value().clone())
         .is_err());
         assert!(block_on(super::cos_builtin(
+            None,
             Value::Int(IntValue::U64(1_u64 << 54)),
             Vec::new(),
         ))
+        .map(|owned| owned.value().clone())
         .is_ok());
 
         let single = Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let Value::Tensor(single_out) =
-            block_on(super::cos_builtin(Value::Tensor(single), Vec::new())).unwrap()
+            block_on(super::cos_builtin(None, Value::Tensor(single), Vec::new()))
+                .map(|owned| owned.value().clone())
+                .unwrap()
         else {
             panic!("expected single tensor")
         };
         assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
         let complex = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
         let Value::ComplexTensor(complex_out) = block_on(super::cos_builtin(
+            None,
             Value::ComplexTensor(complex),
             Vec::new(),
         ))
+        .map(|owned| owned.value().clone())
         .unwrap() else {
             panic!("expected single complex tensor")
         };
@@ -736,9 +768,11 @@ pub(crate) mod tests {
     fn cos_validates_like_syntax_before_extension_gate() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(super::cos_builtin(
+            None,
             Value::Int(IntValue::U8(1)),
             vec![Value::from("like")],
         ))
+        .map(|owned| owned.value().clone())
         .expect_err("malformed like syntax");
         assert_eq!(error.identifier(), COS_ERROR_INVALID_OPTION.identifier);
     }

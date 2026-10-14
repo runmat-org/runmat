@@ -36,6 +36,7 @@ fn method(name: &str) -> crate::class_registry::RuntimeMethod {
         access: MemberAccess::Public,
         function_name: format!("{name}_impl"),
         implicit_class_argument: None,
+        role: runmat_types::ClassMethodRole::Ordinary,
     }
 }
 

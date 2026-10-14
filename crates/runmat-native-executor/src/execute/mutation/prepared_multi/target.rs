@@ -46,7 +46,7 @@ impl PendingSequenceTarget {
         let root = flatten_root(base, &mut path)?;
         let root_value = root_local_value(state, base)?;
         let path = path.into_iter().cloned().collect();
-        let builder = SequenceDestinationBuilder::new(&root_value);
+        let builder = SequenceDestinationBuilder::new(&root_value)?;
         let mut pending = Self {
             target: target.clone(),
             root,

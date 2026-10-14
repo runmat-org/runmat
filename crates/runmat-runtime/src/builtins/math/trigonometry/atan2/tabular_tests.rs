@@ -248,15 +248,15 @@ fn atan2_tabular_success_publishes_owned_columns_with_numeric_oracle() {
     let _serial = test_support::accel_test_lock();
     let (provider, borrowed, table) = fixture(Fault::None);
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let output = block_on(crate::dispatcher::call_builtin_async(
+    let output_owner = block_on(crate::dispatcher::call_builtin_async(
         "atan2",
         &[table, Value::Num(1.0)],
     ))
     .unwrap();
-    let Value::Object(output) = output else {
+    let Value::Object(output) = output_owner.value() else {
         panic!("table result")
     };
-    let columns = crate::builtins::table::table_variables(&output).unwrap();
+    let columns = crate::builtins::table::table_variables(output).unwrap();
     for (name, expected) in [
         ("A", [1.0_f64.atan(), (-1.0_f64).atan()]),
         ("B", [0.0, 1.0_f64.atan()]),
@@ -275,7 +275,7 @@ fn atan2_tabular_success_publishes_owned_columns_with_numeric_oracle() {
         .iter()
         .all(|(_, probe)| probe.retirements() == 0));
     drop(columns);
-    drop(output);
+    drop(output_owner);
     assert!(provider
         .state
         .lock()

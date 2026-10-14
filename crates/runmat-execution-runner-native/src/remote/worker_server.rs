@@ -1,33 +1,106 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use runmat_execution::identity::AttemptId;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
-use runmat_execution_artifact::{ExecutableForm, ExecutionBundle, ProgramExecutionResponse};
-use runmat_execution_runner::WorkerSpec;
+use runmat_execution_artifact::{
+    ExecutableForm, ExecutionBundle, ProgramExecutionResponse, WorkerProgramRequest,
+};
+use runmat_execution_runner::{AttemptRequest, WorkerSpec};
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use tokio::sync::Mutex;
 
 use super::protocol::{
-    RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
+    RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest, WorkerReady,
     REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::RemoteFrameRoute;
 use super::worker_protocol::{
     acknowledged, command_frame_kind, rejected, reply, reply_kind, reply_progress,
 };
-use super::RemoteAttempt;
+use super::{RemoteAttempt, RemoteAttemptProgram, RemoteStagedGraphReference};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+const MAX_PREEXECUTION_CANCELLATIONS: usize = 1 << 20;
+const GRAPH_STAGE_IDLE_RETENTION: Duration = Duration::from_secs(60);
+
 struct WorkerState {
-    bundle: Option<ExecutionBundle>,
+    bundle: Option<Arc<ExecutionBundle>>,
     materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, ActiveAttempt>,
+    cancelled_attempts: HashSet<AttemptId>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
     objects: super::object_transfer::RemoteObjectStore,
     draining: bool,
     bundle_cache: Option<std::path::PathBuf>,
+    graph_staging: HashMap<AttemptId, GraphStageSlot>,
+    graph_stage_download_in_flight:
+        HashMap<AttemptId, runmat_execution::cancellation::CancellationSource>,
+    graph_programs: HashMap<AttemptId, Arc<super::program_staging::StagedGraphProgram>>,
+    // This state is created for exactly one authenticated run/key epoch in
+    // run_worker_loop. A digest is only a lookup within that sealed scope;
+    // attempt leases and idle expiry own the underlying private bytes.
+    graph_cache: HashMap<runmat_execution::Digest, CachedGraphProgram>,
+}
+
+struct CachedGraphProgram {
+    program: Arc<super::program_staging::StagedGraphProgram>,
+    last_used: tokio::time::Instant,
+}
+
+fn retire_idle_graph_cache(
+    state: &mut WorkerState,
+    now: tokio::time::Instant,
+    expired_only: bool,
+) -> Vec<Arc<super::program_staging::StagedGraphProgram>> {
+    let mut retired = Vec::new();
+    let mut retained = HashMap::with_capacity(state.graph_cache.len());
+    for (digest, cached) in std::mem::take(&mut state.graph_cache) {
+        let idle = Arc::strong_count(&cached.program) == 1;
+        let expired = now.duration_since(cached.last_used) >= GRAPH_STAGE_IDLE_RETENTION;
+        if idle && (!expired_only || expired) {
+            retired.push(cached.program);
+        } else {
+            retained.insert(digest, cached);
+        }
+    }
+    state.graph_cache = retained;
+    retired
+}
+
+fn graph_stage_scratch_bytes(
+    state: &WorkerState,
+    incoming_program: u64,
+    incoming_manifest: u64,
+) -> Option<u64> {
+    let cached = state.graph_cache.values().try_fold(0_u64, |total, entry| {
+        total.checked_add(entry.program.length())
+    })?;
+    let partial = state
+        .graph_staging
+        .values()
+        .try_fold(cached, |total, slot| {
+            total
+                .checked_add(slot.program_length)?
+                .checked_add(slot.manifest_bytes)
+        })?;
+    // The downloader holds the encoded CBOR object while decoding allocates
+    // ciphertext and opening allocates plaintext. All three can coexist
+    // before the bounded chunk is appended to the partial stage.
+    let chunk_buffers =
+        runmat_execution_artifact::encryption::MAX_PROGRAM_CHUNK_ENCODED_OBJECT_BYTES
+            .checked_add(
+                runmat_execution_artifact::encryption::MAX_PROGRAM_CHUNK_PLAINTEXT_BYTES + 16,
+            )?
+            .checked_add(
+                runmat_execution_artifact::encryption::MAX_PROGRAM_CHUNK_PLAINTEXT_BYTES,
+            )?;
+    partial
+        .checked_add(incoming_program)?
+        .checked_add(incoming_manifest)?
+        .checked_add(chunk_buffers as u64)
 }
 
 struct ActiveAttempt {
@@ -36,6 +109,21 @@ struct ActiveAttempt {
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
+}
+
+struct GraphStageSlot {
+    writer: Arc<Mutex<super::program_staging::GraphProgramStageWriter>>,
+    program_digest: runmat_execution::Digest,
+    program_length: u64,
+    manifest_bytes: u64,
+}
+
+/// The wire carries a small staged reference; only the exact private
+/// completed-stage owner can turn it into a callable request.
+struct ResolvedRemoteAttempt {
+    scheduling: AttemptRequest,
+    program: WorkerProgramRequest,
+    graph_wire_bytes: Option<usize>,
 }
 
 pub(super) struct WorkerLoopContext {
@@ -47,6 +135,8 @@ pub(super) struct WorkerLoopContext {
     pub(super) limits: FrameLimits,
     pub(super) bundle_cache: Option<std::path::PathBuf>,
     pub(super) meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+    /// Set only by an allocation-bound NodeAgent bootstrap from the driver.
+    pub(super) ready_v1: bool,
 }
 
 pub(super) async fn run_worker_loop(
@@ -62,6 +152,7 @@ pub(super) async fn run_worker_loop(
         limits,
         bundle_cache,
         meshing_host,
+        ready_v1,
     } = context;
     let mut receiver = EncryptedFrameSession::new(
         run_identity.clone(),
@@ -71,6 +162,9 @@ pub(super) async fn run_worker_loop(
         run_key.clone(),
     )
     .map_err(protocol)?;
+    let graph_run_key = run_key.clone();
+    let graph_downloader =
+        runmat_execution_transport_native::control::SignedArtifactDownloader::new();
     let sender = Arc::new(Mutex::new(
         EncryptedFrameSession::new(
             run_identity.clone(),
@@ -81,17 +175,50 @@ pub(super) async fn run_worker_loop(
         )
         .map_err(protocol)?,
     ));
+    if ready_v1 {
+        reply(
+            connection.as_ref(),
+            &sender,
+            limits,
+            RemoteWorkerReply {
+                schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                correlation_id: "worker-ready-v1".into(),
+                outcome: RemoteWorkerOutcome::WorkerReady {
+                    ready: WorkerReady {
+                        run_identity: run_identity.clone(),
+                        session_id,
+                        driver_fence,
+                        worker_id: worker.id,
+                        pool_id: worker.pool_id,
+                        capabilities: super::worker_protocol::software_capabilities(),
+                    },
+                },
+            },
+        )
+        .await?;
+    }
     let state = Arc::new(Mutex::new(WorkerState {
         bundle: None,
         materialized_project: None,
         bundle_digest: None,
         attempts: HashMap::new(),
+        cancelled_attempts: HashSet::new(),
         values: HashMap::new(),
         objects: super::object_transfer::RemoteObjectStore::default(),
         draining: false,
         bundle_cache,
+        graph_staging: HashMap::new(),
+        graph_stage_download_in_flight: HashMap::new(),
+        graph_programs: HashMap::new(),
+        graph_cache: HashMap::new(),
     }));
     let drain_complete = Arc::new(tokio::sync::Notify::new());
+    let mut graph_cache_reaper = tokio::time::interval(Duration::from_secs(30));
+    let mut graph_stage_tasks = tokio::task::JoinSet::new();
+    let result: NativeExecutionResult<()> = async {
+    // A QUIC receive can already own a partially read stream. Keep that
+    // future across housekeeping wakeups instead of discarding its bytes.
+    let mut incoming_frame = connection.receive();
     loop {
         let notified = drain_complete.notified();
         let is_drained = {
@@ -102,8 +229,29 @@ pub(super) async fn run_worker_loop(
             return Ok(());
         }
         let frame = tokio::select! {
-            frame = connection.receive() => frame?,
+            frame = &mut incoming_frame => {
+                let frame = frame?;
+                incoming_frame = connection.receive();
+                frame
+            },
             _ = notified => continue,
+            _ = graph_cache_reaper.tick() => {
+                let retired = {
+                    let mut state = state.lock().await;
+                    retire_idle_graph_cache(&mut state, tokio::time::Instant::now(), true)
+                };
+                drop(retired);
+                continue;
+            }
+            joined = graph_stage_tasks.join_next(), if !graph_stage_tasks.is_empty() => {
+                // A completed signed download no longer needs a task slot;
+                // keep the JoinSet bounded by concurrent staging, not by
+                // the historical chunk count of this worker session.
+                if joined.is_some_and(|result| result.is_err()) {
+                    return Err(protocol("Graph Program staging task failed"));
+                }
+                continue;
+            }
         };
         if !matches!(frame.kind, FrameKind::Control | FrameKind::Artifact) {
             return Err(protocol(
@@ -191,6 +339,369 @@ pub(super) async fn run_worker_loop(
                 )
                 .await?;
             }
+            RemoteWorkerCommand::BeginGraphProgram {
+                attempt_id,
+                encrypted_manifest,
+                maximum_program_bytes,
+            } => {
+                let unavailable = {
+                    let state = state.lock().await;
+                    // Decode/open briefly holds the encoded manifest,
+                    // ciphertext and plaintext together. Refuse that peak
+                    // before allocating decoded copies or a private stage.
+                    let manifest_peak = (encrypted_manifest.len() as u64).checked_mul(3);
+                    state.draining
+                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state.graph_staging.contains_key(&attempt_id)
+                        || manifest_peak.is_none_or(|peak| {
+                            graph_stage_scratch_bytes(&state, 0, peak)
+                                .is_none_or(|bytes| bytes > worker.resources.scratch_bytes)
+                        })
+                };
+                let outcome = if unavailable {
+                    RemoteWorkerOutcome::Rejected {
+                        message: "Graph attempt cannot begin private staging".into(),
+                    }
+                } else {
+                    match super::worker_graph_stage::begin(
+                        graph_run_key.clone(),
+                        &run_identity,
+                        &encrypted_manifest,
+                        maximum_program_bytes,
+                    )
+                    .await
+                    {
+                        Ok(writer) => {
+                            let manifest = writer.manifest();
+                            let program_digest = manifest.program_digest;
+                            let program_length = manifest.program_length;
+                            let manifest_bytes = encrypted_manifest.len() as u64;
+                            let chunk_count = manifest.chunks.len() as u32;
+                            let mut state = state.lock().await;
+                            let mut retired = retire_idle_graph_cache(
+                                &mut state,
+                                tokio::time::Instant::now(),
+                                true,
+                            );
+                            let outcome = if state.draining
+                                || state.cancelled_attempts.contains(&attempt_id)
+                                || state.graph_staging.contains_key(&attempt_id)
+                            {
+                                RemoteWorkerOutcome::Rejected {
+                                    message: "Graph attempt cannot begin private staging".into(),
+                                }
+                            } else if let Some(existing) = state.graph_programs.get(&attempt_id) {
+                                if existing.digest() == program_digest
+                                    && existing.length() == program_length
+                                {
+                                    RemoteWorkerOutcome::GraphProgramStaged {
+                                        receipt: super::RemoteGraphProgramReceipt {
+                                            program_digest,
+                                            program_length,
+                                        },
+                                    }
+                                } else {
+                                    RemoteWorkerOutcome::Rejected {
+                                        message: "staged Graph digest has a different length"
+                                            .into(),
+                                    }
+                                }
+                            } else if let Some(cached) = state.graph_cache.get_mut(&program_digest)
+                            {
+                                if cached.program.length() != program_length {
+                                    RemoteWorkerOutcome::Rejected {
+                                        message: "staged Graph digest has a different length"
+                                            .into(),
+                                    }
+                                } else {
+                                    cached.last_used = tokio::time::Instant::now();
+                                    let program = Arc::clone(&cached.program);
+                                    state.graph_programs.insert(attempt_id, program);
+                                    RemoteWorkerOutcome::GraphProgramStaged {
+                                        receipt: super::RemoteGraphProgramReceipt {
+                                            program_digest,
+                                            program_length,
+                                        },
+                                    }
+                                }
+                            } else {
+                                if graph_stage_scratch_bytes(
+                                    &state,
+                                    program_length,
+                                    manifest_bytes,
+                                )
+                                    .is_none_or(|bytes| bytes > worker.resources.scratch_bytes)
+                                {
+                                    retired.extend(retire_idle_graph_cache(
+                                        &mut state,
+                                        tokio::time::Instant::now(),
+                                        false,
+                                    ));
+                                }
+                                if graph_stage_scratch_bytes(
+                                    &state,
+                                    program_length,
+                                    manifest_bytes,
+                                )
+                                    .is_none_or(|bytes| bytes > worker.resources.scratch_bytes)
+                                {
+                                    RemoteWorkerOutcome::Rejected {
+                                        message:
+                                            "Graph Program staging exceeds worker scratch allocation"
+                                                .into(),
+                                    }
+                                } else {
+                                    state.graph_staging.insert(
+                                        attempt_id,
+                                        GraphStageSlot {
+                                            writer: Arc::new(Mutex::new(writer)),
+                                            program_digest,
+                                            program_length,
+                                            manifest_bytes,
+                                        },
+                                    );
+                                    RemoteWorkerOutcome::GraphProgramPrepared {
+                                        program_digest,
+                                        program_length,
+                                        chunk_count,
+                                    }
+                                }
+                            };
+                            drop(state);
+                            drop(retired);
+                            outcome
+                        }
+                        Err(error) => RemoteWorkerOutcome::Rejected {
+                            message: error.to_string(),
+                        },
+                    }
+                };
+                reply(
+                    connection.as_ref(),
+                    &sender,
+                    limits,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                        correlation_id: request.correlation_id,
+                        outcome,
+                    },
+                )
+                .await?;
+            }
+            RemoteWorkerCommand::StageGraphProgramChunk {
+                attempt_id,
+                program_digest,
+                ordinal,
+                download,
+            } => {
+                let writer = {
+                    let mut state = state.lock().await;
+                    if state.draining
+                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state
+                            .graph_stage_download_in_flight
+                            .contains_key(&attempt_id)
+                    {
+                        None
+                    } else {
+                        let writer = state
+                            .graph_staging
+                            .get(&attempt_id)
+                            .filter(|slot| slot.program_digest == program_digest)
+                            .map(|slot| Arc::clone(&slot.writer));
+                        if writer.is_some() {
+                            state.graph_stage_download_in_flight.insert(
+                                attempt_id,
+                                runmat_execution::cancellation::CancellationSource::new(),
+                            );
+                        }
+                        writer
+                    }
+                };
+                let Some(writer) = writer else {
+                    reply(
+                        connection.as_ref(),
+                        &sender,
+                        limits,
+                        rejected(
+                            request.correlation_id,
+                            "worker has no available Graph Program staging",
+                        ),
+                    )
+                    .await?;
+                    continue;
+                };
+                let stage_state = Arc::clone(&state);
+                let stage_connection = Arc::clone(&connection);
+                let stage_sender = Arc::clone(&sender);
+                let stage_downloader = graph_downloader.clone();
+                let stage_cancellation = {
+                    let state = state.lock().await;
+                    state
+                        .graph_stage_download_in_flight
+                        .get(&attempt_id)
+                        .expect("accepted stage has cancellation owner")
+                        .token()
+                };
+                graph_stage_tasks.spawn_local(async move {
+                    let result = tokio::select! {
+                        result = async {
+                            let mut writer_guard = writer.lock().await;
+                            super::worker_graph_stage::download_next(
+                                &mut writer_guard,
+                                &stage_downloader,
+                                program_digest,
+                                ordinal,
+                                &download,
+                            ).await
+                        } => result,
+                        _ = stage_cancellation.cancelled() => {
+                            Err(protocol("Graph Program chunk staging was cancelled"))
+                        }
+                    };
+                    let retired = {
+                        let mut state = stage_state.lock().await;
+                        state.graph_stage_download_in_flight.remove(&attempt_id);
+                        if result.is_err()
+                            && state
+                                .graph_staging
+                                .get(&attempt_id)
+                                .is_some_and(|slot| Arc::ptr_eq(&slot.writer, &writer))
+                        {
+                            state.graph_staging.remove(&attempt_id)
+                        } else {
+                            None
+                        }
+                    };
+                    drop(writer);
+                    drop(retired);
+                    let outcome = match result {
+                        Ok(()) => RemoteWorkerOutcome::Acknowledged,
+                        Err(error) => RemoteWorkerOutcome::Rejected {
+                            message: error.to_string(),
+                        },
+                    };
+                    let _ = reply(
+                        stage_connection.as_ref(),
+                        &stage_sender,
+                        limits,
+                        RemoteWorkerReply {
+                            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                            correlation_id: request.correlation_id,
+                            outcome,
+                        },
+                    )
+                    .await;
+                });
+            }
+            RemoteWorkerCommand::FinishGraphProgram {
+                attempt_id,
+                program_digest,
+            } => {
+                let slot = {
+                    let mut state = state.lock().await;
+                    if state.draining
+                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state
+                            .graph_stage_download_in_flight
+                            .contains_key(&attempt_id)
+                    {
+                        None
+                    } else {
+                        state.graph_staging.remove(&attempt_id)
+                    }
+                };
+                let outcome = match slot {
+                    Some(slot)
+                        if slot.program_digest == program_digest
+                            && Arc::strong_count(&slot.writer) == 1 =>
+                    {
+                        let Some(writer) = Arc::into_inner(slot.writer) else {
+                            unreachable!("only the worker owns finished Graph staging")
+                        };
+                        let writer = writer.into_inner();
+                        match super::worker_graph_stage::finish(writer, program_digest).await {
+                            Ok(program) => {
+                                let receipt = super::RemoteGraphProgramReceipt {
+                                    program_digest: program.digest(),
+                                    program_length: program.length(),
+                                };
+                                let incoming = Arc::new(program);
+                                let mut state = state.lock().await;
+                                if state.draining || state.cancelled_attempts.contains(&attempt_id)
+                                {
+                                    RemoteWorkerOutcome::Rejected {
+                                        message:
+                                            "Graph attempt was cancelled before staging finished"
+                                                .into(),
+                                    }
+                                } else {
+                                    let selected = if let Some(cached) =
+                                        state.graph_cache.get_mut(&program_digest)
+                                    {
+                                        if cached.program.length() != incoming.length() {
+                                            None
+                                        } else {
+                                            cached.last_used = tokio::time::Instant::now();
+                                            Some(Arc::clone(&cached.program))
+                                        }
+                                    } else {
+                                        state.graph_cache.insert(
+                                            program_digest,
+                                            CachedGraphProgram {
+                                                program: Arc::clone(&incoming),
+                                                last_used: tokio::time::Instant::now(),
+                                            },
+                                        );
+                                        Some(Arc::clone(&incoming))
+                                    };
+                                    if let Some(selected) = selected {
+                                        let retired =
+                                            state.graph_programs.insert(attempt_id, selected);
+                                        drop(state);
+                                        drop(retired);
+                                        RemoteWorkerOutcome::GraphProgramStaged { receipt }
+                                    } else {
+                                        drop(state);
+                                        RemoteWorkerOutcome::Rejected {
+                                            message: "staged Graph digest has a different length"
+                                                .into(),
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => RemoteWorkerOutcome::Rejected {
+                                message: error.to_string(),
+                            },
+                        }
+                    }
+                    Some(slot) => {
+                        let mut state = state.lock().await;
+                        if slot.program_digest == program_digest
+                            && !state.cancelled_attempts.contains(&attempt_id)
+                        {
+                            state.graph_staging.insert(attempt_id, slot);
+                        }
+                        RemoteWorkerOutcome::Rejected {
+                            message: "Graph Program staging identity or ownership changed".into(),
+                        }
+                    }
+                    None => RemoteWorkerOutcome::Rejected {
+                        message: "worker has no completed Graph Program staging".into(),
+                    },
+                };
+                reply(
+                    connection.as_ref(),
+                    &sender,
+                    limits,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                        correlation_id: request.correlation_id,
+                        outcome,
+                    },
+                )
+                .await?;
+            }
             RemoteWorkerCommand::PutValue { reference, encoded } => {
                 let outcome = match super::value_transfer::decode_value(
                     &reference,
@@ -231,6 +742,19 @@ pub(super) async fn run_worker_loop(
                 .await?;
             }
             RemoteWorkerCommand::Execute { attempt } => {
+                let attempt = match resolve_attempt(&state, &worker, driver_fence, *attempt).await {
+                    Ok(attempt) => attempt,
+                    Err(message) => {
+                        reply(
+                            connection.as_ref(),
+                            &sender,
+                            limits,
+                            rejected(request.correlation_id, message),
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
                 let rejection = validate_attempt(&state, &worker, driver_fence, &attempt).await;
                 if let Some(message) = rejection {
                     reply(
@@ -242,8 +766,11 @@ pub(super) async fn run_worker_loop(
                     .await?;
                     continue;
                 }
-                let attempt = *attempt;
                 let attempt_id = attempt.scheduling.id;
+                let graph_run_identity = run_identity.clone();
+                let graph_worker_resources = worker.resources.clone();
+                let graph_task_resources = attempt.scheduling.task.resources.clone();
+                let graph_worker_host = worker.host.clone();
                 let correlation_id = request.correlation_id;
                 let attempt_reply = super::attempt_reply::AttemptReply::spawn(
                     Arc::clone(&connection),
@@ -254,32 +781,42 @@ pub(super) async fn run_worker_loop(
                 let attempt_reply_for_task = Arc::clone(&attempt_reply);
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
-                let collective = match &attempt.program.context {
-                    runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
-                        Some(super::collective::RemoteCollectiveChannel::new(
-                            attempt_id,
-                            correlation_id.clone(),
-                            task.clone(),
-                            Arc::clone(&connection),
-                            Arc::clone(&sender),
-                            limits,
-                        ))
-                    }
+                let collective = match &attempt.program {
+                    WorkerProgramRequest::Direct(program) => match &program.context {
+                        runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
+                            Some(super::collective::RemoteCollectiveChannel::new(
+                                attempt_id,
+                                correlation_id.clone(),
+                                task.clone(),
+                                Arc::clone(&connection),
+                                Arc::clone(&sender),
+                                limits,
+                            ))
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 };
                 let collective_for_task = collective.as_ref().map(Arc::clone);
                 let state_for_task = Arc::clone(&state);
-                let (materialized_project, objects) = {
+                let (materialized_project, bundle, objects) = {
                     let state = state.lock().await;
                     (
                         state.materialized_project.as_ref().cloned(),
+                        state.bundle.as_ref().cloned(),
                         state.objects.clone(),
                     )
                 };
-                let cooperative = attempt.program.artifact.form == ExecutableForm::MeshingWorkload;
+                let cooperative = matches!(
+                    &attempt.program,
+                    WorkerProgramRequest::Direct(program)
+                        if program.artifact.form == ExecutableForm::MeshingWorkload
+                ) || matches!(&attempt.program, WorkerProgramRequest::Graph(_));
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
                 let cancellation_for_task = Arc::clone(&cancellation);
+                let cancellation_after_task = Arc::clone(&cancellation);
+                let graph_attempt = matches!(&attempt.program, WorkerProgramRequest::Graph(_));
                 let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
                 let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
@@ -287,22 +824,36 @@ pub(super) async fn run_worker_loop(
                     if start_receiver.await.is_err() {
                         return;
                     }
-                    let mut program = attempt.program;
-                    let materialized = if cooperative {
-                        Ok(program.arguments.clone())
-                    } else {
-                        let state = state_for_task.lock().await;
-                        program
-                            .arguments
-                            .iter()
-                            .map(|value| super::value_transfer::materialize(value, &state.values))
-                            .collect::<NativeExecutionResult<Vec<_>>>()
+                    let program = attempt.program;
+                    let materialized = match &program {
+                        WorkerProgramRequest::Graph(_) => Ok(Vec::new()),
+                        WorkerProgramRequest::Direct(direct) if cooperative => {
+                            Ok(direct.arguments.clone())
+                        }
+                        WorkerProgramRequest::Direct(direct) => {
+                            let state = state_for_task.lock().await;
+                            direct
+                                .arguments
+                                .iter()
+                                .map(|value| {
+                                    super::value_transfer::materialize(value, &state.values)
+                                })
+                                .collect::<NativeExecutionResult<Vec<_>>>()
+                        }
                     };
                     let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel(256);
                     let execution = async {
                         match materialized {
                             Ok(arguments) => {
-                                program.arguments = arguments;
+                                let program = match program {
+                                    WorkerProgramRequest::Direct(mut direct) => {
+                                        direct.arguments = arguments;
+                                        WorkerProgramRequest::Direct(direct)
+                                    }
+                                    WorkerProgramRequest::Graph(graph) => {
+                                        WorkerProgramRequest::Graph(graph)
+                                    }
+                                };
                                 let collective = collective_for_task.map(|channel| {
                                     std::rc::Rc::new(
                                         super::collective::RemoteCollectiveService::new(channel),
@@ -312,19 +863,35 @@ pub(super) async fn run_worker_loop(
                                         >
                                 });
                                 super::worker_execution::execute(
-                                    program,
-                                    materialized_project,
-                                    collective,
-                                    meshing_host,
-                                    objects,
-                                    cancellation_for_task,
-                                    progress_sender,
+                                    super::worker_execution::WorkerExecutionInput {
+                                        program,
+                                        graph_attempt: graph_attempt.then_some(
+                                            super::worker_execution::GraphAttemptContext {
+                                                run_identity: graph_run_identity,
+                                                attempt_id,
+                                                resources: graph_worker_resources,
+                                                task_resources: graph_task_resources,
+                                                host: graph_worker_host,
+                                            },
+                                        ),
+                                        project: materialized_project,
+                                        bundle,
+                                    },
+                                    super::worker_execution::WorkerExecutionPorts {
+                                        collective,
+                                        meshing_host,
+                                        objects,
+                                        cancellation: cancellation_for_task,
+                                        progress_sender,
+                                    },
                                 )
                                 .await
                             }
-                            Err(error) => ProgramExecutionResponse::Failure {
-                                message: error.to_string(),
-                            },
+                            Err(error) => super::worker_execution::WorkerExecutionOutcome::Response(
+                                ProgramExecutionResponse::Failure {
+                                    message: error.to_string(),
+                                },
+                            ),
                         }
                     };
                     tokio::pin!(execution);
@@ -355,13 +922,44 @@ pub(super) async fn run_worker_loop(
                             }
                         }
                     };
-                    let report = super::worker_execution::report(response);
-                    attempt_reply_for_task.complete(report);
+                    // Graph cancellation enters the selected runtime token and
+                    // completes adapter retirement before terminal publication.
+                    // Never publish a late successful Graph result after the
+                    // scheduler has cancelled the attempt.
+                    let (report, retirement_unverified) = match response {
+                        super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(message) => (
+                            runmat_execution_runner::AttemptReport::RetirementUnverified { message },
+                            true,
+                        ),
+                        super::worker_execution::WorkerExecutionOutcome::Response(response) => {
+                            let report = if graph_attempt
+                                && cancellation_after_task.token().is_cancelled()
+                            {
+                                runmat_execution_runner::AttemptReport::Cancelled
+                            } else {
+                                super::worker_execution::report(response)
+                            };
+                            (report, false)
+                        }
+                    };
+                    if retirement_unverified {
+                        // Stop admission first, but keep the active attempt
+                        // present until its fatal report has had a bounded
+                        // encrypted send. Otherwise the drain loop may close
+                        // the connection before the reply task is polled.
+                        state_for_task.lock().await.draining = true;
+                        attempt_reply_for_task.complete_before_drain(report).await;
+                    } else {
+                        attempt_reply_for_task.complete(report);
+                    }
                     let mut state = state_for_task.lock().await;
                     state.attempts.remove(&attempt_id);
+                    let retired_program = state.graph_programs.remove(&attempt_id);
                     if state.draining && state.attempts.is_empty() {
                         drain_complete_for_task.notify_waiters();
                     }
+                    drop(state);
+                    drop(retired_program);
                 });
                 state.lock().await.attempts.insert(
                     attempt_id,
@@ -403,6 +1001,22 @@ pub(super) async fn run_worker_loop(
             RemoteWorkerCommand::Cancel { attempt_id } => {
                 let mut state = state.lock().await;
                 let mut cancelled_reply = None;
+                // A Cancel may overtake Execute while the driver streams a
+                // staged Graph. Retain that exact attempt's cancellation so
+                // a later Execute cannot start foreign effects.
+                if !state.cancelled_attempts.contains(&attempt_id)
+                    && state.cancelled_attempts.len() >= MAX_PREEXECUTION_CANCELLATIONS
+                {
+                    state.draining = true;
+                } else {
+                    state.cancelled_attempts.insert(attempt_id);
+                }
+                let retired_stage = state.graph_staging.remove(&attempt_id);
+                let retired_program = state.graph_programs.remove(&attempt_id);
+                let stage_cancellation = state
+                    .graph_stage_download_in_flight
+                    .get(&attempt_id)
+                    .cloned();
                 if let Some(active) = state.attempts.get(&attempt_id) {
                     active.cancellation.cancel();
                     if !active.cooperative {
@@ -416,6 +1030,11 @@ pub(super) async fn run_worker_loop(
                     drain_complete.notify_waiters();
                 }
                 drop(state);
+                if let Some(stage_cancellation) = stage_cancellation {
+                    stage_cancellation.cancel(runmat_execution::CancellationReason::User);
+                }
+                drop(retired_stage);
+                drop(retired_program);
                 if let Some(cancelled_reply) = cancelled_reply {
                     cancelled_reply.complete(runmat_execution_runner::AttemptReport::Cancelled);
                 }
@@ -431,7 +1050,20 @@ pub(super) async fn run_worker_loop(
                 let mut state = state.lock().await;
                 state.draining = true;
                 let drained = state.attempts.is_empty();
+                let stage_cancellations = state
+                    .graph_stage_download_in_flight
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let retired_staging = std::mem::take(&mut state.graph_staging);
+                let retired_cache =
+                    retire_idle_graph_cache(&mut state, tokio::time::Instant::now(), false);
                 drop(state);
+                for stage_cancellation in stage_cancellations {
+                    stage_cancellation.cancel(runmat_execution::CancellationReason::Shutdown);
+                }
+                drop(retired_staging);
+                drop(retired_cache);
                 reply(
                     connection.as_ref(),
                     &sender,
@@ -463,13 +1095,134 @@ pub(super) async fn run_worker_loop(
             }
         }
     }
+    }
+    .await;
+    // The worker loop owns every signed HTTP stage task. On Drain, QUIC
+    // disconnect, or any protocol error, cancellation and task retirement
+    // complete before its private program roots can be released.
+    let (stage_cancellations, retired_staging, retired_programs, retired_cache) = {
+        let mut state = state.lock().await;
+        let stage_cancellations = state
+            .graph_stage_download_in_flight
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let retired_staging = std::mem::take(&mut state.graph_staging);
+        let retired_programs = std::mem::take(&mut state.graph_programs);
+        let retired_cache = std::mem::take(&mut state.graph_cache);
+        (
+            stage_cancellations,
+            retired_staging,
+            retired_programs,
+            retired_cache,
+        )
+    };
+    for cancellation in stage_cancellations {
+        cancellation.cancel(runmat_execution::CancellationReason::Shutdown);
+    }
+    graph_stage_tasks.abort_all();
+    while graph_stage_tasks.join_next().await.is_some() {}
+    drop(retired_staging);
+    drop(retired_programs);
+    drop(retired_cache);
+    result
+}
+
+async fn resolve_attempt(
+    state: &Mutex<WorkerState>,
+    worker: &WorkerSpec,
+    driver_fence: u64,
+    attempt: RemoteAttempt,
+) -> Result<ResolvedRemoteAttempt, String> {
+    let RemoteAttempt {
+        scheduling,
+        program,
+    } = attempt;
+    scheduling.validate().map_err(|error| error.to_string())?;
+    let staged = {
+        let state = state.lock().await;
+        if state.draining
+            || scheduling.driver_fence != driver_fence
+            || scheduling.worker_id != worker.id
+        {
+            return Err("attempt is outside live worker authority".into());
+        }
+        if state.cancelled_attempts.contains(&scheduling.id) {
+            return Err("attempt was cancelled before execution".into());
+        }
+        match &program {
+            RemoteAttemptProgram::GraphStaged(RemoteStagedGraphReference::StagedGraphV10 {
+                program_digest,
+                program_length,
+            }) => {
+                let staged = state
+                    .graph_programs
+                    .get(&scheduling.id)
+                    .cloned()
+                    .ok_or_else(|| "Graph Program is not staged by this worker".to_string())?;
+                if staged.digest() != *program_digest || staged.length() != *program_length {
+                    return Err("staged Graph Program identity changed".into());
+                }
+                Some(staged)
+            }
+            RemoteAttemptProgram::Direct(_) => None,
+        }
+    };
+    let (program, graph_wire_bytes) = match (program, staged) {
+        (RemoteAttemptProgram::Direct(direct), None) => {
+            (WorkerProgramRequest::Direct(*direct), None)
+        }
+        (RemoteAttemptProgram::GraphStaged(_), Some(staged)) => {
+            let wire_bytes = usize::try_from(staged.length())
+                .map_err(|_| "staged Graph Program exceeds process ABI".to_string())?;
+            let mut graph = tokio::task::spawn_blocking(move || {
+                let object: runmat_execution_artifact::RemoteProgramObject =
+                    crate::local_store::read_verified_json_file(
+                        staged.private_path(),
+                        &staged.digest(),
+                        staged.length(),
+                        runmat_execution::resource::MAX_GRAPH_PROGRAM_WIRE_BYTES,
+                    )
+                    .map_err(|error| error.to_string())?;
+                match object {
+                    runmat_execution_artifact::RemoteProgramObject::Graph(graph) => {
+                        Ok::<_, String>(*graph)
+                    }
+                    runmat_execution_artifact::RemoteProgramObject::Direct(_) => {
+                        Err("staged Graph reference contains a Direct Program".into())
+                    }
+                }
+            })
+            .await
+            .map_err(|error| error.to_string())??;
+            if graph.assignment.is_some() {
+                return Err("staged Graph Program already has an assignment".into());
+            }
+            graph.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+                scope_id: scheduling.scope_id,
+                pool_id: scheduling.task.pool_id,
+                task_id: scheduling.task_id,
+                attempt_id: scheduling.id,
+                worker_id: scheduling.worker_id,
+                backend: runmat_execution::PoolBackend::Remote,
+                resources: scheduling.resource_assignment.clone(),
+            });
+            (WorkerProgramRequest::Graph(graph), Some(wire_bytes))
+        }
+        _ => return Err("remote attempt program form is inconsistent".into()),
+    };
+    Ok(ResolvedRemoteAttempt {
+        scheduling,
+        program,
+        graph_wire_bytes,
+    })
 }
 
 async fn validate_attempt(
     state: &Mutex<WorkerState>,
     worker: &WorkerSpec,
     driver_fence: u64,
-    attempt: &RemoteAttempt,
+    attempt: &ResolvedRemoteAttempt,
 ) -> Option<String> {
     let state = state.lock().await;
     if state.draining
@@ -478,23 +1231,73 @@ async fn validate_attempt(
     {
         return Some("attempt is outside live worker authority".into());
     }
-    let Some(bundle) = state.bundle.as_ref() else {
-        return Some("exact execution bundle is not installed".into());
-    };
-    if bundle.requires_materialization() != state.materialized_project.is_some()
-        || attempt.program.validate_for_portable_host().is_err()
-        || !bundle
-            .manifest
-            .recipes
-            .iter()
-            .any(|value| value == &attempt.program.recipe)
-        || !bundle
-            .manifest
-            .artifacts
-            .iter()
-            .any(|value| value == &attempt.program.artifact)
-    {
-        return Some("attempt program is not authorized by the installed bundle".into());
+    match &attempt.program {
+        WorkerProgramRequest::Direct(program) => {
+            let Some(bundle) = state.bundle.as_ref() else {
+                return Some("exact execution bundle is not installed".into());
+            };
+            if bundle.requires_materialization() != state.materialized_project.is_some()
+                || program.validate_for_portable_host().is_err()
+                || !bundle
+                    .manifest
+                    .recipes
+                    .iter()
+                    .any(|value| value == &program.recipe)
+                || !bundle
+                    .manifest
+                    .artifacts
+                    .iter()
+                    .any(|value| value == &program.artifact)
+            {
+                return Some("attempt program is not authorized by the installed bundle".into());
+            }
+        }
+        WorkerProgramRequest::Graph(graph) => {
+            if graph.validate().is_err() {
+                return Some("attempt graph or its selected archives are invalid".into());
+            }
+            let scheduling = &attempt.scheduling;
+            let expected = runmat_execution::ProgramExecutionAssignment {
+                scope_id: scheduling.scope_id,
+                pool_id: scheduling.task.pool_id,
+                task_id: scheduling.task_id,
+                attempt_id: scheduling.id,
+                worker_id: scheduling.worker_id,
+                backend: runmat_execution::PoolBackend::Remote,
+                resources: scheduling.resource_assignment.clone(),
+            };
+            let label = graph.scheduler_callable();
+            let trust = [
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
+                runmat_execution::security::ExecutionTrustTier::AttestedConfidential,
+            ]
+            .into_iter()
+            .collect();
+            let host = graph.execution_host_requirement(trust);
+            let demand = attempt
+                .graph_wire_bytes
+                .and_then(|bytes| graph.input_allocation_floor_bytes(bytes).ok());
+            if scheduling.validate().is_err()
+                || graph.assignment.as_ref() != Some(&expected)
+                || !scheduling.task.inputs.is_empty()
+                || scheduling.task.invocation_context != graph.context
+                || scheduling.task.outputs.requested_outputs != graph.requested_outputs
+                || label
+                    .as_ref()
+                    .ok()
+                    .map(|label| runmat_execution::task::Callable::for_program("remote-run", label))
+                    != Some(scheduling.task.callable.clone())
+                || host.ok() != Some(scheduling.task.host.clone())
+                || demand.is_none_or(|bytes| scheduling.task.resources.memory_bytes < bytes)
+                || graph
+                    .recipe
+                    .validate_resource_request(&scheduling.task.resources)
+                    .is_err()
+            {
+                return Some("graph attempt differs from selected scheduler authority".into());
+            }
+        }
     }
     None
 }

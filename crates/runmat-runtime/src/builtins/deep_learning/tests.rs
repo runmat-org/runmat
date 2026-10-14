@@ -14,38 +14,6 @@ use runmat_value::{
     ObjectInstance, StringArray, StructArray, StructValue, Tensor, Value,
 };
 
-#[runmat_macros::runtime_builtin(
-    name = "__deep_learning_square_grad",
-    category = "deep_learning/tests",
-    summary = "Test helper for dlarray autodiff.",
-    keywords = "test,dlgradient",
-    type_resolver(super::any_type),
-    descriptor(runmat_builtins::DLFEVAL_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::tests"
-)]
-async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Value> {
-    let y = crate::call_builtin_async("times", &[x.clone(), x.clone()]).await?;
-    let loss = crate::call_builtin_async("sum", &[y, Value::String("all".into())]).await?;
-    let _guard = crate::output_count::push_output_count(Some(1));
-    let grad = super::autodiff::dlgradient_direct(loss.clone(), vec![x]).await?;
-    Ok(Value::OutputList(vec![loss, grad]))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "__deep_learning_network_grad",
-    category = "deep_learning/tests",
-    summary = "Test helper for dlnetwork autodiff.",
-    keywords = "test,dlnetwork,dlgradient",
-    type_resolver(super::any_type),
-    descriptor(runmat_builtins::DLFEVAL_DESCRIPTOR),
-    builtin_path = "crate::builtins::deep_learning::tests"
-)]
-async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::BuiltinResult<Value> {
-    let y = forward_builtin(net.clone(), x, vec![]).await?;
-    let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
-    super::autodiff::dlgradient_direct(loss, vec![net]).await
-}
-
 fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
     let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
     Value::Tensor(tensor)
@@ -444,7 +412,7 @@ fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
         initialize,
     ]))
     .unwrap();
-    let Value::Object(object) = net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected network object");
     };
     assert_eq!(object.class_name.display_name(), "dlnetwork");
@@ -467,7 +435,7 @@ fn dlnetwork_constructor_options_are_case_insensitive_and_last_value_wins() {
         Value::String("relu".into()),
     ]))
     .unwrap();
-    let Value::Object(object) = net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected network object")
     };
     assert_eq!(
@@ -618,7 +586,8 @@ fn forward_rejects_malformed_elu_alpha_before_resident_preparation() {
         Value::Num(f64::INFINITY),
     ];
     for alpha in invalid {
-        let mut net = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let mut net = net_owner.value().clone();
         let Value::Object(network) = &mut net else {
             panic!("network expected")
         };
@@ -659,7 +628,7 @@ fn forward_rejects_malformed_elu_alpha_before_resident_preparation() {
 #[test]
 fn dlnetwork_materializes_metadata_and_learnables() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-    let Value::Object(object) = net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected dlnetwork object");
     };
     assert_eq!(object.class_name.display_name(), "dlnetwork");
@@ -672,7 +641,7 @@ fn dlnetwork_materializes_metadata_and_learnables() {
     };
     assert_eq!(names.data, vec!["features", "fc", "prob"]);
     assert!(!object.properties.contains_key("Learnables"));
-    let Value::Object(learnables) = super::model::project_learnables(&object, "dlnetwork").unwrap()
+    let Value::Object(learnables) = super::model::project_learnables(object, "dlnetwork").unwrap()
     else {
         panic!("expected learnables table");
     };
@@ -714,11 +683,10 @@ fn dlnetwork_materializes_metadata_and_learnables() {
 #[test]
 fn network_learnables_setter_updates_only_canonical_layers() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-    let Value::Object(network) = net else {
+    let Value::Object(network) = net.value() else {
         panic!("expected network")
     };
-    let Value::Object(table) =
-        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    let Value::Object(table) = super::model::project_learnables(network, "set.Learnables").unwrap()
     else {
         panic!("expected table")
     };
@@ -730,7 +698,7 @@ fn network_learnables_setter_updates_only_canonical_layers() {
     let replacement =
         crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
     let Value::Object(updated) =
-        super::model::apply_learnables(network, replacement, "set.Learnables").unwrap()
+        super::model::apply_learnables(network.clone(), replacement, "set.Learnables").unwrap()
     else {
         panic!("expected updated network")
     };
@@ -766,11 +734,10 @@ fn network_learnables_setter_updates_only_canonical_layers() {
 #[test]
 fn network_learnables_reject_mismatched_identity_and_shape_before_publish() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-    let Value::Object(network) = net else {
+    let Value::Object(network) = net.value() else {
         panic!("expected network")
     };
-    let Value::Object(table) =
-        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    let Value::Object(table) = super::model::project_learnables(network, "set.Learnables").unwrap()
     else {
         panic!("expected table")
     };
@@ -804,13 +771,11 @@ fn network_learnables_reject_mismatched_identity_and_shape_before_publish() {
 
 #[test]
 fn network_learnables_accepts_reordered_rows_but_rejects_duplicate_keys() {
-    let Value::Object(network) =
-        block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap()
-    else {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(network) = net.value() else {
         panic!("expected network")
     };
-    let Value::Object(table) =
-        super::model::project_learnables(&network, "get.Learnables").unwrap()
+    let Value::Object(table) = super::model::project_learnables(network, "get.Learnables").unwrap()
     else {
         panic!("expected table")
     };
@@ -839,7 +804,7 @@ fn network_learnables_accepts_reordered_rows_but_rejects_duplicate_keys() {
     let duplicate =
         crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
     assert!(
-        super::model::apply_learnables(network, duplicate, "set.Learnables")
+        super::model::apply_learnables(network.clone(), duplicate, "set.Learnables")
             .unwrap_err()
             .message
             .contains("duplicate")
@@ -848,13 +813,11 @@ fn network_learnables_accepts_reordered_rows_but_rejects_duplicate_keys() {
 
 #[test]
 fn network_learnables_logical_storage_cannot_bypass_admission() {
-    let Value::Object(network) =
-        block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap()
-    else {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(network) = net.value() else {
         panic!("expected network")
     };
-    let Value::Object(table) =
-        super::model::project_learnables(&network, "get.Learnables").unwrap()
+    let Value::Object(table) = super::model::project_learnables(network, "get.Learnables").unwrap()
     else {
         panic!("expected table")
     };
@@ -865,7 +828,7 @@ fn network_learnables_logical_storage_cannot_bypass_admission() {
     values.data[0] = Value::Bool(false);
     let invalid = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
     assert!(
-        super::model::apply_learnables(network, invalid, "set.Learnables")
+        super::model::apply_learnables(network.clone(), invalid, "set.Learnables")
             .unwrap_err()
             .message
             .contains("real numeric storage")
@@ -875,11 +838,10 @@ fn network_learnables_logical_storage_cannot_bypass_admission() {
 #[test]
 fn network_learnables_empty_then_replacement_updates_initialization_lifecycle() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-    let Value::Object(network) = net else {
+    let Value::Object(network) = net.value() else {
         panic!("expected network")
     };
-    let Value::Object(table) =
-        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    let Value::Object(table) = super::model::project_learnables(network, "set.Learnables").unwrap()
     else {
         panic!("expected table")
     };
@@ -890,7 +852,7 @@ fn network_learnables_empty_then_replacement_updates_initialization_lifecycle() 
     values.data[1] = Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
     let empty = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
     let Value::Object(uninitialized) =
-        super::model::apply_learnables(network, empty, "set.Learnables").unwrap()
+        super::model::apply_learnables(network.clone(), empty, "set.Learnables").unwrap()
     else {
         panic!("expected network")
     };
@@ -957,7 +919,7 @@ fn dlnetwork_rejects_unknown_options_and_preserves_resident_learnables() {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
         let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
-        let Value::Object(object) = net else {
+        let Value::Object(object) = net.value() else {
             panic!("network object expected")
         };
         let Value::Cell(layers) = object.properties.get("Layers").unwrap() else {
@@ -977,7 +939,8 @@ fn dlnetwork_rejects_unknown_options_and_preserves_resident_learnables() {
 #[test]
 fn forward_rejects_host_known_late_matrix_error_before_resident_input_download() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let mut net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let mut net = net_owner.value().clone();
         let Value::Object(net_object) = &mut net else {
             panic!("network expected")
         };
@@ -1013,14 +976,17 @@ fn forward_integer_predictors_use_declared_runmat_extension_before_execution() {
         Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).unwrap());
     {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap_err();
+        let error =
+            block_on(forward_builtin(net.value().clone(), input.clone(), vec![])).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:ForwardIntegerDataExtension")
         );
     }
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let Value::Tensor(result) = block_on(forward_builtin(net, input, vec![])).unwrap() else {
+    let Value::Tensor(result) =
+        block_on(forward_builtin(net.value().clone(), input, vec![])).unwrap()
+    else {
         panic!("host numeric output expected")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F64);
@@ -1049,7 +1015,7 @@ fn forward_host_input_does_not_gather_unused_dlarray_metadata() {
         "UnusedMetadata".into(),
         Value::GpuTensor(allocation.handle.clone()),
     );
-    let output = block_on(forward_builtin(net, input, vec![]))
+    let output = block_on(forward_builtin(net.value().clone(), input, vec![]))
         .expect("unused resident metadata must not require a provider");
     let Value::Object(output) = output else {
         panic!("dlarray result expected")
@@ -1073,7 +1039,7 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
         Value::Bool(false),
     ]))
     .unwrap();
-    let Value::Object(object) = &net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected dlnetwork object");
     };
     assert_eq!(
@@ -1095,7 +1061,7 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
         .all(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == [0, 0])));
 
     let err = block_on(forward_builtin(
-        net,
+        net.value().clone(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         vec![],
     ))
@@ -1112,7 +1078,7 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
 fn forward_and_predict_execute_supported_feedforward_networks() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
-    let out = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap();
+    let out = block_on(forward_builtin(net.value().clone(), input.clone(), vec![])).unwrap();
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor output");
     };
@@ -1123,7 +1089,7 @@ fn forward_and_predict_execute_supported_feedforward_networks() {
     assert!((tensor.materialize_f64()[3] - 0.11920292202211755).abs() < 1.0e-12);
 
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        net,
+        net.value().clone(),
         input,
         vec![],
     ))
@@ -1141,7 +1107,8 @@ fn canonical_forward_uses_invocation_outputs_and_cancellation() {
 
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
-    let network = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let network_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let network = network_owner.value().clone();
     let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
     let args = [network, input];
     let bindings = crate::builtin::runtime_builtin_bindings_by_name("forward");
@@ -1199,10 +1166,11 @@ fn forward_preserves_native_single_through_fully_connected_and_softmax() {
     ))
     .unwrap();
     let softmax = block_on(softmax_layer_builtin(vec![])).unwrap();
-    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, fully_connected, softmax], 3, 1).unwrap(),
     )]))
     .unwrap();
+    let network = network_owner.value().clone();
     let input =
         Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("input"));
     let output = block_on(forward_builtin(network, input, vec![])).expect("forward");
@@ -1233,10 +1201,11 @@ fn forward_and_predict_read_typed_integer_storage_exactly() {
         ],
     ))
     .unwrap();
-    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let net_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, fc], 2, 1).unwrap(),
     )]))
     .unwrap();
+    let net = net_owner.value().clone();
     let input = poisoned_int_tensor(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2], 99.0);
 
     let out = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap();
@@ -1272,10 +1241,11 @@ fn predict_observations_in_columns_reads_typed_integer_storage_exactly() {
         ],
     ))
     .unwrap();
-    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let net_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, fc], 2, 1).unwrap(),
     )]))
     .unwrap();
+    let net = net_owner.value().clone();
     let input = poisoned_int_tensor(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2], 99.0);
 
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
@@ -1298,7 +1268,8 @@ fn predict_observations_in_columns_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn forward_preserves_dlarray_wrapper() {
-    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net = net_owner.value().clone();
     let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
     let dl = block_on(dlarray_builtin(data, vec![Value::String("CB".into())])).unwrap();
     let out = block_on(forward_builtin(net, dl, vec![])).unwrap();
@@ -1319,7 +1290,8 @@ fn forward_preserves_dlarray_wrapper() {
 #[test]
 fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let net = net_owner.value().clone();
         let values = [1.0, 2.0, -1.0, 0.5, 3.0, -2.0];
         let shape = [2usize, 3usize]; // CB: two channels, three observations.
         let cpu_input = block_on(dlarray_builtin(
@@ -1368,7 +1340,8 @@ fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
     use runmat_accelerate_api::{handle_provenance, GpuHandleProvenance};
     crate::builtins::common::test_support::with_test_provider(|provider| {
         for layers in [dense_feature_network_layers(), elu_feature_network_layers()] {
-            let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
+            let net_owner = block_on(dlnetwork_builtin(vec![layers])).unwrap();
+            let net = net_owner.value().clone();
             for intent in [
                 GpuHandleProvenance::Automatic,
                 GpuHandleProvenance::Explicit,
@@ -1405,7 +1378,8 @@ fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
 #[test]
 fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let net = net_owner.value().clone();
         let values = vec![-2.0, 0.0, 3.0, f64::NAN];
         let cpu = block_on(forward_builtin(
             net.clone(),
@@ -1450,7 +1424,8 @@ fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
 #[test]
 fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let net = net_owner.value().clone();
         let values = [1.0, 2.0, -1.0, 0.5, 3.0, -2.0];
         let shape = [2usize, 3usize]; // CB: two channels, three observations.
         let cpu_input = block_on(dlarray_builtin(
@@ -1504,7 +1479,8 @@ fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
 #[test]
 fn forward_propagates_nonfinite_gpu_softmax_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let net = net_owner.value().clone();
         let values = [f64::INFINITY, 0.0, 0.0, 1.0];
         let shape = [2usize, 2usize];
         let handle = provider
@@ -1552,7 +1528,8 @@ fn forward_propagates_nonfinite_gpu_softmax_without_host_gather() {
 #[test]
 fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let net_owner = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let net = net_owner.value().clone();
         let shape = [2usize, 1usize]; // CB: admitted channel extent is two.
         let handle = provider
             .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
@@ -1618,10 +1595,11 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
         Value::String("class".into()),
     ]))
     .unwrap();
-    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let net_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, fc, relu, elu, softmax, output], 6, 1).unwrap(),
     )]))
     .unwrap();
+    let net = net_owner.value().clone();
 
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("network.onnx");
@@ -1665,7 +1643,8 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
 #[test]
 fn export_onnx_options_read_typed_integer_storage_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net = net_owner.value().clone();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("typed-options.onnx");
     let result = block_on(export_onnx_network_builtin(vec![
@@ -1708,7 +1687,8 @@ fn export_onnx_network_rejects_unexportable_forms_deterministically() {
         "unsupported lowering must not create a file"
     );
 
-    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net = net_owner.value().clone();
     let _guard = crate::output_count::push_output_count(Some(1));
     let err = block_on(export_onnx_network_builtin(vec![
         net,
@@ -1737,7 +1717,7 @@ fn dlfeval_dlgradient_differentiates_dlarray_elementwise_loss() {
         x,
     ]))
     .expect("dlfeval square grad");
-    let Value::OutputList(values) = out else {
+    let Value::OutputList(values) = out.value() else {
         panic!("expected output list");
     };
     let Value::Object(loss) = &values[0] else {
@@ -1773,7 +1753,7 @@ fn dlfeval_dlgradient_preserves_native_single_storage() {
         x,
     ]))
     .expect("dlfeval square grad");
-    let Value::OutputList(values) = out else {
+    let Value::OutputList(values) = out.value() else {
         panic!("expected output list");
     };
     let Value::Object(loss) = &values[0] else {
@@ -1820,10 +1800,11 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
         ],
     ))
     .unwrap();
-    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let net_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, fc], 2, 1).unwrap(),
     )]))
     .unwrap();
+    let net = net_owner.value().clone();
     let x = block_on(dlarray_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap()),
         vec![Value::String("CB".into())],
@@ -1836,10 +1817,10 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
         x,
     ]))
     .expect("network gradients");
-    let Value::Object(table) = gradients else {
+    let Value::Object(table) = gradients.value() else {
         panic!("expected learnables gradient table");
     };
-    let variables = crate::builtins::table::table_variables(&table).unwrap();
+    let variables = crate::builtins::table::table_variables(table).unwrap();
     let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
         panic!("expected Value cell");
     };
@@ -1863,14 +1844,15 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
 
 #[test]
 fn dlupdate_traverses_dlnetwork_learnables_and_rebuilds_layers() {
-    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let net = net_owner.value().clone();
     let out = block_on(dlupdate_builtin(vec![
         Value::FunctionHandle("plus".into()),
         net.clone(),
         net,
     ]))
     .expect("network dlupdate");
-    let Value::Object(network) = out else {
+    let Value::Object(network) = out.value() else {
         panic!("expected network object");
     };
     let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
@@ -1918,24 +1900,28 @@ fn dlgradient_rejects_gpu_backed_dlarray_autodiff_with_provider_gap() {
 fn default_recurrent_network_initializes_canonical_parameters_and_state() {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
-    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, lstm], 2, 1).unwrap(),
     )]))
     .expect("recognized recurrent layers initialize from known input geometry");
-    let Value::Object(network) = network else {
+    let Value::Object(network) = network_owner.value() else {
         panic!("network expected");
     };
     assert_eq!(
         network.properties.get("Initialized"),
         Some(&Value::Bool(true))
     );
-    let learnables = super::model::project_learnables(&network, "get.Learnables").unwrap();
+    let learnables = super::model::project_learnables(network, "get.Learnables").unwrap();
     assert!(
         matches!(learnables, Value::Object(table) if table.class_name.is(runmat_types::standard::TABLE))
     );
-    let state = block_on(super::model::get_state_builtin(Value::Object(network))).unwrap();
+    let state = block_on(network_owner.with_owned_async(|network| async move {
+        let state = super::model::get_state_builtin(network).await?;
+        crate::execution::RootedValue::new(state).map_err(|error| error.into_runtime_error())
+    }))
+    .unwrap();
     assert!(
-        matches!(state, Value::Object(table) if table.class_name.is(runmat_types::standard::TABLE))
+        matches!(state.value(), Value::Object(table) if table.class_name.is(runmat_types::standard::TABLE))
     );
 }
 
@@ -2029,7 +2015,7 @@ fn train_network_regression_updates_weights_and_predicts() {
         adam_training_options(),
     ]))
     .unwrap();
-    let Value::Object(object) = &net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected trained network object");
     };
     assert_eq!(object.class_name.display_name(), "SeriesNetwork");
@@ -2038,7 +2024,7 @@ fn train_network_regression_updates_weights_and_predicts() {
         Some(Value::Struct(_))
     ));
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        net,
+        net.value().clone(),
         x,
         vec![],
     ))
@@ -2064,7 +2050,7 @@ fn train_network_regression_reads_typed_integer_storage_exactly() {
     .unwrap();
 
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        net,
+        net.value().clone(),
         x,
         vec![],
     ))
@@ -2093,7 +2079,7 @@ fn supervised_classification_keeps_wide_integer_label_identities_distinct() {
         options,
     ]))
     .unwrap();
-    let Value::Object(network) = trained else {
+    let Value::Object(network) = trained.value() else {
         panic!("expected trained network object")
     };
     let Some(Value::StringArray(classes)) = network.properties.get("Classes") else {
@@ -2124,7 +2110,7 @@ fn train_network_classification_supports_string_labels() {
         adam_training_options(),
     ]))
     .unwrap();
-    let Value::Object(object) = &net else {
+    let Value::Object(object) = net.value() else {
         panic!("expected trained network object");
     };
     let Value::StringArray(classes) = object.properties.get("Classes").unwrap() else {
@@ -2132,7 +2118,7 @@ fn train_network_classification_supports_string_labels() {
     };
     assert_eq!(classes.data, vec!["left", "right"]);
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        net,
+        net.value().clone(),
         x,
         vec![],
     ))
@@ -2164,12 +2150,12 @@ fn trainnet_crossentropy_supports_categorical_labels() {
     let trained = block_on(trainnet_builtin(vec![
         x.clone(),
         Value::Object(categorical),
-        net,
+        net.value().clone(),
         Value::String("crossentropy".into()),
         adam_training_options(),
     ]))
     .unwrap();
-    let Value::Object(object) = &trained else {
+    let Value::Object(object) = trained.value() else {
         panic!("expected dlnetwork");
     };
     assert_eq!(object.class_name.display_name(), "dlnetwork");
@@ -2181,10 +2167,11 @@ fn trainnet_crossentropy_supports_categorical_labels() {
 
 #[test]
 fn trainnet_rejects_custom_loss_until_autodiff_exists() {
+    let network = block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap();
     let err = block_on(trainnet_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap(),
+        network.value().clone(),
         Value::FunctionHandle("loss".into()),
         adam_training_options(),
     ]))
@@ -2228,11 +2215,16 @@ fn supervised_host_admission_precedes_resident_predictor_download() {
         let wrong_rows = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
         for trainnet in [false, true] {
             provider.reset_telemetry();
+            let network = if trainnet {
+                Some(block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap())
+            } else {
+                None
+            };
             let args = if trainnet {
                 vec![
                     Value::GpuTensor(predictor.clone()),
                     wrong_rows.clone(),
-                    block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap(),
+                    network.as_ref().expect("trainnet network").value().clone(),
                     Value::String("mse".into()),
                     adam_training_options(),
                 ]
@@ -2429,7 +2421,7 @@ fn supervised_two_outputs_include_typed_loss_history() {
     ];
     let _guard = crate::output_count::push_output_count(Some(2));
     let result = block_on(train_network_builtin(args)).unwrap();
-    let Value::OutputList(outputs) = result else {
+    let Value::OutputList(outputs) = result.value() else {
         panic!("expected two requested outputs")
     };
     assert_eq!(outputs.len(), 2);
@@ -2474,7 +2466,8 @@ fn supervised_training_gathers_only_consumed_nested_learnables() {
         // Unknown layer options are rejected by the typed layer schema. Put
         // this unrelated resident payload in opaque network metadata instead
         // and verify training still downloads only the consumed learnable.
-        let mut network = block_on(dlnetwork_builtin(vec![Value::Cell(layers)])).unwrap();
+        let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(layers)])).unwrap();
+        let mut network = network_owner.value().clone();
         let Value::Object(network_object) = &mut network else {
             panic!("network expected")
         };
@@ -2494,7 +2487,7 @@ fn supervised_training_gathers_only_consumed_nested_learnables() {
             options,
         ]))
         .unwrap();
-        assert!(matches!(trained, Value::Object(_)));
+        assert!(matches!(trained.value(), Value::Object(_)));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
     });
 }
@@ -2524,10 +2517,11 @@ fn trainnet_single_precision_conv_pool_dense_step_uses_shared_kernels() {
         ],
     ))
     .unwrap();
-    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, conv, pool, dense], 4, 1).unwrap(),
     )]))
     .unwrap();
+    let network = network_owner.value().clone();
     let predictor = block_on(dlarray_builtin(
         Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![1, 2, 3]).unwrap()),
         vec![Value::String("CBT".into())],
@@ -2558,7 +2552,7 @@ fn trainnet_single_precision_conv_pool_dense_step_uses_shared_kernels() {
         options,
     ]))
     .unwrap();
-    let Value::Object(trained_object) = &trained else {
+    let Value::Object(trained_object) = trained.value() else {
         panic!("expected trained dlnetwork")
     };
     let Some(Value::Struct(info)) = trained_object.properties.get("TrainingInfo") else {
@@ -2568,7 +2562,7 @@ fn trainnet_single_precision_conv_pool_dense_step_uses_shared_kernels() {
         panic!("expected training loss")
     };
     assert!((history.materialize_f64()[0] - 12.5).abs() < 1.0e-4);
-    let prediction = block_on(forward_builtin(trained, predictor, vec![])).unwrap();
+    let prediction = block_on(forward_builtin(trained.value().clone(), predictor, vec![])).unwrap();
     let Value::Object(prediction) = prediction else {
         panic!("formatted predictor should produce dlarray")
     };
@@ -2602,10 +2596,11 @@ fn trainnet_recurrent_modes_preserve_canonical_state_across_minibatches() {
             } else {
                 block_on(lstm_layer_builtin(Value::Num(1.0), recurrent_options)).unwrap()
             };
-            let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+            let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
                 CellArray::new(vec![input, recurrent], 2, 1).unwrap(),
             )]))
             .unwrap();
+            let network = network_owner.value().clone();
             let Value::Object(initial) = &network else {
                 panic!("expected dlnetwork")
             };
@@ -2647,7 +2642,7 @@ fn trainnet_recurrent_modes_preserve_canonical_state_across_minibatches() {
                 options,
             ]))
             .unwrap();
-            let Value::Object(trained) = trained else {
+            let Value::Object(trained) = trained.value() else {
                 panic!("expected trained dlnetwork")
             };
             assert_eq!(trained.properties.get("_State"), Some(&initial_state));
@@ -2728,7 +2723,7 @@ fn train_network_normalization_activations_softmax_matches_classification_oracle
         predictor, labels, layers, options,
     ]))
     .unwrap();
-    let Value::Object(trained) = trained else {
+    let Value::Object(trained) = trained.value() else {
         panic!("expected trained SeriesNetwork")
     };
     let Some(Value::Struct(info)) = trained.properties.get("TrainingInfo") else {
@@ -2812,7 +2807,7 @@ fn supervised_l2_regularizes_weights_but_not_default_bias() {
         options,
     ]))
     .unwrap();
-    let Value::Object(network) = trained else {
+    let Value::Object(network) = trained.value() else {
         panic!("expected trained network")
     };
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -2861,7 +2856,7 @@ fn train_network_rmsprop_executes_native_optimizer_step() {
         options,
     ]))
     .unwrap();
-    let Value::Object(network) = trained else {
+    let Value::Object(network) = trained.value() else {
         panic!("expected trained network")
     };
     assert_eq!(
@@ -4519,12 +4514,12 @@ fn dlfeval_preserves_requested_output_count() {
         Value::String("b".into()),
     ]))
     .expect("dlfeval deal");
-    let Value::OutputList(outputs) = out else {
+    let Value::OutputList(outputs) = out.value() else {
         panic!("expected output list");
     };
     assert_eq!(
-        outputs,
-        vec![Value::String("a".into()), Value::String("b".into())]
+        outputs.as_slice(),
+        &[Value::String("a".into()), Value::String("b".into())]
     );
 }
 
@@ -4540,12 +4535,12 @@ fn dlfeval_registered_dispatch_preserves_requested_outputs() {
         2,
     ))
     .expect("registered dlfeval deal");
-    let Value::OutputList(outputs) = out else {
+    let Value::OutputList(outputs) = out.value() else {
         panic!("expected output list");
     };
     assert_eq!(
-        outputs,
-        vec![Value::String("left".into()), Value::String("right".into())]
+        outputs.as_slice(),
+        &[Value::String("left".into()), Value::String("right".into())]
     );
 }
 
@@ -4597,7 +4592,7 @@ fn dlfeval_owned_resident_argument_survives_callback_and_unpolled_drop() {
             Value::GpuTensor(resident.clone()),
         ]))
         .unwrap();
-        let Value::GpuTensor(returned) = output else {
+        let Value::GpuTensor(returned) = output.value() else {
             panic!("callback must retain the resident value")
         };
         assert_eq!(
@@ -4644,7 +4639,7 @@ fn dlupdate_maps_matching_struct_and_cell_trees() {
         Value::Struct(right),
     ]))
     .expect("dlupdate plus");
-    let Value::Struct(out) = out else {
+    let Value::Struct(out) = out.value() else {
         panic!("expected struct output");
     };
     let Value::Tensor(weights) = out.fields.get("Weights").unwrap() else {
@@ -4675,7 +4670,7 @@ fn dlupdate_borrowed_resident_tree_survives_callback_and_preflight_rejection() {
             tree(),
         ]))
         .unwrap();
-        let Value::Cell(output) = output else {
+        let Value::Cell(output) = output.value() else {
             panic!("callback must reconstruct the cell tree")
         };
         let Value::GpuTensor(returned) = &output.data[0] else {
@@ -4716,7 +4711,7 @@ fn dlupdate_preserves_typed_struct_array_shape_and_schema() {
         Value::StructArray(right),
     ]))
     .expect("dlupdate structure array");
-    let Value::StructArray(output) = output else {
+    let Value::StructArray(output) = output.value() else {
         panic!("expected typed structure array");
     };
     assert_eq!(output.shape(), &[2, 1]);
@@ -4743,10 +4738,10 @@ fn dlupdate_reconstructs_multiple_output_trees() {
         second.clone(),
     ]))
     .expect("dlupdate deal");
-    let Value::OutputList(outputs) = out else {
+    let Value::OutputList(outputs) = out.value() else {
         panic!("expected output list");
     };
-    assert_eq!(outputs, vec![first, second]);
+    assert_eq!(outputs.as_slice(), &[first, second]);
 }
 
 #[test]
@@ -4804,10 +4799,10 @@ fn dlupdate_maps_learnables_table_value_variable_only() {
         right,
     ]))
     .expect("dlupdate table");
-    let Value::Object(object) = out else {
+    let Value::Object(object) = out.value() else {
         panic!("expected table object");
     };
-    let vars = crate::builtins::table::table_variables(&object).expect("table variables");
+    let vars = crate::builtins::table::table_variables(object).expect("table variables");
     assert_eq!(
         vars.fields.get("Layer"),
         Some(&Value::StringArray(
@@ -4838,7 +4833,7 @@ fn dlupdate_treats_dlarray_objects_as_leaves() {
         dlarray.clone(),
     ]))
     .expect("dlupdate dlarray");
-    assert_eq!(out, Value::String("dlarray".into()));
+    assert_eq!(out.value(), &Value::String("dlarray".into()));
 }
 
 #[test]

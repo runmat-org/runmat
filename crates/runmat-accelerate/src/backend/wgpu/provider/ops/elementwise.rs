@@ -651,9 +651,7 @@ impl WgpuProvider {
                         total: len as u32,
                         digits,
                     };
-                    emission
-                        .queue()
-                        .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                    emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                     let groups = frame
                         .launch
                         .dispatch_groups(chunk_len)
@@ -1539,9 +1537,7 @@ impl WgpuProvider {
                                 as u64,
                             "runmat-scalar-params-f64",
                         )?;
-                        emission
-                            .queue()
-                            .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                        emission.write_buffer(buf.as_ref(), 0, bytes_of(&params));
                         buf
                     }
                     NumericPrecision::F32 => {
@@ -1562,9 +1558,7 @@ impl WgpuProvider {
                                 as u64,
                             "runmat-scalar-params-f32",
                         )?;
-                        emission
-                            .queue()
-                            .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                        emission.write_buffer(buf.as_ref(), 0, bytes_of(&params));
                         buf
                     }
                 };
@@ -1814,12 +1808,12 @@ impl WgpuProvider {
             if let Some(observed) = observed {
                 observed.borrow_mut().begin_effect();
             }
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-binary-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-binary-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-binary-noop-pass"),
                 timestamp_writes: None,
@@ -1843,12 +1837,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-binary-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-binary-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
                 if let Some(observed) = observed {
                     observed
@@ -1892,9 +1886,7 @@ impl WgpuProvider {
                 if let Some(observed) = observed {
                     observed.borrow_mut().uniform(&params_buffer)?;
                 }
-                emission
-                    .queue()
-                    .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                 let bind_group = emission
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2258,9 +2250,7 @@ impl WgpuProvider {
                     params.a_strides[i] = AlignedU32::new(stride_a[i]);
                     params.b_strides[i] = AlignedU32::new(stride_b[i]);
                 }
-                emission
-                    .queue()
-                    .write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
+                emission.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
                 let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -2676,7 +2666,7 @@ impl WgpuProvider {
             fn update(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>, len: u32, offset: u32) {
                 self.template[..4].copy_from_slice(&len.to_ne_bytes());
                 self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
-                emission.queue().write_buffer(self.buffer.as_ref(), 0, &self.template);
+                emission.write_buffer(self.buffer.as_ref(), 0, &self.template);
             }
         }
 
@@ -2727,7 +2717,7 @@ impl WgpuProvider {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            emission.queue().write_buffer(buffer.as_ref(), 0, &bytes);
+            emission.write_buffer(buffer.as_ref(), 0, &bytes);
             let uniform_buffer = buffer.clone();
             let state = BroadcastUniformState {
                 buffer,
@@ -2824,16 +2814,14 @@ impl WgpuProvider {
                         _pad1: 0,
                         _pad2: 0,
                     };
-                    emission.queue().write_buffer(buffer.as_ref(), 0, bytes_of(&params));
+                    emission.write_buffer(buffer.as_ref(), 0, bytes_of(&params));
                 }
             }
 
             let workgroups = launch
                 .dispatch_groups(chunk_len)
                 .ok_or_else(|| anyhow!("fused_elementwise: launch exceeds enabled limits"))?;
-            let mut enc =
-                emission.device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            let mut enc = pending.profiled_encoder(emission, &wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-fusion-elementwise-encoder"),
                     });
             {
@@ -3146,9 +3134,7 @@ impl WgpuProvider {
                 ) {
                     self.template[..4].copy_from_slice(&len.to_ne_bytes());
                     self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
-                    emission
-                        .queue()
-                        .write_buffer(self.buffer.as_ref(), 0, &self.template);
+                    emission.write_buffer(self.buffer.as_ref(), 0, &self.template);
                 }
             }
 
@@ -3188,9 +3174,7 @@ impl WgpuProvider {
                     mapped_at_creation: false,
                 }),
             );
-            emission
-                .queue()
-                .write_buffer(uniform_buffer.as_ref(), 0, &bytes);
+            emission.write_buffer(uniform_buffer.as_ref(), 0, &bytes);
 
             let mut uniform_state = BroadcastUniformState {
                 buffer: uniform_buffer.clone(),
@@ -3242,12 +3226,12 @@ impl WgpuProvider {
                     chunk_len as u32,
                     workgroup_size,
                 );
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-fusion-multi-elementwise-encoder"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-fusion-multi-elementwise-encoder"),
+                    },
+                );
                 {
                     let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("runmat-fusion-multi-elementwise-pass"),

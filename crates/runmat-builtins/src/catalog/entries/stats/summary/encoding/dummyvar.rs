@@ -9,6 +9,7 @@ fn dummyvar_infer(
     inference::dummyvar(request, entry)
 }
 pub const DUMMYVAR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dummyvar" },
     category: "stats/summary",

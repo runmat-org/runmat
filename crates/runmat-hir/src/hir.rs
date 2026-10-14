@@ -161,7 +161,10 @@ pub enum FunctionKind {
     Named,
     Anonymous,
     SyntheticEntrypoint,
-    ClassMethod { is_static: bool },
+    ClassMethod {
+        is_static: bool,
+        role: runmat_types::ClassMethodRole,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
@@ -220,7 +223,7 @@ pub struct HirBinding {
     pub declared_span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum BindingOwner {
     Module(ModuleId),
     Function(FunctionId),
@@ -437,11 +440,11 @@ pub enum HirCallableRef {
     Builtin(BuiltinId),
     Imported(DefPath),
     SuperConstructor {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
     },
     SuperMethod {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
         method: SymbolName,
     },

@@ -1,4 +1,5 @@
 use super::{PreparedSequenceEndpoint, SequenceEndpointSpec};
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::indexing::plan::IndexPlan;
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
@@ -38,6 +39,8 @@ pub(super) enum PreparedAssignmentStep {
 #[derive(Debug, Clone)]
 pub struct PreparedSequenceDestination {
     kind: PreparedDestinationKind,
+    _retained_roots: RootedValueLease,
+    _source_roots: RootedValueLease,
 }
 
 #[derive(Debug, Clone)]
@@ -70,18 +73,24 @@ struct ObjectSuffixBuilder {
 
 #[derive(Debug, Clone)]
 pub struct SequenceDestinationBuilder {
-    current: Value,
+    current: RootedValue,
+    source_roots: RootedValueLease,
     steps: Vec<PreparedAssignmentStep>,
     object_suffix: Option<ObjectSuffixBuilder>,
+    selector_roots: Vec<RootedValueLease>,
 }
 
 impl SequenceDestinationBuilder {
-    pub fn new(root: &Value) -> Self {
-        Self {
-            current: root.clone(),
+    pub fn new(root: &Value) -> Result<Self, RuntimeError> {
+        let source_roots = RootedValueLease::for_values(std::iter::once(root))
+            .map_err(|error| error.into_runtime_error())?;
+        Ok(Self {
+            current: RootedValue::new(root.clone()).map_err(|error| error.into_runtime_error())?,
+            source_roots,
             steps: Vec::new(),
             object_suffix: None,
-        }
+            selector_roots: Vec::new(),
+        })
     }
 
     pub fn current(&self) -> &Value {
@@ -121,26 +130,36 @@ impl SequenceDestinationBuilder {
         step: AssignmentStepSpec,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
+        let step_roots =
+            RootedValueLease::for_traced(&step).map_err(|error| error.into_runtime_error())?;
         if let Some(suffix) = &mut self.object_suffix {
             suffix.structural_steps.push(step.clone());
             suffix.steps.push(object_subscript_from_step(step));
+            self.selector_roots.push(step_roots);
             return Ok(());
         }
         if let Some(expected_class) =
             crate::object::indexing::class_name_from_base(&self.current).cloned()
         {
             self.object_suffix = Some(ObjectSuffixBuilder {
-                target: self.current.clone(),
+                target: self.current.value().clone(),
                 expected_class,
                 structural_steps: vec![step.clone()],
                 steps: vec![object_subscript_from_step(step)],
             });
+            self.selector_roots.push(step_roots);
             return Ok(());
         }
         let step = prepare_step(&self.current, step).await?;
-        self.current =
-            read_step(context, self.current.clone(), &step, caller_function_name).await?;
+        self.current = read_step(
+            context,
+            self.current.value().clone(),
+            &step,
+            caller_function_name,
+        )
+        .await?;
         self.steps.push(step);
+        self.selector_roots.push(step_roots);
         Ok(())
     }
 
@@ -164,9 +183,14 @@ impl SequenceDestinationBuilder {
         context: Option<&crate::context::RuntimeContext>,
         endpoint: SequenceEndpointSpec,
     ) -> Result<PreparedSequenceDestination, RuntimeError> {
+        let _endpoint_roots =
+            RootedValueLease::for_traced(&endpoint).map_err(|error| error.into_runtime_error())?;
         if matches!(&endpoint, SequenceEndpointSpec::Member(_))
             && crate::object::indexing::class_name_from_base(&self.current).is_none()
-            && !matches!(&self.current, Value::Struct(_) | Value::StructArray(_))
+            && !matches!(
+                self.current.value(),
+                Value::Struct(_) | Value::StructArray(_)
+            )
             && self.steps.iter().any(|step| {
                 matches!(
                     step,
@@ -188,7 +212,7 @@ impl SequenceDestinationBuilder {
                 crate::object::indexing::class_name_from_base(&self.current).cloned()
             {
                 self.object_suffix = Some(ObjectSuffixBuilder {
-                    target: self.current.clone(),
+                    target: self.current.value().clone(),
                     expected_class,
                     structural_steps: Vec::new(),
                     steps: Vec::new(),
@@ -219,8 +243,8 @@ impl SequenceDestinationBuilder {
                     .await?
                 }
             };
-            return Ok(PreparedSequenceDestination {
-                kind: PreparedDestinationKind::ObjectProtocol(Box::new(
+            return PreparedSequenceDestination::rooted(
+                PreparedDestinationKind::ObjectProtocol(Box::new(
                     PreparedObjectProtocolDestination {
                         prefix: self.steps,
                         expected_class: suffix.expected_class,
@@ -231,14 +255,31 @@ impl SequenceDestinationBuilder {
                         cardinality: cardinality.count,
                     },
                 )),
-            });
+                self.source_roots,
+            );
         }
         let endpoint = PreparedSequenceEndpoint::prepare(&self.current, endpoint).await?;
-        Ok(PreparedSequenceDestination {
-            kind: PreparedDestinationKind::Structural {
+        PreparedSequenceDestination::rooted(
+            PreparedDestinationKind::Structural {
                 steps: self.steps,
                 endpoint,
             },
+            self.source_roots,
+        )
+    }
+}
+
+impl PreparedSequenceDestination {
+    fn rooted(
+        kind: PreparedDestinationKind,
+        source_roots: RootedValueLease,
+    ) -> Result<Self, RuntimeError> {
+        let retained_roots =
+            RootedValueLease::for_traced(&kind).map_err(|error| error.into_runtime_error())?;
+        Ok(Self {
+            kind,
+            _retained_roots: retained_roots,
+            _source_roots: source_roots,
         })
     }
 }

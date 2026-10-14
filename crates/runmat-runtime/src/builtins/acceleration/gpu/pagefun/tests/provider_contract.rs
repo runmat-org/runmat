@@ -48,13 +48,13 @@ impl AccelProvider for Provider {
             _ => {}
         }
         let output = match self.response {
-            Response::WrongStorage => {
-                self.inner
-                    .upload_logical_raw(&runmat_accelerate_api::HostLogicalTensorView {
-                        data: &[1, 0, 0, 1],
-                        shape: &[2, 2],
-                    })?
-            }
+            Response::WrongStorage => self
+                .inner
+                .upload_logical_raw(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 0, 1],
+                    shape: &[2, 2],
+                })
+                .expect("fixture logical output allocation"),
             _ => self.inner.upload(&HostTensorView {
                 data: &[1., 0., 0., 1.],
                 shape: if matches!(self.response, Response::WrongShape) {

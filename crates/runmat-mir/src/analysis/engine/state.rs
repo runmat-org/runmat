@@ -5,7 +5,7 @@ use runmat_types::{
     ValueSequenceFact,
 };
 
-use crate::{MirBody, MirSequenceLocalId};
+use crate::{MirBody, MirLocalId, MirSequenceLocalId};
 
 use super::super::InitFact;
 
@@ -50,7 +50,12 @@ pub(crate) struct FlowState {
 }
 
 impl FlowState {
-    pub fn entry(body: &MirBody, parameters: &[ValueFact], captures: &[ValueFact]) -> Self {
+    pub fn entry(
+        body: &MirBody,
+        parameters: &[ValueFact],
+        captures: &[ValueFact],
+        constructor_instance: Option<MirLocalId>,
+    ) -> Self {
         let mut state = Self {
             locals: vec![LocalState::unassigned(); body.locals.len()],
             effects: EffectSet::default(),
@@ -85,6 +90,12 @@ impl FlowState {
                     LiteralValue::Unknown,
                 );
             }
+        }
+        if let Some(local) = constructor_instance {
+            state.locals[local.0] = LocalState::assigned(
+                ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+                LiteralValue::Unknown,
+            );
         }
         state
     }
@@ -259,18 +270,18 @@ mod tests {
     fn sequence_facts_join_exactly_only_when_all_predecessors_define_them() {
         let body = empty_body();
         let id = MirSequenceLocalId(3);
-        let mut left = FlowState::entry(&body, &[], &[]);
+        let mut left = FlowState::entry(&body, &[], &[], None);
         left.set_sequence(id, ValueSequenceFact::single(number()));
-        let right = FlowState::entry(&body, &[], &[]);
+        let right = FlowState::entry(&body, &[], &[], None);
         assert!(left.join_from(&right, false));
         assert_eq!(
             left.sequence_facts().get(&id),
             Some(&ValueSequenceFact::dynamic())
         );
 
-        let mut first = FlowState::entry(&body, &[], &[]);
+        let mut first = FlowState::entry(&body, &[], &[], None);
         first.set_sequence(id, ValueSequenceFact::single(number()));
-        let mut second = FlowState::entry(&body, &[], &[]);
+        let mut second = FlowState::entry(&body, &[], &[], None);
         second.set_sequence(
             id,
             ValueSequenceFact::single(ValueFact::unknown(DynamicReason::RuntimeValue)),

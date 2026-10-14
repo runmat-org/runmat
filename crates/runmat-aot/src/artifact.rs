@@ -20,6 +20,7 @@ pub fn materialize_native_object_artifact(
     object
         .validate()
         .map_err(|error| AotError::contract("aot.artifact.object", error.to_string()))?;
+    validate_object_policy(&recipe, &object.manifest)?;
     let environment = recipe.program_revision.environment();
     if object.manifest.runtime_fingerprint != environment.runtime_fingerprint
         || object.manifest.catalog_fingerprint != environment.catalog_fingerprint
@@ -89,6 +90,7 @@ pub fn read_native_object_artifact(
     }
     let manifest: NativeObjectManifest = serde_json::from_slice(&payload.metadata)
         .map_err(|error| AotError::contract("aot.artifact.metadata", error.to_string()))?;
+    validate_object_policy(recipe, &manifest)?;
     if canonical_native_manifest(&manifest)? != payload.metadata {
         return Err(AotError::contract(
             "aot.artifact.metadata",
@@ -189,6 +191,25 @@ pub fn read_native_object_artifact(
     Ok(object)
 }
 
+fn validate_object_policy(
+    recipe: &ProgramBuildRecipe,
+    manifest: &NativeObjectManifest,
+) -> AotResult<()> {
+    let recipe_ref = recipe
+        .foreign_policy
+        .as_ref()
+        .map(runmat_execution_artifact::foreign_policy_ref)
+        .transpose()
+        .map_err(|error| AotError::contract("aot.artifact.foreign_policy", error.to_string()))?;
+    if recipe_ref != manifest.foreign_policy {
+        return Err(AotError::contract(
+            "aot.artifact.foreign_policy",
+            "native object policy differs from recipe policy",
+        ));
+    }
+    Ok(())
+}
+
 fn revision_mismatch(
     code: &'static str,
     field: &'static str,
@@ -217,7 +238,9 @@ fn canonical_native_manifest(manifest: &NativeObjectManifest) -> AotResult<Vec<u
 mod tests {
     use std::collections::BTreeSet;
 
-    use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+    use runmat_execution::{
+        Digest, ForeignPolicyRef, OutputContract, ProgramEnvironment, ProgramRevision,
+    };
     use runmat_execution_artifact::{
         ExecutableForm, NativeObjectPayload, ProgramArtifact, ProgramBuildRecipe,
         ProgramTargetCohort, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -282,6 +305,7 @@ mod tests {
                 catalog_fingerprint: catalog,
                 optimization: NativeOptimization::Speed,
                 runtime_binding_mode: AotRuntimeBindingMode::Dynamic,
+                foreign_policy: None,
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
                 entrypoint: function,
@@ -321,6 +345,7 @@ mod tests {
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
 
@@ -340,6 +365,35 @@ mod tests {
                     .token(),
             )
             .unwrap()
+        );
+
+        let captured_policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&Default::default())
+                .unwrap();
+        let mut policy_object = object.clone();
+        policy_object.manifest.foreign_policy = Some(
+            runmat_execution_artifact::foreign_policy_ref(&captured_policy.descriptor).unwrap(),
+        );
+        let mut policy_recipe = recipe.clone();
+        policy_recipe.foreign_policy = Some(captured_policy.descriptor);
+        let (policy_recipe, policy_artifact) =
+            materialize_native_object_artifact(policy_recipe, &policy_object).unwrap();
+        assert_eq!(
+            read_native_object_artifact(&policy_recipe, &policy_artifact).unwrap(),
+            policy_object
+        );
+        let mut substituted_policy = policy_object.manifest.clone();
+        substituted_policy.foreign_policy = Some(ForeignPolicyRef::new(
+            Digest::sha256(b"substituted-captured-policy"),
+            std::num::NonZeroU64::new(16).unwrap(),
+        ));
+        let substituted_artifact =
+            artifact_with_manifest(&policy_recipe, &substituted_policy, &policy_object.bytes);
+        assert!(
+            read_native_object_artifact(&policy_recipe, &substituted_artifact)
+                .unwrap_err()
+                .to_string()
+                .contains("aot.artifact.foreign_policy")
         );
 
         let wrong_payload_format = match payload.object_format {
@@ -423,6 +477,15 @@ mod tests {
         )));
 
         for (mutate, expected_code) in [
+            (
+                (|manifest: &mut NativeObjectManifest| {
+                    manifest.foreign_policy = Some(ForeignPolicyRef::new(
+                        Digest::sha256(b"substituted-policy"),
+                        std::num::NonZeroU64::new(16).unwrap(),
+                    ));
+                }) as fn(&mut NativeObjectManifest),
+                "aot.artifact.foreign_policy",
+            ),
             (
                 (|manifest: &mut NativeObjectManifest| {
                     manifest.runtime_fingerprint = Digest::sha256(b"other-runtime")

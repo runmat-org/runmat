@@ -10,6 +10,7 @@ mod tests;
 pub use invocation::*;
 pub use path_execution::*;
 pub use receiver::*;
+pub(crate) use resolution::selected_receiver_facts as selected_graph_receiver_facts;
 pub use resolution::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +27,7 @@ pub struct ObjectAccessContext {
     pub caller_method: Option<runmat_types::MethodName>,
     pub active_protocol: Option<ObjectProtocol>,
     pub active_method: Option<ActiveObjectMethodIdentity>,
+    pub selected_active_owner: Option<runmat_types::ClassMethodOwner>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,10 +35,39 @@ pub struct ActiveObjectMethodIdentity {
     pub declaring_class: runmat_types::ClassIdentity,
     pub method: runmat_types::MethodName,
     pub callable: runmat_types::CallableIdentity,
-    pub registry_generation: u64,
+    pub registry_generation: crate::class_registry::ClassRegistryRevision,
 }
 
 impl ObjectAccessContext {
+    pub fn from_selected_method_frame(
+        owner: &runmat_types::ClassMethodOwner,
+        facts: &runmat_value::SelectedObjectClassFacts,
+    ) -> Result<Self, crate::RuntimeError> {
+        let admitted = match owner.role {
+            runmat_types::ClassMethodRole::Ordinary => facts
+                .method(&owner.method)
+                .is_some_and(|method| &method.owner == owner),
+            runmat_types::ClassMethodRole::Constructor => {
+                facts.ancestry().contains(&owner.declaring_class) && !owner.is_static
+            }
+        };
+        if !admitted {
+            return Err(crate::runtime_error::semantic_error(
+                "ObjectMethodFrameIdentityMismatch",
+                "selected method frame differs from its receiver's class product",
+            ));
+        }
+        Ok(Self {
+            caller_class: Some(owner.declaring_class.clone()),
+            caller_method: Some(owner.method.clone()),
+            active_protocol: (!owner.is_static)
+                .then(|| ObjectProtocol::from_method(&owner.method))
+                .flatten(),
+            active_method: None,
+            selected_active_owner: Some(owner.clone()),
+        })
+    }
+
     pub fn from_method_frame(
         owner: Option<&runmat_types::ClassMethodOwner>,
         executable: &runmat_types::CallableIdentity,
@@ -77,6 +108,7 @@ impl ObjectAccessContext {
                 .as_ref()
                 .and_then(|_| ObjectProtocol::from_method(&owner.method)),
             active_method,
+            selected_active_owner: None,
         })
     }
 
@@ -102,6 +134,7 @@ impl ObjectAccessContext {
             active_protocol: caller_method.as_ref().and_then(ObjectProtocol::from_method),
             caller_method,
             active_method,
+            selected_active_owner: None,
         }
     }
 }

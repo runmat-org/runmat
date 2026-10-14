@@ -1,5 +1,8 @@
 use crate::bytecode::program::ExecutionContext;
 use runmat_runtime::execution::value_codec::encode_inline_value_in_context;
+use runmat_runtime::execution::{
+    RootedValue, RootedValueLease, RootedValueSequence, RootedValues, RootedValuesBuilder,
+};
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -12,7 +15,7 @@ pub(super) async fn execute(
     operation: crate::BytecodeCollectiveOp,
     arguments: Vec<Value>,
     execution: &ExecutionContext,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let contract = bytecode
         .collective_contracts
         .iter()
@@ -249,19 +252,14 @@ async fn collective_response(
     response: runmat_execution::CollectiveResponse,
     operation: crate::BytecodeCollectiveOp,
     function_registry: &crate::FunctionRegistry,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     use runmat_execution::CollectiveResponse;
 
     match response {
         CollectiveResponse::Complete => single_output(empty_value()),
-        CollectiveResponse::Value { value } => {
-            runmat_runtime::execution::value_codec::decode_inline_value(&value)
-                .map_err(value_codec_error)
-                .and_then(single_output)
-        }
+        CollectiveResponse::Value { value } => single_rooted_output(decode_value(&value)?),
         CollectiveResponse::Received { value, source, tag } => {
-            let value = runmat_runtime::execution::value_codec::decode_inline_value(&value)
-                .map_err(value_codec_error)?;
+            let value = decode_value(&value)?;
             let requested_outputs = match operation {
                 crate::BytecodeCollectiveOp::Receive {
                     requested_outputs, ..
@@ -270,114 +268,130 @@ async fn collective_response(
                 _ => 1,
             };
             if requested_outputs == 1 {
-                single_output(value)
+                single_rooted_output(value)
             } else {
-                let mut outputs = vec![value, Value::Num(f64::from(source.0))];
-                if requested_outputs == 3 {
-                    outputs.push(Value::Int(runmat_value::IntValue::U64(tag.0)));
-                }
-                runmat_value::ValueSequence::comma_separated(outputs)
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                value.try_map_owned(
+                    |value| {
+                        let mut outputs = vec![value, Value::Num(f64::from(source.0))];
+                        if requested_outputs == 3 {
+                            outputs.push(Value::Int(runmat_value::IntValue::U64(tag.0)));
+                        }
+                        runmat_value::ValueSequence::comma_separated(outputs)
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                )
             }
         }
         CollectiveResponse::Values { values } => {
             let count = values.len();
-            let values = values
-                .iter()
-                .map(runmat_runtime::execution::value_codec::decode_inline_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(value_codec_error)?;
-            runmat_value::CellArray::new_with_shape(values, vec![count, 1])
-                .map(Value::Cell)
-                .map_err(|error| {
-                    runmat_runtime::runtime_error::semantic_error("RunMat:CollectiveResult", error)
-                })
-                .and_then(single_output)
+            decode_values(&values)?.with_owned_values(|values| {
+                runmat_value::CellArray::new_with_shape(values, vec![count, 1])
+                    .map(Value::Cell)
+                    .map_err(|error| {
+                        runmat_runtime::runtime_error::semantic_error(
+                            "RunMat:CollectiveResult",
+                            error,
+                        )
+                    })
+                    .and_then(single_output)
+            })
         }
         CollectiveResponse::ReductionInputs { operator, values } => {
-            let mut values = values
-                .iter()
-                .map(runmat_runtime::execution::value_codec::decode_inline_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(value_codec_error)?
-                .into_iter();
-            let mut accumulator = values.next().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "CollectiveReductionEmpty",
-                    "collective reduction received no lab contributions",
-                )
-            })?;
-            for contribution in values {
-                accumulator = runmat_runtime::parallel::reduction::combine_in_context(
-                    Some(runtime),
-                    operator,
-                    accumulator,
-                    contribution,
-                )
-                .await?;
-            }
-            single_output(accumulator)
+            decode_values(&values)?
+                .with_owned_values_async(|values| async move {
+                    let mut values = values.into_iter();
+                    let accumulator = values.next().ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "CollectiveReductionEmpty",
+                            "collective reduction received no lab contributions",
+                        )
+                    })?;
+                    let mut accumulator = RootedValue::new(accumulator)
+                        .map_err(|error| error.into_runtime_error())?;
+                    for contribution in values {
+                        accumulator = runmat_runtime::parallel::reduction::combine_in_context(
+                            Some(runtime),
+                            operator,
+                            accumulator,
+                            contribution,
+                        )
+                        .await?;
+                    }
+                    single_rooted_output(accumulator)
+                })
+                .await
         }
         CollectiveResponse::ConcatenationInputs { dimension, values } => {
             if values.len() == 1 {
-                return runmat_runtime::execution::value_codec::decode_inline_value(&values[0])
-                    .map_err(value_codec_error)
-                    .and_then(single_output);
+                return single_rooted_output(decode_value(&values[0])?);
             }
-            let mut arguments = Vec::with_capacity(values.len() + 1);
-            arguments.push(Value::Int(runmat_value::IntValue::U32(dimension)));
-            arguments.extend(
-                values
-                    .iter()
-                    .map(runmat_runtime::execution::value_codec::decode_inline_value)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(value_codec_error)?,
-            );
-            crate::call::execute_callable_descriptor(
-                runtime,
-                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId("cat".into())),
-                    arguments,
-                    1,
-                    runmat_hir::CallableFallbackPolicy::None,
-                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
-                ),
-            )
-            .await
+            decode_values(&values)?
+                .with_owned_values_async(|values| async move {
+                    let mut arguments = Vec::with_capacity(values.len() + 1);
+                    arguments.push(Value::Int(runmat_value::IntValue::U32(dimension)));
+                    arguments.extend(values);
+                    crate::call::execute_callable_descriptor(
+                        runtime,
+                        runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                            runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId(
+                                "cat".into(),
+                            )),
+                            arguments,
+                            1,
+                            runmat_hir::CallableFallbackPolicy::None,
+                            runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                        ),
+                    )
+                    .await
+                })
+                .await
         }
         CollectiveResponse::FunctionalReductionInputs { reducer, values } => {
-            let reducer = runmat_runtime::execution::value_codec::decode_inline_value(&reducer)
-                .map_err(value_codec_error)?;
-            let mut values = values
-                .iter()
-                .map(runmat_runtime::execution::value_codec::decode_inline_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(value_codec_error)?
-                .into_iter();
-            let mut accumulator = values.next().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "CollectiveReductionEmpty",
-                    "functional reduction received no lab contributions",
-                )
-            })?;
-            for contribution in values {
-                let descriptor =
-                    runmat_runtime::call::descriptor::CallableDescriptor::from_feval_value(
-                        reducer.clone(),
-                        vec![accumulator, contribution],
-                        1,
-                        function_registry,
-                    );
-                let mut outputs =
-                    crate::call::execute_callable_descriptor(runtime, descriptor)
-                        .await?
-                        .resolve(
-                            runmat_types::SequenceUse::RequireSingle,
-                            runmat_runtime::sequence::SequenceResolutionContext::default(),
+            let reducer = decode_value(&reducer)?;
+            decode_values(&values)?
+                .with_owned_values_async(|values| async move {
+                    let mut values = values.into_iter();
+                    let accumulator = values.next().ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "CollectiveReductionEmpty",
+                            "functional reduction received no lab contributions",
+                        )
+                    })?;
+                    let mut accumulator = RootedValue::new(accumulator)
+                        .map_err(|error| error.into_runtime_error())?;
+                    for contribution in values {
+                        let (arguments, argument_roots) = accumulator
+                            .with_owned(|accumulator| {
+                                let arguments = vec![accumulator, contribution];
+                                RootedValueLease::for_values(arguments.iter())
+                                    .map(|roots| (arguments, roots))
+                            })
+                            .map_err(|error| error.into_runtime_error())?;
+                        let descriptor =
+                            runmat_runtime::call::descriptor::CallableDescriptor::from_feval_value(
+                                (*reducer).clone(),
+                                arguments,
+                                1,
+                                function_registry,
+                            );
+                        let outputs =
+                            crate::call::execute_callable_descriptor(runtime, descriptor).await?;
+                        drop(argument_roots);
+                        accumulator = outputs.try_map_owned(
+                            |sequence| {
+                                let mut outputs = sequence.resolve(
+                                    runmat_types::SequenceUse::RequireSingle,
+                                    runmat_runtime::sequence::SequenceResolutionContext::default(),
+                                )?;
+                                Ok(outputs.remove(0))
+                            },
+                            |error| error.into_runtime_error(),
                         )?;
-                accumulator = outputs.remove(0);
-            }
-            single_output(accumulator)
+                    }
+                    single_rooted_output(accumulator)
+                })
+                .await
         }
         CollectiveResponse::Probe { available } => single_output(Value::Bool(available)),
         CollectiveResponse::Agreement { .. } | CollectiveResponse::DistributedBuild { .. } => {
@@ -389,9 +403,51 @@ async fn collective_response(
     }
 }
 
-fn single_output(value: Value) -> Result<runmat_value::ValueSequence, RuntimeError> {
+fn decode_value(
+    payload: &runmat_execution::value::ValuePayload,
+) -> Result<RootedValue, RuntimeError> {
+    runmat_runtime::execution::value_codec::decode_inline_value_owned(payload).map_err(|error| {
+        match error {
+            runmat_runtime::execution::value_codec::CooperativeValueCodecError::Value(error) => {
+                super::value_codec_error(error)
+            }
+            runmat_runtime::execution::value_codec::CooperativeValueCodecError::Execution(
+                error,
+            ) => error.into_runtime_error(),
+        }
+    })
+}
+
+fn decode_values(
+    payloads: &[runmat_execution::value::ValuePayload],
+) -> Result<RootedValues, RuntimeError> {
+    let mut decoded = RootedValuesBuilder::with_capacity(payloads.len());
+    for payload in payloads {
+        decoded.push_owned(decode_value(payload)?);
+    }
+    decoded.finish().map_err(|error| error.into_runtime_error())
+}
+
+fn single_output(value: Value) -> Result<RootedValueSequence, RuntimeError> {
     runmat_value::ValueSequence::single(value)
         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        .and_then(root_sequence)
+}
+
+fn single_rooted_output(value: RootedValue) -> Result<RootedValueSequence, RuntimeError> {
+    value.try_map_owned(
+        |value| {
+            runmat_value::ValueSequence::single(value)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        },
+        |error| error.into_runtime_error(),
+    )
+}
+
+fn root_sequence(
+    sequence: runmat_value::ValueSequence,
+) -> Result<RootedValueSequence, RuntimeError> {
+    RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
 }
 
 fn receive_source(

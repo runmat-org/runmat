@@ -10,6 +10,8 @@ use std::task::{Context, Poll};
 mod pending_managed;
 #[path = "native_method_expansion/pending_operator.rs"]
 mod pending_operator;
+#[path = "native_method_expansion/native_sequence_truth.rs"]
+mod native_sequence_truth;
 
 const COMPOUND_EXPANSION: &str = r#"
 function output = first(value)

@@ -7,8 +7,8 @@ use runmat_types::{
 };
 
 use crate::{
-    BasicBlock, BasicBlockId, MirBody, MirOutputTarget, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirBody, MirLocalId, MirOutputTarget, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind,
 };
 
 use super::state::FlowState;
@@ -42,12 +42,13 @@ pub(crate) fn analyze_body(
     function: ProgramFunctionId,
     parameters: &[ValueFact],
     captures: &[ValueFact],
+    constructor_instance: Option<MirLocalId>,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> BodyFlow {
     if body.blocks.is_empty() {
         return BodyFlow {
             points: Vec::new(),
-            final_state: FlowState::entry(body, parameters, captures),
+            final_state: FlowState::entry(body, parameters, captures, constructor_instance),
             return_facts: Vec::new(),
             widened: false,
             converged: true,
@@ -64,7 +65,12 @@ pub(crate) fn analyze_body(
         .collect();
     let mut entries = vec![None; body.blocks.len()];
     let mut updates = vec![0usize; body.blocks.len()];
-    entries[0] = Some(FlowState::entry(body, parameters, captures));
+    entries[0] = Some(FlowState::entry(
+        body,
+        parameters,
+        captures,
+        constructor_instance,
+    ));
     let mut worklist = VecDeque::from([0usize]);
     let mut widened = false;
     let mut converged = true;
@@ -101,7 +107,7 @@ pub(crate) fn analyze_body(
     }
 
     let mut points = Vec::new();
-    let mut final_state = FlowState::entry(body, parameters, captures);
+    let mut final_state = FlowState::entry(body, parameters, captures, constructor_instance);
     let mut has_final = false;
     let mut return_facts = Vec::new();
     let mut diagnostics = Vec::new();
@@ -561,6 +567,7 @@ end
             ProgramFunctionId(u32::try_from(main.0).unwrap()),
             &program.parameters[&main],
             &program.captures[&main],
+            None,
             &program.summaries,
         );
         let helper = by_name["helper"];
@@ -609,6 +616,7 @@ end
             ProgramFunctionId(u32::try_from(main.0).unwrap()),
             &program.parameters[&main],
             &program.captures[&main],
+            None,
             &program.summaries,
         );
         let helper = by_name["helper"];

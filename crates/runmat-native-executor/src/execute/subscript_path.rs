@@ -1,4 +1,5 @@
 use runmat_mir::{MirSubscriptChain, MirSubscriptStep};
+use runmat_runtime::execution::RootedValues;
 use runmat_runtime::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
@@ -135,7 +136,7 @@ fn read_inner(
         roots::subscript_roots(&root, Some(&path)),
         "native_pending_subscript_path",
     )?;
-    super::call_suspension::begin(
+    super::call_suspension::begin_rooted_arguments(
         state,
         embedded.cloned(),
         Box::pin(async move {
@@ -147,9 +148,10 @@ fn read_inner(
                     ),
                 )
                 .await?;
-            sequence
-                .resolve(selection, sequence_context)
-                .map_err(Into::into)
+            sequence.with_owned_sequence(|sequence| {
+                let values = sequence.resolve(selection, sequence_context)?;
+                RootedValues::new(values).map_err(|error| error.into_runtime_error())
+            })
         }),
     )
 }

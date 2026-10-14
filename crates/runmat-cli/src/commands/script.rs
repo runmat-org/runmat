@@ -170,7 +170,6 @@ async fn execute_script_request(
         .await;
     signal_task.abort();
     let response = response.context("Local callback driver stopped during script execution")??;
-    engine.shutdown_local_tasks();
     let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,
@@ -180,6 +179,7 @@ async fn execute_script_request(
                     "could not finish foreign runtime lifecycle after execution failure: {shutdown_error}"
                 );
             }
+            engine.shutdown_local_tasks();
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
@@ -203,10 +203,9 @@ async fn execute_script_request(
             return Err(AlreadyReportedCliError.into());
         }
     };
-    engine
-        .shutdown_foreign_runtime()
-        .await
-        .context("failed to finish foreign runtime lifecycle")?;
+    let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+    engine.shutdown_local_tasks();
+    foreign_lifecycle.context("failed to finish foreign runtime lifecycle")?;
 
     let execution_time = start_time.elapsed();
     emit_execution_streams(&outcome.streams);

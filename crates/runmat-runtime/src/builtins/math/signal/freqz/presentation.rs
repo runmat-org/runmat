@@ -1,8 +1,8 @@
 //! Zero-output frequency-response presentation. Numerical output forms never enter here.
 use super::*;
 use crate::builtins::plotting::state::{
-    PlotRenderOptions, append_active_plot, prepare_plotyy_axes, presentation_unavailable,
-    register_line_handle, with_render_cause,
+    append_active_plot, prepare_plotyy_axes, presentation_unavailable, register_line_handle,
+    with_render_cause, PlotRenderOptions,
 };
 use runmat_plot::plots::LinePlot;
 

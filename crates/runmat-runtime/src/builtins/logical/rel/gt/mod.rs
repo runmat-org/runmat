@@ -56,10 +56,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gt",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::logical::rel::gt"
 )]
-async fn gt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    comparison::evaluate(lhs, rhs, RelationalOperator::GreaterThan).await
+async fn gt_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    comparison::evaluate(runtime.as_ref(), lhs, rhs, RelationalOperator::GreaterThan).await
 }
 
 #[cfg(test)]

@@ -56,7 +56,7 @@ pub(super) async fn optimize(
         })?;
         check_cancellation(runtime)?;
         let elapsed = eval_start.elapsed().as_secs_f64();
-        let objective_value = parse_objective_value(callback).await?;
+        let objective_value = callback.with_owned_async(parse_objective_value).await?;
         observations.push(Observation {
             point,
             objective: objective_value.objective,

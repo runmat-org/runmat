@@ -1,7 +1,9 @@
 //! Preparation of an admitted real floating operand with request-local domain evidence.
 use crate::context::preparation::{
-    execute_current_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_accelerate_api::NumericalDomainEvidence;
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinPreparationFormId};
@@ -10,15 +12,18 @@ use runmat_value::{NumericDType, Tensor, Value};
 use std::future::Future;
 
 pub(crate) async fn execute<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     entry: &'static BuiltinCatalogEntry,
     predicate: RealUnaryPredicate,
     value: Value,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     if !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
         return body(value).await;
@@ -52,9 +57,12 @@ where
             ..
         }
     ) {
-        return body(request.into_operands().remove(0)).await;
+        return request
+            .into_operands()
+            .with_owned_values_async(|mut values| body(values.remove(0)))
+            .await;
     }
-    execute_current_request(request, |mut values| body(values.remove(0))).await
+    execute_request(runtime, request, |mut values| body(values.remove(0))).await
 }
 
 fn classify(tensor: &Tensor, predicate: RealUnaryPredicate) -> RealUnaryClassification {

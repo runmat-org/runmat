@@ -83,14 +83,15 @@ mod tests {
             Value::CharArray(CharArray::new_row("text")),
             Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell")),
             Value::Struct(st),
-            Value::FunctionHandle("sin".to_string()),
-            Value::Closure(Closure {
+            Value::FunctionHandle("sin".into()),
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                lexical_environment: None,
                 function_name: "anon".into(),
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: Vec::new(),
-            }),
+            })),
         ];
 
         for value in values {

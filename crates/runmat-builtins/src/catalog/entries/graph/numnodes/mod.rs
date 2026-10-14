@@ -8,6 +8,7 @@ pub use contract::NUMNODES_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&NUMNODES_CATALOG_ENTRY];
 
 pub const NUMNODES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "numnodes" },
     category: "graph",

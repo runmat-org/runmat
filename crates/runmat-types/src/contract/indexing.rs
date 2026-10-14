@@ -27,12 +27,19 @@ pub enum ObjectIndexingContext {
 /// Exact semantic owner of executable class-method code. Executors combine
 /// this declaration identity with the active callable identity; registry
 /// generations remain runtime-only and are never serialized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ClassMethodRole {
+    Ordinary,
+    Constructor,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClassMethodOwner {
     pub declaring_class: crate::ClassIdentity,
     pub method: crate::MethodName,
     pub is_static: bool,
+    pub role: ClassMethodRole,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

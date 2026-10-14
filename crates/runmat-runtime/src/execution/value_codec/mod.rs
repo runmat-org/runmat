@@ -2,15 +2,26 @@ mod decode;
 mod durable;
 mod encode;
 mod error;
+mod graph;
 mod path;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use decode::decode_inline_value_rooted;
 pub use decode::{
-    decode_durable_values_cooperatively, decode_inline_value, decode_inline_values_cooperatively,
-    CooperativeValueCodecError,
+    decode_durable_values_cooperatively, decode_inline_value, decode_inline_value_owned,
+    decode_inline_values_cooperatively, CooperativeValueCodecError,
 };
 pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
 pub use encode::{encode_inline_value, encode_inline_value_in_context};
 pub use error::ValueCodecError;
+pub use graph::{
+    decode_payload_graph_in_context, decode_payload_graph_with_selected_classes_in_context,
+    decode_payload_graph_with_source_issuer_in_context, deferred_invocation_requires_graph,
+    encode_payload_graph_in_context, encode_payload_graph_with_issuer,
+    prepare_deferred_invocation_graph, prepare_payload_graph, GraphFrameSourceRequirement,
+    GraphSourceIssuer, GraphSourceUnitFacts, PreparedPayloadGraph,
+};
+pub use graph::{GraphCallableProof, GraphCaptureProof, GraphNestedZeroCopy};
 
 #[cfg(test)]
 mod tests {
@@ -260,6 +271,37 @@ mod tests {
             error,
             ValueCodecError::TransientSequenceNotPortable { ref path } if path == "$[0]"
         ));
+
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let text = "x = 1;";
+        let source_map = runmat_execution::ExecutableSourceMapV2::new(vec![
+            runmat_execution::ExecutableSourceRecordV2 {
+                source_id: runmat_types::ProgramSourceId(0),
+                owner_identity: "transient-codec-test".into(),
+                relative_path: "transient.m".into(),
+                content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+                display_name: "transient.m".into(),
+                text: text.into(),
+            },
+        ])
+        .unwrap();
+        for value in [Value::OutputList(vec![Value::Num(1.0)]), nested] {
+            let error = super::encode_payload_graph_in_context(
+                &[value],
+                &runtime,
+                &source_map,
+                &Default::default(),
+                &Default::default(),
+                runmat_execution::value::ValueLimits::default(),
+            )
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                ValueCodecError::TransientSequenceNotPortable { .. }
+            ));
+        }
     }
 
     #[test]
@@ -458,13 +500,16 @@ mod tests {
                     })
                     .collect(),
             )));
-        let closure = Value::Closure(runmat_value::Closure {
-            function_name: "worker".into(),
-            binding: Some(runmat_value::BoundFunctionBinding::portable(7, origin(7))),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::Num(2.0)],
-        });
+        let closure = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "worker".into(),
+                binding: Some(runmat_value::BoundFunctionBinding::portable(7, origin(7))),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: vec![Value::Num(2.0)],
+            },
+        ));
         assert_eq!(
             decode_inline_value(&encode_inline_value(&closure).unwrap()).unwrap(),
             closure
@@ -479,13 +524,16 @@ mod tests {
         callable.qualified_name = "other_worker".into();
         assert!(decode_inline_value(&tampered).is_err());
 
-        let empty_anonymous = Value::Closure(runmat_value::Closure {
-            function_name: "display_is_not_authority".into(),
-            binding: Some(runmat_value::BoundFunctionBinding::portable(9, origin(9))),
-            source_role: runmat_types::FunctionSourceRole::Anonymous,
-            source_file: Some("/origin/worker.m".into()),
-            captures: Vec::new(),
-        });
+        let empty_anonymous = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "display_is_not_authority".into(),
+                binding: Some(runmat_value::BoundFunctionBinding::portable(9, origin(9))),
+                source_role: runmat_types::FunctionSourceRole::Anonymous,
+                source_file: Some("/origin/worker.m".into()),
+                captures: Vec::new(),
+            },
+        ));
         assert_eq!(
             decode_inline_value(&encode_inline_value(&empty_anonymous).unwrap()).unwrap(),
             empty_anonymous,
@@ -518,17 +566,27 @@ mod tests {
         };
         callable.form = runmat_execution::value::CallableForm::Handle;
         assert!(decode_inline_value(&tampered_form).is_err());
-        let local_handle = Value::BoundFunctionHandle {
-            name: "local_display".into(),
-            function: 11,
-            authority: runmat_value::BoundFunctionAuthority::portable(origin(11)),
-            source_role: runmat_types::FunctionSourceRole::Local,
-            source_file: Some("/origin/local.m".into()),
-        };
+        let local_handle = Value::BoundFunctionHandle(
+            runmat_value::BoundFunctionHandle::from_data(runmat_value::BoundFunctionHandleData {
+                name: "local_display".into(),
+                function: 11,
+                authority: runmat_value::BoundFunctionAuthority::portable(origin(11)),
+                source_role: runmat_types::FunctionSourceRole::Local,
+                source_file: Some("/origin/local.m".into()),
+            }),
+        );
         assert_eq!(
             decode_inline_value(&encode_inline_value(&local_handle).unwrap()).unwrap(),
             local_handle,
             "bound-handle role must not be re-derived from the destination catalog"
+        );
+        let encoded = encode_inline_value(&local_handle).unwrap();
+        let first = decode_inline_value(&encoded).unwrap();
+        let second = decode_inline_value(&encoded).unwrap();
+        assert_ne!(
+            first.callable_instance_key(),
+            second.callable_instance_key(),
+            "independent inline reconstructions mint independent local instances"
         );
 
         let mut structure = StructValue::new();
@@ -673,6 +731,8 @@ mod tests {
                 function: "origin".into(),
                 source_id: None,
                 span: Some((2, 5)),
+                source_owner: None,
+                diagnostic_source: None,
             }])
             .with_phase("execution")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -745,6 +805,8 @@ mod tests {
                 function: "remote_spmd".into(),
                 source_id: Some(worker_id.0),
                 span: Some((0, 5)),
+                source_owner: None,
+                diagnostic_source: None,
             }])
             .build();
         let nested = Value::Cell(
@@ -772,7 +834,7 @@ mod tests {
             panic!("exception");
         };
         assert_eq!(
-            exception.runtime.as_ref().unwrap().call_frames[0].program_source_id,
+            exception.runtime.as_ref().unwrap().call_frames[0].program_source_id(),
             Some(runmat_types::ProgramSourceId(0))
         );
         assert_ne!(u64::try_from(worker_id.0).unwrap(), 0);
@@ -791,6 +853,30 @@ mod tests {
             ["remote_spmd @ remote_spmd.m:1:1"]
         );
         assert_eq!(decoded.stack, ["remote_spmd"]);
+
+        let selected = runtime
+            .call_frame_source_owner_for_program_source(runmat_types::ProgramSourceId(0))
+            .unwrap();
+        for (owner, accepted) in [
+            (selected, true),
+            (crate::CallFrameSourceOwner::issue(), false),
+        ] {
+            let error = crate::build_runtime_error("caught")
+                .with_call_frames(vec![crate::CallFrame {
+                    function: "remote_spmd".into(),
+                    source_id: Some(worker_id.0),
+                    span: Some((0, 5)),
+                    source_owner: Some(owner),
+                    diagnostic_source: None,
+                }])
+                .build();
+            let value = Value::MException(crate::runtime_error::exception_from_error(error));
+            assert_eq!(
+                super::encode_inline_value_in_context(&value, &runtime).is_ok(),
+                accepted,
+                "a frame token must match the source table that supplies its ordinal"
+            );
+        }
     }
 
     #[test]

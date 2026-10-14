@@ -55,6 +55,7 @@ pub struct RuntimeContextState {
     pub(crate) timing: RefCell<super::timing::TimingSessionState>,
     pub(crate) timers: RefCell<super::timer::TimerSessionState>,
     pub(crate) console: RefCell<crate::console::ConsoleState>,
+    pub(crate) display_format: runmat_value::DisplayFormatOwner,
     pub(crate) classes: RefCell<crate::class_registry::RuntimeClassState>,
     pub(crate) interaction: RefCell<crate::interaction::InteractionState>,
     pub(crate) test_services: RefCell<Vec<crate::testing::RuntimeTestServices>>,
@@ -97,6 +98,7 @@ impl RuntimeContextState {
             timing: RefCell::new(super::timing::TimingSessionState::default()),
             timers: RefCell::new(super::timer::TimerSessionState::default()),
             console: RefCell::new(crate::console::ConsoleState::default()),
+            display_format: runmat_value::DisplayFormatOwner::default(),
             classes: RefCell::new(crate::class_registry::RuntimeClassState::default()),
             interaction: RefCell::new(crate::interaction::InteractionState::default()),
             test_services: RefCell::new(Vec::new()),
@@ -166,7 +168,7 @@ pub(crate) struct CallState {
     pub lexical_invoker: Option<std::rc::Rc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
     pub scoped_name_target_resolver:
-        Option<std::sync::Arc<crate::user_functions::ScopedNameTargetResolver>>,
+        Option<std::rc::Rc<crate::user_functions::ScopedNameTargetResolver>>,
     pub semantic_name_candidates:
         Option<std::sync::Arc<crate::user_functions::SemanticNameCandidates>>,
     pub dynamic_loader: Option<std::rc::Rc<crate::user_functions::DynamicFunctionLoader>>,

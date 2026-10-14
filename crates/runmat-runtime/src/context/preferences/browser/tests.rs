@@ -3,6 +3,7 @@ use crate::execution::RuntimeExecutionService;
 use futures::channel::oneshot;
 use js_sys::Uint8Array;
 use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::profiling::{CommandProfilingRoot, DeferredWorkCounts};
 use runmat_execution::CancellationReason;
 use runmat_value::IntValue;
 use std::cell::RefCell;
@@ -57,7 +58,7 @@ async fn delete_namespace(service: &BrowserPreferenceService) {
 }
 
 async fn store_invalid_document(service: &BrowserPreferenceService) {
-    let database = connection::open(&service.namespace).await.unwrap();
+    let database = connection::open(&service.namespace, None).await.unwrap();
     let transaction = database
         .transaction_with_str_and_mode(connection::DOCUMENT_STORE, IdbTransactionMode::Readwrite)
         .unwrap();
@@ -78,6 +79,29 @@ async fn store_invalid_document(service: &BrowserPreferenceService) {
     transaction.set_oncomplete(Some(on_complete.as_ref().unchecked_ref()));
     receiver.await.unwrap();
     transaction.set_oncomplete(None);
+}
+
+#[wasm_bindgen_test(async)]
+async fn browser_service_retains_open_and_transaction_observers_through_terminal_events() {
+    let service = unique_service();
+    let command = CommandProfilingRoot::new();
+    service
+        .set_many(
+            runtime().with_command_profiling(command.receipt()),
+            "app".into(),
+            vec![("name".into(), Value::Num(3.0))],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        command.seal().deferred_work,
+        Some(DeferredWorkCounts {
+            admitted: 2, // one open and one transaction observer
+            completed: 2,
+            ..DeferredWorkCounts::default()
+        })
+    );
+    delete_namespace(&service).await;
 }
 
 #[wasm_bindgen_test(async)]
@@ -132,11 +156,16 @@ async fn indexeddb_reopens_exact_values_and_distinct_user_path_in_current_scope(
 #[wasm_bindgen_test(async)]
 async fn unpolled_invalid_and_cancelled_calls_cannot_publish() {
     let service = unique_service();
+    let unpolled_command = CommandProfilingRoot::new();
     drop(service.set_many(
-        runtime(),
+        runtime().with_command_profiling(unpolled_command.receipt()),
         "app".into(),
         vec![("unpolled".into(), Value::Num(1.0))],
     ));
+    assert_eq!(
+        unpolled_command.seal().deferred_work,
+        Some(DeferredWorkCounts::default())
+    );
     assert!(matches!(
         RuntimeUserPathService::commit(&service, runtime(), UserPathMutation::Set(String::new()))
             .await,
@@ -164,12 +193,13 @@ async fn unpolled_invalid_and_cancelled_calls_cannot_publish() {
 #[wasm_bindgen_test(async)]
 async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
     let resumed = unique_service();
-    let held = connection::open(&resumed.namespace).await.unwrap();
+    let held = connection::open(&resumed.namespace, None).await.unwrap();
     let (blocked_tx, blocked_rx) = oneshot::channel();
     let mut upgrade = Box::pin(connection::open_version(
         &resumed.namespace,
         2,
         Some(blocked_tx),
+        None,
     ));
     assert!(matches!(
         Future::poll(
@@ -187,12 +217,15 @@ async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
     delete_namespace(&resumed).await;
 
     let abandoned = unique_service();
-    let held = connection::open(&abandoned.namespace).await.unwrap();
+    let held = connection::open(&abandoned.namespace, None).await.unwrap();
     let (blocked_tx, blocked_rx) = oneshot::channel();
+    let command = CommandProfilingRoot::new();
+    let receipt = command.receipt();
     let mut upgrade = Box::pin(connection::open_version(
         &abandoned.namespace,
         2,
         Some(blocked_tx),
+        Some(&receipt),
     ));
     assert!(matches!(
         Future::poll(
@@ -209,12 +242,22 @@ async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
     // The host-owned observer must close a successful request whose caller
     // vanished; otherwise deleting this unique namespace reports blocked.
     delete_namespace(&abandoned).await;
+    assert_eq!(
+        command.seal().deferred_work,
+        Some(DeferredWorkCounts {
+            admitted: 1,
+            completed: 1,
+            ..DeferredWorkCounts::default()
+        })
+    );
 }
 
 #[wasm_bindgen_test(async)]
 async fn dropped_authorized_writer_keeps_one_terminal_owner_and_closes_connection() {
     let service = unique_service();
-    let database = connection::open(&service.namespace).await.unwrap();
+    let database = connection::open(&service.namespace, None).await.unwrap();
+    let command = CommandProfilingRoot::new();
+    let receipt = command.receipt();
     let gate = service.gate.clone().lock_owned().await;
     let mutation = DocumentMutation::Set {
         group: "app".into(),
@@ -227,6 +270,7 @@ async fn dropped_authorized_writer_keeps_one_terminal_owner_and_closes_connectio
         database,
         transaction::BrowserMutation::Prepared(mutation),
         gate,
+        Some(&receipt),
     ));
     assert!(matches!(
         Future::poll(
@@ -238,6 +282,14 @@ async fn dropped_authorized_writer_keeps_one_terminal_owner_and_closes_connectio
     drop(write);
     let terminal_gate = service.gate.clone().lock_owned().await;
     drop(terminal_gate);
+    assert_eq!(
+        command.seal().deferred_work,
+        Some(DeferredWorkCounts {
+            admitted: 1,
+            completed: 1,
+            ..DeferredWorkCounts::default()
+        })
+    );
     assert_eq!(
         service
             .group_values(runtime(), "app".into())
@@ -269,7 +321,7 @@ async fn dropped_pending_default_reader_keeps_gc_input_root_until_terminal_obser
     })];
     let roots = super::super::input_roots::PreferenceInputRoots::for_values(&defaults).unwrap();
     initial.unroot().unwrap();
-    let database = connection::open(&service.namespace).await.unwrap();
+    let database = connection::open(&service.namespace, None).await.unwrap();
     let gate = service.gate.clone().lock_owned().await;
     let mut pending = Box::pin(transaction::mutate(
         database,
@@ -280,6 +332,7 @@ async fn dropped_pending_default_reader_keeps_gc_input_root_until_terminal_obser
             _roots: roots,
         },
         gate,
+        None,
     ));
     assert!(matches!(
         Future::poll(
@@ -361,7 +414,7 @@ async fn public_default_reader_roots_nested_ignored_input_while_waiting_for_gate
 #[wasm_bindgen_test(async)]
 async fn late_missing_name_aborts_private_document_without_partial_publication() {
     let service = unique_service();
-    let database = connection::open(&service.namespace).await.unwrap();
+    let database = connection::open(&service.namespace, None).await.unwrap();
     let gate = service.gate.clone().lock_owned().await;
     let result = transaction::mutate(
         database,
@@ -371,6 +424,7 @@ async fn late_missing_name_aborts_private_document_without_partial_publication()
             defaults: Some(vec![Some(encode_durable_value(&Value::Num(1.0)).unwrap())]),
         }),
         gate,
+        None,
     )
     .await;
     assert!(matches!(
@@ -431,7 +485,7 @@ async fn indexeddb_transaction_encodes_only_missing_first_defaults() {
 #[wasm_bindgen_test(async)]
 async fn cancelled_blocked_open_and_corrupt_read_release_exact_connection() {
     let cancelled = unique_service();
-    let held = connection::open(&cancelled.namespace).await.unwrap();
+    let held = connection::open(&cancelled.namespace, None).await.unwrap();
     let (blocked_tx, blocked_rx) = oneshot::channel();
     let cancellation = CancellationSource::new();
     let cancelled_runtime = runtime().with_cancellation_token(cancellation.token());
@@ -440,6 +494,7 @@ async fn cancelled_blocked_open_and_corrupt_read_release_exact_connection() {
         &cancelled.namespace,
         2,
         Some(blocked_tx),
+        None,
     )));
     assert!(matches!(
         Future::poll(

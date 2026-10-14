@@ -87,7 +87,7 @@ impl Drop for CurrentDirGuard {
     }
 }
 
-fn call(args: Vec<Value>) -> BuiltinResult<Value> {
+fn call(args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     let outputs = crate::output_count::current_output_count();
     let (context, _) = crate::context::document_test_support::recording_context();
     let selected = context.clone();
@@ -107,8 +107,10 @@ fn selected_openfig(
     };
     assert!(path.ends_with("selected.fig"));
     Box::pin(async {
-        runmat_value::ValueSequence::single(Value::Num(90_210.0))
-            .map_err(crate::sequence::sequence_error_to_runtime)
+        let sequence = runmat_value::ValueSequence::single(Value::Num(90_210.0))
+            .map_err(crate::sequence::sequence_error_to_runtime)?;
+        crate::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -188,7 +190,7 @@ fn open_mat_file_returns_loaded_struct() {
     std::fs::write(&path, bytes).expect("write mat");
 
     let result = call(vec![Value::String(path.to_string_lossy().to_string())]).expect("open");
-    match result {
+    match result.value() {
         Value::Struct(st) => {
             assert!(matches!(st.fields.get("A"), Some(Value::Tensor(_))));
         }
@@ -252,7 +254,10 @@ fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_, _, requested| {
             assert_eq!(requested, 0);
-            Box::pin(async { Ok(runmat_value::ValueSequence::empty()) })
+            Box::pin(async {
+                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
+            })
         },
     )));
     let _outputs = crate::output_count::push_output_count(Some(0));
@@ -306,7 +311,9 @@ fn open_calls_custom_extension_handler() {
             };
             *seen_for_resolver.lock().unwrap() = path.clone();
             Box::pin(async {
-                crate::sequence::single_value_sequence(Value::String("handled".to_string()))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::String(
+                    "handled".to_string(),
+                ))
             })
         },
     )));
@@ -339,7 +346,9 @@ fn open_resolves_custom_extension_file_on_current_path() {
             };
             assert!(path.ends_with("events.log"));
             Box::pin(async {
-                crate::sequence::single_value_sequence(Value::String("handled".to_string()))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::String(
+                    "handled".to_string(),
+                ))
             })
         },
     )));

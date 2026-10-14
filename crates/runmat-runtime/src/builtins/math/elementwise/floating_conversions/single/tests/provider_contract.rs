@@ -2,9 +2,12 @@ use super::*;
 use crate::builtins::math::elementwise::floating_conversions::test_support::{
     release_final_handles, with_conversion_hook_provider, HookBehavior,
 };
+use crate::context::RuntimeContext;
+use crate::execution::RuntimeExecutionService;
 use runmat_accelerate_api::{
     AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView, NumericElementType,
 };
+use std::rc::Rc;
 
 #[test]
 fn abandoned_direct_hook_preserves_immutable_input_and_owner() {
@@ -42,9 +45,11 @@ fn dropping_template_download_releases_only_the_owned_conversion_result() {
     use std::task::{Context, Poll};
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     with_conversion_hook_provider(HookBehavior::PendingTemplateDownload, |provider| {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let input = upload_input(provider);
         let before = input.wire_descriptor();
         let mut call = Box::pin(super::super::single_builtin(
+            Some(runtime),
             Value::GpuTensor(input.clone()),
             vec![Value::from("like"), Value::Num(0.0)],
         ));

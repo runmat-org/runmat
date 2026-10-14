@@ -99,7 +99,8 @@ impl NativeProgramTask {
                 crate::driver::TransferFailure::Infrastructure(message) => {
                     NativeProgramFailure::Infrastructure(message)
                 }
-                crate::driver::TransferFailure::WorkerLost(message) => {
+                crate::driver::TransferFailure::WorkerLost(message)
+                | crate::driver::TransferFailure::RetirementUnverified(message) => {
                     NativeProgramFailure::WorkerLost(message)
                 }
                 crate::driver::TransferFailure::Cancelled => NativeProgramFailure::Cancelled,

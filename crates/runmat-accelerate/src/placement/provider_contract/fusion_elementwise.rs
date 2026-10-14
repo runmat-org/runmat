@@ -22,6 +22,10 @@ pub(crate) struct PhysicalWork {
     pub scratch_bytes: u64,
     #[cfg(any(feature = "wgpu", test))]
     pub queue_submissions: u32,
+    /// Numerical/adapter encoders plus actual no-op compute warmups; excludes
+    /// the one noncompute flush in each materialization setup pair.
+    #[cfg(any(feature = "wgpu", test))]
+    pub compute_encoders: u32,
     /// Logical element visits in host staging and device representation
     /// adapters, excluding the primary fused program and transfer bytes.
     #[cfg(any(feature = "wgpu", test))]
@@ -48,6 +52,10 @@ pub(crate) fn observation_capability(
             * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
         clear_commands: work.queue_submissions,
         map_callbacks: work.queue_submissions,
+        wgpu_compute_query: crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+            work.compute_encoders,
+            work.queue_submissions,
+        ),
     })
 }
 
@@ -419,6 +427,8 @@ fn analyze(
             #[cfg(any(feature = "wgpu", test))]
             queue_submissions: 0,
             #[cfg(any(feature = "wgpu", test))]
+            compute_encoders: 0,
+            #[cfg(any(feature = "wgpu", test))]
             adapter_element_visits: 0,
         }));
     }
@@ -471,12 +481,18 @@ fn analyze(
                     "fusion.elementwise.queue_overflow",
                 );
             };
+            // Each nonempty materialization contributes exactly a no-op
+            // compute pass followed by a noncompute flush. Keep the warmup
+            // compute pass, but subtract only those flushes from query demand.
+            let _compute_encoders = _queue_submissions - materialization_setup_submissions / 2;
             Ok(PhysicalWork {
                 estimate,
                 #[cfg(any(feature = "wgpu", test))]
                 scratch_bytes,
                 #[cfg(any(feature = "wgpu", test))]
                 queue_submissions: _queue_submissions,
+                #[cfg(any(feature = "wgpu", test))]
+                compute_encoders: _compute_encoders,
                 #[cfg(any(feature = "wgpu", test))]
                 adapter_element_visits,
             })

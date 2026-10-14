@@ -4,7 +4,7 @@ use runmat_value::{CellArray, IntegerStorage, NumericDType, Tensor, Value};
 use super::*;
 use crate::builtins::deep_learning::{layers::*, model::dlnetwork_builtin, object};
 
-fn network() -> Value {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -45,7 +45,7 @@ fn predict_column_input_returns_batch_major_native_single_scores() {
     );
     let result = block_on(execute_network(NetworkExecutionRequest {
         runtime: None,
-        network: network_object(&network),
+        network: network_object(network.value()),
         input: &input,
         caller: NetworkCaller::Predict,
         requested_outputs: None,
@@ -87,7 +87,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(execute_network(NetworkExecutionRequest {
         runtime: None,
-        network: network_object(&network),
+        network: network_object(network.value()),
         input: &input,
         caller: NetworkCaller::Forward,
         requested_outputs: None,
@@ -101,7 +101,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
     );
     let result = block_on(execute_network(NetworkExecutionRequest {
         runtime: None,
-        network: network_object(&network),
+        network: network_object(network.value()),
         input: &input,
         caller: NetworkCaller::Predict,
         requested_outputs: None,

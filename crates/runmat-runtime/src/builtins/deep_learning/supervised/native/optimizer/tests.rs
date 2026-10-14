@@ -150,14 +150,14 @@ fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
         CellArray::new(vec![input, dense], 2, 1).unwrap(),
     )]))
     .unwrap();
-    let Value::Object(network) = network else {
+    let Value::Object(network) = network.value() else {
         panic!("network object")
     };
     let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
         panic!("canonical Layers")
     };
     let factors = FactorPlan::admit(&layers.data, "test").unwrap();
-    let rows = parameters::view(&network, "test").unwrap();
+    let rows = parameters::view(network, "test").unwrap();
     let prepared = rows
         .iter()
         .map(|row| {
@@ -189,7 +189,7 @@ fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
     let config = config(Solver::Sgdm);
     assert_eq!(
         optimizer
-            .propose(&network, &prepared, gradients(false), &config, 1, "test")
+            .propose(network, &prepared, gradients(false), &config, 1, "test")
             .unwrap()
             .len(),
         2
@@ -205,7 +205,7 @@ fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
         })
         .collect::<HashMap<_, _>>();
     assert!(optimizer
-        .propose(&network, &prepared, gradients(true), &config, 2, "test")
+        .propose(network, &prepared, gradients(true), &config, 2, "test")
         .is_err());
     assert_eq!(optimizer.slots.len(), before.len());
     for (key, slot) in &optimizer.slots {

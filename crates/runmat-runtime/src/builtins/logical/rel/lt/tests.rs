@@ -8,7 +8,9 @@ use runmat_builtins::LT_ERROR_INVALID_INPUT;
 use runmat_value::{CharArray, StringArray, Tensor};
 
 fn run_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(super::lt_builtin(lhs, rhs))
+    // Terminal fixture projection: comparison emits only logical, symbolic
+    // expression, or external GPU values, never a GC-managed child.
+    block_on(super::lt_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[test]

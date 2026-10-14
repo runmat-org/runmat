@@ -7,6 +7,8 @@ use super::numeric::{
 use super::removal::{remove_missing_value, RemoveOptions};
 use super::standardize::{indicator_set, numeric_tensor, standardize_missing_value};
 use super::*;
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 
 #[runtime_builtin(
     name = "missing",
@@ -250,16 +252,19 @@ pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinRe
     name = "nansum",
     binding_variant = "default",
     builtin_path = "crate::builtins::missing",
+    context = true,
     call_observation = true
 )]
 pub(super) async fn nansum_builtin(
+    runtime: Option<RuntimeContext>,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
     value: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     ensure_output_arity("nansum", 1)?;
     ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
     sum::sum_for_invocation_observed(
+        runtime.as_ref(),
         value,
         rest,
         None,

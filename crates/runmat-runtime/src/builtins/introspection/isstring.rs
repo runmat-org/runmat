@@ -42,19 +42,20 @@ pub(crate) mod tests {
             ComplexTensor::new(vec![(0.0, 1.0), (2.0, -2.5)], vec![2, 1]).expect("complex tensor"),
         );
         let object = Value::Object(ObjectInstance::new("ExampleClass".to_string()));
-        let closure = Value::Closure(Closure {
+        let closure = Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "some_func".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: Vec::new(),
-        });
+        }));
         let class_ref = Value::ClassRef("pkg.Type".into());
         let exception = Value::MException(MException::new(
             "RunMat:Test".to_string(),
             "example".to_string(),
         ));
-        let function_handle = Value::FunctionHandle("sin".to_string());
+        let function_handle = Value::FunctionHandle("sin".into());
 
         for candidate in vec![
             complex_scalar,

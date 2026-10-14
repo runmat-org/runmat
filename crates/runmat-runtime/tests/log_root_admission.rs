@@ -33,9 +33,9 @@ impl RuntimeAccelerationService for Recorder {
             .borrow_mut()
             .push((request.admission().binding.builtin.name, predicate));
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -107,7 +107,7 @@ fn actual_dispatch_admits_only_valid_real_domain_forms_before_preparation() {
         if name == "realsqrt" {
             assert!(negative.is_err());
         } else {
-            assert!(matches!(negative.unwrap(), Value::ComplexTensor(_)));
+            assert!(matches!(negative.unwrap().value(), Value::ComplexTensor(_)));
         }
         block_on(
             context.scope(runmat_runtime::call_builtin_async_with_outputs_in_context(

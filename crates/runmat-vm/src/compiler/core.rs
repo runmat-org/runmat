@@ -31,6 +31,21 @@ pub struct ClassRegistration {
     events: Vec<runmat_types::EventDeclaration>,
     enumerations: Vec<String>,
 }
+
+impl ClassRegistration {
+    fn into_instruction(self) -> Instr {
+        Instr::RegisterClass {
+            name: self.name,
+            super_class: self.super_class,
+            is_sealed: self.is_sealed,
+            is_abstract: self.is_abstract,
+            properties: self.properties,
+            methods: self.methods,
+            events: self.events,
+            enumerations: self.enumerations,
+        }
+    }
+}
 type MirCellSelectorCompileResult = (usize, bool);
 
 #[derive(Clone, Copy)]
@@ -297,9 +312,24 @@ fn hir_function_imports(hir: &HirAssembly, function: FunctionId) -> Vec<(Vec<Str
         .unwrap_or_default()
 }
 
-fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
+fn hir_class_registrations(hir: &HirAssembly, mir: &MirAssembly) -> Vec<ClassRegistration> {
+    hir_class_registrations_for_source(hir, mir, None)
+}
+
+fn hir_class_registrations_for_source(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> Vec<ClassRegistration> {
     hir.classes
         .iter()
+        .filter(|class| {
+            source.is_none_or(|source| {
+                hir.modules
+                    .get(class.module.0)
+                    .is_some_and(|module| module.source_id == source)
+            })
+        })
         .map(|class| {
             let name = runmat_types::ClassIdentity::from_qualified_name(&class.declaration.name)
                 .expect("HIR class declaration must have a canonical identity");
@@ -340,9 +370,27 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .properties
                 .iter()
                 .map(|property| {
-                    let default = class
-                        .property_default(&property.name)
-                        .and_then(hir_property_default_to_value);
+                    let default = mir
+                        .class_property_defaults
+                        .iter()
+                        .find(|candidate| {
+                            candidate.class == class.declaration.id
+                                && candidate.property == property.name
+                        })
+                        .map(|candidate| match &candidate.literal {
+                            runmat_mir::MirClassDefaultLiteral::Num(value) => {
+                                PropertyDefaultLiteral::Num(*value)
+                            }
+                            runmat_mir::MirClassDefaultLiteral::Int(value) => {
+                                PropertyDefaultLiteral::Int(runmat_value::IntValue::from(value))
+                            }
+                            runmat_mir::MirClassDefaultLiteral::Bool(value) => {
+                                PropertyDefaultLiteral::Bool(*value)
+                            }
+                            runmat_mir::MirClassDefaultLiteral::String(value) => {
+                                PropertyDefaultLiteral::String(value.clone())
+                            }
+                        });
                     BytecodeClassProperty {
                         name: property.name.clone(),
                         is_static: property.attributes.is_static,
@@ -368,6 +416,7 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                     BytecodeClassMethod {
                         name: method.name.clone(),
                         function_name,
+                        role: method.role,
                         is_static: method.is_static,
                         is_abstract: method.attributes.is_abstract,
                         is_sealed: method.attributes.is_sealed,
@@ -396,55 +445,15 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
         .collect()
 }
 
-fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyDefaultLiteral> {
-    fn eval_numeric(expr: &runmat_hir::HirExpr) -> Option<f64> {
-        match &expr.kind {
-            runmat_hir::HirExprKind::Number(text) => text.parse::<f64>().ok(),
-            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryPlus, inner) => {
-                eval_numeric(inner)
-            }
-            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryMinus, inner) => {
-                eval_numeric(inner).map(|value| -value)
-            }
-            runmat_hir::HirExprKind::Binary(left, op, right) => {
-                let left = eval_numeric(left)?;
-                let right = eval_numeric(right)?;
-                match op {
-                    runmat_hir::OperatorKind::Add => Some(left + right),
-                    runmat_hir::OperatorKind::Subtract => Some(left - right),
-                    runmat_hir::OperatorKind::MatrixMultiply
-                    | runmat_hir::OperatorKind::ElementwiseMultiply => Some(left * right),
-                    runmat_hir::OperatorKind::Mrdivide
-                    | runmat_hir::OperatorKind::Mldivide
-                    | runmat_hir::OperatorKind::ElementwiseDivide
-                    | runmat_hir::OperatorKind::ElementwiseLeftDivide => Some(left / right),
-                    runmat_hir::OperatorKind::MatrixPower
-                    | runmat_hir::OperatorKind::ElementwisePower => Some(left.powf(right)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    match &expr.kind {
-        runmat_hir::HirExprKind::Number(text) => {
-            text.parse::<f64>().ok().map(PropertyDefaultLiteral::Num)
-        }
-        runmat_hir::HirExprKind::IntegerLiteral(value) => Some(PropertyDefaultLiteral::Int(
-            runmat_value::IntValue::from(value),
-        )),
-        runmat_hir::HirExprKind::String(text) => {
-            Some(PropertyDefaultLiteral::String(text.0.clone()))
-        }
-        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("true") => {
-            Some(PropertyDefaultLiteral::Bool(true))
-        }
-        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("false") => {
-            Some(PropertyDefaultLiteral::Bool(false))
-        }
-        _ => eval_numeric(expr).map(PropertyDefaultLiteral::Num),
-    }
+pub(crate) fn class_declaration_instructions(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> Vec<Instr> {
+    hir_class_registrations_for_source(hir, mir, source)
+        .into_iter()
+        .map(ClassRegistration::into_instruction)
+        .collect()
 }
 
 impl SpanGuard {
@@ -525,7 +534,7 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             aggregate_proof: None,
-            class_registrations: hir_class_registrations(hir),
+            class_registrations: hir_class_registrations(hir, mir),
             current_span: None,
             current_catch_scope: None,
             pending_place_mutation: None,
@@ -573,7 +582,7 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             aggregate_proof: None,
-            class_registrations: hir_class_registrations(hir),
+            class_registrations: hir_class_registrations(hir, mir),
             current_span: None,
             current_catch_scope: None,
             pending_place_mutation: None,
@@ -609,16 +618,7 @@ impl Compiler {
         self.aggregate_proof = None;
 
         for registration in self.class_registrations.clone() {
-            self.emit(Instr::RegisterClass {
-                name: registration.name,
-                super_class: registration.super_class,
-                is_sealed: registration.is_sealed,
-                is_abstract: registration.is_abstract,
-                properties: registration.properties,
-                methods: registration.methods,
-                events: registration.events,
-                enumerations: registration.enumerations,
-            });
+            self.emit(registration.into_instruction());
         }
         for (path, wildcard) in self.imports.clone() {
             self.emit(Instr::RegisterImport { path, wildcard });
@@ -2026,7 +2026,7 @@ impl Compiler {
                 );
             }
             MirCallee::Dynamic(_) => {
-                self.compile_mir_dynamic_callee_operand(match &call.callee {
+                self.compile_mir_operand(match &call.callee {
                     MirCallee::Dynamic(callee) => callee,
                     _ => unreachable!(),
                 })?;
@@ -3403,7 +3403,7 @@ impl Compiler {
                 }
             }
             MirCallee::Dynamic(callee) => {
-                self.compile_mir_dynamic_callee_operand(callee)?;
+                self.compile_mir_operand(callee)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -4227,18 +4227,6 @@ impl Compiler {
         }
     }
 
-    fn compile_mir_dynamic_callee_operand(
-        &mut self,
-        operand: &MirOperand,
-    ) -> Result<(), CompileError> {
-        if let Some(name) = callback_name_from_mir_operand(operand) {
-            if self.compile_semantic_function_handle_for_name(&name)? {
-                return Ok(());
-            }
-        }
-        self.compile_mir_operand(operand)
-    }
-
     fn compile_mir_function_handle(
         &mut self,
         target: &CallableIdentity,
@@ -4338,7 +4326,20 @@ impl Compiler {
                     ));
                     return Ok(());
                 };
-                if captures.is_empty() {
+                if source_role == runmat_types::FunctionSourceRole::Nested
+                    && !self.function.is_some_and(|caller| {
+                        self.layout.as_ref().is_some_and(|layout| {
+                            nested_visibility_distance(layout, caller, *function).is_some()
+                        })
+                    })
+                {
+                    return Err(self.compile_error(
+                        "nested function handle is outside the caller's lexical scope",
+                    ));
+                }
+                // A capture-free nested handle still retains this particular
+                // lexical activation. Only non-nested handles can discard it.
+                if captures.is_empty() && source_role != runmat_types::FunctionSourceRole::Nested {
                     self.emit(Instr::CreateBoundFunctionHandle(
                         *function,
                         display_name,
@@ -4361,99 +4362,30 @@ impl Compiler {
         }
     }
 
-    fn compile_semantic_function_handle_for_name(
-        &mut self,
-        name: &str,
-    ) -> Result<bool, CompileError> {
-        let Some((function, captures, display_name, source_role)) =
-            self.resolve_visible_semantic_function_layout(name)
-        else {
-            return Ok(false);
-        };
-        if captures.is_empty() {
-            self.emit(Instr::CreateBoundFunctionHandle(
-                function,
-                display_name,
-                source_role,
-            ));
-            return Ok(true);
-        }
-        for capture in &captures {
-            let slot = self.binding_slot(capture.binding)?;
-            self.emit(Instr::LoadVar(slot));
-        }
-        self.emit(Instr::CreateSemanticClosure(
-            function,
-            display_name,
-            captures.len(),
-            source_role,
-        ));
-        Ok(true)
-    }
-
-    fn resolve_visible_semantic_function_layout(
-        &self,
-        name: &str,
-    ) -> Option<(
-        FunctionId,
-        Vec<crate::layout::VmCaptureSlot>,
-        String,
-        runmat_types::FunctionSourceRole,
-    )> {
-        let layout = self.layout.as_ref()?;
-        let current_function = self.function;
-        if let Some(current) = current_function {
-            let owner_scope = layout
-                .functions
-                .get(&current)
-                .map(|function| function.private_owner_scope.as_str())
-                .unwrap_or_default();
-            if !owner_scope.is_empty() && !name.contains('.') {
-                let scoped_name = format!("{owner_scope}.__private__.{name}");
-                if let Some((function, function_layout)) = layout
-                    .functions
-                    .iter()
-                    .find(|(_, function_layout)| function_layout.display_name == scoped_name)
-                {
-                    return Some((
-                        *function,
-                        function_layout.captures.clone(),
-                        function_layout.display_name.clone(),
-                        function_layout.source_role,
-                    ));
-                }
-            }
-        }
-        let mut ids: Vec<_> = layout.functions.keys().copied().collect();
-        ids.sort_by_key(|id| id.0);
-        ids.into_iter().find_map(|function| {
-            let function_layout = layout.functions.get(&function)?;
-            if function_layout.display_name != name {
-                return None;
-            }
-            let visible = function_layout.captures.is_empty()
-                || current_function.is_some_and(|current| {
-                    function_layout
-                        .captures
-                        .iter()
-                        .all(|capture| capture.from_function == current)
-                });
-            visible.then(|| {
-                (
-                    function,
-                    function_layout.captures.clone(),
-                    function_layout.display_name.clone(),
-                    function_layout.source_role,
-                )
-            })
-        })
-    }
-
     fn semantic_capture_slots_for_call(
         &self,
         target_function: FunctionId,
         captures: &[crate::layout::VmCaptureSlot],
     ) -> Result<Option<Vec<usize>>, CompileError> {
+        if let Some(layout) = self.layout.as_ref().and_then(|layout| {
+            layout.functions.get(&target_function).and_then(|target| {
+                (target.source_role == runmat_types::FunctionSourceRole::Nested).then_some(layout)
+            })
+        }) {
+            let current = self
+                .function
+                .ok_or_else(|| self.compile_error("nested call has no lexical caller"))?;
+            if nested_visibility_distance(layout, current, target_function).is_none() {
+                return Err(
+                    self.compile_error("nested function is outside the caller's lexical scope")
+                );
+            }
+            return captures
+                .iter()
+                .map(|capture| self.binding_slot(capture.binding))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some);
+        }
         if captures.is_empty() {
             return Ok(None);
         }
@@ -4564,17 +4496,24 @@ impl Compiler {
     }
 }
 
-fn callback_name_from_mir_operand(operand: &MirOperand) -> Option<String> {
-    let MirOperand::Constant(MirConstant::String(value)) = operand else {
-        return None;
-    };
-    let text = string_literal_runtime_text(&value.0);
-    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-fn string_literal_runtime_text(value: &str) -> String {
-    runmat_hir::StringLiteral(value.to_string()).runtime_text()
+/// A nested definition is visible from its parent and every frame below that
+/// parent, including sibling nested functions. A cousin in another branch is
+/// not below the target's parent and therefore cannot call it or form `@`.
+fn nested_visibility_distance(
+    layout: &VmAssemblyLayout,
+    caller: FunctionId,
+    target: FunctionId,
+) -> Option<usize> {
+    let parent = layout.functions.get(&target)?.parent?;
+    let mut frame = Some(caller);
+    for distance in 0..layout.functions.len() {
+        let current = frame?;
+        if current == parent {
+            return Some(distance);
+        }
+        frame = layout.functions.get(&current)?.parent;
+    }
+    None
 }
 
 fn emit_string_literal(compiler: &mut Compiler, value: &str) {
@@ -4648,6 +4587,7 @@ mod tests {
             function,
             VmFunctionLayout {
                 function,
+                parent: None,
                 display_name: "test".into(),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 private_owner_scope: String::new(),
@@ -4759,7 +4699,8 @@ mod tests {
         let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
             .unwrap()
             .assembly;
-        let registrations = hir_class_registrations(&hir);
+        let mir = runmat_mir::lowering::lower_assembly(&hir).expect("lower MIR");
+        let registrations = hir_class_registrations(&hir, &mir);
         assert_eq!(registrations.len(), 1);
         assert_eq!(registrations[0].events.len(), 1);
         assert_eq!(registrations[0].events[0].name.0, "Changed");

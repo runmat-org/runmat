@@ -2,14 +2,14 @@ use anyhow::anyhow;
 #[cfg(test)]
 use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
-use runmat_types::{ClassIdentity, standard};
+use runmat_types::{standard, ClassIdentity};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 mod platform;
 mod provider_registry;
@@ -24,10 +24,10 @@ pub use allocation::{
 mod iir;
 mod native_device;
 pub use iir::{
+    provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
     ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
     ProviderIirIndexCancelled, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexBuilder,
     ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest, ProviderPreparedIirCoefficients,
-    provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
 };
 mod fusion_outputs;
 mod logical_upload;
@@ -55,8 +55,8 @@ pub use deep_learning::{
     DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
-    ProviderExecutionCompletionError, ProviderExecutionError, ProviderExecutionFuture,
-    ProviderExecutionResult, is_unsupported_provider_error,
+    is_unsupported_provider_error, ProviderExecutionCompletionError, ProviderExecutionError,
+    ProviderExecutionFuture, ProviderExecutionResult,
 };
 mod placement;
 mod power;
@@ -74,30 +74,31 @@ mod wgpu_access;
 mod wgpu_buffer_owner;
 #[cfg(feature = "wgpu")]
 pub use wgpu_access::{
-    WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission, WgpuEmissionMode,
-    WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
+    CanonicalWgpuEmissionAuthority, WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission,
+    WgpuEmissionMode, WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
 };
 #[cfg(feature = "wgpu")]
 pub use wgpu_buffer_owner::WgpuBufferOwner;
 
 pub use fusion_outputs::validate_fused_output_classes;
-pub use logical_upload::{HostLogicalTensorView, upload_logical_protecting};
+pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
+    class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
     InvalidNumericUploadResult, NumericUploadCompletionError, NumericUploadError,
-    NumericUploadResult, class_preserving_upload_query, is_invalid_numeric_upload_result,
-    upload_numeric_protecting,
+    NumericUploadResult,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::{PowerResultDomain, PowerScalarControl, RealPowerArithmeticMode, RealPowerOperand};
-pub use residency::{ResidencyCleanupError, ResidencyRestoreGuard, clear_residency_checked};
+pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(GpuHandleIdentity) -> Result<(), ResidencyCleanupError>;
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
-type ExecutionProviderAuthorizer = fn(&dyn AccelProvider) -> ExecutionProviderAuthorization;
+type ExecutionProviderAuthorizer =
+    for<'a> fn(ExecutionProviderAdmission<'a>) -> ExecutionProviderAuthorization;
 
 static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
@@ -113,6 +114,42 @@ pub enum ExecutionProviderAuthorization {
     Unrestricted,
     Allowed,
     Denied,
+}
+
+/// The already-installed runtime policy observes both a selected provider and
+/// effects that bypass its physical WGPU submission owner. An escape never
+/// grants provider authorization.
+pub enum ExecutionProviderAdmission<'a> {
+    Provider(&'a dyn AccelProvider),
+    DeviceEffect(ExecutionDeviceEffect),
+    #[cfg(feature = "wgpu")]
+    CanonicalWgpuSubmit(&'a WgpuDeviceAccess),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionDeviceEffect {
+    RawWgpuExport,
+    RawNativeExport,
+    PlotDeviceEmission,
+    ForeignExecution,
+    /// `Queue::write_buffer` enqueues device transfer work outside measured
+    /// encoder intervals, without introducing an uncounted kernel launch.
+    ImplicitQueueTransfer,
+}
+
+/// Monotone negative observation at the effect's owning ingress. This uses
+/// the same runtime callback as provider authorization, not a second registry.
+pub fn observe_execution_device_effect(effect: ExecutionDeviceEffect) {
+    if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
+        let _ = authorizer(ExecutionProviderAdmission::DeviceEffect(effect));
+    }
+}
+
+#[cfg(feature = "wgpu")]
+fn observe_canonical_wgpu_submit(access: &WgpuDeviceAccess) {
+    if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
+        let _ = authorizer(ExecutionProviderAdmission::CanonicalWgpuSubmit(access));
+    }
 }
 
 /// Installs the runtime-owned provider authorization policy. Provider
@@ -193,6 +230,7 @@ pub fn workgroup_size_hint() -> Option<u32> {
 /// Export a shared acceleration context (e.g., the active WGPU device) when the
 /// current provider exposes one.
 pub fn export_context(kind: AccelContextKind) -> Option<AccelContextHandle> {
+    observe_execution_device_effect(ExecutionDeviceEffect::RawWgpuExport);
     provider().and_then(|p| p.export_context(kind))
 }
 
@@ -201,6 +239,7 @@ pub fn export_context(kind: AccelContextKind) -> Option<AccelContextHandle> {
 /// supplied handle.
 #[cfg(feature = "wgpu")]
 pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+    observe_execution_device_effect(ExecutionDeviceEffect::RawWgpuExport);
     provider_for_handle(handle).and_then(|p| p.export_wgpu_buffer(handle))
 }
 
@@ -1581,6 +1620,13 @@ fn unsupported_execution_future<T>(message: &'static str) -> ProviderExecutionFu
 
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: AcceleratorThreadBound {
+    /// Exact access identity for the canonical WGPU provider. This does not
+    /// grant raw device or queue access to callers.
+    #[cfg(feature = "wgpu")]
+    fn wgpu_device_access(&self) -> Option<&WgpuDeviceAccess> {
+        None
+    }
+
     /// Effect-free ordinary real Sub/Div proposal. Source-level numerical
     /// admission and any selected-program binding remain separate.
     fn propose_real_binary(
@@ -4715,7 +4761,7 @@ pub fn provider_matches_execution_lease(
 fn provider_authorization(provider: &dyn AccelProvider) -> ExecutionProviderAuthorization {
     EXECUTION_PROVIDER_AUTHORIZER
         .get()
-        .map(|authorizer| authorizer(provider))
+        .map(|authorizer| authorizer(ExecutionProviderAdmission::Provider(provider)))
         .unwrap_or(ExecutionProviderAuthorization::Unrestricted)
 }
 
@@ -5898,12 +5944,10 @@ mod tests {
             .acquire_tensor(&wire)
             .unwrap();
         assert!(acquired.shares_allocation_with(&handle));
-        assert!(
-            serde_json::from_str::<GpuTensorWireDescriptor>(
-                r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#
-            )
-            .is_err()
-        );
+        assert!(serde_json::from_str::<GpuTensorWireDescriptor>(
+            r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -6069,11 +6113,9 @@ mod tests {
                 }
             }
         ));
-        assert!(
-            !PROVIDER_A
-                .capability_snapshot()
-                .supports(ProviderOperationFamily::Elementwise)
-        );
+        assert!(!PROVIDER_A
+            .capability_snapshot()
+            .supports(ProviderOperationFamily::Elementwise));
 
         let snapshot = PROVIDER_A.capability_snapshot();
         let encoded = serde_json::to_string(&snapshot).expect("serialize capability snapshot");
@@ -6133,11 +6175,9 @@ mod tests {
             NumericElementType::F32,
             GpuTensorStorage::Real,
         );
-        assert!(
-            numeric
-                .with_view(numeric.view().clone().with_logical(true))
-                .is_err()
-        );
+        assert!(numeric
+            .with_view(numeric.view().clone().with_logical(true))
+            .is_err());
         assert_eq!(
             handle_class_identity(&numeric),
             Some(standard::SINGLE.owned())

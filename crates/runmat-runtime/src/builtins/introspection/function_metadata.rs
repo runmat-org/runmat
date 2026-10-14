@@ -49,25 +49,21 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => Ok(metadata_struct(
-            name,
+            name.into_name(),
             FunctionHandleKind::Simple,
             String::new(),
         )),
-        Value::BoundFunctionHandle {
-            name,
-            function: _,
-            source_role,
-            source_file,
-            ..
-        } => {
-            let kind = role_kind(source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = source_file.unwrap_or_default();
-            Ok(metadata_struct(name, kind, file))
+        Value::BoundFunctionHandle(handle) => {
+            let data = handle.into_data();
+            let kind = role_kind(data.source_role).unwrap_or(FunctionHandleKind::Unknown);
+            let file = data.source_file.unwrap_or_default();
+            Ok(metadata_struct(data.name, kind, file))
         }
         Value::Closure(closure) => {
-            let kind = role_kind(closure.source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = closure.source_file.unwrap_or_default();
-            Ok(metadata_struct(closure.function_name, kind, file))
+            let data = closure.into_data();
+            let kind = role_kind(data.source_role).unwrap_or(FunctionHandleKind::Unknown);
+            let file = data.source_file.map(String::from).unwrap_or_default();
+            Ok(metadata_struct(data.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
             "functions",
@@ -152,8 +148,8 @@ mod tests {
 
     #[test]
     fn functions_reports_named_handle_metadata() {
-        let value = dispatch_functions(Value::FunctionHandle("sin".to_string()))
-            .expect("functions succeeds");
+        let value =
+            dispatch_functions(Value::FunctionHandle("sin".into())).expect("functions succeeds");
         assert_eq!(field(&value, "function"), &Value::String("sin".to_string()));
         assert_eq!(field(&value, "type"), &Value::String("simple".to_string()));
         assert_eq!(field(&value, "file"), &Value::String(String::new()));
@@ -172,13 +168,16 @@ mod tests {
                 definition_owners: None,
             }]),
         ));
-        let value = dispatch_functions(Value::Closure(runmat_value::Closure {
-            function_name: "@anon0".into(),
-            binding: Some(runmat_value::BoundFunctionBinding::unavailable(1)),
-            source_role: runmat_types::FunctionSourceRole::Anonymous,
-            source_file: None,
-            captures: Vec::new(),
-        }))
+        let value = dispatch_functions(Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "@anon0".into(),
+                binding: Some(runmat_value::BoundFunctionBinding::unavailable(1)),
+                source_role: runmat_types::FunctionSourceRole::Anonymous,
+                source_file: None,
+                captures: Vec::new(),
+            },
+        )))
         .expect("functions succeeds");
         assert_eq!(
             field(&value, "function"),
@@ -250,13 +249,17 @@ mod tests {
             (runmat_types::FunctionSourceRole::Local, "scopedfunction"),
             (runmat_types::FunctionSourceRole::Unknown, "unknown"),
         ] {
-            let value = dispatch_functions(Value::BoundFunctionHandle {
-                name: "legacy_role_missing".into(),
-                function: 3,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
-                source_role: stored_role,
-                source_file: Some("/tmp/metadata_file.m".into()),
-            })
+            let value = dispatch_functions(Value::BoundFunctionHandle(
+                runmat_value::BoundFunctionHandle::from_data(
+                    runmat_value::BoundFunctionHandleData {
+                        name: "legacy_role_missing".into(),
+                        function: 3,
+                        authority: runmat_value::BoundFunctionAuthority::unavailable(3),
+                        source_role: stored_role,
+                        source_file: Some("/tmp/metadata_file.m".into()),
+                    },
+                ),
+            ))
             .expect("file provenance independent of role");
             assert_eq!(field(&value, "type"), &Value::String(expected_type.into()));
             assert_eq!(
@@ -268,34 +271,42 @@ mod tests {
 
     #[test]
     fn unbound_closure_uses_value_owned_role_without_name_heuristics() {
-        let anonymous = dispatch_functions(Value::Closure(runmat_value::Closure {
-            function_name: "plain_display_name".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Anonymous,
-            source_file: None,
-            captures: Vec::new(),
-        }))
+        let anonymous = dispatch_functions(Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "plain_display_name".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Anonymous,
+                source_file: None,
+                captures: Vec::new(),
+            },
+        )))
         .expect("anonymous metadata");
         assert_eq!(
             field(&anonymous, "type"),
             &Value::String("anonymous".into())
         );
-        let unknown = dispatch_functions(Value::Closure(runmat_value::Closure {
-            function_name: "@anon_display_is_not_authority".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: Vec::new(),
-        }))
+        let unknown = dispatch_functions(Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "@anon_display_is_not_authority".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: Vec::new(),
+            },
+        )))
         .expect("unknown metadata");
         assert_eq!(field(&unknown, "type"), &Value::String("unknown".into()));
-        let unknown_bound = dispatch_functions(Value::BoundFunctionHandle {
-            name: "display_name".into(),
-            function: usize::MAX,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(usize::MAX),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        })
+        let unknown_bound = dispatch_functions(Value::BoundFunctionHandle(
+            runmat_value::BoundFunctionHandle::from_data(runmat_value::BoundFunctionHandleData {
+                name: "display_name".into(),
+                function: usize::MAX,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(usize::MAX),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            }),
+        ))
         .expect("unregistered bound handle has unknown source role");
         assert_eq!(
             field(&unknown_bound, "type"),

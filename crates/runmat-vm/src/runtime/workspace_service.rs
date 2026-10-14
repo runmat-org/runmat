@@ -290,7 +290,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn assign_executor_slot(
         &self,
-        _slot: usize,
+        slot: usize,
         name: &str,
         value: Value,
     ) -> Result<(), RuntimeError> {
@@ -302,7 +302,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
                 if global {
                     delegate.remove(name)?;
                 } else {
-                    delegate.assign(name, value.clone())?;
+                    delegate.assign_executor_slot(slot, name, value.clone())?;
                 }
             }
         }
@@ -435,8 +435,9 @@ mod tests {
                     super::super::workspace::WorkspaceTarget::Base,
                 ] {
                     assert_eq!(
-                        super::super::workspace::workspace_target_snapshot(target)
+                        super::super::workspace::capture_workspace_target(target)
                             .unwrap()
+                            .1
                             .vars[0],
                         Value::Num(value)
                     );

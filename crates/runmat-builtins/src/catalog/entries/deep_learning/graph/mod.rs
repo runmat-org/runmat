@@ -15,6 +15,7 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
     &[&LAYER_GRAPH_CATALOG_ENTRY, &ANALYZE_NETWORK_CATALOG_ENTRY];
 
 pub const LAYER_GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "layerGraph" },
     category: "deep_learning",
@@ -56,6 +57,7 @@ pub const LAYER_GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub const ANALYZE_NETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "analyzeNetwork",

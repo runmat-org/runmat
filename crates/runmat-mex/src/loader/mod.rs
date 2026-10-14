@@ -1,3 +1,5 @@
 mod module;
 
-pub use module::{MexInvocation, MexLoadError, MexModule, MexNativeInvocation};
+pub use module::{
+    MexInvocation, MexLoadError, MexModule, MexModuleRetirement, MexNativeInvocation,
+};

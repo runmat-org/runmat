@@ -19,16 +19,18 @@ pub(super) struct PreparedBuiltinCall {
     args: Vec<Value>,
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
+    request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
 }
 
 /// One call owns both its measurement and its fresh operand allocations.
 struct BuiltinCallGuard {
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
+    _request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
 }
 
 impl BuiltinCallGuard {
-    fn finish(mut self, result: &Result<Value, RuntimeError>) -> PreparationResult<()> {
+    fn finish(mut self, result: Result<&Value, &RuntimeError>) -> PreparationResult<()> {
         // Release unused staging before sealing the candidate's publication.
         if let Some(uploads) = self.uploads.as_mut() {
             if let Err(error) = uploads.release() {
@@ -58,7 +60,16 @@ impl PreparedBuiltinCall {
             args,
             observation: None,
             uploads: None,
+            request_input_root: None,
         }
+    }
+
+    fn with_request_input_root(
+        mut self,
+        root: runmat_runtime::execution::RootedValueLease,
+    ) -> Self {
+        self.request_input_root = Some(root);
+        self
     }
 
     #[cfg(test)]
@@ -73,6 +84,7 @@ impl PreparedBuiltinCall {
             BuiltinCallGuard {
                 observation: self.observation,
                 uploads: self.uploads,
+                _request_input_root: self.request_input_root,
             },
         )
     }
@@ -82,10 +94,12 @@ impl PreparedBuiltinCall {
     fn execute<F, Fut>(
         self,
         call: F,
-    ) -> impl std::future::Future<Output = Result<Value, RuntimeError>>
+    ) -> impl std::future::Future<Output = Result<runmat_runtime::execution::RootedValue, RuntimeError>>
     where
         F: FnOnce(Vec<Value>) -> Fut,
-        Fut: std::future::Future<Output = Result<Value, RuntimeError>>,
+        Fut: std::future::Future<
+            Output = Result<runmat_runtime::execution::RootedValue, RuntimeError>,
+        >,
     {
         let (args, guard) = self.into_execution();
         let recorder = guard
@@ -94,7 +108,9 @@ impl PreparedBuiltinCall {
             .and_then(BuiltinCallObservation::recorder);
         runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
             let result = call(args).await;
-            let cleanup = guard.finish(&result).map_err(|error| *error);
+            let cleanup = guard
+                .finish(result.as_ref().map(|value| value.value()))
+                .map_err(|error| *error);
             runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
         })
     }

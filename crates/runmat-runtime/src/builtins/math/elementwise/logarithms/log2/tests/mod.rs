@@ -9,7 +9,7 @@ use crate::BuiltinResult;
 
 fn call(value: Value) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(super::log2_builtin(value))
+    block_on(super::log2_builtin(None, value)).map(|owned| owned.value().clone())
 }
 
 fn call_with_outputs(value: Value, count: usize) -> BuiltinResult<Value> {
@@ -19,5 +19,5 @@ fn call_with_outputs(value: Value, count: usize) -> BuiltinResult<Value> {
 
 fn call_matlab(value: Value) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    block_on(super::log2_builtin(value))
+    block_on(super::log2_builtin(None, value)).map(|owned| owned.value().clone())
 }

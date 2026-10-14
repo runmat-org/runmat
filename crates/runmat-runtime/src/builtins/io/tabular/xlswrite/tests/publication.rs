@@ -377,7 +377,7 @@ fn dispatcher_binding_preserves_two_output_known_unpublished_status() {
         2,
     ))
     .expect("public dispatcher must select xlswrite");
-    let values = output_list(outputs);
+    let values = output_list(outputs.value());
     assert_eq!(values.len(), 2);
     assert_eq!(values[0], Value::Bool(false));
     let Value::Struct(message) = &values[1] else {
@@ -458,7 +458,8 @@ fn public_status_forms_only_capture_known_unpublished_failure() {
     let _lock = runmat_filesystem::provider_override_lock();
     for outputs in [1, 2] {
         let (result, memory) = public_call(FsPublicationDisposition::NotPublished, outputs);
-        let values = output_list(result.expect("known unpublished failure becomes status"));
+        let status = result.expect("known unpublished failure becomes status");
+        let values = output_list(&status);
         assert_eq!(values[0], Value::Bool(false));
         assert_eq!(values.len(), outputs);
         if outputs == 2 {

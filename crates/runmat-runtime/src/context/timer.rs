@@ -241,7 +241,8 @@ mod tests {
             let mut object = ObjectInstance::new("timer");
             object.properties.insert(
                 "TimerFcn".into(),
-                Value::Closure(Closure {
+                Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                    lexical_environment: None,
                     function_name: "callback".into(),
                     binding: None,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
@@ -254,7 +255,7 @@ mod tests {
                         }),
                         Value::GpuTensor(resident.clone()),
                     ],
-                }),
+                })),
             );
             let timer = runmat_gc::gc_allocate_rooted(Value::Object(object)).expect("timer object");
             let handle = HandleRef {

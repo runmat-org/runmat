@@ -16,6 +16,27 @@ fn retains_empty_schema_and_nd_shape() {
 }
 
 #[test]
+fn owned_field_major_parts_preserve_schema_shape_and_column_order() {
+    let array = StructArray::new(
+        vec![
+            structure(&[("first", 1.0), ("second", 3.0)]),
+            structure(&[("first", 2.0), ("second", 4.0)]),
+        ],
+        vec![1, 2],
+    )
+    .unwrap();
+    let (columns, shape) = array.into_field_major_parts();
+    assert_eq!(shape, vec![1, 2]);
+    assert_eq!(
+        columns,
+        vec![
+            ("first".into(), vec![Value::Num(1.0), Value::Num(2.0)]),
+            ("second".into(), vec![Value::Num(3.0), Value::Num(4.0)]),
+        ]
+    );
+}
+
+#[test]
 fn rejects_heterogeneous_field_schema() {
     let error = StructArray::new(
         vec![structure(&[("x", 1.0)]), structure(&[("y", 2.0)])],

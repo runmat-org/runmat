@@ -438,7 +438,7 @@ fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() 
     ];
     let result = futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
         .expect("one-output provider fit");
-    let Value::Tensor(coefficients) = result else {
+    let Value::Tensor(coefficients) = result.value() else {
         panic!("expected real coefficient tensor");
     };
     assert!((coefficients.materialize_f64()[0] * f64::MAX - 1.0).abs() < 1e-14);

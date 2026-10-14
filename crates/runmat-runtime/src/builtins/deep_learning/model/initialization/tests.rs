@@ -288,3 +288,80 @@ fn orthogonal_initializer_uses_unit_columns_for_tall_recurrent_matrix() {
     assert!((right - 1.0).abs() < 1e-12);
     assert!(dot.abs() < 1e-12);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn staged_dlarray_extra_handle_survives_collecting_publication_retirement() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    runmat_gc::gc_test_context(|| {
+        let initial = runmat_gc::gc_allocate_rooted(Value::String("extra".into()))
+            .expect("allocate managed dlarray property");
+        let handle = initial.handle();
+        let mut dlarray = ObjectInstance::new(super::super::DLARRAY_CLASS);
+        dlarray.properties.insert(
+            "Data".into(),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("numeric data")),
+        );
+        dlarray.properties.insert(
+            "Extra".into(),
+            Value::HandleObject(runmat_value::HandleRef {
+                class_name: "ExtraPayload".into(),
+                target: handle,
+                valid: true,
+            }),
+        );
+        let staged = RootedValue::new(Value::Object(dlarray)).expect("root staged value");
+        initial.unroot().expect("transfer to staged owner");
+        parameters::validate_initialized_parameter(
+            staged.value(),
+            &ParameterShape::Elements(1),
+            ParameterRole::Weights,
+            "test",
+        )
+        .expect("numeric Data admits extra property");
+        let mut layers = vec![Value::Object(ObjectInstance::new("TestLayer"))];
+        thread_local! {
+            static OBSERVED_HANDLE: std::cell::RefCell<Option<runmat_gc::GcHandle>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
+        let observed = Arc::new(AtomicBool::new(false));
+        let observed_in_callback = Arc::clone(&observed);
+        let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+            if !OBSERVED_HANDLE.with(|slot| {
+                slot.borrow()
+                    .is_some_and(|handle| event == runmat_gc::RootRetirement::Explicit(handle))
+            }) || observed_in_callback.swap(true, Ordering::SeqCst)
+            {
+                return;
+            }
+            runmat_gc::gc_collect_major().expect("collect as staged root retires");
+            OBSERVED_HANDLE.with(|slot| {
+                let handle = slot.borrow().expect("observed handle remains selected");
+                assert_eq!(
+                    runmat_gc::gc_clone_value(&handle).expect("publication lease is live"),
+                    Value::String("extra".into())
+                );
+            });
+        }))
+        .expect("register collecting retirement observer");
+        let published = publish_staged_parameters(
+            &mut layers,
+            vec![StagedParameter {
+                layer_index: 0,
+                role: ParameterRole::Weights,
+                value: staged,
+                generated: false,
+                existing_precision: None,
+            }],
+        )
+        .expect("publish one initialized parameter");
+        assert!(observed.load(Ordering::SeqCst));
+        drop(published);
+        runmat_gc::gc_collect_major().expect("collect after publication lease retires");
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = None);
+    });
+}

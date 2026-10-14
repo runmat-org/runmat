@@ -1,4 +1,12 @@
 use super::*;
+
+// Terminal test projection: this conversion publishes only numerical or
+// resident GPU values, never a GC-managed object graph.
+async fn im2uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::im2uint8_builtin(None, value, rest)
+        .await
+        .map(|owned| owned.with_owned(|value| value))
+}
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};

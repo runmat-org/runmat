@@ -554,7 +554,7 @@ fn validate_update_fcn(value: &Value) -> BuiltinResult<()> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => Ok(()),
+        | Value::BoundFunctionHandle(_) => Ok(()),
         _ => Err(invalid("UpdateFcn must be empty or a function handle")),
     }
 }

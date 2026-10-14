@@ -14,14 +14,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::signal::common::{SignalCooperation, real_vector_to_row_value};
+use crate::builtins::math::signal::common::{real_vector_to_row_value, SignalCooperation};
 use crate::builtins::math::signal::order_selection::{
-    FilterKind, OrderEdgeError, OrderFamily, chebyshev_v_pass_stop, checked_order, classify_kind,
-    db_excess_log_ratio, find_natural_frequency, option_text, parse_positive_db, real_edges,
-    transform_edges, unwarp_frequency, validate_critical_frequencies,
+    chebyshev_v_pass_stop, checked_order, classify_kind, db_excess_log_ratio,
+    find_natural_frequency, option_text, parse_positive_db, real_edges, transform_edges,
+    unwarp_frequency, validate_critical_frequencies, FilterKind, OrderEdgeError, OrderFamily,
 };
 use crate::{
-    BuiltinResult, GpuGatherRetry, RuntimeError, build_runtime_error, gather_if_needed_async,
+    build_runtime_error, gather_if_needed_async, BuiltinResult, GpuGatherRetry, RuntimeError,
 };
 
 const BUILTIN_NAME: &str = "cheb2ord";
@@ -413,8 +413,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{CHEB2ORD_EXTENSIONS, CHEB2ORD_INTEGER_CAPABILITIES};
     use runmat_builtins::{builtin_catalog_entry_by_name, builtin_function_by_name};
+    use runmat_builtins::{CHEB2ORD_EXTENSIONS, CHEB2ORD_INTEGER_CAPABILITIES};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
@@ -495,12 +495,10 @@ mod tests {
             builtin.binding_identity(&builtin.bindings[0])
         );
         let descriptor = builtin.descriptor;
-        assert!(
-            descriptor
-                .signatures
-                .iter()
-                .any(|sig| sig.label == "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)")
-        );
+        assert!(descriptor
+            .signatures
+            .iter()
+            .any(|sig| sig.label == "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)"));
     }
 
     #[test]

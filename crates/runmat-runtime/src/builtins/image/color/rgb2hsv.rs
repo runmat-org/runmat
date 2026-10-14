@@ -14,8 +14,7 @@ use crate::builtins::image::color::common;
 use crate::builtins::image::color::rgb_input;
 use crate::builtins::image::color::rgb_presentation::{self, SelectedRgbPresentation};
 use crate::context::preparation::{
-    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -58,7 +57,7 @@ async fn rgb2hsv_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     rgb: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(rgb2hsv_error(&RGB2HSV_ERROR_TOO_MANY_INPUTS));
     }
@@ -104,17 +103,14 @@ async fn rgb2hsv_builtin(
         )
         .await
     };
-    match runtime.as_ref() {
-        Some(runtime) => execute_admitted(runtime, request, execute).await,
-        None => execute_current_request(request, execute).await,
-    }
+    execute_request(runtime.as_ref(), request, execute).await
 }
 
 async fn rgb2hsv_execute(
     rgb: Value,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
     mut selected: Option<SelectedRgbPresentation>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = match rgb {
         Value::Tensor(tensor) => tensor,
@@ -149,13 +145,15 @@ async fn rgb2hsv_execute(
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INTERNAL))?;
-    rgb_presentation::publish(&mut selected, || {
+    let output = rgb_presentation::publish(&mut selected, || {
         common::restore_resident_numeric_result_for_sources(
             &resident_sources,
             common::image_value_from_tensor(out),
             NAME,
         )
-    })
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| rgb2hsv_map_error(err.into_runtime_error(), &RGB2HSV_ERROR_INTERNAL))
 }
 
 pub(crate) fn rgb_to_hsv_unit(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
@@ -186,6 +184,18 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Terminal numerical test projection; these color outputs have no
+    // GC-managed children and do not escape into asynchronous work.
+    async fn rgb2hsv_builtin(
+        runtime: Option<crate::context::RuntimeContext>,
+        rgb: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        super::rgb2hsv_builtin(runtime, rgb, rest)
+            .await
+            .map(|owned| owned.with_owned(|value| value))
+    }
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, Tensor};

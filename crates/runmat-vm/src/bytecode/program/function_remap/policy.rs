@@ -28,10 +28,14 @@ fn remap_function_with_policy(
     function: &mut FunctionBytecode,
     remap: &HashMap<FunctionId, FunctionId>,
     policy: RemapPolicy,
-) {
+) -> Result<(), String> {
+    let lexical_parent = project_lexical_parent(function, remap)?;
+    let inherited_storage = project_inherited_storage(function, remap)?;
     if let Some(destination) = remap.get(&function.function).copied() {
         function.rebind_identity(destination, function.portable_function);
     }
+    function.lexical_parent = lexical_parent;
+    function.inherited_storage_slots = inherited_storage;
     #[cfg(feature = "native-accel")]
     let selected_stage_valid = function.validate_fusion_stage_projection().is_ok();
     let context = RemapContext { ids: remap, policy };
@@ -44,20 +48,59 @@ fn remap_function_with_policy(
     } else {
         function.fusion_stage_projection = None;
     }
+    Ok(())
+}
+
+fn project_lexical_parent(
+    function: &FunctionBytecode,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<Option<FunctionId>, String> {
+    match (function.lexical_parent, function.portable_lexical_parent) {
+        (None, None) if function.source_role == runmat_types::FunctionSourceRole::Nested => {
+            Err("nested definition has no lexical parent".into())
+        }
+        (None, None) => Ok(None),
+        (Some(parent), Some(_)) => {
+            remap.get(&parent).copied().map(Some).ok_or_else(|| {
+                format!("nested definition has no admitted lexical parent {parent:?}")
+            })
+        }
+        _ => Err("nested definition has inconsistent lexical parent identities".into()),
+    }
+}
+
+fn project_inherited_storage(
+    function: &FunctionBytecode,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<Vec<crate::bytecode::InheritedStorageSlot>, String> {
+    function
+        .inherited_storage_slots
+        .iter()
+        .map(|entry| {
+            let mut projected = entry.clone();
+            projected.owner = remap.get(&entry.owner).copied().ok_or_else(|| {
+                format!(
+                    "inherited canonical storage owner {:?} is outside admitted function map",
+                    entry.owner
+                )
+            })?;
+            Ok(projected)
+        })
+        .collect()
 }
 
 pub(crate) fn remap_eval_local_function(
     function: &mut FunctionBytecode,
     remap: &HashMap<FunctionId, FunctionId>,
-) {
-    remap_function_with_policy(function, remap, RemapPolicy::EvalLocal);
+) -> Result<(), String> {
+    remap_function_with_policy(function, remap, RemapPolicy::EvalLocal)
 }
 
 pub(crate) fn remap_closed_function(
     function: &mut FunctionBytecode,
     remap: &HashMap<FunctionId, FunctionId>,
-) {
-    remap_function_with_policy(function, remap, RemapPolicy::ClosedUnit);
+) -> Result<(), String> {
+    remap_function_with_policy(function, remap, RemapPolicy::ClosedUnit)
 }
 
 pub(crate) fn remap_eval_local_instruction(
@@ -72,7 +115,8 @@ pub(crate) fn remap_eval_local_instruction(
 }
 
 /// Rebind a session-owned body as one validated transform. Compiler-local IDs
-/// move, while externally bound parent references retain their identity domain.
+/// and same-unit lexical parents move. Externally bound call references retain
+/// their identity domain; no producer admits an external lexical parent.
 pub fn remap_session_function(
     function: &mut FunctionBytecode,
     destination: FunctionId,
@@ -80,15 +124,52 @@ pub fn remap_session_function(
     source: Option<BytecodeSourceRef>,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
+    remap_session_function_with_policy(
+        function,
+        destination,
+        program_function,
+        source,
+        remap,
+        RemapPolicy::EvalLocal,
+    )
+}
+
+/// Rebind a proved closed product body after fresh session IDs have been
+/// assigned. Unlike eval-local remapping, every reference to a fresh ID is
+/// owned by this product and must move, including external-call encodings.
+pub fn remap_closed_session_function(
+    function: &mut FunctionBytecode,
+    destination: FunctionId,
+    program_function: ProgramFunctionId,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    let source = function.source_id;
+    remap_session_function_with_policy(
+        function,
+        destination,
+        program_function,
+        source,
+        remap,
+        RemapPolicy::ClosedUnit,
+    )
+}
+
+fn remap_session_function_with_policy(
+    function: &mut FunctionBytecode,
+    destination: FunctionId,
+    program_function: ProgramFunctionId,
+    source: Option<BytecodeSourceRef>,
+    remap: &HashMap<FunctionId, FunctionId>,
+    policy: RemapPolicy,
+) -> Result<(), String> {
     #[cfg(feature = "native-accel")]
     function.validate_fusion_stage_projection()?;
     let mut next = function.clone();
+    next.lexical_parent = project_lexical_parent(&next, remap)?;
+    next.inherited_storage_slots = project_inherited_storage(&next, remap)?;
     next.rebind_identity_unsealed(destination, program_function);
     next.source_id = source;
-    let context = RemapContext {
-        ids: remap,
-        policy: RemapPolicy::EvalLocal,
-    };
+    let context = RemapContext { ids: remap, policy };
     for instruction in &mut next.instructions {
         remap_instruction_with_policy(instruction, &context);
     }
@@ -129,39 +210,69 @@ pub fn remap_session_entrypoint(
     remap: &HashMap<FunctionId, FunctionId>,
     bindings: &[SessionCallableBinding],
 ) -> Result<(), String> {
+    remap_session_entrypoint_with_policy(bytecode, remap, bindings, RemapPolicy::EvalLocal)
+}
+
+pub(crate) fn remap_closed_session_entrypoint(
+    bytecode: &mut Bytecode,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    remap_session_entrypoint_with_policy(bytecode, remap, &[], RemapPolicy::ClosedUnit)
+}
+
+fn remap_session_entrypoint_with_policy(
+    bytecode: &mut Bytecode,
+    remap: &HashMap<FunctionId, FunctionId>,
+    bindings: &[SessionCallableBinding],
+    policy: RemapPolicy,
+) -> Result<(), String> {
     #[cfg(feature = "native-accel")]
     bytecode.validate_fusion_stage_projection()?;
     let mut next = bytecode.clone();
-    let context = RemapContext {
-        ids: remap,
-        policy: RemapPolicy::EvalLocal,
-    };
+    let context = RemapContext { ids: remap, policy };
     for instruction in &mut next.instructions {
         remap_instruction_with_policy(instruction, &context);
     }
-    let mut bound_pcs = HashMap::<usize, (FunctionId, &str)>::new();
+    let mut bound_pcs = HashMap::<usize, (FunctionId, &str, SessionCallableBindingKind)>::new();
     for binding in bindings {
-        if let Some((function, name)) = bound_pcs.insert(
+        if let Some((function, name, kind)) = bound_pcs.insert(
             binding.pc,
-            (binding.function, binding.display_name.as_str()),
+            (
+                binding.function,
+                binding.display_name.as_str(),
+                binding.kind,
+            ),
         ) {
-            if function == binding.function && name == binding.display_name {
+            if function == binding.function && name == binding.display_name && kind == binding.kind
+            {
                 continue;
             }
             return Err("conflicting session callable bindings at one instruction".into());
         }
-        if next.function_registry.resolve_name(&binding.display_name) != Some(binding.function) {
+        let selected = match binding.kind {
+            SessionCallableBindingKind::Named => {
+                next.function_registry.resolve_name(&binding.display_name)
+            }
+            SessionCallableBindingKind::Constructor => next
+                .function_registry
+                .resolve_session_constructor_handle(&binding.display_name)?,
+        };
+        if selected != Some(binding.function) {
             return Err("session callable binding disagrees with selected registry".into());
         }
         let instruction = next.instructions.get_mut(binding.pc).ok_or_else(|| {
             "session callable binding points outside instruction stream".to_string()
         })?;
-        let admissible = match instruction {
-            Instr::CreateFunctionHandle(name) => name == &binding.display_name,
-            Instr::LoadString(text) | Instr::LoadCharRow(text) => {
-                text.trim().strip_prefix('@').unwrap_or(text.trim()).trim() == binding.display_name
-            }
-            _ => false,
+        let admissible = match binding.kind {
+            SessionCallableBindingKind::Named => matches!(
+                instruction,
+                Instr::CreateFunctionHandle(name) if name == &binding.display_name
+            ),
+            SessionCallableBindingKind::Constructor => matches!(
+                instruction,
+                Instr::CreateFunctionHandle(name) | Instr::CreateExternalFunctionHandle(name)
+                    if name == &binding.display_name
+            ),
         };
         if !admissible {
             return Err("session callable binding does not match source instruction".into());
@@ -172,8 +283,16 @@ pub fn remap_session_entrypoint(
             .map_or(runmat_types::FunctionSourceRole::Unknown, |body| {
                 body.source_role
             });
-        *instruction =
-            Instr::CreateBoundFunctionHandle(binding.function, binding.display_name.clone(), role);
+        let external = matches!(instruction, Instr::CreateExternalFunctionHandle(_));
+        *instruction = if external {
+            Instr::CreateExternalBoundFunctionHandle(
+                binding.function,
+                binding.display_name.clone(),
+                role,
+            )
+        } else {
+            Instr::CreateBoundFunctionHandle(binding.function, binding.display_name.clone(), role)
+        };
     }
     #[cfg(feature = "native-accel")]
     {
@@ -189,12 +308,40 @@ pub fn remap_session_entrypoint(
     Ok(())
 }
 
-/// A Core-resolved callable-literal edit, checked against the selected VM
-/// registry and original instruction before entering the sealed stream.
+/// A Core-resolved explicit function-handle edit, checked against the selected
+/// VM registry and original instruction before entering the sealed stream.
+/// Textual callback names remain runtime name selections.
 pub struct SessionCallableBinding {
     pub pc: usize,
     pub function: FunctionId,
     pub display_name: String,
+    kind: SessionCallableBindingKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionCallableBindingKind {
+    Named,
+    Constructor,
+}
+
+impl SessionCallableBinding {
+    pub fn named(pc: usize, function: FunctionId, display_name: String) -> Self {
+        Self {
+            pc,
+            function,
+            display_name,
+            kind: SessionCallableBindingKind::Named,
+        }
+    }
+
+    pub fn constructor(pc: usize, function: FunctionId, display_name: String) -> Self {
+        Self {
+            pc,
+            function,
+            display_name,
+            kind: SessionCallableBindingKind::Constructor,
+        }
+    }
 }
 
 fn remap_instruction_with_policy(instruction: &mut Instr, context: &RemapContext<'_>) {

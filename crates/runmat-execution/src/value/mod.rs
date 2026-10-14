@@ -3,10 +3,22 @@ use serde::{Deserialize, Serialize};
 use crate::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use crate::ContractError;
 
-mod identity;
 mod durable_aggregate;
+mod exception;
+mod graph;
+mod identity;
 mod origins;
 mod validation;
+pub use exception::{DetachedDiagnosticFrame, ExceptionCallFrame, ExceptionFrameSource};
+pub use graph::{
+    GraphActivation, GraphBinding, GraphBindingKind, GraphBoundOwner, GraphCallable,
+    GraphCallableOwner, GraphClassDependency, GraphClassMethodDependency, GraphField,
+    GraphInvocationRoots, GraphLexicalLayout, GraphNode, GraphNodeRef, GraphProgramUnitId,
+    GraphRegistered, GraphRegisteredKind, GraphRequiredSchema,
+    GraphSelectedDynamicPropertyMetadata, GraphSelectedObject, GraphSelectedObjectArray,
+    GraphSelectedObjectKind, GraphStaticCaller, GraphStaticDependency, GraphStaticReferenceSite,
+    PayloadGraph, GRAPH_MAX_SELECTED_UNITS, GRAPH_REQUEST_SCHEMA_V10, GRAPH_REQUEST_SCHEMA_V11,
+};
 pub use validation::{ValuePayloadValidationCursor, ValueValidationProgress};
 #[cfg(test)]
 mod callable_tests;
@@ -79,6 +91,16 @@ impl ValuePayload {
         source_map: Option<&crate::ExecutableSourceMapV2>,
     ) -> Result<(), ContractError> {
         validation::validate_for_program_sources(self, limits, source_map)
+    }
+
+    /// V8 graph leaves may carry bounded detached diagnostic presentation.
+    /// The selected source map still exclusively authenticates admitted code.
+    pub fn validate_for_graph_sources(
+        &self,
+        limits: ValueLimits,
+        source_map: Option<&crate::ExecutableSourceMapV2>,
+    ) -> Result<(), ContractError> {
+        validation::validate_for_graph_sources(self, limits, source_map)
     }
 
     /// Durable-storage payloads may contain aggregate tags that
@@ -274,6 +296,21 @@ pub struct RegisteredField {
     pub value: ValuePayload,
 }
 
+impl RegisteredData {
+    pub(crate) fn validate_identity_parts(
+        type_identity: &str,
+        schema_version: u32,
+    ) -> Result<(), ContractError> {
+        if schema_version == 0 || type_identity.trim().is_empty() || type_identity.contains('\0') {
+            return Err(ContractError::invalid(
+                "registered value",
+                "type identity must be nonempty and its schema version nonzero",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExceptionValue {
     pub identifier: String,
@@ -297,15 +334,6 @@ pub enum ExceptionGpuGatherRetry {
 pub enum ExceptionFailureOrigin {
     Unclassified,
     LanguageEvaluation,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ExceptionCallFrame {
-    pub function: String,
-    /// Portable program-source ordinal. Never a worker-local SourceId.
-    #[serde(rename = "source_id")]
-    pub program_source_id: Option<runmat_types::ProgramSourceId>,
-    pub span: Option<(u64, u64)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -401,20 +429,43 @@ impl CallableValue {
     }
 
     pub fn validate_identity(&self) -> Result<(), ContractError> {
-        if self.form == CallableForm::Handle && !self.captures.is_empty() {
+        Self::validate_identity_parts(
+            self.owner,
+            &self.qualified_name,
+            self.callable_digest,
+            self.form,
+            self.source_role,
+            self.source_file.as_deref(),
+            self.captures.len(),
+        )
+    }
+
+    pub(crate) fn validate_identity_parts(
+        owner: CallableOwner,
+        qualified_name: &str,
+        callable_digest: Digest,
+        form: CallableForm,
+        source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<&str>,
+        capture_count: usize,
+    ) -> Result<(), ContractError> {
+        if form == CallableForm::Handle && capture_count != 0 {
             return Err(ContractError::invalid(
                 "callable value",
                 "plain function handles cannot carry closure captures",
             ));
         }
-        if self.callable_digest
-            != Self::identity_digest(
-                self.owner,
-                &self.qualified_name,
-                self.form,
-                self.source_role,
-                self.source_file.as_deref(),
-            )
+        if qualified_name.trim().is_empty()
+            || qualified_name.contains('\0')
+            || source_file.is_some_and(|path| path.contains('\0'))
+        {
+            return Err(ContractError::invalid(
+                "callable value",
+                "callable name or source path is invalid",
+            ));
+        }
+        if callable_digest
+            != Self::identity_digest(owner, qualified_name, form, source_role, source_file)
         {
             return Err(ContractError::invalid(
                 "callable value",
@@ -508,7 +559,7 @@ mod exception_protocol_tests {
             task_id: None,
             call_frames: vec![ExceptionCallFrame {
                 function: "origin".into(),
-                program_source_id: Some(runmat_types::ProgramSourceId(7)),
+                source: ExceptionFrameSource::Admitted(runmat_types::ProgramSourceId(7)),
                 span: Some((2, 5)),
             }],
             call_frames_elided: 0,

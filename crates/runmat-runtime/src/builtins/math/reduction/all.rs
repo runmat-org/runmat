@@ -5,6 +5,8 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_builtins::{
     LogicalReductionKind, ALL_CATALOG_ENTRY, ALL_ERROR_INTERNAL, ALL_ERROR_INVALID_ARGUMENT,
@@ -67,10 +69,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "all",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::all"
 )]
-async fn all_builtin(value: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
-    super::logical::execute(&CONFIG, value, arguments).await
+async fn all_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    arguments: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    super::logical::execute(runtime.as_ref(), &CONFIG, value, arguments).await
 }
 
 #[cfg(all(test, feature = "wgpu"))]

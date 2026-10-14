@@ -12,14 +12,15 @@ impl crate::context::RuntimeForeignService for RecordingForeign {
         _context: crate::context::RuntimeContext,
         call: crate::context::ForeignCall,
     ) -> crate::context::RuntimeServiceFuture<
-        Result<runmat_value::ValueSequence, crate::RuntimeError>,
+        Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
     > {
         self.calls.borrow_mut().push(call);
         Box::pin(async {
-            Ok(
+            crate::execution::RootedValueSequence::new(
                 runmat_value::ValueSequence::single(Value::String("done".into()))
                     .expect("single status"),
             )
+            .map_err(|error| error.into_runtime_error())
         })
     }
 }

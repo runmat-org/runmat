@@ -1,4 +1,5 @@
 use runmat_mir::{MirAggregateElement, MirAggregateKind, MirOperand};
+use runmat_runtime::native::NativeValueRef;
 use runmat_types::{MemberName, QualifiedName};
 use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
 
@@ -12,7 +13,7 @@ pub(super) fn evaluate(
     kind: &MirAggregateKind,
     row_lengths: &[usize],
     elements: &[MirAggregateElement],
-) -> NativeExecutorResult<Value> {
+) -> NativeExecutorResult<NativeValueRef> {
     let rows = row_lengths.len();
     let expected_elements = row_lengths
         .iter()
@@ -51,16 +52,21 @@ pub(super) fn evaluate(
                         .into(),
                 ));
             }
-            CellArray::new(realized_rows.into_iter().flatten().collect(), rows, columns)
-                .map(Value::Cell)
-                .map_err(NativeExecutorError::Host)
+            let value =
+                CellArray::new(realized_rows.into_iter().flatten().collect(), rows, columns)
+                    .map(Value::Cell)
+                    .map_err(NativeExecutorError::Host)?;
+            Ok(state.arena.insert(value))
         }
-        MirAggregateKind::Tensor => super::sync::complete(
-            &state.runtime,
-            runmat_runtime::create_matrix_from_values(&realized_rows),
-            "tensor aggregate construction",
-        )
-        .finish(state),
+        MirAggregateKind::Tensor => {
+            let result = super::sync::complete(
+                &state.runtime,
+                runmat_runtime::create_matrix_from_values(&realized_rows),
+                "tensor aggregate construction",
+            )
+            .finish(state)?;
+            Ok(result.with_owned(|value| state.arena.insert(value)))
+        }
     }
 }
 

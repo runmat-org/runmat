@@ -1,4 +1,5 @@
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
+use runmat_runtime::execution::{RootedValueLease, RootedValues};
 use runmat_runtime::indexing::plan::{build_assignment_plan, build_index_plan, IndexPlan};
 use runmat_runtime::indexing::read_slice;
 use runmat_runtime::indexing::selectors::{
@@ -15,18 +16,10 @@ use runmat_runtime::RuntimeError;
 use runmat_types::{IndexKind, IndexResultContext};
 use runmat_value::{LogicalArray, SymbolicArray, Value};
 
-use crate::memory::ScopedValueRoots;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::operand::materialize_operand;
 use super::state::HostState;
-
-fn object_protocol_roots(base: &Value, selectors: &MaterializedSelectors) -> Vec<Value> {
-    let mut roots = Vec::with_capacity(selectors.numeric.len() + 1);
-    roots.push(base.clone());
-    roots.extend(selectors.numeric.iter().cloned());
-    roots
-}
 
 fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<ObjectIndexSelector> {
     if selectors.end_mask != 0 {
@@ -186,17 +179,20 @@ fn assign_inner_with_completion(
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
     ) {
         let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
-        if let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution {
+        if let Some(method) = resolution {
             let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
                 &selectors,
             )?));
             let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs.clone())?
                 .into_values();
-            let mut roots = object_protocol_roots(&base, &selectors);
-            roots.push(rhs);
-            let roots = ScopedValueRoots::register(roots, "native_pending_object_index_write")?;
+            let roots = RootedValueLease::for_values(
+                std::iter::once(&base)
+                    .chain(selectors.numeric.iter())
+                    .chain(std::iter::once(&rhs)),
+            )
+            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
             let runtime = state.runtime.clone();
-            let mut outputs = super::call_suspension::begin(
+            let mut outputs = super::call_suspension::begin_rooted_arguments(
                 state,
                 embedded.cloned(),
                 Box::pin(async move {
@@ -206,7 +202,9 @@ fn assign_inner_with_completion(
                             &runtime, &method, base, path, values,
                         ))
                         .await?;
-                    Ok(vec![value])
+                    value.with_owned(|value| {
+                        RootedValues::new(vec![value]).map_err(|error| error.into_runtime_error())
+                    })
                 }),
             )?;
             if outputs.len() != 1 {
@@ -543,38 +541,49 @@ fn read_paren(
                 "Function handle call does not support colon or end selector syntax",
             )));
         }
+        let roots =
+            RootedValueLease::for_values(std::iter::once(&base).chain(selectors.numeric.iter()))
+                .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
         let runtime = state.runtime.clone();
-        let value = super::sync::complete(
-            &state.runtime,
-            runmat_runtime::call_feval_async_with_outputs_in_context(
-                &runtime,
-                base,
-                &selectors.numeric,
-                requested_outputs,
-            ),
-            "function-handle indexed call",
-        )
-        .finish(state)?;
-        return normalize_outputs(value, requested_outputs);
+        let arguments = selectors.numeric;
+        return super::call_suspension::begin_rooted_arguments(
+            state,
+            embedded.cloned(),
+            Box::pin(async move {
+                let _roots = roots;
+                let sequence = runtime
+                    .scope(
+                        runmat_runtime::call_feval_sequence_async_with_outputs_in_context(
+                            &runtime,
+                            base,
+                            &arguments,
+                            requested_outputs,
+                        ),
+                    )
+                    .await?;
+                sequence.with_owned_sequence(|sequence| {
+                    let values = normalize_sequence_outputs(sequence, requested_outputs)
+                        .map_err(|error| *error)?;
+                    RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                })
+            }),
+        );
     }
     if matches!(
         base,
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
     ) {
         let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-        if matches!(
-            resolution,
-            runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-        ) {
+        if resolution.is_some() {
             let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
                 &selectors,
             )?));
-            let roots = ScopedValueRoots::register(
-                object_protocol_roots(&base, &selectors),
-                "native_pending_object_index_read",
-            )?;
+            let roots = RootedValueLease::for_values(
+                std::iter::once(&base).chain(selectors.numeric.iter()),
+            )
+            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
             let runtime = state.runtime.clone();
-            return super::call_suspension::begin(
+            return super::call_suspension::begin_rooted_arguments(
                 state,
                 embedded.cloned(),
                 Box::pin(async move {
@@ -588,7 +597,11 @@ fn read_paren(
                             requested_outputs,
                         ))
                         .await?;
-                    normalize_sequence_outputs(sequence, requested_outputs)
+                    sequence.with_owned_sequence(|sequence| {
+                        let values = normalize_sequence_outputs(sequence, requested_outputs)
+                            .map_err(|error| *error)?;
+                        RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                    })
                 }),
             );
         }
@@ -855,24 +868,24 @@ fn gather<T: Clone>(data: &[T], plan: &IndexPlan, kind: &str) -> NativeExecutorR
 
 fn normalize_outputs(value: Value, requested_outputs: usize) -> NativeExecutorResult<Vec<Value>> {
     let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_values();
-    normalize_output_values(values, requested_outputs)
+    normalize_output_values(values, requested_outputs).map_err(NativeExecutorError::Runtime)
 }
 
 fn normalize_sequence_outputs(
     sequence: runmat_value::ValueSequence,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> Result<Vec<Value>, Box<RuntimeError>> {
     normalize_output_values(sequence.into_values(), requested_outputs)
 }
 
 fn normalize_output_values(
     values: Vec<Value>,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> Result<Vec<Value>, Box<RuntimeError>> {
     match (requested_outputs, values.len()) {
         (0, _) => Ok(Vec::new()),
         (expected, actual) if expected == actual => Ok(values),
-        (expected, actual) => Err(NativeExecutorError::from(semantic_error(
+        (expected, actual) => Err(Box::new(semantic_error(
             "OutputArityMismatch",
             format!("indexing produced {actual} values for {expected} outputs"),
         ))),
@@ -902,7 +915,7 @@ fn is_function_value(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }

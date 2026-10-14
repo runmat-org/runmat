@@ -16,8 +16,7 @@ use crate::builtins::image::color::color_presentation::{
 };
 use crate::builtins::image::color::common;
 use crate::context::preparation::{
-    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -65,7 +64,7 @@ async fn lab2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     lab: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let output_type = parse_output_type(&rest)?;
     crate::output_count::validate_fixed_outputs(
         &LAB2RGB_DESCRIPTOR,
@@ -134,10 +133,7 @@ async fn lab2rgb_builtin(
         )
         .await
     };
-    match runtime.as_ref() {
-        Some(runtime) => execute_admitted(runtime, request, execute).await,
-        None => execute_current_request(request, execute).await,
-    }
+    execute_request(runtime.as_ref(), request, execute).await
 }
 
 fn admit_lab(lab: &Value) -> BuiltinResult<bool> {
@@ -205,7 +201,7 @@ async fn lab2rgb_execute(
     output_type: Option<LabOutputType>,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
     mut selected: Option<SelectedColorPresentation>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let logical_input = match &lab {
         Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
@@ -255,13 +251,15 @@ async fn lab2rgb_execute(
     let storage = lab2rgb_output_storage(data, output_type);
     let out = Tensor::from_numeric_storage(storage, layout.output_shape())
         .map_err(|err| lab2rgb_error_with_message(err, &LAB2RGB_ERROR_INTERNAL))?;
-    color_presentation::publish(&mut selected, || {
+    let output = color_presentation::publish(&mut selected, || {
         common::restore_resident_numeric_result_for_sources(
             &resident_sources,
             common::image_value_from_tensor(out),
             NAME,
         )
-    })
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| lab2rgb_map_error(err.into_runtime_error(), &LAB2RGB_ERROR_INTERNAL))
 }
 
 fn parse_output_type(rest: &[Value]) -> BuiltinResult<Option<LabOutputType>> {

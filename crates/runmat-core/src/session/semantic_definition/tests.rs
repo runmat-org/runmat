@@ -3,6 +3,10 @@ use runmat_hir::FunctionId;
 use runmat_vm::{Bytecode, BytecodeSourceRef, FunctionBytecode, FunctionRegistry, Instr};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/lexical_parent.rs"]
+mod lexical_parent;
+
 thread_local! {
     static ISSUED: (runmat_runtime::context::RuntimeContext, std::cell::RefCell<Vec<runmat_runtime::source_context::RuntimeSourceLease>>) = (
         runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
@@ -228,7 +232,8 @@ fn complete_mutual_group_reuses_normalized_identities() {
     let incoming = group(1);
     let published = group(100);
     let remap =
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).unwrap();
+        unchanged_closed_product_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new())
+            .unwrap();
     assert_eq!(remap.get(&FunctionId(1)), Some(&FunctionId(100)));
     assert_eq!(remap.get(&FunctionId(2)), Some(&FunctionId(101)));
 }
@@ -250,10 +255,13 @@ fn changed_body_source_scope_capture_layout_and_alias_do_not_reuse() {
             5 => function.varargin_slot = Some(0),
             _ => unreachable!(),
         }
-        assert!(
-            unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new())
-                .is_none()
-        );
+        assert!(unchanged_closed_product_remap(
+            &Bytecode::empty(),
+            &incoming,
+            &published,
+            &HashSet::new()
+        )
+        .is_none());
     }
 }
 
@@ -265,9 +273,13 @@ fn removed_same_source_definition_does_not_reuse_subset() {
         (FunctionId(100), definition(100, "first", 100)),
         (FunctionId(101), definition(101, "removed", 101)),
     ]));
-    assert!(
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
-    );
+    assert!(unchanged_closed_product_remap(
+        &Bytecode::empty(),
+        &incoming,
+        &published,
+        &HashSet::new()
+    )
+    .is_none());
 }
 
 #[test]
@@ -275,17 +287,29 @@ fn aliases_must_match_in_both_directions() {
     let mut incoming = group(1);
     let mut published = group(100);
     published.names.insert("alias".into(), FunctionId(100));
-    assert!(
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
-    );
+    assert!(unchanged_closed_product_remap(
+        &Bytecode::empty(),
+        &incoming,
+        &published,
+        &HashSet::new()
+    )
+    .is_none());
     incoming.names.insert("alias".into(), FunctionId(1));
-    assert!(
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_some()
-    );
+    assert!(unchanged_closed_product_remap(
+        &Bytecode::empty(),
+        &incoming,
+        &published,
+        &HashSet::new()
+    )
+    .is_some());
     incoming.names.insert("alias".into(), FunctionId(2));
-    assert!(
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
-    );
+    assert!(unchanged_closed_product_remap(
+        &Bytecode::empty(),
+        &incoming,
+        &published,
+        &HashSet::new()
+    )
+    .is_none());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -343,9 +367,13 @@ fn unrelated_published_source_does_not_prevent_reuse() {
     published
         .names
         .insert("unrelated_alias".into(), FunctionId(200));
-    assert!(
-        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_some()
-    );
+    assert!(unchanged_closed_product_remap(
+        &Bytecode::empty(),
+        &incoming,
+        &published,
+        &HashSet::new()
+    )
+    .is_some());
 }
 
 #[test]
@@ -432,9 +460,9 @@ fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
         assert_eq!(handles.data.len(), 1);
         assert!(matches!(
             &handles.data[0],
-            runmat_value::Value::BoundFunctionHandle { name, source_role, .. }
-                if name == "child_local"
-                    && *source_role == runmat_types::FunctionSourceRole::Local
+            runmat_value::Value::BoundFunctionHandle(handle)
+                if handle.name == "child_local"
+                    && handle.source_role == runmat_types::FunctionSourceRole::Local
         ));
     });
 }
@@ -462,18 +490,11 @@ fn repeated_captured_definition_survives_workspace_growth() {
                 .expect("definition remains published");
             let mut next = second.get(next_id).unwrap().clone();
             next.rebind_identity(*id, runmat_types::ProgramFunctionId(id.0 as u32));
-            let before = serde_json::to_value(original).unwrap();
-            let after = serde_json::to_value(&next).unwrap();
-            let differences: Vec<_> = before
-                .as_object()
-                .unwrap()
-                .iter()
-                .filter(|(field, value)| after.get(field.as_str()) != Some(*value))
-                .map(|(field, _)| field.as_str())
-                .collect();
+            let before = super::fingerprint(original).unwrap();
+            let after = super::fingerprint(&next).unwrap();
             assert_eq!(
                 *id, next_id,
-                "unchanged capture definition was retired; differing fields: {differences:?}"
+                "unchanged capture definition was retired; semantic fingerprints: {before:?} -> {after:?}"
             );
         }
         execute(&mut session, "assert(saved(2) == 3);");
@@ -519,7 +540,55 @@ fn retained_static_helper_does_not_shadow_latest_dynamic_name() {
         execute(&mut session, "new_mix = @retained_mix;");
         execute(
             &mut session,
-            "assert(old_mix(2) == 105); assert(new_mix(2) == 204);",
+            "old_value = old_mix(2); new_value = new_mix(2);",
+        );
+        let old_value = session.logical_workspace_value("old_value").unwrap();
+        let new_value = session.logical_workspace_value("new_value").unwrap();
+        assert_eq!(
+            old_value,
+            Some(runmat_value::Value::Num(105.0)),
+            "retained static helper plus latest dynamic name; new value: {new_value:?}"
+        );
+        assert_eq!(
+            new_value,
+            Some(runmat_value::Value::Num(204.0)),
+            "new static helper plus latest dynamic name; old value: {old_value:?}"
+        );
+    });
+}
+
+#[test]
+fn entrypoint_text_names_stay_dynamic_after_helper_republication() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let execute = |session: &mut crate::RunMatSession, source: &str| {
+            let outcome = crate::execute_text_request_for_testing(session, source).unwrap();
+            assert!(outcome.error.is_none(), "{source}: {:?}", outcome.error);
+        };
+        execute(
+            &mut session,
+            "function y = entry_helper(x)\ny = x + 1;\nend",
+        );
+        execute(&mut session, "old_entry_helper = @entry_helper;");
+        execute(
+            &mut session,
+            "function y = entry_helper(x)\ny = x + 100;\nend",
+        );
+        execute(
+            &mut session,
+            "target = 'entry_helper'; literal = feval('entry_helper', 2); variable = feval(target, 2); explicit = feval(@entry_helper, 2); mapped = cellfun(@entry_helper, {2}); mapped_total = sum(mapped); old_value = old_entry_helper(2);",
+        );
+        for name in ["literal", "variable", "explicit", "mapped_total"] {
+            assert_eq!(
+                session.logical_workspace_value(name).unwrap(),
+                Some(runmat_value::Value::Num(102.0)),
+                "{name} must select the latest published helper"
+            );
+        }
+        assert_eq!(
+            session.logical_workspace_value("old_value").unwrap(),
+            Some(runmat_value::Value::Num(3.0)),
+            "the earlier explicit handle retains its old definition"
         );
     });
 }

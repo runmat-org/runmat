@@ -2,12 +2,12 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::execution::RootedValue;
 use runmat_value::Value;
 
 use super::{AssignmentStepSpec, PreparedAssignmentStep};
 use crate::object::dispatch::resolve_object_index_protocol;
 use crate::object::indexing::{ObjectIndexOp, ObjectSubscriptPath};
-use crate::object::protocol::ProtocolResolution;
 use crate::runtime_error::semantic_error;
 use crate::sequence::destination::{PreparedSequenceEndpoint, SequenceEndpointSpec};
 use crate::RuntimeError;
@@ -22,7 +22,7 @@ pub(super) fn assign_object_path<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
         if prefix.is_empty() {
             let actual =
@@ -39,7 +39,7 @@ pub(super) fn assign_object_path<'a>(
                 ));
             }
             return match resolve_object_index_protocol(&current, ObjectIndexOp::Subsasgn, caller)? {
-                ProtocolResolution::Method(method) => match context {
+                Some(method) => match context {
                     Some(context) => {
                         crate::object::protocol::invoke_resolved_object_assignment_in_context(
                             context, &method, current, path, values,
@@ -53,7 +53,7 @@ pub(super) fn assign_object_path<'a>(
                         .await
                     }
                 },
-                ProtocolResolution::DefaultIndexing => {
+                None => {
                     assign_unprepared_path(
                         context,
                         current,
@@ -68,19 +68,26 @@ pub(super) fn assign_object_path<'a>(
         }
         let step = prefix.pop_front().expect("nonempty prefix checked above");
         let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
-        let updated = assign_object_path(
-            context,
-            child,
-            prefix,
-            expected_class,
-            suffix_steps,
-            endpoint,
-            path,
-            values,
-            caller,
-        )
-        .await?;
-        super::structural::write_step(context, current, step, updated, caller).await
+        let updated = child
+            .with_owned_async(|child| {
+                assign_object_path(
+                    context,
+                    child,
+                    prefix,
+                    expected_class,
+                    suffix_steps,
+                    endpoint,
+                    path,
+                    values,
+                    caller,
+                )
+            })
+            .await?;
+        updated
+            .with_owned_async(|updated| {
+                super::structural::write_step(context, current, step, updated, caller)
+            })
+            .await
     })
 }
 
@@ -91,7 +98,7 @@ fn assign_unprepared_path<'a>(
     endpoint: SequenceEndpointSpec,
     values: Vec<Value>,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let Some(spec) = steps.pop_front() else {
             let prepared = PreparedSequenceEndpoint::prepare(&current, endpoint).await?;
@@ -106,8 +113,15 @@ fn assign_unprepared_path<'a>(
         };
         let step = super::structural::prepare_step(&current, spec).await?;
         let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
-        let updated =
-            assign_unprepared_path(context, child, steps, endpoint, values, caller).await?;
-        super::structural::write_step(context, current, step, updated, caller).await
+        let updated = child
+            .with_owned_async(|child| {
+                assign_unprepared_path(context, child, steps, endpoint, values, caller)
+            })
+            .await?;
+        updated
+            .with_owned_async(|updated| {
+                super::structural::write_step(context, current, step, updated, caller)
+            })
+            .await
     })
 }

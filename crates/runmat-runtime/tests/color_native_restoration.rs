@@ -46,7 +46,7 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
                 1,
             ))
             .unwrap();
-            let Value::Tensor(expected) = expected else {
+            let Value::Tensor(expected) = expected.value() else {
                 panic!("host RGB")
             };
             let result = block_on(call_builtin_async_with_outputs(
@@ -62,24 +62,26 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
             );
             match mode {
                 Mode::Supported => {
-                    let Value::GpuTensor(output) = result.unwrap() else {
+                    let result = result.unwrap();
+                    let Value::GpuTensor(output) = result.value() else {
                         panic!("supported native Single must stay resident")
                     };
                     assert_eq!(output.physical().element_type(), NumericElementType::F32);
                     assert_eq!(output.shape(), &[1, 1, 3]);
-                    assert_eq!(handle_is_explicit(&output), explicit);
+                    assert_eq!(handle_is_explicit(output), explicit);
                     assert!(!output.shares_allocation_with(&input));
                     let retired = output.allocation_lease().downgrade();
-                    let payload = block_on(inner.download_numeric(&output)).unwrap();
+                    let payload = block_on(inner.download_numeric(output)).unwrap();
                     let HostNumericDataOwned::F32(data) = payload.data else {
                         panic!("native Single output")
                     };
                     assert_eq!(data, expected.as_f32_slice().unwrap());
-                    drop(output);
+                    drop(result);
                     assert!(retired.acquire().is_none());
                 }
                 Mode::Unsupported if !explicit => {
-                    let Value::Tensor(output) = result.unwrap() else {
+                    let result = result.unwrap();
+                    let Value::Tensor(output) = result.value() else {
                         panic!("typed unsupported automatic result")
                     };
                     assert_eq!(output.numeric_dtype(), NumericDType::F32);

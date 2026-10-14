@@ -59,7 +59,7 @@ fn finite_host_budget_admits_bound_and_rejects_before_gather() {
         1,
     ))
     .expect("finite host budget admits real route");
-    let Value::OutputList(outputs) = admitted else {
+    let Value::OutputList(outputs) = &*admitted else {
         panic!("one requested output must retain its result");
     };
     assert!(matches!(outputs.as_slice(), [Value::GpuTensor(_)]));

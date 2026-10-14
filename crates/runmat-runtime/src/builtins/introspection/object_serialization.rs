@@ -1,18 +1,15 @@
 //! Object save/load customization hooks.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
+
+mod assembly;
+mod mat_load;
+mod prepare;
+mod restore;
+pub(crate) use mat_load::{classify_mat_load_restoration, MatLoadRestoration};
 
 pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
     runmat_types::StaticMethodName::new("saveobj");
@@ -27,147 +24,11 @@ const SERIALIZED_KIND_VALUE: &str = "value";
 const SERIALIZED_KIND_HANDLE: &str = "handle";
 const MAX_SERIALIZATION_DEPTH: usize = 32;
 
-const SAVEOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "b",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Serialized object representation.",
-}];
-
-const SAVEOBJ_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "a",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Object to serialize.",
-}];
-
-const SAVEOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "b = saveobj(a)",
-    inputs: &SAVEOBJ_INPUTS,
-    outputs: &SAVEOBJ_OUTPUT,
-}];
-
-const LOADOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "b",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Deserialized object.",
-}];
-
-const LOADOBJ_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "a",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Serialized object representation.",
-}];
-
-const LOADOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "b = loadobj(a)",
-    inputs: &LOADOBJ_INPUTS,
-    outputs: &LOADOBJ_OUTPUT,
-}];
-
-const SERIALIZATION_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OBJECT_SERIALIZATION.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ObjectSerialization:InvalidArgument"),
-    when: "The input is not an object or serialized object envelope.",
-    message: "object serialization: invalid argument",
+pub use runmat_builtins::{
+    LOADOBJ_DESCRIPTOR, LOADOBJ_EXTENSIONS, LOADOBJ_INTEGER_CAPABILITIES,
+    LOADOBJ_PASSTHROUGH_EXTENSION, SAVEOBJ_DESCRIPTOR, SAVEOBJ_INTEGER_AUDIT,
+    SERIALIZATION_ERROR_ARGUMENT, SERIALIZATION_ERROR_DISPATCH, SERIALIZATION_ERROR_RECURSION,
 };
-
-const SERIALIZATION_ERROR_DISPATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OBJECT_SERIALIZATION.DISPATCH",
-    identifier: Some("RunMat:ObjectSerialization:Dispatch"),
-    when: "A saveobj or loadobj method cannot be resolved or executed.",
-    message: "object serialization: method dispatch failed",
-};
-
-const SERIALIZATION_ERROR_RECURSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OBJECT_SERIALIZATION.RECURSION",
-    identifier: Some("RunMat:ObjectSerialization:RecursionLimit"),
-    when: "Object serialization nesting exceeds the supported recursion limit.",
-    message: "object serialization: recursion limit exceeded",
-};
-
-const SERIALIZATION_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    SERIALIZATION_ERROR_ARGUMENT,
-    SERIALIZATION_ERROR_DISPATCH,
-    SERIALIZATION_ERROR_RECURSION,
-];
-
-pub const SAVEOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SAVEOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SERIALIZATION_ERRORS,
-};
-
-pub const SAVEOBJ_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "saveobj dispatches only on value or handle objects; direct typed-integer input is invalid. Integer-valued object properties remain opaque nested payloads and are copied through authoritative storage without becoming a direct integer call form.",
-};
-
-pub const LOADOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOADOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SERIALIZATION_ERRORS,
-};
-
-const LOADOBJ_PASSTHROUGH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "loadobj-plain-payload-passthrough",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "loadobj passthrough for a plain non-object, non-structure payload is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LoadobjPlainPayloadPassthroughExtension"),
-};
-
-pub const LOADOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LOADOBJ_PASSTHROUGH_EXTENSION];
-
-const LOADOBJ_INTEGER_PAYLOAD_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "a.integer_payload",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "An object or structure supplied to loadobj may contain fields of every integer class; nested payloads retain exact class, shape, and value through recursive restoration and class loadobj dispatch.",
-    }];
-
-const LOADOBJ_DIRECT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer_a",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A direct integer payload is outside the documented object-or-structure surface and is admitted only in RunMat mode as an exact passthrough.",
-    }];
-
-pub const LOADOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = loadobj(a_with_integer_payload)",
-        inputs: &LOADOBJ_INTEGER_PAYLOAD_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer fields are opaque serialized payloads rather than numeric controls and are never materialized as floating point by the default restoration path.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = loadobj(integer_a)",
-        inputs: &LOADOBJ_DIRECT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat mode preserves a direct integer scalar or array without conversion; MATLAB-compatible modes reject this undocumented plain-payload form before recursive restoration.",
-    },
-];
 
 fn serialization_error(
     builtin: &'static str,
@@ -186,7 +47,9 @@ async fn dispatch_registered_method(
     method_name: runmat_types::StaticMethodName,
     args: Vec<Value>,
     builtin: &'static str,
-) -> crate::BuiltinResult<Option<Value>> {
+) -> crate::BuiltinResult<Option<RootedValue>> {
+    let _args_root =
+        RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
     if let Some((method, owner)) =
         crate::class_registry::lookup_method(class_name, &method_name.owned())
     {
@@ -243,7 +106,7 @@ async fn dispatch_registered_method(
     }
 }
 
-async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<Value>> {
+async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<RootedValue>> {
     let Some(class_name) = object_class_name(&value) else {
         return Ok(None);
     };
@@ -259,7 +122,7 @@ async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<
 async fn call_loadobj_if_available(
     class_name: &str,
     payload: Value,
-) -> crate::BuiltinResult<Option<Value>> {
+) -> crate::BuiltinResult<Option<RootedValue>> {
     let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
         serialization_error(
             LOADOBJ_METHOD.display_name(),
@@ -373,20 +236,28 @@ fn serialized_object_envelope(
     Value::Struct(st)
 }
 
-fn serialized_envelope(value: &Value) -> Option<(String, String, bool, Value)> {
-    let Value::Struct(st) = value else {
-        return None;
+fn into_serialized_envelope(value: Value) -> Result<(String, String, bool, Value), Value> {
+    let Value::Struct(mut st) = value else {
+        return Err(value);
     };
-    let class_name = st
+    let Some(class_name) = st
         .fields
         .get(SERIALIZED_CLASS_FIELD)
-        .and_then(|value| String::try_from(value).ok())?;
-    let payload = st.fields.get(SERIALIZED_PAYLOAD_FIELD)?.clone();
-    let kind = st
+        .and_then(|value| String::try_from(value).ok())
+    else {
+        return Err(Value::Struct(st));
+    };
+    if !st.fields.contains_key(SERIALIZED_PAYLOAD_FIELD) {
+        return Err(Value::Struct(st));
+    }
+    let Some(kind) = st
         .fields
         .get(SERIALIZED_KIND_FIELD)
-        .and_then(|value| String::try_from(value).ok())?;
-    let had_saveobj = st
+        .and_then(|value| String::try_from(value).ok())
+    else {
+        return Err(Value::Struct(st));
+    };
+    let Some(had_saveobj) = st
         .fields
         .get(SERIALIZED_HAD_SAVEOBJ_FIELD)
         .and_then(|value| {
@@ -395,200 +266,43 @@ fn serialized_envelope(value: &Value) -> Option<(String, String, bool, Value)> {
             } else {
                 None
             }
-        })?;
-    Some((class_name, kind, had_saveobj, payload))
+        })
+    else {
+        return Err(Value::Struct(st));
+    };
+    let payload = st
+        .fields
+        .shift_remove(SERIALIZED_PAYLOAD_FIELD)
+        .expect("validated serialized payload field");
+    Ok((class_name, kind, had_saveobj, payload))
 }
 
-async fn prepare_value_for_save_depth(value: Value, depth: usize) -> crate::BuiltinResult<Value> {
-    if depth > MAX_SERIALIZATION_DEPTH {
-        return Err(serialization_error(
-            SAVEOBJ_METHOD.display_name(),
-            &SERIALIZATION_ERROR_RECURSION,
-            "nested object serialization exceeded the supported depth",
-        ));
-    }
-
-    match value {
-        receiver @ (Value::Object(_) | Value::HandleObject(_)) => {
-            // The generic properties-only envelope cannot represent a native
-            // payload. Reject it before any optional saveobj dispatch can
-            // accidentally erase the authoritative map storage.
-            ensure_no_native_payload(&receiver)?;
-            let class_name = object_class_name(&receiver).ok_or_else(|| {
-                serialization_error(
-                    SAVEOBJ_METHOD.display_name(),
-                    &SERIALIZATION_ERROR_ARGUMENT,
-                    "object receiver is missing class metadata",
-                )
-            })?;
-            let kind = if matches!(receiver, Value::HandleObject(_)) {
-                SERIALIZED_KIND_HANDLE
-            } else {
-                SERIALIZED_KIND_VALUE
-            };
-            let (payload, had_saveobj) =
-                if let Some(saved) = call_saveobj_if_available(receiver.clone()).await? {
-                    (saved, true)
-                } else {
-                    (Value::Struct(object_properties_payload(&receiver)?), false)
-                };
-            let payload = Box::pin(prepare_value_for_save_depth(payload, depth + 1)).await?;
-            Ok(serialized_object_envelope(
-                class_name,
-                kind,
-                had_saveobj,
-                payload,
-            ))
-        }
-        Value::Struct(st) => {
-            let mut converted = StructValue::new();
-            for (name, field) in st.fields.into_iter() {
-                converted.insert(
-                    name,
-                    Box::pin(prepare_value_for_save_depth(field, depth + 1)).await?,
-                );
-            }
-            Ok(Value::Struct(converted))
-        }
-        Value::StructArray(array) => {
-            let converted = array
-                .try_map_values_async(|field| async move {
-                    Box::pin(prepare_value_for_save_depth(field, depth + 1)).await
-                })
-                .await?;
-            Ok(Value::StructArray(converted))
-        }
-        Value::Cell(cell) => {
-            let mut converted = Vec::with_capacity(cell.data.len());
-            for value in cell.data {
-                converted.push(Box::pin(prepare_value_for_save_depth(value, depth + 1)).await?);
-            }
-            CellArray::new_with_shape(converted, cell.shape)
-                .map(Value::Cell)
-                .map_err(|err| {
-                    serialization_error(
-                        SAVEOBJ_METHOD.display_name(),
-                        &SERIALIZATION_ERROR_ARGUMENT,
-                        format!("failed to rebuild serialized cell payload: {err}"),
-                    )
-                })
-        }
-        other => Ok(other),
-    }
+fn root_value(value: Value) -> crate::BuiltinResult<RootedValue> {
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
-pub(crate) async fn prepare_value_for_mat_save(value: Value) -> crate::BuiltinResult<Value> {
-    prepare_value_for_save_depth(value, 0).await
+pub(crate) async fn prepare_value_for_mat_save(value: Value) -> crate::BuiltinResult<RootedValue> {
+    prepare::prepare_value_for_save(value).await
 }
 
-async fn restore_value_after_load_depth(value: Value, depth: usize) -> crate::BuiltinResult<Value> {
-    if depth > MAX_SERIALIZATION_DEPTH {
-        return Err(serialization_error(
-            LOADOBJ_METHOD.display_name(),
-            &SERIALIZATION_ERROR_RECURSION,
-            "nested object deserialization exceeded the supported depth",
-        ));
-    }
-
-    if let Some((class_name, kind, had_saveobj, payload)) = serialized_envelope(&value) {
-        let restored_payload = Box::pin(restore_value_after_load_depth(payload, depth + 1)).await?;
-        if had_saveobj {
-            if let Some(restored) =
-                call_loadobj_if_available(&class_name, restored_payload.clone()).await?
-            {
-                return Ok(restored);
-            }
-        }
-        if let Value::Struct(fields) = restored_payload {
-            let mut object = ObjectInstance::new(class_name);
-            object.properties = fields.fields.into_iter().collect();
-            let object = Value::Object(object);
-            return match kind.as_str() {
-                SERIALIZED_KIND_VALUE => Ok(object),
-                SERIALIZED_KIND_HANDLE => {
-                    let class_name = object_class_name(&object).expect("constructed object class");
-                    let target = runmat_gc::gc_allocate(object).map_err(|error| {
-                        serialization_error(
-                            LOADOBJ_METHOD.display_name(),
-                            &SERIALIZATION_ERROR_ARGUMENT,
-                            format!("failed to restore serialized handle object: {error}"),
-                        )
-                    })?;
-                    Ok(Value::HandleObject(runmat_value::HandleRef {
-                        class_name,
-                        target,
-                        valid: true,
-                    }))
-                }
-                _ => Err(serialization_error(
-                    LOADOBJ_METHOD.display_name(),
-                    &SERIALIZATION_ERROR_ARGUMENT,
-                    format!("unsupported serialized object kind '{kind}'"),
-                )),
-            };
-        }
-        return Ok(restored_payload);
-    }
-
-    match value {
-        Value::Struct(st) => {
-            let mut converted = StructValue::new();
-            for (name, field) in st.fields.into_iter() {
-                converted.insert(
-                    name,
-                    Box::pin(restore_value_after_load_depth(field, depth + 1)).await?,
-                );
-            }
-            Ok(Value::Struct(converted))
-        }
-        Value::StructArray(array) => {
-            let converted = array
-                .try_map_values_async(|field| async move {
-                    Box::pin(restore_value_after_load_depth(field, depth + 1)).await
-                })
-                .await?;
-            Ok(Value::StructArray(converted))
-        }
-        Value::Cell(cell) => {
-            let mut converted = Vec::with_capacity(cell.data.len());
-            for value in cell.data {
-                converted.push(Box::pin(restore_value_after_load_depth(value, depth + 1)).await?);
-            }
-            CellArray::new_with_shape(converted, cell.shape)
-                .map(Value::Cell)
-                .map_err(|err| {
-                    serialization_error(
-                        LOADOBJ_METHOD.display_name(),
-                        &SERIALIZATION_ERROR_ARGUMENT,
-                        format!("failed to rebuild deserialized cell payload: {err}"),
-                    )
-                })
-        }
-        other => Ok(other),
-    }
-}
-
-pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinResult<Value> {
-    restore_value_after_load_depth(value, 0).await
+pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinResult<RootedValue> {
+    restore::restore_value_after_load(value).await
 }
 
 #[runtime_builtin(
     name = "saveobj",
-    execution_stack = "process",
-    category = "introspection",
-    summary = "Return the serialized representation for an object.",
-    keywords = "saveobj,loadobj,object,serialization,mat",
-    descriptor(crate::builtins::introspection::object_serialization::SAVEOBJ_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::object_serialization::SAVEOBJ_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::object_serialization"
 )]
-pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
+pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<RootedValue> {
+    let _input_root =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     match value {
         receiver @ (Value::Object(_) | Value::HandleObject(_)) => {
             if let Some(saved) = call_saveobj_if_available(receiver.clone()).await? {
                 Ok(saved)
             } else {
-                Ok(Value::Struct(object_properties_payload(&receiver)?))
+                root_value(Value::Struct(object_properties_payload(&receiver)?))
             }
         }
         other => Err(serialization_error(
@@ -601,18 +315,10 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "loadobj",
-    execution_stack = "process",
-    category = "introspection",
-    summary = "Restore an object from a serialized representation.",
-    keywords = "loadobj,saveobj,object,serialization,mat",
-    descriptor(crate::builtins::introspection::object_serialization::LOADOBJ_DESCRIPTOR),
-    extensions(crate::builtins::introspection::object_serialization::LOADOBJ_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::introspection::object_serialization::LOADOBJ_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::object_serialization"
 )]
-pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
+pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<RootedValue> {
     if !matches!(
         value,
         Value::Object(_) | Value::HandleObject(_) | Value::Struct(_) | Value::StructArray(_)
@@ -665,7 +371,7 @@ mod tests {
             ),
         );
         let restored = block_on(loadobj_builtin(Value::Struct(payload))).expect("loadobj");
-        let Value::Struct(restored) = restored else {
+        let Value::Struct(restored) = restored.value() else {
             panic!("expected structure payload");
         };
         assert_eq!(
@@ -687,7 +393,7 @@ mod tests {
             .expect("empty structure array");
         let saved = block_on(prepare_value_for_mat_save(Value::StructArray(empty)))
             .expect("prepare empty array");
-        let Value::StructArray(saved) = saved else {
+        let Value::StructArray(saved) = saved.value() else {
             panic!("expected typed empty structure array");
         };
         assert_eq!(saved.shape(), [0, 2, 3]);
@@ -701,11 +407,11 @@ mod tests {
             .collect();
         let array = StructArray::with_fields(vec!["payload".into()], elements, vec![2, 1, 2])
             .expect("N-D structure array");
-        let restored = block_on(restore_value_from_mat_load(
-            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare"),
-        ))
-        .expect("restore");
-        let Value::StructArray(restored) = restored else {
+        let prepared =
+            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare");
+        let restored =
+            block_on(restore_value_from_mat_load(prepared.value().clone())).expect("restore");
+        let Value::StructArray(restored) = restored.value() else {
             panic!("expected typed N-D structure array");
         };
         assert_eq!(restored.shape(), [2, 1, 2]);
@@ -744,11 +450,11 @@ mod tests {
             vec![2, 1],
         )
         .expect("structure array");
-        let restored = block_on(restore_value_from_mat_load(
-            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare"),
-        ))
-        .expect("restore");
-        let Value::StructArray(restored) = restored else {
+        let prepared =
+            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare");
+        let restored =
+            block_on(restore_value_from_mat_load(prepared.value().clone())).expect("restore");
+        let Value::StructArray(restored) = restored.value() else {
             panic!("expected typed structure array");
         };
         assert!(matches!(
@@ -814,8 +520,10 @@ mod tests {
         let value = Value::Int(IntValue::U64(u64::MAX));
         let runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
-            block_on(loadobj_builtin(value.clone())).expect("RunMat passthrough"),
-            value
+            block_on(loadobj_builtin(value.clone()))
+                .expect("RunMat passthrough")
+                .value(),
+            &value
         );
         drop(runmat);
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -842,7 +550,7 @@ mod tests {
         let restored = block_on(loadobj_builtin(Value::StructArray(array.clone())))
             .expect("structure arrays are part of the compatible loadobj domain");
         drop(strict);
-        assert_eq!(restored, Value::StructArray(array));
+        assert_eq!(restored.value(), &Value::StructArray(array));
     }
 
     #[test]
@@ -850,7 +558,7 @@ mod tests {
         let mut object = ObjectInstance::new("NoIdx".to_string());
         object.properties.insert("x".to_string(), Value::Num(4.0));
         let saved = block_on(saveobj_builtin(Value::Object(object))).expect("saveobj");
-        let Value::Struct(st) = saved else {
+        let Value::Struct(st) = saved.value() else {
             panic!("expected struct payload");
         };
         assert_eq!(st.fields.get("x"), Some(&Value::Num(4.0)));
@@ -866,7 +574,7 @@ mod tests {
             .insert("nargs".to_string(), Value::Num(5.0));
 
         let saved = block_on(saveobj_builtin(Value::Object(object))).expect("saveobj");
-        let Value::Struct(st) = saved else {
+        let Value::Struct(st) = saved.value() else {
             panic!("expected saveobj struct");
         };
         assert_eq!(st.fields.get("k"), Some(&Value::Num(9.0)));
@@ -884,8 +592,9 @@ mod tests {
 
         let envelope =
             block_on(prepare_value_for_mat_save(Value::Object(object))).expect("prepare");
-        let restored = block_on(restore_value_from_mat_load(envelope)).expect("restore");
-        let Value::Object(restored_object) = restored else {
+        let restored =
+            block_on(restore_value_from_mat_load(envelope.value().clone())).expect("restore");
+        let Value::Object(restored_object) = restored.value() else {
             panic!("expected restored object");
         };
         assert_eq!(restored_object.class_name.display_name(), "OverIdx");
@@ -920,6 +629,8 @@ mod tests {
         let entries =
             block_on(crate::builtins::io::mat::load::read_mat_file(&path)).expect("load mat file");
         let loaded = entries
+            .value()
+            .0
             .iter()
             .find(|(name, _)| name == "obj")
             .map(|(_, value)| value)
@@ -939,6 +650,8 @@ mod tests {
         )
         .expect("decode workspace bytes");
         let decoded_value = decoded
+            .value()
+            .0
             .iter()
             .find(|(name, _)| name == "obj")
             .map(|(_, value)| value)

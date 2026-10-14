@@ -7,6 +7,7 @@ mod inference;
 mod tests;
 
 pub const AUDIOREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "audioread" },
     category: "io/audio",

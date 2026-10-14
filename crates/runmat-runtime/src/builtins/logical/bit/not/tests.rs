@@ -30,7 +30,9 @@ fn assert_error_contains(err: &RuntimeError, expected: &str) {
 }
 
 fn run_not(value: Value) -> BuiltinResult<Value> {
-    block_on(super::not_builtin(value))
+    // Terminal projection is restricted to non-tabular logical results.
+    assert!(!matches!(&value, Value::Object(_)));
+    block_on(super::not_builtin(value)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[cfg(feature = "wgpu")]
@@ -151,11 +153,12 @@ fn not_maps_table_variables_and_preserves_the_container() {
     )
     .unwrap();
 
-    let Value::Object(output) = run_not(table).expect("table not") else {
+    let output_owner = block_on(super::not_builtin(table)).expect("table not");
+    let Value::Object(output) = output_owner.value() else {
         panic!("expected table output")
     };
     assert_eq!(output.class_name, runmat_types::standard::TABLE);
-    let variables = crate::builtins::table::table_variables(&output).unwrap();
+    let variables = crate::builtins::table::table_variables(output).unwrap();
     assert!(matches!(
         &variables.fields["A"],
         Value::LogicalArray(values) if values.data == vec![0, 1]

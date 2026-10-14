@@ -9,7 +9,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Value};
 
 use super::control::{default_user_data, parse_timeout_value};
-use crate::context::{RuntimeTcpByteOrder, RuntimeTcpIssuer};
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpInvocation};
 use crate::tcp::TcpTransportErrorKind;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -45,7 +45,7 @@ pub(crate) async fn accept_builtin(
     }
     let endpoint = work
         .await_service(service.accept(
-            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
             server_authority,
             options.timeout.and_then(|seconds| {
                 seconds

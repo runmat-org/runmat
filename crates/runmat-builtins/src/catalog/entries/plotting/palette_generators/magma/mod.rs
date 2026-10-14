@@ -4,6 +4,7 @@ mod documentation;
 mod inference;
 
 pub const MAGMA_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "magma" },
     category: "plotting",

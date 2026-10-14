@@ -9,7 +9,6 @@ use runmat_accelerate_api::{
     ProviderPolyderQuotient, ProviderPolyfitOutputs, ProviderPolyfitResult, ProviderPolyvalOptions,
 };
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
-use wgpu::util::DeviceExt;
 
 use super::{
     conv_orientation_for, polynomial_orientation, shape_for_orientation, trim_leading_zeros_real,
@@ -122,12 +121,12 @@ impl WgpuProvider {
         );
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-polyval-warmup"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-polyval-warmup"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-polyval-warmup-pass"),
                 timestamp_writes: None,
@@ -141,12 +140,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-polyval-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-polyval-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -285,15 +284,13 @@ impl WgpuProvider {
                     };
                     self.with_emission(|emission, _| {
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-polyint-const-f64"),
-                                    contents: cast_slice(&values),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyint-const-f64"),
+                                contents: cast_slice(&values),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     })?
                 }
@@ -305,15 +302,13 @@ impl WgpuProvider {
                     };
                     self.with_emission(|emission, _| {
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-polyint-const-f32"),
-                                    contents: cast_slice(&values),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyint-const-f32"),
+                                contents: cast_slice(&values),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     })?
                 }
@@ -388,12 +383,12 @@ impl WgpuProvider {
                 output_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
             );
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-polyint-encoder"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-polyint-encoder"),
+                },
+            );
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-polyint-pass"),
@@ -438,31 +433,27 @@ impl WgpuProvider {
             let shape = shape_for_orientation(orientation, 1);
             let buffer = match self.precision {
                 NumericPrecision::F64 => self.with_emission(|emission, _| {
-                    runmat_accelerate_api::WgpuBufferOwner::new(
-                        emission
-                            .device()
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-polyder-const-f64"),
-                                contents: cast_slice(&[0.0f64]),
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
+                    runmat_accelerate_api::WgpuBufferOwner::new(emission.create_initialized_buffer(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-polyder-const-f64"),
+                            contents: cast_slice(&[0.0f64]),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    ))
                 })?,
                 NumericPrecision::F32 => {
                     let zeros: [f32; 1] = [0.0];
                     self.with_emission(|emission, _| {
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-polyder-const-f32"),
-                                    contents: cast_slice(&zeros),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyder-const-f32"),
+                                contents: cast_slice(&zeros),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     })?
                 }
@@ -509,12 +500,12 @@ impl WgpuProvider {
                 params.output_len,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
             );
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-polyder-encoder"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-polyder-encoder"),
+                },
+            );
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-polyder-pass"),
@@ -660,15 +651,13 @@ impl WgpuProvider {
                 NumericPrecision::F64 => {
                     let buffer = self.with_emission(|emission, _| {
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-polyder-trim-f64"),
-                                    contents: cast_slice(trimmed.as_slice()),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyder-trim-f64"),
+                                contents: cast_slice(trimmed.as_slice()),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     })?;
                     self.register_existing_buffer(buffer, shape_vec, trimmed.len())?
@@ -677,15 +666,13 @@ impl WgpuProvider {
                     let data_f32: Vec<f32> = trimmed.iter().map(|v| *v as f32).collect();
                     let buffer = self.with_emission(|emission, _| {
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-polyder-trim-f32"),
-                                    contents: cast_slice(&data_f32),
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyder-trim-f32"),
+                                contents: cast_slice(&data_f32),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     })?;
                     self.register_existing_buffer(buffer, shape_vec, trimmed.len())?

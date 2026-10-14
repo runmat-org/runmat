@@ -4,7 +4,9 @@ use runmat_builtins::{
 use runmat_value::{IntValue, NumericDType, Value};
 use std::future::Future;
 
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 
 pub(crate) fn decode(value: &Value) -> Option<ImageIndexMode> {
@@ -74,16 +76,17 @@ fn admitted(value: &Value, mode: ImageIndexMode, target: NumericDType) -> bool {
 }
 
 pub(crate) async fn execute<F, Fut>(
+    context: Option<&RuntimeContext>,
     name: &'static str,
     value: Value,
     mode: ImageIndexMode,
     target: NumericDType,
     input_count: usize,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
     if !admitted(&value, mode, target) {
         return body(value).await;
@@ -92,7 +95,8 @@ where
         ImageIndexMode::Intensity => 0,
         ImageIndexMode::Indexed => 1,
     };
-    execute_current_invocation(
+    execute_invocation(
+        context,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name },

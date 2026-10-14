@@ -1,5 +1,5 @@
 use super::*;
-use runmat_accelerate_api::{GpuHandleProvenance, NumericElementType};
+use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorStorage, NumericElementType};
 use runmat_value::{IntegerStorage, Tensor};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

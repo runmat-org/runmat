@@ -25,5 +25,5 @@ async fn function_file_excludes_primary_from_localfunctions() {
     };
     assert_eq!(handles.shape, vec![1, 1]);
     assert!(matches!(&handles.data[0],
-        Value::BoundFunctionHandle { name, .. } if name == "child_local"));
+        Value::BoundFunctionHandle(handle) if handle.name == "child_local"));
 }

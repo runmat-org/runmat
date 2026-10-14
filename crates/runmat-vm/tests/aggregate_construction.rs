@@ -1,11 +1,10 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_value::Value;
 use runmat_vm::Instr;
 use test_helpers::{compile_source, interpret};
 
-fn execute_with_dynamic_concat(source: &str) -> Vec<Value> {
+fn execute_with_dynamic_concat(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile aggregate source");
     let has_dynamic = |instructions: &[Instr]| {
         instructions

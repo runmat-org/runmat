@@ -126,8 +126,10 @@ fn key_type_single_roundtrip() {
     let payload = crate::make_cell(vec![single_key], 1, 1).unwrap();
     let map = containers_map_subsasgn(map, "()".to_string(), payload.clone(), Value::Num(7.0))
         .expect("assign");
-    let value = containers_map_subsref(map, "()".to_string(), payload).expect("lookup");
-    assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
+    let value = map
+        .with_owned(|map| containers_map_subsref(map, "()".to_string(), payload))
+        .expect("lookup");
+    assert!(matches!(value.value(), Value::Num(n) if (n - 7.0).abs() < 1e-12));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -148,8 +150,10 @@ fn value_type_double_converts_integers() {
         Value::Int(IntValue::I32(7)),
     )
     .expect("assign");
-    let value = containers_map_subsref(map, "()".to_string(), payload).expect("lookup");
-    assert!(matches!(value, Value::Num(n) if (n - 7.0).abs() < 1e-12));
+    let value = map
+        .with_owned(|map| containers_map_subsref(map, "()".to_string(), payload))
+        .expect("lookup");
+    assert!(matches!(value.value(), Value::Num(n) if (n - 7.0).abs() < 1e-12));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -196,22 +200,20 @@ fn assignment_updates_and_inserts() {
         Value::Num(1.0),
     )
     .expect("assign");
-    let updated = containers_map_subsasgn(
-        updated.clone(),
-        "()".to_string(),
-        payload.clone(),
-        Value::Num(5.0),
-    )
-    .expect("update");
+    let updated = updated
+        .with_owned(|map| {
+            containers_map_subsasgn(map, "()".to_string(), payload.clone(), Value::Num(5.0))
+        })
+        .expect("update");
     let beta_payload = crate::make_cell(vec![Value::from("beta")], 1, 1).unwrap();
-    let updated = containers_map_subsasgn(
-        updated.clone(),
-        "()".to_string(),
-        beta_payload,
-        Value::Num(9.0),
-    )
-    .expect("insert");
-    let value = containers_map_subsref(updated, "()".to_string(), payload).expect("lookup");
+    let updated = updated
+        .with_owned(|map| {
+            containers_map_subsasgn(map, "()".to_string(), beta_payload, Value::Num(9.0))
+        })
+        .expect("insert");
+    let value = updated
+        .with_owned(|map| containers_map_subsref(map, "()".to_string(), payload))
+        .expect("lookup");
     assert_eq!(value, Value::Num(5.0));
 }
 

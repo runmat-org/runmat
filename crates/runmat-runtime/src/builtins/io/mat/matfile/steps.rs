@@ -1,12 +1,15 @@
 use super::receiver::replace_or_append;
 use super::*;
+use crate::execution::{RootedValue, RootedValueLease};
 
 pub(super) async fn matfile_read_step(
     runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _input_roots = RootedValueLease::for_values(std::iter::once(&obj))
+        .map_err(|error| error.into_runtime_error())?;
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSREF)?;
     if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
@@ -19,11 +22,12 @@ pub(super) async fn matfile_read_step(
     reject_internal_field(&field)?;
     let owner = resolve_matfile(runtime, &object)?;
     if field == PROPERTIES_FIELD {
-        return object
+        let value = object
             .properties
             .get(PROPERTIES_FIELD)
             .cloned()
-            .ok_or_else(|| matfile_error("matfile object is missing Properties"));
+            .ok_or_else(|| matfile_error("matfile object is missing Properties"))?;
+        return RootedValue::new(value).map_err(|error| error.into_runtime_error());
     }
     let entries = read_mat_file_for_builtin_on_with_resource_liveness(
         &owner.source,
@@ -33,19 +37,25 @@ pub(super) async fn matfile_read_step(
     )
     .await?;
     resolve_matfile(runtime, &object)?;
-    entries
-        .into_iter()
-        .find(|(name, _)| name == &field)
-        .map(|(_, value)| value)
-        .ok_or_else(|| {
-            matfile_error_with(
-                &MATFILE_ERROR_SELECTION,
-                format!(
-                    "matfile: variable '{field}' was not found in '{}'",
-                    owner.source.path().display()
-                ),
-            )
-        })
+    entries.try_map_owned(
+        |mut entries| {
+            let index = entries
+                .0
+                .iter()
+                .position(|(name, _)| name == &field)
+                .ok_or_else(|| {
+                    matfile_error_with(
+                        &MATFILE_ERROR_SELECTION,
+                        format!(
+                            "matfile: variable '{field}' was not found in '{}'",
+                            owner.source.path().display()
+                        ),
+                    )
+                })?;
+            Ok(entries.0.swap_remove(index).1)
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 pub(super) async fn matfile_write_step(
@@ -54,7 +64,9 @@ pub(super) async fn matfile_write_step(
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
     resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _input_roots = RootedValueLease::for_values([&obj, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSASGN)?;
     if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
@@ -94,11 +106,19 @@ pub(super) async fn matfile_write_step(
             .await?;
     resolve_matfile(runtime, &object)?;
     let value = cooperation.await_io(gather_if_needed_async(&rhs)).await??;
+    let _value_root = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|error| error.into_runtime_error())?;
     resolve_matfile(runtime, &object)?;
-    replace_or_append(&mut entries, field, value);
+    entries = entries.try_map_owned(
+        |mut entries| {
+            replace_or_append(&mut entries.0, field, value);
+            Ok::<_, crate::RuntimeError>(entries)
+        },
+        |error| error.into_runtime_error(),
+    )?;
     cooperation.completed(0).await?;
     let bytes = encode_workspace_to_mat_bytes_for_owner(
-        &entries,
+        &entries.value().0,
         MatEncodingOwner::MatFile,
         Some(&mut cooperation),
     )
@@ -119,7 +139,7 @@ pub(super) async fn matfile_write_step(
             )
         })?;
     resolve_matfile(runtime, &object)?;
-    Ok(Value::Object(object))
+    RootedValue::new(Value::Object(object)).map_err(|error| error.into_runtime_error())
 }
 
 async fn read_existing_entries_for_assignment(
@@ -127,7 +147,7 @@ async fn read_existing_entries_for_assignment(
     object: &ObjectInstance,
     path: &MatFsPath,
     cooperation: &mut MatCodecCooperation<'_>,
-) -> BuiltinResult<Vec<(String, Value)>> {
+) -> BuiltinResult<super::super::load::RootedMatEntries> {
     match cooperation.await_io(path.metadata()).await? {
         Ok(_) => {
             resolve_matfile(runtime, object)?;
@@ -141,7 +161,10 @@ async fn read_existing_entries_for_assignment(
             resolve_matfile(runtime, object)?;
             Ok(entries)
         }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            super::super::load::RootedMatEntries::new(super::super::load::MatEntries(Vec::new()))
+                .map_err(|error| error.into_runtime_error())
+        }
         Err(err) => Err(matfile_error_with_source(
             &MATFILE_ERROR_IO,
             format!(

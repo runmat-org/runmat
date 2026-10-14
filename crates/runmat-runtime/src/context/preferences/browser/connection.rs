@@ -1,7 +1,9 @@
 //! Origin-local IndexedDB connection with a late-success close owner.
 
+use super::retirement::Observer;
 use super::{browser_error, BrowserPreferenceError};
 use futures::channel::oneshot;
+use runmat_execution::profiling::CommandProfilingReceipt;
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -29,14 +31,18 @@ impl Drop for OwnedDatabase {
     }
 }
 
-pub(super) async fn open(namespace: &str) -> Result<OwnedDatabase, BrowserPreferenceError> {
-    open_version(namespace, 1, None).await
+pub(super) async fn open(
+    namespace: &str,
+    profiling: Option<&CommandProfilingReceipt>,
+) -> Result<OwnedDatabase, BrowserPreferenceError> {
+    open_version(namespace, 1, None, profiling).await
 }
 
 pub(super) async fn open_version(
     namespace: &str,
     version: u32,
     blocked: Option<oneshot::Sender<()>>,
+    profiling: Option<&CommandProfilingReceipt>,
 ) -> Result<OwnedDatabase, BrowserPreferenceError> {
     let request = factory()?
         .open_with_u32(namespace, version)
@@ -48,6 +54,7 @@ pub(super) async fn open_version(
         completion_sender: Some(completion_sender),
         blocked,
         upgrade_error: None,
+        terminal: false,
         on_upgrade: None,
         on_success: None,
         on_error: None,
@@ -56,12 +63,21 @@ pub(super) async fn open_version(
     install(&owner);
     // IndexedDB does not expose cancellation of an open request. A dropped
     // caller leaves this one host-owned observer to close any later success.
+    let observer = Observer::new(
+        owner,
+        profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+    );
     spawn_local(async move {
         let outcome = completion_receiver
             .await
             .unwrap_or(Err(BrowserPreferenceError::LostObservation));
-        owner.borrow_mut().clear_handlers();
+        let terminal = {
+            let mut state = observer.subject().borrow_mut();
+            state.clear_handlers();
+            state.terminal
+        };
         let _ = caller_sender.send(outcome);
+        observer.finish(terminal);
     });
     caller_receiver
         .await
@@ -130,6 +146,7 @@ fn upgrade(weak: &Weak<RefCell<OpenOwner>>) {
 fn success(weak: &Weak<RefCell<OpenOwner>>) {
     let Some(owner) = weak.upgrade() else { return };
     let mut state = owner.borrow_mut();
+    state.terminal = true;
     let result = state
         .request
         .result()
@@ -150,6 +167,7 @@ fn success(weak: &Weak<RefCell<OpenOwner>>) {
 fn failed(weak: &Weak<RefCell<OpenOwner>>) {
     let Some(owner) = weak.upgrade() else { return };
     let mut state = owner.borrow_mut();
+    state.terminal = true;
     let error = if let Some(error) = state.upgrade_error.take() {
         error
     } else {
@@ -189,6 +207,7 @@ struct OpenOwner {
     completion_sender: Option<oneshot::Sender<Result<OwnedDatabase, BrowserPreferenceError>>>,
     blocked: Option<oneshot::Sender<()>>,
     upgrade_error: Option<BrowserPreferenceError>,
+    terminal: bool,
     on_upgrade: Option<Closure<dyn FnMut(Event)>>,
     on_success: Option<Closure<dyn FnMut(Event)>>,
     on_error: Option<Closure<dyn FnMut(Event)>>,

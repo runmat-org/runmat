@@ -18,6 +18,7 @@ pub use contract::{
 pub use options::{Ttest2OptionName, Ttest2Tail, Ttest2Variance};
 
 pub const TTEST2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ttest2" },
     category: "stats/summary",

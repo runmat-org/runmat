@@ -1,5 +1,7 @@
 use super::super::binary;
 use crate::builtins::common::test_support;
+use crate::context::RuntimeContext;
+use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
@@ -8,6 +10,7 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::LogicalBinaryOperator;
 use runmat_value::{Tensor, Value};
+use std::rc::Rc;
 use std::sync::Mutex;
 
 #[derive(Clone, Copy)]
@@ -110,17 +113,19 @@ fn resident_pair(provider: &dyn AccelProvider) -> (GpuTensorHandle, GpuTensorHan
 #[test]
 fn typed_unsupported_hook_uses_exact_host_fallback() {
     let _state = test_support::accel_test_lock();
+    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let provider = provider(HookBehavior::Unsupported);
     let _provider = ThreadProviderGuard::set(Some(provider));
     let (lhs, rhs) = resident_pair(provider);
 
     let result = block_on(binary::execute(
+        Some(&context),
         Value::GpuTensor(lhs.clone()),
         Value::GpuTensor(rhs.clone()),
         LogicalBinaryOperator::And,
     ))
     .expect("typed unsupported hook should fall back");
-    let gathered = test_support::gather(result).expect("logical result");
+    let gathered = test_support::gather(result.value().clone()).expect("logical result");
     assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
     lhs.release().expect("free lhs");
     rhs.release().expect("free rhs");
@@ -129,11 +134,13 @@ fn typed_unsupported_hook_uses_exact_host_fallback() {
 #[test]
 fn provider_failure_remains_visible() {
     let _state = test_support::accel_test_lock();
+    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let provider = provider(HookBehavior::Failure);
     let _provider = ThreadProviderGuard::set(Some(provider));
     let (lhs, rhs) = resident_pair(provider);
 
     let error = block_on(binary::execute(
+        Some(&context),
         Value::GpuTensor(lhs.clone()),
         Value::GpuTensor(rhs.clone()),
         LogicalBinaryOperator::And,
@@ -151,11 +158,13 @@ fn provider_failure_remains_visible() {
 #[test]
 fn malformed_provider_output_is_freed_and_rejected() {
     let _state = test_support::accel_test_lock();
+    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let provider = provider(HookBehavior::Malformed);
     let _provider = ThreadProviderGuard::set(Some(provider));
     let (lhs, rhs) = resident_pair(provider);
 
     let error = block_on(binary::execute(
+        Some(&context),
         Value::GpuTensor(lhs.clone()),
         Value::GpuTensor(rhs.clone()),
         LogicalBinaryOperator::And,

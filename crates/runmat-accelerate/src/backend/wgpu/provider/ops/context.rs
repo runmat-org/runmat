@@ -24,10 +24,7 @@ impl WgpuProvider {
                 adapter: self.adapter.clone(),
                 adapter_info: self.adapter_info.clone(),
                 limits: self.adapter_limits.clone(),
-                features: self
-                    .access
-                    .with_shared(|emission| emission.device().features())
-                    .ok()?,
+                features: self.enabled_features,
             })),
         }
     }

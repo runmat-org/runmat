@@ -12,6 +12,7 @@ pub use contract::*;
 pub use option::InputStringMode;
 
 pub const INPUT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "input" },
     category: "io",

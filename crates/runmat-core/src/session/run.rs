@@ -1,6 +1,11 @@
 use super::*;
 use std::rc::Rc;
 
+#[path = "run/selected_class_product.rs"]
+mod selected_class_product;
+#[path = "run/selected_source_owner.rs"]
+mod selected_source_owner;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -179,7 +184,11 @@ impl RunMatSession {
     async fn run(
         &mut self,
         input: &str,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+    ) -> std::result::Result<
+        runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>,
+        RunError,
+    > {
+        self.runtime_context = self.runtime_context.clone().with_fresh_plot_receipts();
         self.configure_runtime_context();
         let runtime = self.runtime_context.clone();
         runtime.scope(self.run_in_context(input)).await
@@ -188,11 +197,16 @@ impl RunMatSession {
     async fn run_in_context(
         &mut self,
         input: &str,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+    ) -> std::result::Result<
+        runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>,
+        RunError,
+    > {
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
                 self.project_handoff.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                self.local_tasks.child_scope_factory(),
             ),
         );
         self.configure_dynamic_function_services();
@@ -221,6 +235,8 @@ impl RunMatSession {
             )
         })?;
         self.pending_companion_source_discovery = Some(companion);
+        self.sync_workspace_binding_metadata()
+            .map_err(RunError::Runtime)?;
         let previous_workspace_bindings = self
             .logical_workspace_values()
             .map_err(RunError::Runtime)?
@@ -228,13 +244,16 @@ impl RunMatSession {
             .map(|name| {
                 let key = self
                     .workspace_bindings
+                    .borrow()
                     .get(&name)
                     .map(|binding| binding.key.clone())
                     .unwrap_or_else(|| self.workspace_binding_key(&name));
                 (name, key)
             })
             .collect::<HashMap<_, _>>();
-        let mut execution = self.execute_internal(input, true).await?;
+        // Keep the compiled execution state off the enclosing request's poll
+        // frame. Pinning transfers ownership; workspace values are not copied.
+        let execution = Box::pin(self.execute_internal(input, true)).await?;
         let workspace_names = execution
             .workspace_snapshot
             .values
@@ -242,17 +261,22 @@ impl RunMatSession {
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
         let workspace_full = execution.workspace_snapshot.full;
-        let outcome = &mut execution.outcome;
-        outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names)?;
+        let upserts = self.abi_workspace_upserts(workspace_names)?;
         let (binding_removals, removed_names) =
             self.abi_workspace_removals(previous_workspace_bindings, workspace_full)?;
-        outcome.workspace_delta.removals = binding_removals;
-        if workspace_full && removed_names {
-            outcome.effects.push(crate::abi::ObservedEffect::Workspace(
-                crate::abi::WorkspaceEffectKind::Clear,
-            ));
-        }
-        Ok(execution.outcome)
+        execution.outcome.try_map_owned(
+            |mut outcome| {
+                outcome.workspace_delta.upserts = upserts;
+                outcome.workspace_delta.removals = binding_removals;
+                if workspace_full && removed_names {
+                    outcome.effects.push(crate::abi::ObservedEffect::Workspace(
+                        crate::abi::WorkspaceEffectKind::Clear,
+                    ));
+                }
+                Ok(outcome)
+            },
+            |error| RunError::Runtime(error.into_runtime_error()),
+        )
     }
 
     /// Execute a structured runtime/workspace ABI request.
@@ -285,7 +309,6 @@ impl RunMatSession {
                             .source,
                     ),
                     result: Err(RunError::Runtime(error)),
-                    _result_roots: None,
                 },
             };
         }
@@ -297,10 +320,55 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
-        let mut response = self.execute_request_inner(request).await;
-        if let Err(error) = response.root_result_values() {
-            response.result = Err(RunError::Runtime(error.into_runtime_error()));
+        let command_start = Instant::now();
+        let profiling_root = self.admit_command_profiling();
+        let receipt = self
+            .runtime_context
+            .command_profiling()
+            .cloned()
+            .expect("admitted command");
+        let mut response = runmat_execution::profiling::observe_command_future(
+            receipt,
+            self.execute_request_and_cleanup(request),
+        )
+        .await;
+        // The owned future and its final selected poll/drop scope have retired
+        // before the sole root publishes an immutable CPU snapshot.
+        if let Some(admission) = profiling_root {
+            let canonical_device_route = admission.canonical_device_route
+                && self
+                    .runtime_context
+                    .command_device_access()
+                    .is_some_and(|access| !access.has_raw_export())
+                && self
+                    .runtime_context
+                    .service_ports()
+                    .same_device_route_owners(&self.canonical_device_route_ports);
+            self.observe_command_device_time_at_seal(&admission.root);
+            let snapshot = admission.root.seal();
+            let command_wall_ms = command_start.elapsed().as_millis() as u64;
+            response.result = response.result.and_then(|outcome| {
+                outcome.try_map_owned(
+                    |mut outcome| {
+                        outcome.profiling = Some(execution_profiling(
+                            command_wall_ms,
+                            &snapshot,
+                            canonical_device_route,
+                        ));
+                        Ok::<_, RunError>(outcome)
+                    },
+                    |error| RunError::Runtime(error.into_runtime_error()),
+                )
+            });
         }
+        response
+    }
+
+    async fn execute_request_and_cleanup(
+        &mut self,
+        request: crate::abi::ExecutionRequest,
+    ) -> crate::abi::ExecutionResponse {
+        let mut response = self.execute_request_inner(request).await;
         if let Err(error) = self.lifecycle_host.service_safepoint(&self.runtime_context) {
             if response.result.is_ok() {
                 response.result = Err(RunError::Runtime(error));
@@ -333,7 +401,6 @@ impl RunMatSession {
             return crate::abi::ExecutionResponse {
                 source_context: unresolved_source_context(&source_input),
                 result: Err(error),
-                _result_roots: None,
             };
         }
         let source_resolution = match source_input_text(request.source).await {
@@ -342,7 +409,6 @@ impl RunMatSession {
                 return crate::abi::ExecutionResponse {
                     source_context: unresolved_source_context(&source_input),
                     result: Err(err),
-                    _result_roots: None,
                 };
             }
         };
@@ -383,13 +449,36 @@ impl RunMatSession {
                 text: Some(source_text),
                 identity: source_identity,
             },
-            result: result
-                .and_then(|outcome| apply_requested_output_policy(outcome, &requested_outputs)),
-            _result_roots: None,
+            result: result.and_then(|outcome| {
+                outcome.try_map_owned(
+                    |outcome| apply_requested_output_policy(outcome, &requested_outputs),
+                    |error| RunError::Runtime(error.into_runtime_error()),
+                )
+            }),
         }
     }
 
-    async fn execute_internal(
+    #[tracing::instrument(
+        name = "runtime.execute",
+        skip_all,
+        fields(input_len = input.len(), verbose = self.verbose)
+    )]
+    fn execute_internal<'a>(
+        &'a mut self,
+        input: &'a str,
+        preserve_layout_var_names: bool,
+    ) -> impl std::future::Future<Output = std::result::Result<SessionExecution, RunError>> + 'a
+    {
+        // Attach the span when constructing the request-owned future. An
+        // async instrument wrapper otherwise reserves its full construction
+        // frame during every nested interpreter poll.
+        tracing::Instrument::instrument(
+            self.execute_internal_inner(input, preserve_layout_var_names),
+            tracing::Span::current(),
+        )
+    }
+
+    async fn execute_internal_inner(
         &mut self,
         input: &str,
         preserve_layout_var_names: bool,
@@ -408,18 +497,10 @@ impl RunMatSession {
             self.dynamic_eval_enabled,
         );
         runmat_hir::set_error_namespace(&self.error_namespace);
-        let exec_span = info_span!(
-            "runtime.execute",
-            input_len = input.len(),
-            verbose = self.verbose
-        );
-        let _exec_guard = exec_span.enter();
         runmat_runtime::console::reset_thread_buffer();
         runmat_runtime::console::record_diary_command(input);
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
-        runmat_value::set_display_format(self.format_mode);
-        reset_provider_telemetry();
         let _interrupt_guard =
             runmat_runtime::interrupt::replace_interrupt(Some(self.runtime_context.cancellation()));
         let start_time = Instant::now();
@@ -462,7 +543,8 @@ impl RunMatSession {
                         compat: runmat_parser::CompatMode,
                         top_level_await_enabled: bool,
                         source_catalog: Arc<Option<runmat_package::DiscoveredSourceSymbols>>,
-                    ) -> Result<Value, RuntimeError> {
+                    ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError>
+                    {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
                             .map_err(|e| {
@@ -506,13 +588,23 @@ impl RunMatSession {
                             (name == "__runmat_input_result__").then_some(*idx)
                         });
                         let vars = runmat_vm::interpret(&bc).await?;
-                        result_idx
-                            .and_then(|idx| vars.get(idx).cloned())
-                            .ok_or_else(|| {
+                        vars.with_owned_values(|mut vars| {
+                            let index = result_idx.ok_or_else(|| {
                                 build_runtime_error("input: expression produced no value")
                                     .with_identifier("RunMat:input:NoValue")
                                     .build()
-                            })
+                            })?;
+                            let value = vars
+                                .get_mut(index)
+                                .map(|slot| std::mem::replace(slot, Value::Num(0.0)))
+                                .ok_or_else(|| {
+                                    build_runtime_error("input: expression produced no value")
+                                        .with_identifier("RunMat:input:NoValue")
+                                        .build()
+                                })?;
+                            runmat_runtime::execution::RootedValue::new(value)
+                                .map_err(|error| error.into_runtime_error())
+                        })
                     }
 
                     let source_catalog = Arc::clone(&source_catalog_for_eval_hook);
@@ -559,6 +651,10 @@ impl RunMatSession {
         );
 
         let source = self.canonical_interactive_source(input)?;
+        // This is the exact bound-function table supplied to HIR lowering.
+        // A later merged/current registry can reuse the same numeric ID for
+        // a different body and cannot select an External static target.
+        let inherited_registry = self.function_registry.clone();
         let mut prepared = self.compile_input(input)?;
         let revision = crate::ExecutableRevision::derive(
             &source,
@@ -586,27 +682,141 @@ impl RunMatSession {
             analysis,
             bytecode,
             portable_source_map: _,
+            source_projection,
             mut function_registry_after_success,
-            current_function_ids,
-            next_semantic_function_id_after_success,
+            published_registry_for_reuse,
+            private_companion_function_names,
+            mut current_function_ids,
+            mut next_semantic_function_id_after_success,
         } = prepared;
-        let interactive_unit = {
-            crate::ExecutableUnit::new(
-                source.clone(),
-                revision,
-                source_map,
-                mir,
-                analysis,
-                bytecode,
+        let mut draft = crate::executable::ExecutableUnitDraft::prepare(
+            source.clone(),
+            revision,
+            source_map,
+            mir,
+            analysis,
+            bytecode,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
             )
+        })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let prepared_foreign = self
+            .prepare_selected_project_foreign(&draft.inferred_interop_manifest())
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)
-                        .with_identifier("RunMat:ExecutableProduct")
+                        .with_identifier("RunMat:SelectedForeignPreparation")
                         .build(),
                 )
-            })?
+            })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let foreign_issuance_source = crate::foreign_artifacts::ForeignIssuanceSource::capture(
+            self.project_handoff.as_ref(),
+            self.selected_foreign_config.as_ref(),
+            self.prepared_selected_foreign_input.as_ref(),
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error.to_string())
+                    .with_identifier("RunMat:SelectedForeignSource")
+                    .build(),
+            )
+        })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_interop = prepared_foreign
+            .as_ref()
+            .map(|prepared| prepared.interop().clone())
+            .unwrap_or_else(runmat_types::InteropManifest::empty);
+        #[cfg(target_arch = "wasm32")]
+        let selected_interop = runmat_types::InteropManifest::empty();
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_foreign_basis = if selected_interop == runmat_types::InteropManifest::empty() {
+            None
+        } else {
+            prepared_foreign
+                .as_ref()
+                .map(|prepared| prepared.selected_reuse_basis())
+                .transpose()
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error.to_string())
+                            .with_identifier("RunMat:SelectedForeignPreparation")
+                            .build(),
+                    )
+                })?
         };
+        #[cfg(target_arch = "wasm32")]
+        let selected_foreign_basis = None;
+        let reuse = super::semantic_definition::unchanged_product_remap(
+            draft.bytecode(),
+            &current_function_ids,
+            &published_registry_for_reuse,
+            &private_companion_function_names,
+        )
+        .filter(|remap| {
+            !draft.bytecode().instructions.is_empty()
+                && remap.values().all(|target| {
+                    published_registry_for_reuse
+                        .get_current(*target)
+                        .is_some_and(|body| {
+                            let Some(product) = body.selected_executable_product.as_ref() else {
+                                return false;
+                            };
+                            body.selected_source_owner.as_ref().is_some_and(|owner| {
+                                owner.is_live()
+                                    && product.source_owner().same_issuance(owner)
+                                    && product.foreign_basis() == selected_foreign_basis
+                            })
+                        })
+                })
+        });
+        let mut excluded_reused_ids = HashSet::new();
+        let mut provisional_reused_ids = HashSet::new();
+        if let Some(remap) = reuse {
+            excluded_reused_ids.extend(remap.values().copied());
+            provisional_reused_ids.extend(remap.keys().copied());
+            draft
+                .rebind_current_definitions(&published_registry_for_reuse, &remap)
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableFunctionIdentity")
+                            .build(),
+                    )
+                })?;
+            current_function_ids = current_function_ids
+                .into_iter()
+                .map(|id| remap.get(&id).copied().unwrap_or(id))
+                .collect();
+            // The provisional IDs never escaped the draft. Reuse retains the
+            // published high-water mark rather than consuming one per repeat.
+            next_semantic_function_id_after_success = self.next_semantic_function_id;
+        }
+        let selected_current_function_ids = current_function_ids
+            .difference(&excluded_reused_ids)
+            .copied()
+            .collect::<HashSet<_>>();
+        // Keep one immutable code owner while an accepted deferred task is
+        // outstanding; canonical V3 bytes remain lazy until graph use.
+        let interactive_unit = Rc::new(draft.seal());
+        let selected_static_imports = super::source_evaluation::selected_static_imports(
+            &interactive_unit,
+            &inherited_registry,
+            &selected_current_function_ids,
+            &excluded_reused_ids,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableStaticImport")
+                    .build(),
+            )
+        })?;
         #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
         let execution_runtime =
@@ -622,7 +832,13 @@ impl RunMatSession {
                     )
                 })?;
         let mut bytecode = interactive_unit
-            .runtime_bytecode(&execution_runtime)
+            .runtime_bytecode_with_selected_prior(
+                &execution_runtime,
+                &inherited_registry,
+                &selected_current_function_ids,
+                &excluded_reused_ids,
+                &source_projection,
+            )
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)
@@ -630,10 +846,34 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
-        let active_registry = bytecode.function_registry();
+        let mut active_registry = bytecode.function_registry();
+        let mut publication_projection = function_registry_after_success.clone();
+        for function in &provisional_reused_ids {
+            publication_projection.remove(*function);
+        }
+        let publishable_current = selected_current_function_ids
+            .iter()
+            .copied()
+            .filter(|function| publication_projection.get_current(*function).is_some())
+            .collect::<HashSet<_>>();
+        function_registry_after_success =
+            runmat_vm::FunctionRegistry::selected_execution_registry_from_prior(
+                &self.function_registry,
+                &publication_projection,
+                &publishable_current,
+                &excluded_reused_ids,
+                |source| source_projection.runtime_ref_for_program_ref(source),
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         super::semantic_definition::finalize_current_definitions(
             &mut function_registry_after_success,
-            &current_function_ids,
+            &selected_current_function_ids,
             &active_registry,
         )
         .map_err(|error| {
@@ -643,15 +883,33 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        selected_source_owner::attach_published_aliases(
+            &interactive_unit,
+            &execution_runtime,
+            &selected_current_function_ids,
+            &active_registry,
+            &mut function_registry_after_success,
+        )?;
+        let selected_declaration_products = self
+            .source_evaluator
+            .selected_declaration_products()
+            .map_err(RunError::Runtime)?;
+        selected_class_product::attach_published_constructors(
+            &mut bytecode,
+            &selected_current_function_ids,
+            &mut active_registry,
+            &mut function_registry_after_success,
+            &selected_declaration_products,
+        )?;
         // Only this compilation's definitions need a new artifact. Inherited
         // session definitions already retain their own indexed envelopes.
-        let has_current_artifact_origin = current_function_ids.iter().any(|function| {
+        let has_current_artifact_origin = selected_current_function_ids.iter().any(|function| {
             active_registry
                 .get(*function)
                 .is_some_and(|body| body.binding_origin.is_some())
         });
         let callable_artifact = if has_current_artifact_origin {
-            Some(
+            Some(Arc::<[u8]>::from(
                 (if interactive_unit.bytecode().instructions.is_empty() {
                     let primary_source = lowering.assembly.primary_source.ok_or_else(|| {
                         RunError::Runtime(
@@ -660,14 +918,29 @@ impl RunMatSession {
                                 .build(),
                         )
                     })?;
-                    interactive_unit.portable_envelope_for_current_definition(
-                        &current_function_ids,
+                    interactive_unit.portable_envelope_for_current_definition_with_interop(
+                        &selected_current_function_ids,
                         primary_source,
+                        selected_interop.clone(),
                     )
                 } else {
-                    interactive_unit.portable_envelope()
+                    interactive_unit.portable_script_envelope_with_current_definitions(
+                        selected_interop.clone(),
+                        &selected_current_function_ids,
+                    )
                 })
-                .and_then(|envelope| {
+                .and_then(|mut envelope| {
+                    if !selected_static_imports.imports.is_empty() {
+                        let section = runmat_execution::executable::static_import_section(
+                            selected_static_imports.imports.clone(),
+                        )
+                        .map_err(|error| error.to_string())?;
+                        envelope.manifest.optional_sections.push(section);
+                        envelope
+                            .manifest
+                            .optional_sections
+                            .sort_by(|left, right| left.name.cmp(&right.name));
+                    }
                     envelope
                         .canonical_bytes()
                         .map_err(|error| error.to_string())
@@ -679,14 +952,292 @@ impl RunMatSession {
                             .build(),
                     )
                 })?,
+            ))
+        } else {
+            None
+        };
+        let callable_receipt = if let Some(bytes) = callable_artifact.as_ref() {
+            selected_source_owner::attach_selected_executable_product(
+                selected_source_owner::SelectedProductPublication {
+                    unit: &interactive_unit,
+                    current: &selected_current_function_ids,
+                    bytecode: &mut bytecode,
+                    executing: &mut active_registry,
+                    durable: &mut function_registry_after_success,
+                },
+                selected_source_owner::SelectedProductAdmission {
+                    bytes: Arc::clone(bytes),
+                    static_targets: &selected_static_imports.targets,
+                    foreign_basis: selected_foreign_basis,
+                    dynamic_port: {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            self.source_evaluator.dynamic_admission_port_for_invocation(
+                                prepared_foreign.clone(),
+                                foreign_issuance_source.clone(),
+                            )
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            self.source_evaluator.dynamic_admission_port()
+                        }
+                    },
+                    #[cfg(not(target_arch = "wasm32"))]
+                    prepared: prepared_foreign.as_ref(),
+                },
+            )?
+        } else {
+            None
+        };
+        let requires_foreign_receipt = selected_interop != runmat_types::InteropManifest::empty()
+            || interactive_unit.requires_python_runtime();
+        // Preserve the compiler's exact private-companion publication choice:
+        // those selected bodies execute from this request but are not named in
+        // the durable session registry.
+        let execution_only = selected_current_function_ids
+            .iter()
+            .copied()
+            .filter(|function| {
+                active_registry.get_current(*function).is_some_and(|body| {
+                    private_companion_function_names.contains(&body.display_name)
+                })
+            })
+            .collect::<HashSet<_>>();
+        let declaration_class = if callable_artifact.is_none() {
+            lowering
+                .assembly
+                .primary_source
+                .map(|source| interactive_unit.primary_declaration_only_class(source))
+                .transpose()
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableClassProduct")
+                            .build(),
+                    )
+                })?
+                .flatten()
+        } else {
+            None
+        };
+        let mut selected_static_targets = Some(selected_static_imports.targets);
+        let selected_graph = if declaration_class.is_none()
+            && (callable_artifact.is_some() || !interactive_unit.bytecode().instructions.is_empty())
+        {
+            let primary = super::source_evaluation::SelectedGraphPrimary::new(
+                super::source_evaluation::SelectedGraphSource {
+                    unit: Rc::clone(&interactive_unit),
+                    primary_source: lowering.assembly.primary_source,
+                    already_published: callable_artifact.clone(),
+                },
+                &execution_runtime,
+                bytecode.function_registry.clone(),
+                super::source_evaluation::SelectedGraphPublication::new(
+                    &function_registry_after_success,
+                    &execution_only,
+                ),
+                super::source_evaluation::SelectedGraphSelection {
+                    current_functions: selected_current_function_ids.clone(),
+                    interop: selected_interop.clone(),
+                    static_targets: selected_static_targets.take().ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error("selected static targets have no product owner")
+                                .with_identifier("RunMat:ExecutableStaticImport")
+                                .build(),
+                        )
+                    })?,
+                },
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
+            let interop_receipt = if callable_artifact.is_some() {
+                callable_receipt
+            } else if requires_foreign_receipt {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    crate::foreign_artifacts::selected_unit_interop_receipt(
+                        primary.canonical_v3().map_err(|error| {
+                            RunError::Runtime(build_runtime_error(error).build())
+                        })?,
+                        primary.source_owner(),
+                        prepared_foreign.as_ref(),
+                    )
+                    .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    None
+                }
+            } else {
+                None
+            };
+            Some(Rc::new(
+                primary
+                    .with_selected_interop_receipt(interop_receipt)
+                    .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?,
+            ))
+        } else {
+            None
+        };
+        let selected_declaration = if let Some(class) = declaration_class {
+            let primary_source = lowering.assembly.primary_source.ok_or_else(|| {
+                RunError::Runtime(
+                    build_runtime_error("declaration-only product has no primary source")
+                        .with_identifier("RunMat:ExecutableClassProduct")
+                        .build(),
+                )
+            })?;
+            let mut envelope = interactive_unit
+                .portable_declaration_envelope_with_interop(
+                    &class,
+                    primary_source,
+                    selected_interop,
+                    &selected_current_function_ids,
+                )
+                .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;
+            if !selected_static_imports.imports.is_empty() {
+                let section = runmat_execution::executable::static_import_section(
+                    selected_static_imports.imports,
+                )
+                .map_err(|error| {
+                    RunError::Runtime(build_runtime_error(error.to_string()).build())
+                })?;
+                envelope.manifest.optional_sections.push(section);
+                envelope
+                    .manifest
+                    .optional_sections
+                    .sort_by(|left, right| left.name.cmp(&right.name));
+            }
+            let bytes = Arc::<[u8]>::from(envelope.canonical_bytes().map_err(|error| {
+                RunError::Runtime(build_runtime_error(error.to_string()).build())
+            })?);
+            let source_owner = interactive_unit
+                .selected_source_owner(&execution_runtime)
+                .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let receipt = crate::foreign_artifacts::selected_unit_interop_receipt(
+                Arc::clone(&bytes),
+                &source_owner,
+                prepared_foreign.as_ref(),
+            )
+            .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;
+            #[cfg(target_arch = "wasm32")]
+            let receipt = None;
+            let product =
+                runmat_vm::SelectedDeclarationProduct::admit_local(bytes, source_owner, receipt)
+                    .map_err(RunError::Runtime)?;
+            Some(
+                super::source_evaluation::SelectedDeclarationAdmission::new(
+                    product,
+                    selected_static_targets.take().ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error("selected static targets have no product owner")
+                                .with_identifier("RunMat:ExecutableStaticImport")
+                                .build(),
+                        )
+                    })?,
+                )
+                .map_err(RunError::Runtime)?,
             )
         } else {
             None
         };
+        if selected_graph.is_none()
+            && selected_declaration.is_none()
+            && selected_static_targets
+                .as_ref()
+                .is_some_and(|targets| !targets.is_empty())
+        {
+            return Err(RunError::Runtime(
+                build_runtime_error("static imports have no selected executable product")
+                    .with_identifier("RunMat:ExecutableStaticImport")
+                    .build(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_foreign_scope = if let Some(primary) = selected_graph.as_ref() {
+            primary
+                .selected_interop_receipt()
+                .map(|receipt| {
+                    crate::foreign_artifacts::SelectedForeignPreparation::from_selected_receipt(
+                        receipt,
+                        &primary.canonical_v3().map_err(anyhow::Error::msg)?,
+                        primary.source_owner(),
+                    )
+                })
+                .transpose()
+        } else if let Some(declaration) = selected_declaration.as_ref() {
+            let product = declaration.product();
+            product
+                .interop_receipt()
+                .map(|receipt| {
+                    crate::foreign_artifacts::SelectedForeignPreparation::from_selected_receipt(
+                        receipt,
+                        product.canonical_bytes(),
+                        product.source_owner(),
+                    )
+                })
+                .transpose()
+        } else {
+            Ok(None)
+        }
+        .map_err(|error| RunError::Runtime(build_runtime_error(error.to_string()).build()))?;
         let source_registry_publication = self
             .source_evaluator
             .publish_for_execution(active_registry, callable_artifact)
             .map_err(RunError::Runtime)?;
+        if let Some(declaration) = selected_declaration.as_ref() {
+            source_registry_publication
+                .attach_selected_declaration(Rc::clone(declaration))
+                .map_err(RunError::Runtime)?;
+        }
+        // Adapter installation can invoke user callbacks. Publish this
+        // request's immutable foreign source capability transactionally before
+        // the first install effect; Drop restores the prior scope on failure.
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut source_registry_publication = source_registry_publication;
+        #[cfg(not(target_arch = "wasm32"))]
+        source_registry_publication.set_foreign_preparation(selected_foreign_scope);
+        #[cfg(not(target_arch = "wasm32"))]
+        source_registry_publication.set_foreign_issuance_source(foreign_issuance_source);
+        #[cfg(not(target_arch = "wasm32"))]
+        let execution_runtime = if let Some(selected_graph) = selected_graph {
+            self.source_evaluator
+                .bind_selected_foreign(
+                    execution_runtime,
+                    Rc::clone(&selected_graph),
+                    None,
+                    selected_graph.selected_interop_receipt().cloned(),
+                )
+                .map_err(RunError::Runtime)?
+        } else if let Some(declaration) = selected_declaration {
+            self.source_evaluator
+                .bind_selected_declaration_foreign(execution_runtime, declaration)
+                .map_err(RunError::Runtime)?
+        } else {
+            let service_ports = execution_runtime.service_ports().clone().without_foreign();
+            execution_runtime
+                .without_selected_graph_program()
+                .with_service_ports(service_ports)
+        };
+        #[cfg(target_arch = "wasm32")]
+        let execution_runtime = if let Some(selected_graph) = selected_graph {
+            execution_runtime
+                .without_selected_graph_program()
+                .with_selected_graph_program(
+                    super::source_evaluation::SelectedGraphSnapshot::program(
+                        selected_graph,
+                        &self.source_evaluator,
+                    ),
+                )
+        } else {
+            execution_runtime.without_selected_graph_program()
+        };
         let _source_id_guard = runmat_runtime::source_context::replace_current_source_id_in_context(
             &execution_runtime,
             bytecode
@@ -714,7 +1265,8 @@ impl RunMatSession {
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
             .map_err(RunError::Runtime)?;
         let workspace_projection = std::rc::Rc::new(
-            runmat_runtime::workspace::BaseWorkspaceProjectionService::new(workspace_projection),
+            runmat_runtime::workspace::BaseWorkspaceProjectionService::new(workspace_projection)
+                .with_publication_observer(self.workspace_publication_observer(&execution_vars)),
         );
         if debug_trace {
             let workspace_values_before = workspace_projection
@@ -843,6 +1395,9 @@ impl RunMatSession {
         #[cfg(target_arch = "wasm32")]
         let execution_completed = false;
         let mut result_value: Option<Value> = None; // Always start fresh for each execution
+        let mut completed_vm_root = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut completed_native_root = None;
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
         let mut error = None;
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
@@ -922,7 +1477,7 @@ impl RunMatSession {
                             }
                         }
                     }
-                    let snapshot = native.workspace.ok_or_else(|| {
+                    let snapshot = native.workspace.as_ref().ok_or_else(|| {
                         RunError::Runtime(
                             build_runtime_error(
                                 "interactive native execution produced no workspace snapshot",
@@ -931,10 +1486,10 @@ impl RunMatSession {
                             .build(),
                         )
                     })?;
-                    completed_global_names = snapshot.global_bindings.into_iter().collect();
+                    completed_global_names = snapshot.global_bindings.iter().cloned().collect();
                     execution_vars.retain(|name, _| snapshot.values.contains_key(name));
-                    for (name, value) in snapshot.values {
-                        let slot = execution_vars.get(&name).copied().unwrap_or_else(|| {
+                    for (name, value) in &snapshot.values {
+                        let slot = execution_vars.get(name).copied().unwrap_or_else(|| {
                             let slot = variable_array.len();
                             execution_vars.insert(name.clone(), slot);
                             slot
@@ -942,8 +1497,9 @@ impl RunMatSession {
                         if variable_array.len() <= slot {
                             variable_array.resize(slot + 1, Value::Num(0.0));
                         }
-                        variable_array[slot] = value;
+                        variable_array[slot] = value.clone();
                     }
+                    completed_native_root = Some(native);
                     used_jit = true;
                     execution_completed = true;
                     if !display_context.single_stmt_non_assign {
@@ -1020,7 +1576,7 @@ impl RunMatSession {
             vm_workspace_completion = execution.workspace;
             match execution.outcome {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
-                    let results = completion.values;
+                    let results = &completion.values;
                     self.stats.interpreter_fallback += 1;
                     if self.verbose {
                         debug!("Interpreter results: {results:?}");
@@ -1092,7 +1648,7 @@ impl RunMatSession {
                         && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
                         && result_value.is_none()
                     {
-                        result_value = results.into_iter().last();
+                        result_value = results.last().cloned();
                         if self.verbose {
                             debug!("Fallback result from interpreter: {result_value:?}");
                         }
@@ -1102,6 +1658,7 @@ impl RunMatSession {
                         debug!("Final result_value: {result_value:?}");
                     }
                     debug!("Interpreter execution successful");
+                    completed_vm_root = Some(completion);
                 }
 
                 Err(e) => {
@@ -1264,6 +1821,11 @@ impl RunMatSession {
                     .assign("ans", value.clone())
                     .map_err(RunError::Runtime)?;
                 workspace_projection.publish().map_err(RunError::Runtime)?;
+                // `ans` is a source expression's explicit host publication,
+                // not an effect-imported workspace name. The completed
+                // expression slot is known here even when it was appended
+                // after the original bytecode workspace layout.
+                self.bind_workspace_slot("ans".to_string(), var_id);
                 let published_changes = workspace_projection
                     .take_published_changes()
                     .map_err(RunError::Runtime)?;
@@ -1287,6 +1849,8 @@ impl RunMatSession {
             .session_global_binding_names()
             .map_err(RunError::Runtime)?;
         self.reconcile_workspace_global_binding_keys(&execution_vars, &durable_global_names)
+            .map_err(RunError::Runtime)?;
+        self.sync_workspace_binding_metadata()
             .map_err(RunError::Runtime)?;
 
         // Function-definition publication remains transactional with a
@@ -1490,7 +2054,6 @@ impl RunMatSession {
             .into_iter()
             .collect();
 
-        let profiling = gather_profiling(execution_time_ms);
         let outcome = crate::abi::ExecutionOutcome {
             flow: public_value
                 .clone()
@@ -1512,10 +2075,14 @@ impl RunMatSession {
             figures_touched,
             stdin_events,
             fusion_plan: fusion_snapshot,
-            profiling,
+            profiling: None,
         };
 
-        self.format_mode = runmat_value::get_display_format();
+        let outcome = runmat_runtime::execution::RootedResult::new(outcome)
+            .map_err(|error| RunError::Runtime(error.into_runtime_error()))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        drop(completed_native_root);
+        drop(completed_vm_root);
         Ok(SessionExecution {
             outcome,
             workspace_snapshot,
@@ -1531,12 +2098,13 @@ impl RunMatSession {
         admission: Option<runmat_vm::PendingWorkspaceAdmission>,
     ) -> runmat_vm::WorkspaceInterpreterOutcome {
         let source_name = self.current_source_name().to_string();
-        runmat_vm::interpret_with_workspace_in_context(
+        runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
             bytecode,
             variable_array,
             Some(source_name.as_str()),
             runtime,
             admission,
+            Some(self.source_evaluator.dynamic_admission_port()),
         )
         .await
     }
@@ -1556,6 +2124,7 @@ impl RunMatSession {
                 let binding = runmat_hir::BindingName(name);
                 let key = self
                     .workspace_bindings
+                    .borrow()
                     .get(&binding.0)
                     .map(|binding| binding.key.clone())
                     .unwrap_or_else(|| self.workspace_binding_key(&binding.0));
@@ -1579,6 +2148,7 @@ impl RunMatSession {
                     return include_missing_names;
                 }
                 self.workspace_bindings
+                    .borrow()
                     .get(name)
                     .map(|binding| &binding.key)
                     .is_some_and(|current_key| current_key != previous_key)
@@ -1717,6 +2287,15 @@ fn execution_workspace_mapping(bytecode: &runmat_vm::Bytecode) -> HashMap<String
             mapping.insert(export.name.clone(), export.slot.0);
         }
     }
+    // The VM compiler reserves later reads of names that a current-workspace
+    // eval may create. They are not entrypoint exports yet, but the pending
+    // workspace admission must know their exact slots before eval runs; the
+    // separate assigned snapshot keeps them unassigned until a real write.
+    for slot in &bytecode.initially_unassigned_slots {
+        if let Some(name) = bytecode.var_names.get(slot) {
+            mapping.insert(name.clone(), *slot);
+        }
+    }
     mapping
 }
 
@@ -1739,7 +2318,7 @@ fn first_entry_statement(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_h
 }
 
 struct SessionExecution {
-    outcome: crate::abi::ExecutionOutcome,
+    outcome: runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>,
     workspace_snapshot: WorkspaceSnapshot,
 }
 

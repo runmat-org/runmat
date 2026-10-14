@@ -112,9 +112,9 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
         Ok(crate::user_functions::bound_function_handle(name, function))
     } else if crate::is_well_formed_qualified_name(&name) {
-        Ok(Value::ExternalFunctionHandle(name))
+        Ok(Value::external_function_handle(name))
     } else {
-        Ok(Value::FunctionHandle(name))
+        Ok(Value::function_handle(name))
     }
 }
 
@@ -179,9 +179,9 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(Value::String(name)),
-        Value::Closure(closure) => Ok(Value::String(closure.function_name)),
+        | Value::MethodFunctionHandle(name) => Ok(Value::String(name.into_name())),
+        Value::BoundFunctionHandle(handle) => Ok(Value::String(handle.into_data().name)),
+        Value::Closure(closure) => Ok(Value::String(closure.into_data().function_name)),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
             &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,

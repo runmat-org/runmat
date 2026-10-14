@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;
+use runmat_builtins::SQRT_INTEGER_INPUT_EXTENSION;
 use runmat_value::{ComplexTensor, IntegerStorage, NumericDType, Tensor};
 
 #[test]

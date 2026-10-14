@@ -21,6 +21,22 @@ use machine::{DecodeMachine, DecodeProgress};
 
 const DECODE_WORK_QUANTUM: NonZeroUsize = NonZeroUsize::new(8 * 1024).unwrap();
 
+pub(super) trait InlineFrameSourceAuthority {
+    fn frame_source(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<(runmat_types::SourceId, crate::CallFrameSourceOwner)>;
+}
+
+impl InlineFrameSourceAuthority for super::graph::GraphSourceIssuer {
+    fn frame_source(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<(runmat_types::SourceId, crate::CallFrameSourceOwner)> {
+        super::graph::GraphSourceIssuer::frame_source(self, ordinal)
+    }
+}
+
 /// Scheduling/invocation failure from the cooperative decoder. Portable value
 /// errors remain typed and are never flattened into execution diagnostics.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -32,10 +48,45 @@ pub enum CooperativeValueCodecError {
 }
 
 pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
+    Ok(decode_inline_value_rooted(payload)?.into_unrooted_value())
+}
+
+/// Decode a value while preserving construction roots through publication to
+/// its completed-result owner. Use this at asynchronous host service boundaries.
+pub fn decode_inline_value_owned(
+    payload: &ValuePayload,
+) -> Result<crate::execution::RootedValue, CooperativeValueCodecError> {
+    decode_inline_value_owned_with_limits(payload, ValueLimits::default())
+}
+
+pub(super) fn decode_inline_value_owned_with_limits(
+    payload: &ValuePayload,
+    limits: ValueLimits,
+) -> Result<crate::execution::RootedValue, CooperativeValueCodecError> {
+    payload
+        .validate(limits)
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    Ok(drain_machine_rooted(payload)?.into_rooted_value()?)
+}
+
+pub(super) fn decode_inline_value_owned_with_frame_sources(
+    payload: &ValuePayload,
+    limits: ValueLimits,
+    sources: &dyn InlineFrameSourceAuthority,
+) -> Result<crate::execution::RootedValue, CooperativeValueCodecError> {
+    payload
+        .validate(limits)
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    Ok(drain_machine_rooted_with_frames(payload, Some(sources))?.into_rooted_value()?)
+}
+
+pub(crate) fn decode_inline_value_rooted(
+    payload: &ValuePayload,
+) -> Result<crate::execution::RootedValueMember, ValueCodecError> {
     payload
         .validate(ValueLimits::default())
         .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
-    drain_machine(payload)
+    drain_machine_rooted(payload)
 }
 
 pub(super) fn decode_durable_inline_value(
@@ -118,14 +169,11 @@ async fn decode_validated_values(
                         budget.checkpoint(completed_work as u64).await?;
                     }
                 }
-                DecodeProgress::Complete {
-                    value,
-                    completed_work,
-                } => {
+                DecodeProgress::Complete { completed_work } => {
                     if let Some(budget) = cooperation.as_deref_mut() {
                         budget.checkpoint(completed_work as u64).await?;
                     }
-                    values.push_rooted(value);
+                    values.push_rooted(machine.take_completed());
                     break;
                 }
             }
@@ -135,11 +183,25 @@ async fn decode_validated_values(
 }
 
 fn drain_machine(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
-    let mut machine = DecodeMachine::new(payload, "$".to_owned(), None);
+    Ok(drain_machine_rooted(payload)?.into_unrooted_value())
+}
+
+fn drain_machine_rooted(
+    payload: &ValuePayload,
+) -> Result<crate::execution::RootedValueMember, ValueCodecError> {
+    drain_machine_rooted_with_frames(payload, None)
+}
+
+fn drain_machine_rooted_with_frames<'a>(
+    payload: &'a ValuePayload,
+    frame_sources: Option<&'a dyn InlineFrameSourceAuthority>,
+) -> Result<crate::execution::RootedValueMember, ValueCodecError> {
+    let mut machine =
+        DecodeMachine::new_with_frame_sources(payload, "$".to_owned(), None, frame_sources);
     loop {
         match machine.advance(NonZeroUsize::new(usize::MAX).expect("usize::MAX is nonzero"))? {
             DecodeProgress::Pending { .. } => continue,
-            DecodeProgress::Complete { value, .. } => return Ok(value.into_unrooted_value()),
+            DecodeProgress::Complete { .. } => return Ok(machine.take_completed()),
         }
     }
 }

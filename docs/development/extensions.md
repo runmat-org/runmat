@@ -105,7 +105,7 @@ Isolation contains native crashes and enables termination on timeout or cancella
 
 Calls made through `mexCallMATLAB`, `mexEvalString`, and the workspace APIs re-enter the exact RunMat session and active workspace that invoked the gateway. A callback may invoke other functions, including other MEX modules. Recursive entry into the same C MEX module is rejected with a structured error instead of deadlocking its persistent state. Cancellation is checked before RunMat enters native code and again when a gateway calls back into RunMat. An in-process C gateway cannot be preempted safely while it is executing; timeout and crash containment belong to the isolated extension-host policy.
 
-`mexLock` blocks interactive clearing, but it does not extend a module beyond its owning session. Session and standalone-program shutdown force final teardown and run `mexAtExit` with valid callback services. Invocation-only workspace frames are released after each gateway call rather than being retained by persistent native state.
+`mexLock` blocks interactive clearing, but it does not extend a module beyond its owning session. Explicit graceful session and standalone-program shutdown await final teardown and run `mexAtExit` with valid callback services before the host closes them. Forced host Drop is an abandoned lifecycle, not proof that an exit handler ran; late callbacks are denied origin services, and arbitrary in-process native code cannot be guaranteed to finish. Invocation-only workspace frames are released after each gateway call rather than being retained by persistent native state.
 
 ## Native and browser products
 

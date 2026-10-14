@@ -13,8 +13,15 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::ReadableStream;
 
 use super::*;
+use crate::context::RuntimeContext;
 use crate::context::RuntimeHttpService;
+use crate::execution::RuntimeExecutionService;
 use crate::http::{BrowserHttpService, HttpMethod};
+use std::rc::Rc;
+
+fn runtime() -> RuntimeContext {
+    RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+}
 
 fn blob_request(text: &str) -> (HttpRequest, String) {
     let parts = Array::new();
@@ -42,7 +49,7 @@ async fn window_fetch_streams_without_whole_body_xhr() {
     ));
     let (request, url) = blob_request("RunMat bounded browser HTTP");
     let mut response = BrowserHttpService::new()
-        .open_bounded(request, 1024)
+        .open_bounded(runtime(), request, 1024)
         .await
         .expect("Fetch response stream");
     let mut bytes = Vec::new();
@@ -56,7 +63,10 @@ async fn window_fetch_streams_without_whole_body_xhr() {
 #[wasm_bindgen_test(async)]
 async fn browser_body_limit_never_publishes_excess_bytes() {
     let (request, url) = blob_request("five!");
-    match BrowserHttpService::new().open_bounded(request, 4).await {
+    match BrowserHttpService::new()
+        .open_bounded(runtime(), request, 4)
+        .await
+    {
         Err(error) => assert!(matches!(
             error.kind,
             TransportErrorKind::BodyLimitExceeded(4)
@@ -89,7 +99,7 @@ async fn invalid_header_precedes_fetch_and_preserves_browser_source() {
     let (mut request, url) = blob_request("not fetched");
     request.headers.push(("bad\nname".into(), "value".into()));
     let error = BrowserHttpService::new()
-        .open_bounded(request, 1024)
+        .open_bounded(runtime(), request, 1024)
         .await
         .err()
         .expect("invalid header");
@@ -103,7 +113,7 @@ async fn invalid_header_precedes_fetch_and_preserves_browser_source() {
 #[wasm_bindgen_test]
 fn unpolled_browser_stream_has_no_fetch_or_timeout_effect() {
     let (request, url) = blob_request("unpolled");
-    let stream = BrowserHttpService::new().open_bounded(request, 1024);
+    let stream = BrowserHttpService::new().open_bounded(runtime(), request, 1024);
     drop(stream);
     web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
 }
@@ -307,7 +317,7 @@ fn long_browser_timeout_is_not_shortened_to_signed_timer_limit() {
 #[wasm_bindgen_test]
 fn browser_stream_future_is_lazy_until_first_poll() {
     let (request, url) = blob_request("pending");
-    let mut future = BrowserHttpService::new().open_bounded(request, 1024);
+    let mut future = BrowserHttpService::new().open_bounded(runtime(), request, 1024);
     let waker = futures::task::noop_waker();
     let _ = Pin::as_mut(&mut future).poll(&mut Context::from_waker(&waker));
     drop(future);

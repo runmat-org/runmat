@@ -22,6 +22,7 @@ fn valid_entry(bytes: Vec<u8>) -> PythonArtifactBundleEntry {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn canonical_bundle_round_trips_and_materializes_import_roots() {
     let bytes = wheel(&[
         ("example/__init__.py", b"def answer():\n    return 42\n"),
@@ -66,9 +67,34 @@ fn canonical_bundle_round_trips_and_materializes_import_roots() {
             [crate::PythonValue::Signed(42)]
         ));
     }
+    let mut with_environment = bundle;
+    with_environment.environment = Some(PythonEnvironmentIdentity {
+        implementation: "cpython".into(),
+        version: PythonVersion {
+            major: 3,
+            minor: 12,
+            patch: 0,
+        },
+        abi_tag: "cp312".into(),
+        platform_tag: "any".into(),
+        execution_mode: PythonExecutionMode::InProcess,
+    });
+    with_environment.validate().unwrap();
+    assert_eq!(with_environment.wheel_identities().count(), 1);
+    assert_eq!(with_environment.artifact_identities().len(), 2);
+    let installed_with_environment = with_environment.install().unwrap();
+    assert_eq!(
+        installed_with_environment.wheel_identities(),
+        installed.wheel_identities()
+    );
+    assert_eq!(
+        installed_with_environment.artifact_identities(),
+        &with_environment.artifact_identities()
+    );
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn wheel_library_scheme_is_relocated_to_the_import_root() {
     let bytes = wheel(&[
         ("example-1.data/purelib/example.py", b"VALUE = 42\n"),

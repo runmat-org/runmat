@@ -1,4 +1,5 @@
 use runmat_execution::value::ValuePayload;
+use runmat_execution::Digest;
 use runmat_process_host::shared_memory::SharedMemoryDescriptor;
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,8 @@ pub const NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_NATIVE_FFI_SNAPSHOT_
 #[cfg(test)]
 pub const NATIVE_FFI_HOST_SCHEMA_V1: u16 = 1;
 pub const NATIVE_FFI_HOST_SCHEMA_V2: u16 = 2;
-pub const NATIVE_FFI_HOST_SCHEMA_VERSION: u16 = NATIVE_FFI_HOST_SCHEMA_V2;
+pub const NATIVE_FFI_HOST_SCHEMA_V3: u16 = 3;
+pub const NATIVE_FFI_HOST_SCHEMA_VERSION: u16 = NATIVE_FFI_HOST_SCHEMA_V3;
 pub const NATIVE_FFI_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const NATIVE_FFI_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const NATIVE_FFI_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -65,8 +67,49 @@ pub enum NativeWireValue {
 )]
 pub enum NativeDriverMessage {
     Invoke(NativeInvocationRequest),
+    ProjectLoad(NativeProjectLoadRequest),
     CallbackResult(NativeCallbackResult),
     Shutdown { request_id: u64, releases: Vec<u64> },
+}
+
+/// One parent-issued, exact project load into a new isolated child. Paths are
+/// relative to the authenticated private root owned by the parent lease.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeProjectLoadRequest {
+    pub request_id: u64,
+    pub private_root: std::path::PathBuf,
+    pub library: std::path::PathBuf,
+    pub manifest: std::path::PathBuf,
+    pub alias: String,
+    pub artifact_identity: runmat_types::ForeignArtifactIdentity,
+    pub library_digest: Digest,
+    pub manifest_digest: Digest,
+}
+
+impl NativeProjectLoadRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_id(self.request_id, "request")?;
+        if !self.private_root.is_absolute() {
+            return Err("native project private root is not absolute".into());
+        }
+        for path in [&self.private_root, &self.library, &self.manifest] {
+            if path.to_str().is_none_or(|text| text.len() > 4096) {
+                return Err("native project path exceeds the protocol bound".into());
+            }
+        }
+        for relative in [&self.library, &self.manifest] {
+            if relative.as_os_str().is_empty()
+                || !relative
+                    .components()
+                    .all(|part| matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err("native project load has an invalid relative path".into());
+            }
+        }
+        validate_text(&self.alias, "project library alias")?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -97,6 +140,9 @@ pub struct NativeInvocationRequest {
 pub struct NativeInvocationResult {
     pub request_id: u64,
     pub outcome: Result<Vec<NativeWireValue>, NativeWireError>,
+    /// Child-owned inventory after this exact completed operation, including
+    /// failures that nevertheless changed native-library state.
+    pub user_state_present: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -134,6 +180,7 @@ impl NativeDriverMessage {
     pub fn validate(&self) -> Result<(), String> {
         match self {
             Self::Invoke(request) => request.validate(),
+            Self::ProjectLoad(request) => request.validate(),
             Self::CallbackResult(result) => result.validate(),
             Self::Shutdown {
                 request_id,
@@ -319,9 +366,9 @@ mod tests {
     }
 
     #[test]
-    fn frozen_v1_nested_output_list_is_not_a_v2_wire_value() {
+    fn frozen_v1_nested_output_list_is_not_a_v3_wire_value() {
         assert_eq!(NATIVE_FFI_HOST_SCHEMA_V1, 1);
-        assert_eq!(NATIVE_FFI_HOST_SCHEMA_VERSION, 2);
+        assert_eq!(NATIVE_FFI_HOST_SCHEMA_VERSION, 3);
         let frozen = r#"{"kind":"output_list","value":[]}"#;
         let current = runmat_process_host::ipc::HostHandshake::new(
             NATIVE_FFI_HOST_PROTOCOL,
@@ -334,6 +381,12 @@ mod tests {
             NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
         );
         assert!(runmat_process_host::ipc::negotiate_handshake(&current, &stale).is_err());
+        let prior = runmat_process_host::ipc::HostHandshake::new(
+            NATIVE_FFI_HOST_PROTOCOL,
+            NATIVE_FFI_HOST_SCHEMA_V2,
+            NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+        );
+        assert!(runmat_process_host::ipc::negotiate_handshake(&current, &prior).is_err());
         assert!(serde_json::from_str::<NativeWireValue>(frozen).is_err());
     }
 
@@ -341,6 +394,7 @@ mod tests {
     fn top_level_output_vectors_are_bounded() {
         let result = NativeInvocationResult {
             request_id: 1,
+            user_state_present: false,
             outcome: Ok(vec![
                 NativeWireValue::Callback { id: 1 };
                 NATIVE_FFI_HOST_MAX_OUTPUTS + 1
@@ -354,6 +408,7 @@ mod tests {
         for count in [0, 1, 3] {
             let result = NativeInvocationResult {
                 request_id: 1,
+                user_state_present: false,
                 outcome: Ok((1..=count)
                     .map(|id| NativeWireValue::Callback { id })
                     .collect()),

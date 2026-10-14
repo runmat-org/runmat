@@ -13,7 +13,12 @@ fn assert_error_contains(err: &RuntimeError, expected: &str) {
 }
 
 fn run_or(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    block_on(super::or_builtin(lhs, rhs))
+    // Terminal projection is restricted to non-tabular logical results.
+    assert!(!matches!(
+        (&lhs, &rhs),
+        (Value::Object(_), _) | (_, Value::Object(_))
+    ));
+    block_on(super::or_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[cfg(feature = "wgpu")]

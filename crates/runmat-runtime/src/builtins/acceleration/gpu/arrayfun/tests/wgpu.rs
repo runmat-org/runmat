@@ -23,7 +23,7 @@ fn arrayfun_wgpu_sin_matches_cpu() {
         vec![Value::GpuTensor(handle.clone())],
     )
     .expect("arrayfun sin gpu");
-    let Value::GpuTensor(out_handle) = result else {
+    let Value::GpuTensor(out_handle) = result.value() else {
         panic!("expected GPU tensor result");
     };
     let gathered = test_support::gather(Value::GpuTensor(out_handle.clone())).unwrap();
@@ -40,7 +40,7 @@ fn arrayfun_wgpu_sin_matches_cpu() {
         );
     }
     drop(handle);
-    drop(out_handle);
+    drop(result);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -71,7 +71,7 @@ fn arrayfun_wgpu_plus_matches_cpu() {
     )
     .expect("arrayfun plus gpu");
 
-    let Value::GpuTensor(out_handle) = result else {
+    let Value::GpuTensor(out_handle) = result.value() else {
         panic!("expected GPU tensor result");
     };
     let gathered = test_support::gather(Value::GpuTensor(out_handle.clone())).unwrap();
@@ -93,7 +93,7 @@ fn arrayfun_wgpu_plus_matches_cpu() {
     }
     drop(handle_a);
     drop(handle_b);
-    drop(out_handle);
+    drop(result);
 }
 
 #[test]
@@ -129,17 +129,17 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
         )
         .expect("upload");
         let result = call(
-            Value::FunctionHandle(callback.to_string()),
+            Value::function_handle(callback.to_string()),
             vec![Value::GpuTensor(handle.clone())],
         )
         .expect("wgpu arrayfun");
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("expected resident output");
         };
         let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
         assert_eq!(gathered.integer_storage(), Some(&storage));
         drop(handle);
-        drop(output);
+        drop(result);
     }
 
     let row = Tensor::new_integer(
@@ -155,11 +155,11 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
     let column =
         Tensor::new_integer(IntegerStorage::U64(vec![10, 20]), vec![2, 1]).expect("column");
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         vec![Value::GpuTensor(row_handle.clone()), Value::Tensor(column)],
     )
     .expect("compatible wgpu arrayfun");
-    let Value::GpuTensor(output) = result else {
+    let Value::GpuTensor(output) = result.value() else {
         panic!("expected resident output");
     };
     let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
@@ -176,5 +176,5 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
         ]))
     );
     drop(row_handle);
-    drop(output);
+    drop(result);
 }

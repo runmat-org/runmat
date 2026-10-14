@@ -10,7 +10,7 @@ fn arrayfun_gpu_options_are_mode_gated() {
         .expect("upload");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(
-            Value::FunctionHandle("sin".to_string()),
+            Value::FunctionHandle("sin".into()),
             vec![
                 Value::GpuTensor(handle.clone()),
                 Value::from("UniformOutput"),
@@ -45,18 +45,18 @@ fn arrayfun_provider_fallback_preserves_every_integer_class() {
             let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
             let result = call(
-                Value::FunctionHandle(callback.to_string()),
+                Value::function_handle(callback.to_string()),
                 vec![Value::GpuTensor(handle.clone())],
             )
             .expect("provider arrayfun");
-            let Value::GpuTensor(output) = result else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("expected resident output");
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(output.clone())).expect("gather output");
             assert_eq!(gathered.integer_storage(), Some(&storage));
             drop(handle);
-            drop(output);
+            drop(result);
         }
     });
 }
@@ -74,11 +74,11 @@ fn arrayfun_gpu_overload_uses_documented_compatible_size_expansion_exactly() {
         let column =
             Tensor::new_integer(IntegerStorage::U64(vec![10, 20]), vec![2, 1]).expect("column");
         let result = call(
-            Value::FunctionHandle("plus".to_string()),
+            Value::FunctionHandle("plus".into()),
             vec![Value::GpuTensor(row_handle.clone()), Value::Tensor(column)],
         )
         .expect("compatible gpu arrayfun");
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("expected resident output");
         };
         let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
@@ -95,7 +95,7 @@ fn arrayfun_gpu_overload_uses_documented_compatible_size_expansion_exactly() {
             ]))
         );
         drop(row_handle);
-        drop(output);
+        drop(result);
     });
 }
 
@@ -107,7 +107,7 @@ fn arrayfun_uniform_false_gpu_returns_cell() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let result = call(
-            Value::FunctionHandle("sin".to_string()),
+            Value::FunctionHandle("sin".into()),
             vec![
                 Value::GpuTensor(handle),
                 Value::String("UniformOutput".into()),
@@ -115,7 +115,7 @@ fn arrayfun_uniform_false_gpu_returns_cell() {
             ],
         )
         .expect("arrayfun");
-        match result {
+        match result.value() {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 2);
                 assert_eq!(cell.cols, 1);
@@ -141,16 +141,15 @@ fn arrayfun_gpu_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let result = call(
-            Value::FunctionHandle("sin".to_string()),
+            Value::FunctionHandle("sin".into()),
             vec![Value::GpuTensor(handle)],
         )
         .expect("arrayfun");
-        match result {
+        match result.value() {
             Value::GpuTensor(gpu) => {
                 let gathered = test_support::gather(Value::GpuTensor(gpu.clone())).unwrap();
                 let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
                 assert_eq!(values(&gathered), expected);
-                drop(gpu);
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }

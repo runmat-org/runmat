@@ -29,6 +29,7 @@ pub fn export_native_device_buffer(
     handle: &GpuTensorHandle,
     access: NativeDeviceAccess,
 ) -> anyhow::Result<OwnedNativeDeviceBuffer> {
+    crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::RawNativeExport);
     if crate::handle_is_transposed(handle) {
         return Err(crate::unsupported_provider_operation(
             "native address export requires contiguous layout; materialize lazy transpose first",

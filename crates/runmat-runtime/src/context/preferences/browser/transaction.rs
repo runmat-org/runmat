@@ -1,6 +1,7 @@
 //! Browser-owned read-modify-write transaction; request success is not commit.
 
 use super::connection::{OwnedDatabase, DOCUMENT_KEY, DOCUMENT_STORE};
+use super::retirement::Observer;
 use super::store::{decode_document, transaction_error};
 use super::{browser_error, BrowserPreferenceError};
 use crate::context::preferences::document::{
@@ -12,6 +13,7 @@ use crate::execution::value_codec::encode_durable_value;
 use futures::channel::oneshot;
 use futures::lock::OwnedMutexGuard;
 use js_sys::Uint8Array;
+use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_execution::value::ValuePayload;
 use runmat_value::Value;
 use std::cell::RefCell;
@@ -40,6 +42,7 @@ pub(super) async fn mutate(
     database: OwnedDatabase,
     mutation: BrowserMutation,
     gate: OwnedMutexGuard<()>,
+    profiling: Option<&CommandProfilingReceipt>,
 ) -> Result<BrowserPrepared, BrowserPreferenceError> {
     let transaction = database
         .transaction_with_str_and_mode(DOCUMENT_STORE, IdbTransactionMode::Readwrite)
@@ -71,12 +74,21 @@ pub(super) async fn mutate(
     // This host-owned observer outlives an abandoned caller and releases the
     // single active transaction only after complete/abort. It never reports a
     // successful publication to a dropped caller or treats put as completion.
+    let observer = Observer::new(
+        active,
+        profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
+    );
     spawn_local(async move {
         let outcome = completion_receiver
             .await
             .unwrap_or(Err(BrowserPreferenceError::LostObservation));
-        active.borrow_mut().clear_handlers();
+        let terminal = {
+            let mut state = observer.subject().borrow_mut();
+            state.clear_handlers();
+            state.terminal
+        };
         let _ = caller_sender.send(outcome);
+        observer.finish(terminal);
     });
     caller_receiver
         .await

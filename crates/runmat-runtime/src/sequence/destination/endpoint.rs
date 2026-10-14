@@ -1,11 +1,13 @@
 use crate::builtins::introspection::object_indexing::{
     brace_assignment_cardinality, member_assignment_cardinality,
 };
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::object::indexing::{
     ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
+use runmat_gc::{Trace, Tracer};
 use runmat_value::Value;
 
 #[derive(Debug, Clone)]
@@ -18,6 +20,8 @@ pub enum SequenceEndpointSpec {
 pub struct PreparedSequenceEndpoint {
     spec: SequenceEndpointSpec,
     cardinality: usize,
+    _retained_roots: RootedValueLease,
+    _source_roots: RootedValueLease,
 }
 
 impl PreparedSequenceEndpoint {
@@ -25,6 +29,10 @@ impl PreparedSequenceEndpoint {
         self.spec.visit_retained_values(visitor);
     }
     pub async fn prepare(base: &Value, spec: SequenceEndpointSpec) -> Result<Self, RuntimeError> {
+        let _inputs =
+            RootedValueLease::for_traced(&spec).map_err(|error| error.into_runtime_error())?;
+        let _base = RootedValueLease::for_values(std::iter::once(base))
+            .map_err(|error| error.into_runtime_error())?;
         let cardinality = match &spec {
             SequenceEndpointSpec::Member(member) => {
                 member_assignment_cardinality(base, member.0.clone()).await?
@@ -40,7 +48,14 @@ impl PreparedSequenceEndpoint {
                 .await?
             }
         };
-        Ok(Self { spec, cardinality })
+        let retained_roots =
+            RootedValueLease::for_traced(&spec).map_err(|error| error.into_runtime_error())?;
+        Ok(Self {
+            spec,
+            cardinality,
+            _retained_roots: retained_roots,
+            _source_roots: _base,
+        })
     }
 
     pub const fn cardinality(&self) -> usize {
@@ -52,7 +67,7 @@ impl PreparedSequenceEndpoint {
         base: Value,
         values: Vec<Value>,
         caller_function_name: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         self.assign_with_context(None, base, values, caller_function_name)
             .await
     }
@@ -63,7 +78,7 @@ impl PreparedSequenceEndpoint {
         base: Value,
         values: Vec<Value>,
         caller_function_name: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         self.assign_with_context(Some(context), base, values, caller_function_name)
             .await
     }
@@ -74,18 +89,26 @@ impl PreparedSequenceEndpoint {
         base: Value,
         values: Vec<Value>,
         caller_function_name: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
-        if values.len() != self.cardinality {
+    ) -> Result<RootedValue, RuntimeError> {
+        let Self {
+            spec,
+            cardinality,
+            _retained_roots,
+            _source_roots,
+        } = self;
+        let _inputs = RootedValueLease::for_values(std::iter::once(&base).chain(values.iter()))
+            .map_err(|error| error.into_runtime_error())?;
+        if values.len() != cardinality {
             return Err(semantic_error(
                 "RunMat:CommaSeparatedListAssignmentArity",
                 format!(
                     "sequence assignment requires {} values, but received {}",
-                    self.cardinality,
+                    cardinality,
                     values.len()
                 ),
             ));
         }
-        match self.spec {
+        match spec {
             SequenceEndpointSpec::Member(field) => match context {
                 Some(context) => {
                     crate::object::resolve::store_member_sequence_traced_in_context(
@@ -129,12 +152,20 @@ impl SequenceEndpointSpec {
     }
 }
 
+impl Trace for SequenceEndpointSpec {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.visit_retained_values(&mut |value| value.trace(tracer));
+    }
+}
+
 pub(crate) async fn assign_cell_contents_with_context(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
     indices: Vec<ObjectIndexComponent>,
     values: Vec<Value>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&base).chain(values.iter()))
+        .map_err(|error| error.into_runtime_error())?;
     match base {
         Value::Cell(cell) => {
             let positions = if matches!(indices.as_slice(), [ObjectIndexComponent::Colon]) {
@@ -154,6 +185,7 @@ pub(crate) async fn assign_cell_contents_with_context(
                 &values,
                 runmat_gc::gc_record_write,
             )
+            .and_then(|value| RootedValue::new(value).map_err(|error| error.into_runtime_error()))
         }
         base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
             let resolution = crate::object::dispatch::resolve_object_index_protocol(
@@ -161,7 +193,7 @@ pub(crate) async fn assign_cell_contents_with_context(
                 crate::object::indexing::ObjectIndexOp::Subsasgn,
                 None,
             )?;
-            let crate::object::protocol::ProtocolResolution::Method(method) = resolution else {
+            let Some(method) = resolution else {
                 return Err(semantic_error(
                     "MissingObjectProtocol",
                     "brace assignment object does not define subsasgn",

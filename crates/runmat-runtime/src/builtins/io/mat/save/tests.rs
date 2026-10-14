@@ -184,7 +184,10 @@ fn selected_outer_save_observes_only_after_published_mat_payload() {
         .expect("published payload before receipt completion");
     let decoded = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&bytes)
         .expect("actual MAT payload");
-    assert_eq!(decoded, vec![("answer".to_string(), Value::Num(42.0))]);
+    assert_eq!(
+        decoded.value().0,
+        vec![("answer".to_string(), Value::Num(42.0))]
+    );
     assert_eq!(witness.selections(), 1);
     assert_eq!(witness.probes(), 0);
     assert_eq!(
@@ -587,7 +590,10 @@ fn save_preserves_supported_numeric_classes() {
 
     let values: HashMap<_, _> = block_on(crate::builtins::io::mat::load::read_mat_file(&path))
         .unwrap()
-        .into_iter()
+        .value()
+        .0
+        .iter()
+        .cloned()
         .collect();
     match values.get("single_data").unwrap() {
         Value::Tensor(tensor) => {

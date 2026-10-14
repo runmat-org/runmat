@@ -16,7 +16,7 @@ fn getfield_direct_resident_integer_field_preserves_handle_without_provider_acce
 
     let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
         .expect("direct resident field");
-    assert_eq!(result, Value::GpuTensor(handle.clone()));
+    assert_eq!(result.value(), &Value::GpuTensor(handle.clone()));
     let weak = handle.downgrade();
     drop(handle);
     assert!(
@@ -93,7 +93,7 @@ async fn getfield_gpu_tensor_indexing_case() {
     let direct = getfield_builtin(None, Value::Struct(st.clone()), vec![Value::from("values")])
         .await
         .expect("direct gpu field");
-    match direct {
+    match direct.value() {
         Value::GpuTensor(out) => assert!(out.shares_allocation_with(&handle)),
         other => panic!("expected gpu tensor, got {other:?}"),
     }
@@ -106,7 +106,7 @@ async fn getfield_gpu_tensor_indexing_case() {
     )
     .await
     .expect("gpu indexed field");
-    let Value::Tensor(indexed) = indexed else {
+    let Value::Tensor(indexed) = indexed.value() else {
         panic!("expected class-preserving scalar tensor");
     };
     assert_eq!(indexed.shape(), &[1, 1]);

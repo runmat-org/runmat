@@ -3,27 +3,31 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
-use futures::channel::mpsc as async_mpsc;
+use futures::channel::{mpsc as async_mpsc, oneshot};
 use futures::{FutureExt, StreamExt};
-use runmat_mex::{DirectMexBoundaryHostServices, MexDiagnostic, MexHostServices, MxValueContext};
+use runmat_mex::{MexDiagnostic, MexModuleRetirement, MxBoundaryCodec, MxValueContext};
 use runmat_process_host::ipc::{
     authenticate_host_blocking, read_payload_blocking, write_payload_blocking, FrameLimits,
     HostHandshake, SessionSecret,
 };
 use runmat_process_host::shared_memory::SharedSnapshotStore;
-use runmat_value::Value;
 
 use super::{
-    decode_value_transfer, encode_value_transfer, DriverMessage, HostMessage, MexBinaryTier,
-    MexCallbackOperation, MexCallbackOutput, MexCallbackRequest, MexCallbackResult,
-    MexInvocationOutput, MexInvocationRequest, MexInvocationResult, MexLifecycleOutcome,
-    MexLifecycleResult, MexWireDiagnostic, MexWireError, MEX_HOST_MAX_CALLBACK_DEPTH,
-    MEX_HOST_MAX_MESSAGE_BYTES, MEX_HOST_PROTOCOL, MEX_HOST_SCHEMA_VERSION, MEX_HOST_SECRET_ENV,
-    MEX_HOST_SNAPSHOT_ROOT_ENV,
+    decode_value_transfer_rooted_value, decode_value_transfers_rooted, encode_value_transfer,
+    DriverMessage, HostMessage, MexBinaryTier, MexCallbackCancellation, MexCallbackOperation,
+    MexCallbackOutput, MexCallbackRequest, MexCallbackResult, MexInvocationOutput,
+    MexInvocationRequest, MexInvocationResult, MexLifecycleOutcome, MexLifecycleResult,
+    MexWireDiagnostic, MexWireError, MEX_HOST_MAX_MESSAGE_BYTES, MEX_HOST_PROTOCOL,
+    MEX_HOST_SCHEMA_VERSION, MEX_HOST_SECRET_ENV, MEX_HOST_SNAPSHOT_ROOT_ENV,
 };
+use crate::execution::RootedValue;
 use crate::foreign::mex::native_lane::{NativeMexLane, NativeModuleLoadError};
+use crate::foreign::MexCallbackAncestry;
+
+mod origin;
+use origin::IsolatedOriginBoundaryAdapter;
 
 pub async fn run_mex_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(MEX_HOST_SECRET_ENV)
@@ -108,12 +112,14 @@ pub async fn run_mex_extension_host() -> Result<(), String> {
                 DriverMessage::Clear {
                     request_id,
                     module_path,
+                    callback_ancestry_depth,
                 } => {
                     let outcome = clear(
                         &lane,
                         &mut values,
                         request_id,
                         &module_path,
+                        callback_ancestry_depth,
                         Rc::clone(&writer),
                         Arc::clone(&callback_waiters),
                         Rc::clone(&snapshots),
@@ -127,7 +133,7 @@ pub async fn run_mex_extension_host() -> Result<(), String> {
                     ))?;
                 }
                 DriverMessage::Shutdown { request_id } => {
-                    let outcome = shutdown(
+                    let retirement = shutdown(
                         &lane,
                         &mut values,
                         request_id,
@@ -139,10 +145,12 @@ pub async fn run_mex_extension_host() -> Result<(), String> {
                     writer.borrow_mut().write_host(&HostMessage::Lifecycle(
                         MexLifecycleResult {
                             request_id,
-                            outcome: outcome.map(|()| MexLifecycleOutcome::Shutdown),
+                            outcome: retirement.outcome,
                         },
                     ))?;
-                    return Ok(());
+                    if retirement.complete {
+                        return Ok(());
+                    }
                 }
                 DriverMessage::CallbackResult(_) => {
                     return Err("callback result arrived outside an active callback".into());
@@ -161,6 +169,14 @@ async fn invoke<W: Write + 'static>(
     snapshots: Rc<SharedSnapshotStore>,
 ) -> Result<MexInvocationOutput, MexWireError> {
     request.validate().map_err(protocol_error)?;
+    let ancestry =
+        MexCallbackAncestry::from_wire(request.callback_ancestry_depth).ok_or_else(|| {
+            wire_error(
+                "RunMat:MEX:CallbackDepth",
+                "callback ancestry exceeds the protocol limit",
+                None,
+            )
+        })?;
     let path = canonical_module_path(&request.module_path)?;
     let compatible_isolated = request.tier == MexBinaryTier::RunMatCompatibleIsolated;
     let metadata = lane
@@ -178,41 +194,39 @@ async fn invoke<W: Write + 'static>(
         .entry(path.clone())
         .or_insert_with(|| Rc::new(MxValueContext::new()))
         .clone();
-    let arguments = request
-        .arguments
-        .iter()
-        .map(|value| decode_value_transfer(value, &snapshots))
-        .collect::<Result<Vec<_>, _>>()?;
+    let arguments = decode_value_transfers_rooted(&request.arguments, &snapshots)?;
     let inputs = arguments
+        .values()
         .iter()
         .map(|value| value_context.encode(value, mode, metadata.interface))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| wire_error("RunMat:MEX:Conversion", error.to_string(), None))?;
-    let services = Rc::new(DirectMexBoundaryHostServices::new(
-        Rc::new(IsolatedMexHostServices::new(
-            request.request_id,
-            writer,
-            callback_waiters,
-            Rc::clone(&snapshots),
-        )),
+    let host = Rc::new(IsolatedMexHostServices::new(
+        request.request_id,
+        ancestry,
+        writer,
+        callback_waiters,
+        Rc::clone(&snapshots),
+    ));
+    let codec = Rc::new(MxBoundaryCodec::new(
         value_context.clone(),
         mode,
         metadata.interface,
     ));
+    let services = Rc::new(IsolatedOriginBoundaryAdapter::new(host, codec));
     let invocation = lane
         .invoke(&path, inputs, request.requested_outputs as usize, services)
         .await
         .map_err(|error| wire_error("RunMat:MEX:Invocation", error.to_string(), None))?;
-    let outputs = invocation
-        .outputs
-        .iter()
-        .map(|value| {
-            value_context
-                .decode(value)
-                .map_err(|error| wire_error("RunMat:MEX:Conversion", error.to_string(), None))
-                .and_then(|value| encode_value_transfer(&value, &snapshots))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut outputs = Vec::with_capacity(invocation.outputs.len());
+    for output in &invocation.outputs {
+        let value = value_context
+            .decode(output)
+            .map_err(|error| wire_error("RunMat:MEX:Conversion", error.to_string(), None))?;
+        let value = RootedValue::new(value)
+            .map_err(|error| wire_error("RunMat:MEX:ValueRoot", error.to_string(), None))?;
+        outputs.push(encode_value_transfer(&value, &snapshots)?);
+    }
     Ok(MexInvocationOutput {
         outputs,
         warnings: invocation
@@ -232,10 +246,18 @@ async fn clear<W: Write + 'static>(
     values: &mut HashMap<PathBuf, Rc<MxValueContext>>,
     request_id: u64,
     path: &str,
+    callback_ancestry_depth: u16,
     writer: Rc<RefCell<HostWriter<W>>>,
     callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 ) -> Result<MexLifecycleOutcome, MexWireError> {
+    let ancestry = MexCallbackAncestry::from_wire(callback_ancestry_depth).ok_or_else(|| {
+        wire_error(
+            "RunMat:MEX:CallbackDepth",
+            "callback ancestry exceeds the protocol limit",
+            None,
+        )
+    })?;
     let path = canonical_module_path(path)?;
     let Some(value_context) = values.get(&path).cloned() else {
         return Ok(MexLifecycleOutcome::Cleared);
@@ -244,17 +266,19 @@ async fn clear<W: Write + 'static>(
         .load_with_policy(&path, false)
         .await
         .map_err(native_load_error)?;
-    let services = Rc::new(DirectMexBoundaryHostServices::new(
-        Rc::new(IsolatedMexHostServices::new(
-            request_id,
-            writer,
-            callback_waiters,
-            snapshots,
-        )),
+    let host = Rc::new(IsolatedMexHostServices::new(
+        request_id,
+        ancestry,
+        writer,
+        callback_waiters,
+        snapshots,
+    ));
+    let codec = Rc::new(MxBoundaryCodec::new(
         value_context,
         metadata.mode,
         metadata.interface,
     ));
+    let services = Rc::new(IsolatedOriginBoundaryAdapter::new(host, codec));
     match lane.clear(&path, services).await {
         Ok(true) => {
             values.remove(&path);
@@ -265,6 +289,11 @@ async fn clear<W: Write + 'static>(
     }
 }
 
+struct ShutdownRetirement {
+    outcome: Result<MexLifecycleOutcome, MexWireError>,
+    complete: bool,
+}
+
 async fn shutdown<W: Write + 'static>(
     lane: &NativeMexLane,
     values: &mut HashMap<PathBuf, Rc<MxValueContext>>,
@@ -272,34 +301,62 @@ async fn shutdown<W: Write + 'static>(
     writer: Rc<RefCell<HostWriter<W>>>,
     callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
-) -> Result<(), MexWireError> {
-    let loaded = values.drain().collect::<Vec<_>>();
+) -> ShutdownRetirement {
+    let loaded = values.keys().cloned().collect::<Vec<_>>();
     let mut first_error = None;
-    for (path, value_context) in loaded {
+    let mut retained = false;
+    for path in loaded {
+        let Some(value_context) = values.get(&path).cloned() else {
+            continue;
+        };
         let metadata = match lane.load_with_policy(&path, false).await {
             Ok(metadata) => metadata,
             Err(error) => {
+                retained = true;
                 first_error.get_or_insert_with(|| native_load_error(error));
                 continue;
             }
         };
-        let services = Rc::new(DirectMexBoundaryHostServices::new(
-            Rc::new(IsolatedMexHostServices::new(
-                request_id,
-                Rc::clone(&writer),
-                Arc::clone(&callback_waiters),
-                Rc::clone(&snapshots),
-            )),
+        let host = Rc::new(IsolatedMexHostServices::new(
+            request_id,
+            MexCallbackAncestry::ROOT,
+            Rc::clone(&writer),
+            Arc::clone(&callback_waiters),
+            Rc::clone(&snapshots),
+        ));
+        let codec = Rc::new(MxBoundaryCodec::new(
             value_context,
             metadata.mode,
             metadata.interface,
         ));
-        if let Err(error) = lane.shutdown_module(&path, services).await {
-            first_error
-                .get_or_insert_with(|| wire_error("RunMat:MEX:Shutdown", error.to_string(), None));
+        let services = Rc::new(IsolatedOriginBoundaryAdapter::new(host, codec));
+        match lane.shutdown_module(&path, services).await {
+            Ok(MexModuleRetirement::Retired(result)) => {
+                values.remove(&path);
+                if let Err(error) = result {
+                    first_error.get_or_insert_with(|| {
+                        wire_error("RunMat:MEX:Shutdown", error.to_string(), None)
+                    });
+                }
+            }
+            Ok(MexModuleRetirement::Retained(error)) | Err(error) => {
+                retained = true;
+                first_error.get_or_insert_with(|| {
+                    wire_error("RunMat:MEX:Shutdown", error.to_string(), None)
+                });
+            }
         }
     }
-    first_error.map_or(Ok(()), Err)
+    ShutdownRetirement {
+        outcome: if retained {
+            Ok(MexLifecycleOutcome::Retained)
+        } else {
+            Ok(MexLifecycleOutcome::Retired {
+                diagnostic: first_error,
+            })
+        },
+        complete: !retained,
+    }
 }
 
 fn canonical_module_path(path: &str) -> Result<PathBuf, MexWireError> {
@@ -346,7 +403,28 @@ fn wire_error(
 
 type CallbackKey = (u64, u64);
 type CallbackResponse = Result<MexCallbackResult, String>;
-type CallbackWaiters = Arc<Mutex<HashMap<CallbackKey, mpsc::SyncSender<CallbackResponse>>>>;
+enum CallbackWaiter {
+    Pending(oneshot::Sender<CallbackResponse>),
+    Abandoned,
+}
+type CallbackWaiters = Arc<Mutex<HashMap<CallbackKey, CallbackWaiter>>>;
+
+struct CallbackWaiterLease {
+    waiters: CallbackWaiters,
+    key: CallbackKey,
+}
+
+impl Drop for CallbackWaiterLease {
+    fn drop(&mut self) {
+        let retired = self
+            .waiters
+            .lock()
+            .expect("callback waiter registry is not poisoned")
+            .get_mut(&self.key)
+            .map(|entry| std::mem::replace(entry, CallbackWaiter::Abandoned));
+        drop(retired);
+    }
+}
 
 struct HostWriter<W> {
     writer: W,
@@ -381,14 +459,18 @@ fn spawn_driver_reader<R: Read + Send + 'static>(
                         .lock()
                         .expect("callback waiter registry is not poisoned")
                         .remove(&(response.request_id, response.callback_id));
-                    if let Some(waiter) = waiter {
-                        let _ = waiter.send(Ok(response));
-                    } else {
-                        fail_callback_waiters(
-                            &callback_waiters,
-                            "driver returned an unknown callback identity".into(),
-                        );
-                        break;
+                    match waiter {
+                        Some(CallbackWaiter::Pending(waiter)) => {
+                            let _ = waiter.send(Ok(response));
+                        }
+                        Some(CallbackWaiter::Abandoned) => {}
+                        None => {
+                            fail_callback_waiters(
+                                &callback_waiters,
+                                "driver returned an unknown callback identity".into(),
+                            );
+                            break;
+                        }
                     }
                 }
                 Ok(message) => {
@@ -413,7 +495,9 @@ fn fail_callback_waiters(callback_waiters: &CallbackWaiters, error: String) {
             .expect("callback waiter registry is not poisoned"),
     );
     for (_, waiter) in waiters {
-        let _ = waiter.send(Err(error.clone()));
+        if let CallbackWaiter::Pending(waiter) = waiter {
+            let _ = waiter.send(Err(error.clone()));
+        }
     }
 }
 
@@ -430,7 +514,7 @@ fn read_driver(reader: &mut impl Read, limits: FrameLimits) -> Result<DriverMess
 struct IsolatedMexHostServices<W: Write> {
     request_id: u64,
     next_callback_id: Cell<u64>,
-    depth: Cell<u16>,
+    depth: Cell<MexCallbackAncestry>,
     writer: Rc<RefCell<HostWriter<W>>>,
     callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
@@ -439,6 +523,7 @@ struct IsolatedMexHostServices<W: Write> {
 impl<W: Write> IsolatedMexHostServices<W> {
     fn new(
         request_id: u64,
+        ancestry: MexCallbackAncestry,
         writer: Rc<RefCell<HostWriter<W>>>,
         callback_waiters: CallbackWaiters,
         snapshots: Rc<SharedSnapshotStore>,
@@ -446,7 +531,7 @@ impl<W: Write> IsolatedMexHostServices<W> {
         Self {
             request_id,
             next_callback_id: Cell::new(1),
-            depth: Cell::new(0),
+            depth: Cell::new(ancestry),
             writer,
             callback_waiters,
             snapshots,
@@ -466,57 +551,80 @@ impl<W: Write> Drop for IsolatedMexHostServices<W> {
 }
 
 impl<W: Write> IsolatedMexHostServices<W> {
-    fn callback(
+    async fn callback(
         &self,
         operation: MexCallbackOperation,
+        cancellation: &runmat_execution::cancellation::CancellationToken,
     ) -> Result<MexCallbackOutput, MexDiagnostic> {
-        let depth = self.depth.get().saturating_add(1);
-        if depth > MEX_HOST_MAX_CALLBACK_DEPTH {
-            return Err(diagnostic(
-                "RunMat:MEX:CallbackDepth",
-                "callback depth limit exceeded",
-            ));
-        }
+        let parent = self.depth.get();
+        let depth = parent.child().ok_or_else(|| {
+            diagnostic("RunMat:MEX:CallbackDepth", "callback depth limit exceeded")
+        })?;
         self.depth.set(depth);
         let callback_id = self.next_callback_id.get();
         let Some(next_callback_id) = callback_id.checked_add(1) else {
-            self.depth.set(depth - 1);
+            self.depth.set(parent);
             return Err(diagnostic(
                 "RunMat:MEX:CallbackProtocol",
                 "isolated MEX callback identity space is exhausted",
             ));
         };
         self.next_callback_id.set(next_callback_id);
+        struct CallbackDepth<'a>(&'a Cell<MexCallbackAncestry>, MexCallbackAncestry);
+        impl Drop for CallbackDepth<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
+            }
+        }
+        let _depth = CallbackDepth(&self.depth, parent);
         let result =
-            (|| {
-                let (response_tx, response_rx) = mpsc::sync_channel(1);
+            async {
+                let (response_tx, response_rx) = oneshot::channel();
                 self.callback_waiters
                     .lock()
                     .expect("callback waiter registry is not poisoned")
-                    .insert((self.request_id, callback_id), response_tx);
+                    .insert(
+                        (self.request_id, callback_id),
+                        CallbackWaiter::Pending(response_tx),
+                    );
+                let _waiter = CallbackWaiterLease {
+                    waiters: Arc::clone(&self.callback_waiters),
+                    key: (self.request_id, callback_id),
+                };
                 if let Err(error) = self.writer.borrow_mut().write_host(&HostMessage::Callback(
                     MexCallbackRequest {
                         request_id: self.request_id,
                         callback_id,
-                        depth,
+                        depth: depth.wire(),
                         operation,
                     },
                 )) {
-                    self.callback_waiters
-                        .lock()
-                        .expect("callback waiter registry is not poisoned")
-                        .remove(&(self.request_id, callback_id));
                     return Err(diagnostic("RunMat:MEX:CallbackTransport", error));
                 }
-                let response = response_rx
-                    .recv()
-                    .map_err(|_| {
-                        diagnostic(
-                            "RunMat:MEX:CallbackTransport",
-                            "driver response channel closed",
-                        )
-                    })?
-                    .map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
+                // This counter describes synchronous callback admission, not
+                // the number of independently suspended async siblings.
+                drop(_depth);
+                let response = {
+                    let reply = response_rx.fuse();
+                    let cancelled = cancellation.cancelled().fuse();
+                    futures::pin_mut!(reply, cancelled);
+                    futures::select! {
+                        result = reply => result,
+                        _ = cancelled => {
+                            self.writer.borrow_mut().write_host(&HostMessage::CallbackCancelled(
+                                MexCallbackCancellation { request_id: self.request_id, callback_id }
+                            )).map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
+                            reply.await
+                        }
+                    }
+                }
+                .map_err(|_| {
+                    diagnostic(
+                        "RunMat:MEX:CallbackTransport",
+                        "driver response channel closed",
+                    )
+                })?
+                .map_err(|error| diagnostic("RunMat:MEX:CallbackTransport", error))?;
                 if response.request_id != self.request_id || response.callback_id != callback_id {
                     return Err(diagnostic(
                         "RunMat:MEX:CallbackProtocol",
@@ -527,142 +635,9 @@ impl<W: Write> IsolatedMexHostServices<W> {
                     identifier: Some(error.identifier),
                     message: error.message,
                 })
-            })();
-        self.depth.set(depth - 1);
+            }
+            .await;
         result
-    }
-}
-
-impl<W: Write> MexHostServices for IsolatedMexHostServices<W> {
-    fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
-        match self.callback(MexCallbackOperation::Eval {
-            command: command.into(),
-        })? {
-            MexCallbackOutput::Unit => Ok(()),
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "eval returned an invalid result",
-            )),
-        }
-    }
-
-    fn call(
-        &self,
-        function: &str,
-        arguments: Vec<Value>,
-        requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic> {
-        let arguments = arguments
-            .iter()
-            .map(|value| encode_value_transfer(value, &self.snapshots))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| diagnostic(&error.identifier, error.message))?;
-        let requested_outputs = u32::try_from(requested_outputs)
-            .map_err(|_| diagnostic("RunMat:MEX:CallbackOutputs", "output count exceeds u32"))?;
-        match self.callback(MexCallbackOperation::Call {
-            function: function.into(),
-            arguments,
-            requested_outputs,
-        })? {
-            MexCallbackOutput::Values(values) => values
-                .iter()
-                .map(|value| decode_value_transfer(value, &self.snapshots))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| diagnostic(&error.identifier, error.message)),
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "call returned an invalid result",
-            )),
-        }
-    }
-
-    fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic> {
-        match self.callback(MexCallbackOperation::GetVariable {
-            workspace: workspace.into(),
-            name: name.into(),
-        })? {
-            MexCallbackOutput::OptionalValue(value) => value
-                .as_ref()
-                .map(|value| decode_value_transfer(value, &self.snapshots))
-                .transpose()
-                .map_err(|error| diagnostic(&error.identifier, error.message)),
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "workspace read returned an invalid result",
-            )),
-        }
-    }
-
-    fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic> {
-        let value = encode_value_transfer(&value, &self.snapshots)
-            .map_err(|error| diagnostic(&error.identifier, error.message))?;
-        match self.callback(MexCallbackOperation::PutVariable {
-            workspace: workspace.into(),
-            name: name.into(),
-            value,
-        })? {
-            MexCallbackOutput::Unit => Ok(()),
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "workspace write returned an invalid result",
-            )),
-        }
-    }
-
-    fn get_object_property_at(
-        &self,
-        object: Value,
-        index: usize,
-        name: &str,
-    ) -> Result<Value, MexDiagnostic> {
-        let object = encode_value_transfer(&object, &self.snapshots)
-            .map_err(|error| diagnostic(&error.identifier, error.message))?;
-        let index = u64::try_from(index)
-            .map_err(|_| diagnostic("RunMat:MEX:ObjectIndex", "object index exceeds u64"))?;
-        match self.callback(MexCallbackOperation::GetObjectProperty {
-            object,
-            index,
-            name: name.into(),
-        })? {
-            MexCallbackOutput::Values(values) if values.len() == 1 => {
-                decode_value_transfer(&values[0], &self.snapshots)
-                    .map_err(|error| diagnostic(&error.identifier, error.message))
-            }
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "property read returned an invalid result",
-            )),
-        }
-    }
-
-    fn set_object_property_at(
-        &self,
-        object: Value,
-        index: usize,
-        name: &str,
-        value: Value,
-    ) -> Result<Value, MexDiagnostic> {
-        let object = encode_value_transfer(&object, &self.snapshots)
-            .map_err(|error| diagnostic(&error.identifier, error.message))?;
-        let value = encode_value_transfer(&value, &self.snapshots)
-            .map_err(|error| diagnostic(&error.identifier, error.message))?;
-        let index = u64::try_from(index)
-            .map_err(|_| diagnostic("RunMat:MEX:ObjectIndex", "object index exceeds u64"))?;
-        match self.callback(MexCallbackOperation::SetObjectProperty {
-            object,
-            index,
-            name: name.into(),
-            value,
-        })? {
-            MexCallbackOutput::Values(values) if values.len() == 1 => {
-                decode_value_transfer(&values[0], &self.snapshots)
-                    .map_err(|error| diagnostic(&error.identifier, error.message))
-            }
-            _ => Err(diagnostic(
-                "RunMat:MEX:CallbackProtocol",
-                "property write returned an invalid result",
-            )),
-        }
     }
 }
 
@@ -670,5 +645,262 @@ fn diagnostic(identifier: &str, message: impl Into<String>) -> MexDiagnostic {
     MexDiagnostic {
         identifier: Some(identifier.into()),
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::MEX_HOST_MAX_CALLBACK_DEPTH;
+    use super::*;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    #[test]
+    fn suspended_callback_waiter_retires_exactly_on_cancel_or_reply() {
+        let waiters = Arc::new(Mutex::new(HashMap::new()));
+        let host = IsolatedMexHostServices::new(
+            7,
+            MexCallbackAncestry::ROOT,
+            Rc::new(RefCell::new(HostWriter {
+                writer: Vec::<u8>::new(),
+                limits: FrameLimits {
+                    max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+                },
+            })),
+            Arc::clone(&waiters),
+            Rc::new(SharedSnapshotStore::create().expect("snapshot store")),
+        );
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new().token();
+        let mut cancelled = Box::pin(host.callback(
+            MexCallbackOperation::Eval {
+                command: "cancelled".into(),
+            },
+            &cancellation,
+        ));
+        assert!(matches!(cancelled.as_mut().poll(&mut cx), Poll::Pending));
+        assert_eq!(waiters.lock().unwrap().len(), 1);
+        let cancelled_id = host.next_callback_id.get() - 1;
+        drop(cancelled);
+        assert!(matches!(
+            waiters.lock().unwrap().remove(&(7, cancelled_id)),
+            Some(CallbackWaiter::Abandoned)
+        ));
+        assert_eq!(host.depth.get(), MexCallbackAncestry::ROOT);
+
+        let mut completed = Box::pin(host.callback(
+            MexCallbackOperation::Eval {
+                command: "completed".into(),
+            },
+            &cancellation,
+        ));
+        assert!(matches!(completed.as_mut().poll(&mut cx), Poll::Pending));
+        let callback_id = host.next_callback_id.get() - 1;
+        let sender = waiters
+            .lock()
+            .unwrap()
+            .remove(&(7, callback_id))
+            .expect("exact waiter");
+        let CallbackWaiter::Pending(sender) = sender else {
+            panic!("live callback must retain its reply sender");
+        };
+        sender
+            .send(Ok(MexCallbackResult {
+                request_id: 7,
+                callback_id,
+                outcome: Ok(MexCallbackOutput::Unit),
+            }))
+            .expect("publish callback result");
+        assert!(matches!(
+            Pin::as_mut(&mut completed).poll(&mut cx),
+            Poll::Ready(Ok(MexCallbackOutput::Unit))
+        ));
+        drop(completed);
+        assert!(waiters.lock().unwrap().is_empty());
+        assert_eq!(host.depth.get(), MexCallbackAncestry::ROOT);
+    }
+
+    #[test]
+    fn running_cancellation_is_published_before_exact_terminal_reply() {
+        let waiters = Arc::new(Mutex::new(HashMap::new()));
+        let writer = Rc::new(RefCell::new(HostWriter {
+            writer: Vec::<u8>::new(),
+            limits: FrameLimits {
+                max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+            },
+        }));
+        let host = IsolatedMexHostServices::new(
+            9,
+            MexCallbackAncestry::ROOT,
+            Rc::clone(&writer),
+            Arc::clone(&waiters),
+            Rc::new(SharedSnapshotStore::create().expect("snapshot store")),
+        );
+        let cancellation = CancellationSource::new();
+        let cancellation_token = cancellation.token();
+        let mut callback = Box::pin(host.callback(
+            MexCallbackOperation::Eval {
+                command: "suspended".into(),
+            },
+            &cancellation_token,
+        ));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(matches!(callback.as_mut().poll(&mut cx), Poll::Pending));
+        let callback_id = host.next_callback_id.get() - 1;
+        cancellation.cancel(CancellationReason::User);
+        assert!(matches!(callback.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(
+            waiters.lock().unwrap().get(&(9, callback_id)),
+            Some(CallbackWaiter::Pending(_))
+        ));
+
+        let bytes = writer.borrow().writer.clone();
+        let mut reader = std::io::Cursor::new(bytes);
+        let limits = FrameLimits {
+            max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+        };
+        let first: HostMessage =
+            serde_json::from_slice(&read_payload_blocking(&mut reader, limits).unwrap()).unwrap();
+        assert!(matches!(
+            first,
+            HostMessage::Callback(MexCallbackRequest {
+                request_id: 9,
+                callback_id: id,
+                ..
+            }) if id == callback_id
+        ));
+        let second: HostMessage =
+            serde_json::from_slice(&read_payload_blocking(&mut reader, limits).unwrap()).unwrap();
+        assert_eq!(
+            second,
+            HostMessage::CallbackCancelled(MexCallbackCancellation {
+                request_id: 9,
+                callback_id,
+            })
+        );
+
+        let sender = waiters.lock().unwrap().remove(&(9, callback_id)).unwrap();
+        let CallbackWaiter::Pending(sender) = sender else {
+            panic!("cancelled running callback must retain its exact reply waiter");
+        };
+        sender
+            .send(Ok(MexCallbackResult {
+                request_id: 9,
+                callback_id,
+                outcome: Ok(MexCallbackOutput::Unit),
+            }))
+            .expect("terminal callback reply");
+        assert!(matches!(
+            callback.as_mut().poll(&mut cx),
+            Poll::Ready(Ok(MexCallbackOutput::Unit))
+        ));
+        drop(callback);
+        assert!(waiters.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn suspended_siblings_do_not_consume_logical_callback_depth() {
+        let waiters = Arc::new(Mutex::new(HashMap::new()));
+        let host = IsolatedMexHostServices::new(
+            11,
+            MexCallbackAncestry::ROOT,
+            Rc::new(RefCell::new(HostWriter {
+                writer: Vec::<u8>::new(),
+                limits: FrameLimits {
+                    max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+                },
+            })),
+            Arc::clone(&waiters),
+            Rc::new(SharedSnapshotStore::create().expect("snapshot store")),
+        );
+        let cancellation = CancellationSource::new().token();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut callbacks = Vec::new();
+        for _ in 0..=usize::from(MEX_HOST_MAX_CALLBACK_DEPTH) {
+            let mut callback = Box::pin(host.callback(
+                MexCallbackOperation::Eval {
+                    command: "independent".into(),
+                },
+                &cancellation,
+            ));
+            assert!(matches!(callback.as_mut().poll(&mut cx), Poll::Pending));
+            callbacks.push(callback);
+        }
+        assert_eq!(waiters.lock().unwrap().len(), callbacks.len());
+        assert_eq!(host.depth.get(), MexCallbackAncestry::ROOT);
+        drop(callbacks);
+        assert_eq!(host.depth.get(), MexCallbackAncestry::ROOT);
+    }
+
+    #[test]
+    fn inherited_sixty_third_ancestor_emits_sixty_four_then_rejects_sixty_five() {
+        let waiters = Arc::new(Mutex::new(HashMap::new()));
+        let writer = Rc::new(RefCell::new(HostWriter {
+            writer: Vec::<u8>::new(),
+            limits: FrameLimits {
+                max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+            },
+        }));
+        let parent = MexCallbackAncestry::from_wire(63).unwrap();
+        let host = IsolatedMexHostServices::new(
+            21,
+            parent,
+            Rc::clone(&writer),
+            Arc::clone(&waiters),
+            Rc::new(SharedSnapshotStore::create().expect("snapshot store")),
+        );
+        let cancellation = CancellationSource::new().token();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut callback = Box::pin(host.callback(
+            MexCallbackOperation::Eval {
+                command: "nested".into(),
+            },
+            &cancellation,
+        ));
+        assert!(matches!(callback.as_mut().poll(&mut cx), Poll::Pending));
+        assert_eq!(host.depth.get(), parent);
+        let bytes = writer.borrow().writer.clone();
+        let mut reader = std::io::Cursor::new(bytes);
+        let first: HostMessage = serde_json::from_slice(
+            &read_payload_blocking(
+                &mut reader,
+                FrameLimits {
+                    max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(first, HostMessage::Callback(request) if request.depth == 64));
+        drop(callback);
+        assert_eq!(host.depth.get(), parent);
+
+        host.depth.set(MexCallbackAncestry::from_wire(64).unwrap());
+        let published = writer.borrow().writer.len();
+        let rejected = futures::executor::block_on(host.callback(
+            MexCallbackOperation::Eval {
+                command: "never run".into(),
+            },
+            &cancellation,
+        ))
+        .expect_err("a 65th callback cannot publish a request");
+        assert_eq!(
+            rejected.identifier.as_deref(),
+            Some("RunMat:MEX:CallbackDepth")
+        );
+        assert_eq!(writer.borrow().writer.len(), published);
+        assert_eq!(host.depth.get().wire(), 64);
+        assert!(waiters
+            .lock()
+            .unwrap()
+            .values()
+            .all(|waiter| matches!(waiter, CallbackWaiter::Abandoned)));
     }
 }

@@ -13,6 +13,7 @@ use super::{documentation, ORDERFIELDS_DESCRIPTOR, ORDERFIELDS_INTEGER_CAPABILIT
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const ORDERFIELDS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "orderfields",

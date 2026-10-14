@@ -58,13 +58,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::logical::bit::not"
 )]
-async fn not_builtin(value: Value) -> crate::BuiltinResult<Value> {
+async fn not_builtin(value: Value) -> crate::BuiltinResult<crate::execution::RootedValue> {
     super::truth::unary(value, LogicalUnaryOperator::Not).await
 }
 
 #[cfg(all(test, feature = "wgpu"))]
 async fn not_host(value: Value) -> crate::BuiltinResult<Value> {
-    super::truth::unary(value, LogicalUnaryOperator::Not).await
+    // Terminal numerical test route: logical outputs contain no GC child.
+    super::truth::unary(value, LogicalUnaryOperator::Not)
+        .await
+        .map(|owned| owned.with_owned(|value| value))
 }
 
 #[cfg(test)]

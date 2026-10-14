@@ -27,16 +27,26 @@ impl RuntimeCallService for IncrementingCallService {
         &self,
         _runtime: RuntimeContext,
         request: RuntimeCallRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, runmat_runtime::RuntimeError>> + 'static>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        runmat_runtime::execution::RootedValueSequence,
+                        runmat_runtime::RuntimeError,
+                    >,
+                > + 'static,
+        >,
+    > {
         let result = match request.arguments.as_slice() {
             [Value::Int(IntValue::I32(value))] => Value::Int(IntValue::I32(value + 2)),
             _ => Value::Num(f64::NAN),
         };
         self.requests.borrow_mut().push(request);
         Box::pin(async move {
-            ValueSequence::single(result)
-                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+            let value = ValueSequence::single(result)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+            runmat_runtime::execution::RootedValueSequence::new(value)
+                .map_err(|error| error.into_runtime_error())
         })
     }
 }
@@ -69,7 +79,7 @@ fn invoke(
     context: &RuntimeContext,
     symbol: &str,
     arguments: Vec<Value>,
-) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     let service = context
         .service_ports()
         .require_foreign(symbol)
@@ -85,13 +95,18 @@ fn invoke(
         },
     )))
     .map_err(Box::new)?;
-    let mut values = runmat_runtime::sequence::ResolveValueSequence::resolve(
-        sequence,
-        runmat_types::SequenceUse::RequireSingle,
-        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values = runmat_runtime::sequence::ResolveValueSequence::resolve(
+                sequence,
+                runmat_types::SequenceUse::RequireSingle,
+                runmat_runtime::sequence::SequenceResolutionContext::default(),
+            )
+            .map_err(Box::new)?;
+            Ok(values.pop().expect("RequireSingle returned one Java value"))
+        },
+        |error| Box::new(error.into_runtime_error()),
     )
-    .map_err(Box::new)?;
-    Ok(values.pop().expect("RequireSingle returned one Java value"))
 }
 
 #[test]
@@ -107,7 +122,7 @@ fn java_objects_round_trip_through_runtime_owned_foreign_handles() {
         vec![Value::String("java.lang.StringBuilder".into())],
     )
     .expect("construct Java object");
-    let Value::Foreign(reference) = object else {
+    let Value::Foreign(reference) = object.value() else {
         panic!("Java constructor must return a foreign reference");
     };
     let returned = invoke(
@@ -120,15 +135,18 @@ fn java_objects_round_trip_through_runtime_owned_foreign_handles() {
         ],
     )
     .expect("invoke Java member");
-    let Value::Foreign(returned) = returned else {
+    let Value::Foreign(returned) = returned.value() else {
         panic!("identity-returning Java method must return a foreign reference");
     };
-    assert!(reference.is_same_resource(&returned));
+    assert!(reference.is_same_resource(returned));
     assert_eq!(
         invoke(
             &context,
             "invoke_member",
-            vec![Value::Foreign(returned), Value::String("length".into()),],
+            vec![
+                Value::Foreign(returned.clone()),
+                Value::String("length".into()),
+            ],
         )
         .expect("invoke Java length"),
         Value::Int(IntValue::I32(15))
@@ -187,7 +205,7 @@ fn wide_unsigned_values_and_java_arrays_cross_the_runtime_boundary_exactly() {
         ],
     )
     .expect("create multidimensional Java array");
-    let Value::Foreign(array) = array else {
+    let Value::Foreign(array) = array.value() else {
         panic!("javaArray must preserve the opaque Java array identity");
     };
     assert_eq!(
@@ -197,7 +215,7 @@ fn wide_unsigned_values_and_java_arrays_cross_the_runtime_boundary_exactly() {
             vec![
                 Value::String("java.lang.reflect.Array".into()),
                 Value::String("getLength".into()),
-                Value::Foreign(array),
+                Value::Foreign(array.clone()),
             ],
         )
         .expect("read Java array length"),
@@ -224,7 +242,7 @@ fn typed_vectors_and_reference_collections_use_reviewed_java_copies() {
         ],
     )
     .expect("copy an exact integer vector through Java");
-    let Value::Tensor(copied) = copied else {
+    let Value::Tensor(copied) = copied.value() else {
         panic!("Java int[] must return an integer tensor");
     };
     assert_eq!(
@@ -261,20 +279,20 @@ fn typed_vectors_and_reference_collections_use_reviewed_java_copies() {
         ],
     )
     .expect("compile a regular expression");
-    let Value::Foreign(pattern) = pattern else {
+    let Value::Foreign(pattern) = pattern.value() else {
         panic!("Pattern.compile must return a Java object");
     };
     let split = invoke(
         &context,
         "invoke_member",
         vec![
-            Value::Foreign(pattern),
+            Value::Foreign(pattern.clone()),
             Value::String("split".into()),
             Value::String("left,right".into()),
         ],
     )
     .expect("convert a returned Java String array");
-    let Value::StringArray(split) = split else {
+    let Value::StringArray(split) = split.value() else {
         panic!("Java String[] must return a RunMat string array");
     };
     assert_eq!(split.data, vec!["left", "right"]);
@@ -310,7 +328,7 @@ fn java_environment_configuration_and_desktop_capability_are_session_owned() {
         ],
     )
     .expect("pin the Java major version before startup");
-    let Value::Object(status) = status else {
+    let Value::Object(status) = status.value() else {
         panic!("jenv configuration must return a JavaEnvironment object");
     };
     assert_eq!(
@@ -346,29 +364,32 @@ fn java_callbacks_reenter_the_originating_runtime_call_service() {
         ],
     )
     .expect("create a stream with a RunMat callback");
-    let Value::Foreign(stream) = stream else {
+    let Value::Foreign(stream) = stream.value() else {
         panic!("IntStream.iterate must return a Java stream");
     };
     let stream = invoke(
         &context,
         "invoke_member",
         vec![
-            Value::Foreign(stream),
+            Value::Foreign(stream.clone()),
             Value::String("limit".into()),
             Value::Int(IntValue::I64(3)),
         ],
     )
     .expect("limit the stream");
-    let Value::Foreign(stream) = stream else {
+    let Value::Foreign(stream) = stream.value() else {
         panic!("IntStream.limit must preserve the stream");
     };
     let values = invoke(
         &context,
         "invoke_member",
-        vec![Value::Foreign(stream), Value::String("toArray".into())],
+        vec![
+            Value::Foreign(stream.clone()),
+            Value::String("toArray".into()),
+        ],
     )
     .expect("evaluate the callback-backed stream");
-    let Value::Tensor(values) = values else {
+    let Value::Tensor(values) = values.value() else {
         panic!("IntStream.toArray must return an integer tensor");
     };
     assert_eq!(

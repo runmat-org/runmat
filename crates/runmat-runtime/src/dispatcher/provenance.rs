@@ -49,23 +49,51 @@ pub(super) fn project(value: &mut Value, explicit: bool) -> Result<(), RuntimeEr
             };
             let class = array.class_name().clone();
             let shape = array.shape().to_vec();
+            let selected_provenance = array.selected_provenance().to_vec();
+            let unselected_provenance = array.has_unselected_provenance();
             let mut elements = array.into_data();
             for element in &mut elements {
                 project(element, explicit)?;
             }
-            *value = Value::ObjectArray(
+            let rebuilt =
                 runmat_value::ObjectArray::new(class, elements, shape).map_err(|error| {
                     build_runtime_error(format!("GPU result object array: {error}"))
                         .with_identifier("RunMat:Gpu:InvalidResult")
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build()
-                })?,
-            );
+                })?;
+            let rebuilt = if rebuilt.is_empty() {
+                let rebuilt = rebuilt
+                    .with_selected_provenance(selected_provenance)
+                    .map_err(RuntimeError::from)?;
+                if unselected_provenance {
+                    rebuilt.with_unselected_provenance()
+                } else {
+                    rebuilt
+                }
+            } else {
+                rebuilt
+            };
+            *value = Value::ObjectArray(rebuilt);
         }
         Value::Closure(closure) => {
-            for value in &mut closure.captures {
-                project(value, explicit)?;
+            if !closure
+                .captures
+                .iter()
+                .any(super::owned_gpu::has_transformable_gpu)
+            {
+                return Ok(());
             }
+            let Value::Closure(closure) = std::mem::replace(value, Value::Num(0.)) else {
+                unreachable!("matched closure")
+            };
+            let mut data = closure.into_data();
+            let result = data
+                .captures
+                .iter_mut()
+                .try_for_each(|value| project(value, explicit));
+            *value = Value::Closure(runmat_value::Closure::from_data(data));
+            result?;
         }
         Value::OutputList(values) => {
             for value in values {

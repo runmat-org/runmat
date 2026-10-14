@@ -1,5 +1,7 @@
 use super::*;
-use crate::execute::call_suspension::{CallCompletion, PendingCall};
+use crate::execute::call_suspension::{
+    scope_completion, CallCompletion, PendingCall, TerminatorCompletion,
+};
 use crate::execute::region::observation::test_support::observed_state;
 use crate::region::placement_test_support::Probe;
 use runmat_execution::cancellation::CancellationSource;
@@ -28,13 +30,23 @@ struct PendingProbe {
     drops: Rc<Cell<usize>>,
     ready: Rc<Cell<bool>>,
     on_drop: Option<Box<dyn Fn()>>,
+    terminator_completion: bool,
 }
 impl Future for PendingProbe {
     type Output = NativeExecutorResult<CallCompletion>;
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         self.polls.set(self.polls.get() + 1);
         if self.ready.get() {
-            Poll::Ready(Ok(CallCompletion::Values(vec![])))
+            if self.terminator_completion {
+                Poll::Ready(Ok(CallCompletion::Terminator(Box::new(
+                    TerminatorCompletion::BranchTruth(true),
+                ))))
+            } else {
+                Poll::Ready(Ok(CallCompletion::RootedArguments(
+                    runmat_runtime::execution::RootedValues::new(vec![])
+                        .expect("empty pending-probe result can be rooted"),
+                )))
+            }
         } else {
             Poll::Pending
         }
@@ -70,6 +82,7 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
         .function
         .expected_sites
         .push(state.function.blocks[0].terminator.site.clone());
+    let future = scope_completion(&state, Box::pin(state.runtime.scope(work)));
     state.pending_call = Some(PendingCall {
         continuation: 1,
         generation: 1,
@@ -83,7 +96,7 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
         },
         embedded: None,
         retained_roots: Vec::new(),
-        future: Box::pin(work),
+        future,
     });
     NativeInvocation::new(
         state,
@@ -112,6 +125,7 @@ fn work() -> ProbeFixture {
             drops: drops.clone(),
             ready: ready.clone(),
             on_drop: None,
+            terminator_completion: false,
         },
         polls,
         drops,
@@ -192,6 +206,39 @@ fn correct_resume_after_stale_request_restores_active_execution() {
     assert_eq!(polls.get(), 1);
     assert_eq!(drops.get(), 1);
     assert!(invocation.active.is_some());
+}
+
+#[test]
+fn typed_terminator_pending_cancel_and_abandoned_resume_drop_do_not_replay() {
+    for cancel in [false, true] {
+        let source = CancellationSource::new();
+        let ProbeFixture {
+            mut work,
+            polls,
+            drops,
+            ..
+        } = work();
+        work.terminator_completion = true;
+        let mut invocation = invocation(&source, work);
+        let waker = Waker::from(Arc::new(Wakes::default()));
+        let mut context = Context::from_waker(&waker);
+        let mut resume = Box::pin(invocation.resume_suspension(1, 1));
+        assert!(resume.as_mut().poll(&mut context).is_pending());
+        assert_eq!(polls.get(), 1);
+        assert!(runmat_runtime::context::legacy::active().is_none());
+        if cancel {
+            source.cancel(CancellationReason::User);
+            assert!(matches!(
+                resume.as_mut().poll(&mut context),
+                Poll::Ready(Err(NativeExecutorError::Cancelled))
+            ));
+        }
+        drop(resume);
+        assert_eq!(polls.get(), 1, "abandonment cannot replay terminator work");
+        assert_eq!(drops.get(), 1);
+        assert!(invocation.active.is_none());
+        assert!(runmat_runtime::context::legacy::active().is_none());
+    }
 }
 
 #[test]

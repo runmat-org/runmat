@@ -2,9 +2,10 @@
 
 mod builtin;
 mod execute;
+mod foreign_policy;
+mod foreign_retirement;
 mod input;
 mod java_artifacts;
-mod materialize;
 mod mex;
 mod mex_artifacts;
 mod native_interfaces;

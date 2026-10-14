@@ -35,8 +35,8 @@ fn host_complex_single_preserves_native_class_and_nd_singleton_shape() {
     for singleton in [false, true] {
         let (pairs, shape) = sample(singleton);
         let input = ComplexTensor::from_f32(pairs, shape.clone()).unwrap();
-        let output = block_on(call_builtin_async("sinc", &[Value::ComplexTensor(input)])).unwrap();
-        let Value::ComplexTensor(output) = output else {
+        let result = block_on(call_builtin_async("sinc", &[Value::ComplexTensor(input)])).unwrap();
+        let Value::ComplexTensor(output) = result.value() else {
             panic!("single complex result may not collapse into Double scalar")
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
@@ -75,17 +75,14 @@ fn resident_complex_single_fallback_retains_typed_storage_intent_and_owner() {
                     })
                     .unwrap();
                 let args = [Value::GpuTensor(input.clone())];
-                let output = block_on(call_builtin_async("sinc", &args)).unwrap();
-                let Value::GpuTensor(output) = output else {
+                let result = block_on(call_builtin_async("sinc", &args)).unwrap();
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("supported native Single restoration must remain resident")
                 };
                 assert_eq!(output.shape(), shape);
-                assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
-                assert_eq!(
-                    handle_storage(&output),
-                    GpuTensorStorage::ComplexInterleaved
-                );
-                assert_eq!(handle_provenance(&output), handle_provenance(&input));
+                assert_eq!(handle_precision(output), Some(ProviderPrecision::F32));
+                assert_eq!(handle_storage(output), GpuTensorStorage::ComplexInterleaved);
+                assert_eq!(handle_provenance(output), handle_provenance(&input));
                 assert!(!output.shares_allocation_with(&input));
                 let expected_trace = if precision == ProviderPrecision::F32 {
                     vec!["sinc", "download", "upload"]
@@ -93,7 +90,7 @@ fn resident_complex_single_fallback_retains_typed_storage_intent_and_owner() {
                     vec!["download", "upload"]
                 };
                 assert_eq!(*provider.trace.lock().unwrap(), expected_trace);
-                let downloaded = block_on(provider.inner.download_numeric(&output)).unwrap();
+                let downloaded = block_on(provider.inner.download_numeric(output)).unwrap();
                 let HostNumericDataOwned::F32(data) = downloaded.data else {
                     panic!("actual native output storage must be F32")
                 };
@@ -102,7 +99,7 @@ fn resident_complex_single_fallback_retains_typed_storage_intent_and_owner() {
                     .map(|v| (f64::from(v[0]), f64::from(v[1])))
                     .collect();
                 assert_values(&pairs, singleton);
-                drop(output);
+                drop(result);
                 drop(args);
                 input.allocation_lease().validate_live().unwrap();
                 let original = block_on(provider.inner.download_numeric(&input)).unwrap();

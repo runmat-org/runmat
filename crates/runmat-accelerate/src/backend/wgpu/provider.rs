@@ -4,15 +4,35 @@ use anyhow::Result;
 #[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
 
+#[cfg(not(target_arch = "wasm32"))]
+static INSTANCE: OnceCell<&'static WgpuProvider> = OnceCell::new();
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    // The registered façade belongs to this browser worker for its lifetime.
+    static INSTANCE: std::cell::Cell<Option<&'static WgpuProvider>> = const { std::cell::Cell::new(None) };
+}
+
 mod backend;
 
 #[cfg(test)]
 pub(crate) use backend::backend_shared::host_tensor_from_value;
 pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
 
+/// Read the existing registered façade without initializing a device or
+/// changing ambient provider selection.
+pub fn registered_wgpu_provider() -> Option<&'static WgpuProvider> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        INSTANCE.get().copied()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        INSTANCE.with(std::cell::Cell::get)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {
-    static INSTANCE: OnceCell<&'static WgpuProvider> = OnceCell::new();
     let leaked: &'static WgpuProvider = *INSTANCE.get_or_try_init(move || {
         let provider = WgpuProvider::new(opts)?;
         let leaked: &'static WgpuProvider = Box::leak(Box::new(provider));
@@ -42,11 +62,6 @@ pub fn register_wgpu_provider(_opts: WgpuProviderOptions) -> Result<&'static Wgp
 pub async fn register_wgpu_provider_async(
     opts: WgpuProviderOptions,
 ) -> Result<&'static WgpuProvider> {
-    thread_local! {
-        // The public provider ABI retains its façade for this worker's lifetime;
-        // individual payloads still retire through their allocation leases.
-        static INSTANCE: std::cell::Cell<Option<&'static WgpuProvider>> = const { std::cell::Cell::new(None) };
-    }
     let leaked = if let Some(existing) = INSTANCE.with(std::cell::Cell::get) {
         existing
     } else {

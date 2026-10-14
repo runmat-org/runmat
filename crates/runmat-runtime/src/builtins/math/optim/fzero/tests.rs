@@ -60,10 +60,10 @@ fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
         move |_function, _args, _requested_outputs| {
             observed_calls.fetch_add(1, Ordering::SeqCst);
             let guard = DropCount(observed_drop.clone());
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 let _guard = guard;
                 futures::future::pending::<()>().await;
-                Ok(Value::Num(0.0))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
             })
         },
     )));
@@ -147,8 +147,8 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
             };
             assert_eq!(argument.numeric_dtype(), runmat_value::NumericDType::F32);
             let residual = argument.materialize_f64()[0] - std::f64::consts::PI;
-            crate::sequence::single_value_future(async move {
-                Ok(Value::Tensor(
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Tensor(
                     Tensor::new_with_dtype(
                         vec![residual],
                         vec![1, 1],
@@ -187,8 +187,8 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
                 Value::Num(value) => *value,
                 _ => unreachable!(),
             };
-            crate::sequence::single_value_future(async move {
-                Ok(Value::Tensor(
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Tensor(
                     Tensor::new_with_dtype(
                         vec![x - 1.0],
                         vec![1, 1],
@@ -324,7 +324,9 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
             assert_eq!(requested_outputs, 1);
             assert!(matches!(&args[0], Value::Num(value) if value.is_finite()));
             observed.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(1.0)) })
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(1.0))
+            })
         },
     )));
     let function =
@@ -375,7 +377,11 @@ fn fzero_accepts_semantic_function_handle_callback() {
                 Value::Num(value) => *value,
                 other => panic!("expected scalar numeric argument, got {other:?}"),
             };
-            Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 2.0)) })
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                    x - 2.0,
+                ))
+            })
         },
     )));
 

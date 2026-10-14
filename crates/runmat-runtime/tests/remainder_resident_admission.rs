@@ -158,7 +158,8 @@ fn public_logical_u8_remainder_with_logical_or_bool_matches_host_domain() {
             let actual = runmat_runtime::call_builtin(name, &args).unwrap();
             let actual = block_on(runmat_runtime::gather_if_needed_async(&actual)).unwrap();
             assert_eq!(
-                actual, expected,
+                &actual,
+                expected.value(),
                 "{name}: logical physical encoding must not select integer arithmetic"
             );
         }

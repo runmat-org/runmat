@@ -76,6 +76,7 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
         ),
     };
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: definition.provenance,
         identity: BuiltinCatalogIdentity {
             name: definition.name,

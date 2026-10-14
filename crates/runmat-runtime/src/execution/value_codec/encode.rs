@@ -1,14 +1,69 @@
 use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableForm, CallableOwner, CallableValue, DenseValue, ElementType, ExceptionCallFrame,
-    ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
-    InlineValue, RegisteredData, RegisteredField, SparseValue, StructField, ValuePayload,
+    CallableForm, CallableOwner, CallableValue, DenseValue, DetachedDiagnosticFrame, ElementType,
+    ExceptionCallFrame, ExceptionFailureOrigin, ExceptionFrameSource, ExceptionGpuGatherRetry,
+    ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData, RegisteredField,
+    SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
 #[path = "encode/aggregate.rs"]
 mod aggregate;
+
+pub(super) trait InlineSourceAuthority {
+    fn session_lease(&self) -> std::sync::Weak<()>;
+    fn frame_ordinal(
+        &self,
+        frame: &crate::CallFrame,
+    ) -> Result<runmat_types::ProgramSourceId, &'static str>;
+    fn render_call_stack(&self, error: &crate::RuntimeError) -> Vec<String>;
+    fn allows_detached_diagnostics(&self) -> bool {
+        false
+    }
+}
+
+impl InlineSourceAuthority for crate::context::RuntimeContext {
+    fn session_lease(&self) -> std::sync::Weak<()> {
+        self.session_lease()
+    }
+
+    fn frame_ordinal(
+        &self,
+        frame: &crate::CallFrame,
+    ) -> Result<runmat_types::ProgramSourceId, &'static str> {
+        crate::execution::errors::portable_call_frame_source_in_context(frame, self)
+    }
+
+    fn render_call_stack(&self, error: &crate::RuntimeError) -> Vec<String> {
+        crate::execution::render_source_call_stack_in_context(error, self)
+    }
+}
+
+impl InlineSourceAuthority for super::graph::GraphSourceIssuer {
+    fn session_lease(&self) -> std::sync::Weak<()> {
+        self.session_lease().clone()
+    }
+
+    fn frame_ordinal(
+        &self,
+        frame: &crate::CallFrame,
+    ) -> Result<runmat_types::ProgramSourceId, &'static str> {
+        let source = frame
+            .source_id
+            .ok_or("caught exception frame has no source")?;
+        self.source_ordinal(runmat_types::SourceId(source), frame.source_owner.as_ref())
+            .ok_or("caught exception source is absent from selected graph units")
+    }
+
+    fn render_call_stack(&self, error: &crate::RuntimeError) -> Vec<String> {
+        self.render_call_stack(error)
+    }
+
+    fn allows_detached_diagnostics(&self) -> bool {
+        true
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodecPurpose {
@@ -34,6 +89,13 @@ pub fn encode_inline_value_in_context(
     encode(value, "$", CodecPurpose::ExecutionV2, Some(runtime))
 }
 
+pub(super) fn encode_inline_value_with_authority(
+    value: &Value,
+    issuer: &dyn InlineSourceAuthority,
+) -> Result<ValuePayload, ValueCodecError> {
+    encode(value, "$", CodecPurpose::ExecutionV2, Some(issuer))
+}
+
 pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
     encode(value, "$", CodecPurpose::DurablePreference, None)
 }
@@ -50,7 +112,7 @@ fn encode(
     value: &Value,
     path: &str,
     purpose: CodecPurpose,
-    runtime: Option<&crate::context::RuntimeContext>,
+    runtime: Option<&dyn InlineSourceAuthority>,
 ) -> Result<ValuePayload, ValueCodecError> {
     let inline = match value {
         Value::Int(value) => encode_integer_scalar(value),
@@ -206,27 +268,28 @@ fn encode(
             None,
             Vec::new(),
         ),
-        Value::BoundFunctionHandle {
-            name,
-            function: _,
-            authority,
-            source_role,
-            source_file,
-        } => callable(
+        Value::BoundFunctionHandle(handle) => callable(
             CallableOwner::Bound(
-                authority
-                    .export_origin(&crate::user_functions::current_session_lease())
+                handle
+                    .authority
+                    .export_origin(&selected_session_lease(runtime))
                     .ok_or_else(|| {
                         ValueCodecError::unsupported(path, "bound callable has no portable origin")
                     })?,
             ),
-            name,
+            &handle.name,
             CallableForm::Handle,
-            *source_role,
-            source_file.as_deref(),
+            handle.source_role,
+            handle.source_file.as_deref(),
             Vec::new(),
         ),
         Value::Closure(closure) => {
+            if closure.lexical_environment.is_some() {
+                return Err(ValueCodecError::unsupported(
+                    path,
+                    "shared lexical environment cannot cross a value-codec boundary",
+                ));
+            }
             let captures = closure
                 .captures
                 .iter()
@@ -239,7 +302,7 @@ fn encode(
                 Some(binding) => CallableOwner::Bound(
                     binding
                         .authority
-                        .export_origin(&crate::user_functions::current_session_lease())
+                        .export_origin(&selected_session_lease(runtime))
                         .ok_or_else(|| {
                             ValueCodecError::unsupported(path, "closure has no portable origin")
                         })?,
@@ -295,6 +358,12 @@ fn encode(
         )),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
+}
+
+fn selected_session_lease(runtime: Option<&dyn InlineSourceAuthority>) -> std::sync::Weak<()> {
+    runtime.map_or_else(crate::user_functions::current_session_lease, |runtime| {
+        runtime.session_lease()
+    })
 }
 
 /// A shared rethrow owner is still portable when its actual original is
@@ -516,7 +585,7 @@ fn callable(
 fn exception_runtime_metadata(
     error: &crate::RuntimeError,
     path: &str,
-    runtime: Option<&crate::context::RuntimeContext>,
+    runtime: Option<&dyn InlineSourceAuthority>,
 ) -> Result<ExceptionRuntimeMetadata, ValueCodecError> {
     fn portable(value: usize, path: &str) -> Result<u64, ValueCodecError> {
         u64::try_from(value).map_err(|_| {
@@ -536,35 +605,62 @@ fn exception_runtime_metadata(
         .call_frames
         .iter()
         .map(|frame| {
-            Ok(ExceptionCallFrame {
-                function: frame.function.clone(),
-                program_source_id: frame
-                    .source_id
-                    .map(|id| {
-                        let runtime = runtime.ok_or_else(|| {
-                            ValueCodecError::unsupported(
-                        path,
+            let graph = runtime.is_some_and(|runtime| runtime.allows_detached_diagnostics());
+            let detached = frame
+                .diagnostic_source
+                .as_ref()
+                .is_some_and(crate::CallFrameDiagnosticSource::is_detached);
+            if detached && !graph {
+                return Err(ValueCodecError::unsupported(
+                    path,
+                    "Direct execution transport cannot encode detached diagnostic frames",
+                ));
+            }
+            let selected = if detached {
+                None
+            } else {
+                frame.source_id.map(|_| {
+                    let runtime = runtime.ok_or(
                         "caught exception source requires a selected portable program binding",
-                    )
-                        })?;
-                        let issued = crate::source_context::issued_source_ref_in_context(
-                            runtime,
-                            runmat_types::SourceId(id),
-                        )
-                        .ok_or_else(|| {
-                            ValueCodecError::unsupported(
-                                path,
-                                "caught exception source is missing or foreign",
-                            )
-                        })?;
-                        runtime.portable_ordinal_for_source(issued).ok_or_else(|| {
-                            ValueCodecError::unsupported(
-                                path,
-                                "caught exception source is absent from the portable program",
-                            )
+                    )?;
+                    runtime.frame_ordinal(frame)
+                })
+            };
+            let detached_presentation = || {
+                frame
+                    .diagnostic_source
+                    .as_ref()
+                    .map(|diagnostic| {
+                        let (line, column) = diagnostic
+                            .line_column(frame.span)
+                            .map_or((None, None), |(line, column)| (Some(line), Some(column)));
+                        ExceptionFrameSource::Detached(DetachedDiagnosticFrame {
+                            display_name: diagnostic.display_name().to_owned(),
+                            line,
+                            column,
                         })
                     })
-                    .transpose()?,
+                    .unwrap_or(ExceptionFrameSource::Unknown)
+            };
+            let source = match selected {
+                Some(Ok(ordinal)) => ExceptionFrameSource::Admitted(ordinal),
+                Some(Err(error)) => {
+                    if !graph || frame.diagnostic_source.is_none() {
+                        return Err(ValueCodecError::unsupported(path, error));
+                    }
+                    detached_presentation()
+                }
+                None => {
+                    if graph {
+                        detached_presentation()
+                    } else {
+                        ExceptionFrameSource::Unknown
+                    }
+                }
+            };
+            Ok(ExceptionCallFrame {
+                function: frame.function.clone(),
+                source,
                 span: span(frame.span, path)?,
             })
         })
@@ -582,9 +678,7 @@ fn exception_runtime_metadata(
         call_frames,
         call_frames_elided: portable(error.context.call_frames_elided, path)?,
         call_stack: if error.context.call_stack.is_empty() {
-            runtime.map_or_else(Vec::new, |runtime| {
-                crate::execution::render_source_call_stack_in_context(error, runtime)
-            })
+            runtime.map_or_else(Vec::new, |runtime| runtime.render_call_stack(error))
         } else {
             error.context.call_stack.clone()
         },

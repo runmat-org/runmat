@@ -4,11 +4,14 @@ use std::task::{Context, Poll, Waker};
 
 #[path = "state/resources.rs"]
 mod resources;
+#[path = "state/wgpu_measurement.rs"]
+mod wgpu_measurement;
 use resources::ResourceState;
 pub use resources::{
     ProviderResourcePhasePlan, ProviderResourcePhaseToken, ProviderResourceScope,
     ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
 };
+use wgpu_measurement::WgpuMeasurementAggregate;
 
 struct State {
     start: Option<Duration>,
@@ -28,12 +31,27 @@ struct State {
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
+    wgpu: WgpuMeasurementAggregate,
     resources: ResourceState,
     waiter: Option<Waker>,
     resource_waiter: Option<Waker>,
 }
 
 impl State {
+    fn observation(&self, status: ProviderObservationStatus) -> ProviderOperationObservation {
+        let wgpu = self.wgpu.snapshot(self.registered, status);
+        ProviderOperationObservation {
+            status,
+            route_outcome: self.route_outcome,
+            stages: self.stages,
+            verified_wgpu_compute_elapsed: wgpu.compute_elapsed,
+            verified_wgpu_dispatches: wgpu.dispatches,
+            wgpu_query_allocations: wgpu.query_allocations,
+            pipelines: self.pipelines,
+            resources: self.resources.snapshot(),
+        }
+    }
+
     fn status(&self) -> ProviderObservationStatus {
         if let Some(failure) = self.failure {
             return ProviderObservationStatus::Failed(failure);
@@ -203,6 +221,7 @@ impl ProviderOperationReceipt {
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
+                    wgpu: WgpuMeasurementAggregate::default(),
                     resources: ResourceState::default(),
                     waiter: None,
                     resource_waiter: None,
@@ -463,13 +482,7 @@ impl ProviderOperationReceipt {
                 return None;
             }
             state.taken = true;
-            Some(ProviderOperationObservation {
-                status,
-                route_outcome: state.route_outcome,
-                stages: state.stages,
-                pipelines: state.pipelines,
-                resources: state.resources.snapshot(),
-            })
+            Some(state.observation(status))
         })
     }
 
@@ -494,16 +507,7 @@ impl ProviderOperationReceipt {
                 );
             }
             state.taken = true;
-            (
-                Poll::Ready(Some(ProviderOperationObservation {
-                    status,
-                    route_outcome: state.route_outcome,
-                    stages: state.stages,
-                    pipelines: state.pipelines,
-                    resources: state.resources.snapshot(),
-                })),
-                None,
-            )
+            (Poll::Ready(Some(state.observation(status))), None)
         });
         drop(old);
         result
@@ -548,6 +552,12 @@ impl Drop for ProviderOperationReceipt {
 pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    /// Compare the actual observation owner, never an operation label or a
+    /// later poll-local selection.
+    pub fn same_observation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     pub fn confirm_provider_host_mediated_after(
         &self,
         device_id: u32,
@@ -782,12 +792,17 @@ impl ProviderSubmission {
         }
     }
 
-    fn complete_at(mut self, now: Option<Duration>) {
+    fn complete_at(
+        mut self,
+        now: Option<Duration>,
+        measurement: Option<WgpuSubmissionMeasurement>,
+    ) {
         self.shared.with(|state| {
             if state.failure.is_some() || state.taken {
                 return;
             }
             if let Some(now) = state.timestamp(now) {
+                state.wgpu.record(measurement);
                 state.completion = Some(state.completion.map_or(now, |previous| previous.max(now)));
                 state.pending -= 1;
             }
@@ -812,7 +827,14 @@ pub struct ProviderCompletedSubmission {
 
 impl ProviderCompletedSubmission {
     pub fn complete(self) {
-        self.submission.complete_at(self.timestamp);
+        self.submission.complete_at(self.timestamp, None);
+    }
+
+    /// Settle actual optional WGPU facts only after fence/readback resources
+    /// have retired. Missing fields remain independently unknown.
+    pub fn complete_with_wgpu(self, measurement: WgpuSubmissionMeasurement) {
+        self.submission
+            .complete_at(self.timestamp, Some(measurement));
     }
 
     pub fn fail(self) {

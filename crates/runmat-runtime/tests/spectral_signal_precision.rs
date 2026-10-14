@@ -41,7 +41,7 @@ fn surplus_host_output_slots_retain_shared_double_scalar_padding() {
                 named + 2,
             ))
             .unwrap();
-            let Value::OutputList(values) = result else {
+            let Value::OutputList(values) = result.value() else {
                 panic!("padded outputs")
             };
             for value in &values[named..] {
@@ -94,7 +94,7 @@ fn all_host_spectral_outputs_follow_signal_not_window_or_sampling_class() {
                         if name == "periodogram" { 2 } else { 4 },
                     ))
                     .unwrap();
-                    let Value::OutputList(outputs) = result else {
+                    let Value::OutputList(outputs) = result.value() else {
                         panic!("multiple spectral outputs")
                     };
                     assert_eq!(values(&outputs[1], dtype), vec![0.0, 1.0, 2.0, 3.0]);

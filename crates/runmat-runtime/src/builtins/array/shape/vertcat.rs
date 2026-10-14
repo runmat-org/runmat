@@ -5,39 +5,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
-
-const VERTCAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A1,...,An",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every real integer class participates in documented dimension-one concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands.",
-    }];
-
-pub const VERTCAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = vertcat(A1,...,An) with real integer data",
-        inputs: &VERTCAT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "vertcat delegates to the settled cat(dim=1) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -66,241 +35,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Concatenation materialises outputs immediately, terminating fusion pipelines.",
 };
 
-fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
-    let mut element: Option<Type> = None;
-    for ty in inputs {
-        let Type::Cell { element_type, .. } = ty else {
-            return None;
-        };
-        match (&element, element_type.as_deref()) {
-            (None, Some(current)) => element = Some(current.clone()),
-            (Some(existing), Some(current)) if existing == current => {}
-            (Some(_), Some(_)) => return None,
-            _ => {}
-        }
-    }
-    element.map(Box::new)
-}
-
-fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<Option<usize>>> {
-    if shapes.is_empty() || dim_1based == 0 {
-        return None;
-    }
-    let mut active = shapes.to_vec();
-    let has_known_nonempty = active.iter().any(|shape| {
-        shape.iter().all(Option::is_some)
-            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
-    });
-    if has_known_nonempty {
-        active.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
-    }
-    let rank = active
-        .iter()
-        .map(|shape| shape.len())
-        .max()?
-        .max(dim_1based);
-    let mut padded = Vec::with_capacity(active.len());
-    for shape in &active {
-        let mut current = shape.clone();
-        while current.len() < rank {
-            current.push(Some(1));
-        }
-        padded.push(current);
-    }
-
-    let mut output = vec![None; rank];
-    let dim_zero = dim_1based - 1;
-    for axis in 0..rank {
-        if axis == dim_zero {
-            let mut total: Option<usize> = Some(0);
-            for shape in &padded {
-                match (total, shape[axis]) {
-                    (Some(acc), Some(value)) => total = acc.checked_add(value),
-                    _ => {
-                        total = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = total;
-        } else {
-            let mut shared: Option<usize> = None;
-            let mut mismatch = false;
-            for shape in &padded {
-                match (shared, shape[axis]) {
-                    (None, value) => shared = value,
-                    (Some(current), Some(value)) if current == value => {}
-                    (Some(_), Some(_)) => {
-                        mismatch = true;
-                        break;
-                    }
-                    _ => {
-                        shared = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = if mismatch { None } else { shared };
-        }
-    }
-
-    let min_len = dim_1based.max(2).min(output.len());
-    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
-        output.pop();
-    }
-    Some(output)
-}
-
-fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
-    if args.is_empty() {
-        return Type::tensor();
-    }
-    if args.len() == 1 {
-        return args[0].clone();
-    }
-
-    let has_cell = args.iter().any(|arg| matches!(arg, Type::Cell { .. }));
-    if has_cell {
-        return Type::Cell {
-            element_type: cell_element_type(args),
-            length: None,
-        };
-    }
-
-    let has_string = args.iter().any(|arg| matches!(arg, Type::String));
-    if has_string {
-        return Type::cell_of(Type::String);
-    }
-
-    let has_numeric = args
-        .iter()
-        .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
-    let has_logical = args
-        .iter()
-        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
-
-    if has_numeric {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args
-            .iter()
-            .map(|ty| match ty {
-                Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                    Some(shape.clone())
-                }
-                Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
-                _ => None,
-            })
-            .collect();
-        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
-        return Type::Tensor { shape };
-    }
-
-    if has_logical {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args
-            .iter()
-            .map(|ty| match ty {
-                Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                    Some(shape.clone())
-                }
-                Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
-                _ => None,
-            })
-            .collect();
-        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
-        return Type::Logical { shape };
-    }
-
-    Type::Unknown
-}
-
-fn vertcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    concat_type_with_dim(args, 1)
-}
-
 fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("vertcat").build()
 }
 
-const VERTCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vertically concatenated result (dimension 1).",
-}];
-
-const VERTCAT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-
-const VERTCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "An",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input arrays.",
-    },
-];
-
-const VERTCAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = vertcat()",
-        inputs: &VERTCAT_INPUTS_EMPTY,
-        outputs: &VERTCAT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = vertcat(A1, An...)",
-        inputs: &VERTCAT_INPUTS,
-        outputs: &VERTCAT_OUTPUT,
-    },
-];
-
-const VERTCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VERTCAT.INVALID_INPUT",
-    identifier: Some("RunMat:vertcat:InvalidInput"),
-    when: "Inputs are malformed or incompatible for vertical concatenation.",
-    message: "vertcat: invalid input arguments",
-};
-
-const VERTCAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VERTCAT.TYPE_MISMATCH",
-    identifier: Some("RunMat:vertcat:TypeMismatch"),
-    when: "Input classes cannot be concatenated together.",
-    message: "vertcat: incompatible input classes for concatenation",
-};
-
-const VERTCAT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [VERTCAT_ERROR_INVALID_INPUT, VERTCAT_ERROR_TYPE_MISMATCH];
-
-pub const VERTCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VERTCAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &VERTCAT_ERRORS,
-};
-
 #[runtime_builtin(
     name = "vertcat",
-    category = "array/shape",
-    summary = "Concatenate inputs vertically along the first dimension.",
-    keywords = "vertcat,vertical concatenation,array,gpu",
-    accel = "array_construct",
-    type_resolver(vertcat_type),
-    descriptor(crate::builtins::array::shape::vertcat::VERTCAT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::vertcat::VERTCAT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
-async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if args.is_empty() {
-        return empty_double();
+        return crate::execution::RootedValue::new(empty_double()?)
+            .map_err(|error| error.into_runtime_error());
     }
     if args.len() == 1 {
-        return Ok(args.into_iter().next().unwrap());
+        return crate::execution::RootedValue::new(args.into_iter().next().unwrap())
+            .map_err(|error| error.into_runtime_error());
     }
 
     let mut forwarded = Vec::with_capacity(args.len() + 1);
@@ -340,7 +91,7 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
 
-    fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
         block_on(super::vertcat_builtin(args))
     }
     use crate::builtins::common::test_support;
@@ -348,32 +99,11 @@ pub(crate) mod tests {
         CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 
-    #[test]
-    fn vertcat_type_combines_shapes() {
-        let out = vertcat_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(3)])
-            }
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = vertcat_builtin(Vec::new()).expect("vertcat");
-        match result {
+        match result.value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), vec![0, 0]);
                 assert!(t.materialize_f64().is_empty());
@@ -387,7 +117,7 @@ pub(crate) mod tests {
     fn single_argument_round_trips() {
         let value = Value::Num(42.0);
         let result = vertcat_builtin(vec![value.clone()]).expect("vertcat");
-        assert_eq!(result, value);
+        assert_eq!(result.value(), &value);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -395,7 +125,7 @@ pub(crate) mod tests {
     fn true_empty_operand_is_neutral_for_dynamic_growth() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
         let result = vertcat_builtin(vec![Value::Tensor(empty), Value::Num(2.0)]).expect("vertcat");
-        assert_eq!(result, Value::Num(2.0));
+        assert_eq!(result.value(), &Value::Num(2.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -405,7 +135,7 @@ pub(crate) mod tests {
         let bottom = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let result =
             vertcat_builtin(vec![Value::Tensor(top), Value::Tensor(bottom)]).expect("vertcat");
-        match result {
+        match result.value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), vec![4, 2]);
                 assert_eq!(
@@ -426,7 +156,7 @@ pub(crate) mod tests {
         ])
         .expect("vertcat");
 
-        let Value::Tensor(output) = result else {
+        let Value::Tensor(output) = result.value() else {
             panic!("expected tensor");
         };
         assert_eq!(
@@ -442,7 +172,7 @@ pub(crate) mod tests {
         let bottom = CharArray::new("Rocks!".chars().collect(), 1, 6).unwrap();
         let result = vertcat_builtin(vec![Value::CharArray(top), Value::CharArray(bottom)])
             .expect("vertcat");
-        match result {
+        match result.value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 6);
@@ -462,7 +192,7 @@ pub(crate) mod tests {
         let rows = StringArray::new(vec!["Alice".into(), "98".into()], vec![1, 2]).unwrap();
         let result = vertcat_builtin(vec![Value::StringArray(header), Value::StringArray(rows)])
             .expect("vertcat");
-        match result {
+        match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 2]);
                 assert_eq!(arr.data, vec!["Name", "Alice", "Score", "98"]);
@@ -478,7 +208,7 @@ pub(crate) mod tests {
         let bottom = CharArray::new_row("beta");
         let result = vertcat_builtin(vec![Value::StringArray(top), Value::CharArray(bottom)])
             .expect("vertcat mixed");
-        match result {
+        match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 1]);
                 assert_eq!(arr.data, vec!["alpha", "beta"]);
@@ -515,7 +245,7 @@ pub(crate) mod tests {
             let h_bottom = provider.upload(&view_bottom).expect("upload bottom");
             let result = vertcat_builtin(vec![Value::GpuTensor(h_top), Value::GpuTensor(h_bottom)])
                 .expect("vertcat");
-            let gathered = test_support::gather(result).expect("gather");
+            let gathered = result.with_owned(test_support::gather).expect("gather");
             assert_eq!(gathered.shape(), vec![4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
@@ -531,7 +261,7 @@ pub(crate) mod tests {
             Value::LogicalArray(second),
         ])
         .expect("vertcat logical");
-        match result {
+        match result.value() {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
                 assert_eq!(array.data, vec![1, 0, 0, 1, 1, 0]);
@@ -550,7 +280,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(second),
         ])
         .expect("vertcat complex");
-        match result {
+        match result.value() {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape(), vec![4, 1]);
                 assert_eq!(
@@ -569,7 +299,7 @@ pub(crate) mod tests {
         let second = CellArray::new(vec![Value::Num(2.0), Value::from("high")], 1, 2).unwrap();
         let result =
             vertcat_builtin(vec![Value::Cell(first), Value::Cell(second)]).expect("vertcat cell");
-        match result {
+        match result.value() {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 2);
                 assert_eq!(cell.cols, 2);
@@ -599,11 +329,11 @@ pub(crate) mod tests {
                 Value::GpuTensor(proto_handle),
             ])
             .expect("vertcat like");
-            let handle = match result {
-                Value::GpuTensor(h) => h,
+            match result.value() {
+                Value::GpuTensor(_) => {}
                 other => panic!("expected gpu tensor, got {other:?}"),
-            };
-            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            }
+            let gathered = result.with_owned(test_support::gather).expect("gather");
             assert_eq!(gathered.shape(), vec![4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
@@ -624,7 +354,7 @@ pub(crate) mod tests {
             Value::Tensor(bottom.clone()),
         ])
         .expect("cpu vertcat");
-        let expected = match cpu_value {
+        let expected = match cpu_value.value() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor output, got {other:?}"),
         };
@@ -642,7 +372,7 @@ pub(crate) mod tests {
         let hb = provider.upload(&view_bottom).expect("upload bottom");
         let gpu_value =
             vertcat_builtin(vec![Value::GpuTensor(ht), Value::GpuTensor(hb)]).expect("gpu vertcat");
-        let gathered = test_support::gather(gpu_value).expect("gather");
+        let gathered = gpu_value.with_owned(test_support::gather).expect("gather");
         assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }

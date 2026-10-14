@@ -10,6 +10,7 @@ pub mod handle;
 pub mod host;
 pub mod identity;
 pub mod placement;
+pub mod profiling;
 pub mod protocol;
 pub mod resource;
 pub mod schema;
@@ -33,8 +34,8 @@ pub use executable::{
     ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
     ExecutableOptionalSection, ExecutableSectionSupport, ExecutableSourceMapV2,
     ExecutableSourceRecordV2, ExecutableUnitAdmission, ExecutableUnitEnvelope,
-    ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
-    EXECUTABLE_UNIT_SCHEMA_VERSION,
+    ExecutableUnitManifest, SectionRequirement, ValidatedExecutableEntrypoint,
+    EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdOutputValue, SpmdTaskContext};
 pub use handle::{
@@ -46,8 +47,8 @@ pub use identity::{
     JobId, PoolId, RunId, TaskId,
 };
 pub use identity::{
-    Digest, DigestStream, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment,
-    ProgramRevision,
+    Digest, DigestStream, DomainContribution, ForeignPolicyRef, LanguageCompatibilityMode,
+    ProgramEnvironment, ProgramRevision,
 };
 pub use placement::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -71,6 +72,7 @@ pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};
 pub use task::{
     ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
-    ParallelTaskGraph, ProgramCallFrame, ProgramCallable, ProgramExecutionAssignment,
-    ProgramInvocationContext, ProgramRuntimeFailure, ProgramSourceSpan, RetryPolicy,
+    ParallelTaskGraph, ProgramCallFrame, ProgramCallable, ProgramDetachedDiagnosticSource,
+    ProgramExecutionAssignment, ProgramInvocationContext, ProgramRuntimeFailure, ProgramSourceSpan,
+    RetryPolicy,
 };

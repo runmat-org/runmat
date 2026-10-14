@@ -27,6 +27,7 @@ struct PendingService(Rc<Counts>);
 impl RuntimeHttpService for PendingService {
     fn send(
         &self,
+        _runtime: RuntimeContext,
         _request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         self.0.sends.set(self.0.sends.get() + 1);
@@ -159,6 +160,7 @@ struct ReadyCancellingService(CancellationSource);
 impl RuntimeHttpService for ReadyCancellingService {
     fn send(
         &self,
+        _runtime: RuntimeContext,
         _request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         let cancellation = self.0.clone();

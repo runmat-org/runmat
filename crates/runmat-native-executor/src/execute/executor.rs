@@ -1,3 +1,4 @@
+use runmat_gc::{Trace, Tracer};
 use runmat_runtime::context::RuntimeContext;
 use runmat_types::ProgramFunctionId;
 use runmat_value::Value;
@@ -14,6 +15,8 @@ mod capture_arguments;
 
 pub struct NativeExecutor {
     functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
+    class_declarations: Arc<[runmat_native_codegen::NativeClassDeclaration]>,
+    program_revision: runmat_execution::ProgramRevision,
     compiled: NativeExecutable,
     program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
@@ -60,6 +63,29 @@ pub struct NativeExecution {
     pub expression: Option<Value>,
 }
 
+/// A terminal native result that retains managed values after its invocation
+/// arena is released, until a downstream owner publishes the result.
+pub type RootedNativeExecution = runmat_runtime::execution::RootedResult<NativeExecution>;
+
+impl Trace for NativeExecution {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in &self.outputs {
+            value.trace(tracer);
+        }
+        for capture in &self.captures {
+            capture.value.trace(tracer);
+        }
+        if let Some(workspace) = &self.workspace {
+            for value in workspace.values.values() {
+                value.trace(tracer);
+            }
+        }
+        if let Some(expression) = &self.expression {
+            expression.trace(tracer);
+        }
+    }
+}
+
 impl NativeExecutor {
     /// Bind verified Native IR to an executable with the same exact function set.
     pub fn bind(
@@ -91,6 +117,8 @@ impl NativeExecutor {
         };
         Ok(Self {
             functions: Arc::new(assembly.functions),
+            class_declarations: Arc::from(assembly.class_declarations),
+            program_revision: assembly.program,
             compiled: executable,
             program_capture: options.program_capture,
             interpreter_resume_points: options.interpreter_resume_points,
@@ -105,6 +133,24 @@ impl NativeExecutor {
                 }),
             optimized_regions: Arc::new(optimized_regions),
         })
+    }
+
+    /// The exact class declaration projection admitted with this executor.
+    pub fn class_declarations(&self) -> &[runmat_native_codegen::NativeClassDeclaration] {
+        &self.class_declarations
+    }
+
+    pub fn function_metadata(
+        &self,
+        function: ProgramFunctionId,
+    ) -> Option<&runmat_native_codegen::NativeFunction> {
+        self.functions
+            .iter()
+            .find(|candidate| candidate.id == function)
+    }
+
+    pub fn program_revision(&self) -> &runmat_execution::ProgramRevision {
+        &self.program_revision
     }
 
     pub fn retained_code_bytes(&self) -> u64 {
@@ -132,7 +178,7 @@ impl NativeExecutor {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> NativeExecutorResult<NativeExecution> {
+    ) -> NativeExecutorResult<RootedNativeExecution> {
         let mut invocation = self.begin(function, arguments, requested_outputs, runtime)?;
         loop {
             match invocation.advance()? {
@@ -167,7 +213,7 @@ impl NativeExecutor {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> NativeExecutorResult<NativeExecution> {
+    ) -> NativeExecutorResult<RootedNativeExecution> {
         self.invoke_async_with_captures(function, Vec::new(), arguments, requested_outputs, runtime)
             .await
     }
@@ -179,9 +225,29 @@ impl NativeExecutor {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> NativeExecutorResult<NativeExecution> {
-        let mut invocation =
-            self.begin_with_captures(function, captures, arguments, requested_outputs, runtime)?;
+    ) -> NativeExecutorResult<RootedNativeExecution> {
+        self.invoke_request_async_in_environment(
+            NativeInvocationRequest {
+                function,
+                captures,
+                arguments,
+                requested_outputs,
+                runtime,
+                deoptimization: DeoptimizationPolicy::default(),
+                osr_target: None,
+                workspace: None,
+            },
+            None,
+        )
+        .await
+    }
+
+    pub async fn invoke_request_async_in_environment(
+        &self,
+        request: NativeInvocationRequest,
+        lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    ) -> NativeExecutorResult<RootedNativeExecution> {
+        let mut invocation = self.begin_request_with_environment(request, lexical_environment)?;
         loop {
             match invocation.advance()? {
                 NativeInvocationStep::Completed(execution) => return Ok(execution),
@@ -218,7 +284,7 @@ impl NativeExecutor {
         workspace: super::workspace::NativeWorkspaceInput,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> NativeExecutorResult<NativeExecution> {
+    ) -> NativeExecutorResult<RootedNativeExecution> {
         let mut invocation = self.begin_request(NativeInvocationRequest {
             function,
             captures: Vec::new(),
@@ -307,6 +373,20 @@ impl NativeExecutor {
         &self,
         request: NativeInvocationRequest,
     ) -> NativeExecutorResult<NativeInvocation> {
+        self.begin_request_with_environment(request, None)
+    }
+
+    /// Carry the exact admitted activation through native construction.
+    /// Ordinary requests remain on the environment-free path.
+    pub fn begin_request_with_environment(
+        &self,
+        request: NativeInvocationRequest,
+        lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    ) -> NativeExecutorResult<NativeInvocation> {
+        let _admission_roots = lexical_environment
+            .as_ref()
+            .map(runmat_runtime::call::lexical::root_environment)
+            .transpose()?;
         let NativeInvocationRequest {
             function,
             captures,
@@ -362,6 +442,7 @@ impl NativeExecutor {
             program_capture: self.program_capture.clone(),
             functions: Arc::clone(&self.functions),
             captures,
+            lexical_environment,
             deoptimization,
             interpreter_resume_points: self.interpreter_resume_points.clone(),
             coverage_sites: self.coverage_sites.clone(),

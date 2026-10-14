@@ -18,7 +18,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use self::binary::{finish_binary, plan_binary};
+pub(crate) use self::binary::{finish_binary_owned, plan_binary, TabularBinaryPlan};
 pub(crate) use self::containers::{
     categorical_categories, categorical_compare, categorical_declared_levels,
     categorical_extrema_to_value, categorical_from_args, categorical_label_view,
@@ -30,6 +30,7 @@ pub(crate) use self::display::categorical_label_at;
 pub use self::display::{table_display_text, table_summary_text};
 use self::facade::*;
 pub use self::metadata::*;
+pub(crate) use self::object::table_replace_variables_like_owned;
 pub use self::object::{
     is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,

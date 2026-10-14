@@ -17,6 +17,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{
     binary as common_binary, broadcast::BroadcastPlan, gpu_helpers, tensor,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan2";
@@ -98,20 +100,33 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atan2",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
-async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
+async fn atan2_builtin(
+    runtime: Option<RuntimeContext>,
+    y: Value,
+    x: Value,
+) -> BuiltinResult<RootedValue> {
+    // Planning can row-select right-hand fields and then drop the original
+    // Object. Both original operands must be rooted before that begins.
+    let _inputs = RootedValueLease::for_values([&y, &x].into_iter())
+        .map_err(|cause| cause.into_runtime_error())?;
     reject_excess_outputs()?;
     match crate::builtins::table::plan_binary(y, x)
         .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error))?
     {
         common_binary::BinaryInputPlan::Values(values) => {
             let (y, x) = *values;
-            preparation::execute(y, x).await
+            preparation::execute(runtime.as_ref(), y, x).await
         }
         common_binary::BinaryInputPlan::Structured(plan) => {
-            let (source, variables) = plan.variables();
-            tabular::execute(source, variables).await
+            let crate::builtins::table::TabularBinaryPlan {
+                source,
+                variables,
+                right_values,
+            } = plan;
+            tabular::execute(source, variables, right_values).await
         }
     }
 }

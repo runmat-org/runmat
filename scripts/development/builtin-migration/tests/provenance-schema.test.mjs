@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   gpuSpec, implementationProvenance, registrationManifestEntry, runtimeConstant,
 } from "../compiled-runtime-schema.mjs";
-import { parseCompiledInventory } from "../compiled-inventory.mjs";
+import { authorityFor, parseCompiledInventory, publicSpellingsFor } from "../compiled-inventory.mjs";
 import { contentDigest } from "../evidence.mjs";
 import { compiledInventoryFixture } from "./helpers.mjs";
 
@@ -109,6 +109,50 @@ test("compiled evidence accepts a provider declaration below its implementation 
   nested.snapshot.observed.registration_manifest.counts.gpu_spec = 1;
   reseal(nested);
   assert.doesNotThrow(() => parseCompiledInventory(nested));
+});
+
+test("compiled inventory v4 retains fixture authority without publishing its spelling", () => {
+  const snapshot = compiledInventoryFixture();
+  snapshot.snapshot.declared.catalog_entries[0].audience = "Fixture";
+  reseal(snapshot);
+  const compiled = parseCompiledInventory(snapshot);
+  assert.deepEqual(compiled.identities, ["foo"]);
+  assert.equal(authorityFor(compiled, "foo").catalog_entries[0].audience, "Fixture");
+  assert.deepEqual(publicSpellingsFor(compiled, "foo"), []);
+  assert.deepEqual(publicSpellingsFor(parseCompiledInventory(compiledInventoryFixture()), "foo"), ["foo"]);
+});
+
+test("compiled catalog audience and current schema versions are strict", () => {
+  for (const audience of [undefined, "Hidden", "fixture", null]) {
+    const snapshot = compiledInventoryFixture();
+    if (audience === undefined) delete snapshot.snapshot.declared.catalog_entries[0].audience;
+    else snapshot.snapshot.declared.catalog_entries[0].audience = audience;
+    reseal(snapshot);
+    assert.throws(() => parseCompiledInventory(snapshot), /catalog audience|compiled catalog entry fields/);
+  }
+  const oldInventory = compiledInventoryFixture();
+  oldInventory.schema_version = 3;
+  assert.throws(() => parseCompiledInventory(oldInventory), /schema_version 4/);
+  const oldCatalog = compiledInventoryFixture();
+  oldCatalog.snapshot.declared.catalog_schema_version = 6;
+  reseal(oldCatalog);
+  assert.throws(() => parseCompiledInventory(oldCatalog), /schema version must be 8/);
+});
+
+test("compiled aliases require an exact public canonical target", () => {
+  const alias = { alias: { name: "bar" }, canonical: { name: "foo" }, provenance: {
+    source_file: "crates/runmat-builtins/src/catalog/aliases.rs", module_path: "catalog::aliases",
+  } };
+  const fixture = compiledInventoryFixture();
+  fixture.snapshot.declared.catalog_entries[0].audience = "Fixture";
+  fixture.snapshot.declared.catalog_aliases.push(alias);
+  reseal(fixture);
+  assert.throws(() => parseCompiledInventory(fixture), /alias target is not public/);
+
+  const wrongCase = compiledInventoryFixture();
+  wrongCase.snapshot.declared.catalog_aliases.push({ ...alias, canonical: { name: "Foo" } });
+  reseal(wrongCase);
+  assert.throws(() => parseCompiledInventory(wrongCase), /alias target is not canonical/);
 });
 
 function reseal(value) {

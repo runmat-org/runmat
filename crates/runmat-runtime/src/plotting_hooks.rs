@@ -65,7 +65,8 @@ pub(crate) fn with_render_cause(
     mapped
 }
 
-/// Reset the per-thread "figures touched" set. No-op when plotting is disabled.
+/// Reset the selected invocation's touched-figure receipt, or the thread-local
+/// receipt when no runtime context is selected. No-op when plotting is disabled.
 pub fn reset_recent_figures() {
     #[cfg(feature = "plot-core")]
     {
@@ -73,7 +74,8 @@ pub fn reset_recent_figures() {
     }
 }
 
-/// Drain the per-thread "figures touched" set, returning the raw handles.
+/// Drain the selected invocation's touched-figure receipt, returning raw handles.
+/// Without a selected runtime context, drain the thread-local receipt instead.
 pub fn take_recent_figures() -> Vec<u32> {
     #[cfg(feature = "plot-core")]
     {

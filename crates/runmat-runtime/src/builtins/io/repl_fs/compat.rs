@@ -864,14 +864,14 @@ mod tests {
     use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
-    fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
+    fn run<T>(value: impl std::future::Future<Output = BuiltinResult<T>>) -> BuiltinResult<T> {
         futures::executor::block_on(value)
     }
 
     #[path = "preferences.rs"]
     mod preference_tests;
 
-    fn mapped_property(receiver: Value, name: &str) -> Value {
+    fn mapped_property(receiver: Value, name: &str) -> crate::execution::RootedValue {
         let path = crate::object::indexing::ObjectSubscriptPath::single(
             crate::object::indexing::ObjectSubscript::member(name),
         )
@@ -952,7 +952,8 @@ mod tests {
             ],
         ))
         .unwrap();
-        let Value::Struct(data) = mapped_property(value, "Data") else {
+        let mapped_data = mapped_property(value, "Data");
+        let Value::Struct(data) = mapped_data.value() else {
             panic!("expected Data struct");
         };
         let Some(Value::Tensor(samples)) = data.fields.get("samples") else {

@@ -270,6 +270,37 @@ fn local_authority(
 }
 
 #[test]
+fn retained_definition_without_published_id_remains_selected_for_graph_facts() {
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("retained-graph"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
+    let mut old = function(1, "old_graph_body", 5);
+    old.binding_origin = Some(origin);
+    let mut registry = FunctionRegistry::new(HashMap::from([(FunctionId(1), old)]));
+    let (authority, _issuer) = local_authority(&registry, FunctionId(1));
+    registry.remove(FunctionId(1)).expect("retired leased body");
+    assert!(registry.functions.is_empty());
+    let selected = registry
+        .owned_view(FunctionId(1), &authority)
+        .expect("exact retained execution view");
+    let bodies = selected.selected_execution_bodies();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].display_name, "old_graph_body");
+    assert_eq!(bodies[0].binding_origin, Some(origin));
+    ISSUED.with(|(runtime, _)| {
+        let fact = selected
+            .execution_source_fact_for_origin_in(runtime, origin)
+            .expect("retained origin source fact");
+        assert_eq!(fact.name, "old_graph_body");
+        assert_eq!(fact.binding_origin, Some(origin));
+        assert!(registry
+            .execution_source_fact_for_origin_in(runtime, origin)
+            .is_none());
+    });
+}
+
+#[test]
 fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomically() {
     let mut registry = registry();
     registry.names.insert("alias".into(), FunctionId(1));
@@ -405,12 +436,53 @@ fn retained_source_group_keeps_original_path_and_locals_after_id_reuse() {
 }
 
 #[test]
+fn selected_origin_binding_ignores_absent_or_foreign_ambient_resolver() {
+    let runtime = ISSUED.with(|(runtime, _)| runtime.clone());
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256(b"retired-selected-source"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
+    let mut original = registry();
+    original
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .binding_origin = Some(origin);
+    let original = std::rc::Rc::new(original);
+    let selected = original.execution_source_resolver_in(&runtime);
+    let mut replacement = original.as_ref().clone();
+    replacement.insert_replacing_name(function(1, "replacement", 7));
+    assert_ne!(
+        replacement
+            .get(FunctionId(1))
+            .and_then(|body| body.binding_origin),
+        Some(origin)
+    );
+    let resolve = || {
+        runmat_runtime::user_functions::resolve_binding_origin_binding_in_context(
+            &selected, origin, &runtime,
+        )
+        .expect("selected older body remains bound")
+    };
+    assert_eq!(resolve().function, 1);
+    let foreign = std::rc::Rc::new(runmat_runtime::user_functions::ExecutionSourceFacts::new(
+        std::rc::Rc::new(|_| None),
+        std::rc::Rc::new(|_| Vec::new()),
+        std::rc::Rc::new(|_| None),
+        std::rc::Rc::new(|_| None),
+    ));
+    let _foreign_guard =
+        runmat_runtime::user_functions::install_execution_source_resolver(Some(foreign));
+    assert_eq!(resolve().function, 1);
+}
+
+#[test]
 fn execution_snapshot_clone_is_shared_until_publication_mutates() {
     let original = registry();
     let mut publication = original.clone();
-    assert!(std::sync::Arc::ptr_eq(&original.data, &publication.data));
+    assert!(std::rc::Rc::ptr_eq(&original.data, &publication.data));
     publication.insert_replacing_name(function(4, "new", 8));
-    assert!(!std::sync::Arc::ptr_eq(&original.data, &publication.data));
+    assert!(!std::rc::Rc::ptr_eq(&original.data, &publication.data));
     assert_eq!(original.resolve_name("new"), None);
     assert_eq!(publication.resolve_name("new"), Some(FunctionId(4)));
     let error = serde_json::to_value(&publication)
@@ -447,7 +519,7 @@ fn function_execution_uses_shared_registry_without_cloning_legacy_body_map() {
     let function = registry.get(FunctionId(1)).unwrap();
     let bytecode = function.execution_bytecode(&registry);
     assert!(bytecode.bound_functions.is_empty());
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(std::rc::Rc::ptr_eq(
         &registry.data,
         &bytecode.function_registry.data
     ));
@@ -590,6 +662,117 @@ fn unchanged_origin_refresh_keeps_existing_definition_lease() {
 }
 
 #[test]
+fn changed_origin_clone_cannot_publish_under_retired_definition_lease() {
+    let mut registry = registry();
+    let old_origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("original product"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
+    let new_origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("replacement product"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .binding_origin = Some(old_origin);
+    let old = registry.get(FunctionId(1)).unwrap().clone();
+    let old_lease = runmat_value::FunctionDefinitionOwner::issue(&old.definition_owner, 1);
+    registry.insert_replacing_name(FunctionBytecode {
+        binding_origin: Some(new_origin),
+        ..old
+    });
+
+    let current = registry.get(FunctionId(1)).unwrap();
+    assert_eq!(current.binding_origin, Some(new_origin));
+    assert!(!old_lease.matches(&current.definition_owner));
+    assert_eq!(
+        registry
+            .get_owned(FunctionId(1), &old_lease)
+            .and_then(|body| body.binding_origin),
+        Some(old_origin)
+    );
+}
+
+#[test]
+fn changed_origin_preserves_distinct_preissued_incoming_owner() {
+    let mut registry = registry();
+    let old_lease = runmat_value::FunctionDefinitionOwner::issue(
+        &registry.get(FunctionId(1)).unwrap().definition_owner,
+        1,
+    );
+    let mut incoming = function(1, "first", 7);
+    incoming.binding_origin = Some(runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("independently issued product"),
+        function: runmat_types::ProgramFunctionId(1),
+    });
+    let incoming_lease =
+        runmat_value::FunctionDefinitionOwner::issue(&incoming.definition_owner, 1);
+    registry.insert_replacing_name(incoming);
+
+    assert!(registry.get_owned(FunctionId(1), &incoming_lease).is_some());
+    assert_eq!(
+        registry
+            .get_owned(FunctionId(1), &old_lease)
+            .unwrap()
+            .source_id,
+        Some(runtime_ref(5))
+    );
+}
+
+#[test]
+fn removed_then_reinserted_body_cannot_reuse_the_retained_owner() {
+    let mut registry = registry();
+    let old_owner = std::sync::Arc::clone(&registry.get(FunctionId(1)).unwrap().definition_owner);
+    let old_lease = runmat_value::FunctionDefinitionOwner::issue(&old_owner, 1);
+    let old = registry.remove(FunctionId(1)).expect("remove old body");
+    registry.insert_replacing_name(FunctionBytecode {
+        binding_origin: Some(runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("new product after removal"),
+            function: runmat_types::ProgramFunctionId(1),
+        }),
+        ..old
+    });
+
+    assert!(!old_lease.matches(&registry.get(FunctionId(1)).unwrap().definition_owner));
+    assert!(registry.get_owned(FunctionId(1), &old_lease).is_some());
+}
+
+#[test]
+fn copied_owner_cannot_cross_function_id_or_name_replacement() {
+    let original = function(1, "first", 5);
+    let old_owner = std::sync::Arc::clone(&original.definition_owner);
+    let mut registry = FunctionRegistry::new(HashMap::from([(FunctionId(1), original.clone())]));
+    let old_lease = runmat_value::FunctionDefinitionOwner::issue(&old_owner, 1);
+    registry.insert_replacing_name(FunctionBytecode {
+        function: FunctionId(4),
+        binding_origin: Some(runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("different function product"),
+            function: runmat_types::ProgramFunctionId(4),
+        }),
+        ..original
+    });
+
+    assert_eq!(registry.resolve_name("first"), Some(FunctionId(4)));
+    assert!(!old_lease.matches(&registry.get(FunctionId(4)).unwrap().definition_owner));
+    assert!(registry.get_owned(FunctionId(1), &old_lease).is_some());
+
+    let original = function(1, "first", 5);
+    let mut distinct_names =
+        FunctionRegistry::new(HashMap::from([(FunctionId(1), original.clone())]));
+    distinct_names.insert_replacing_name(FunctionBytecode {
+        function: FunctionId(5),
+        display_name: "unrelated".into(),
+        ..original
+    });
+    assert!(!std::sync::Arc::ptr_eq(
+        &distinct_names.get(FunctionId(1)).unwrap().definition_owner,
+        &distinct_names.get(FunctionId(5)).unwrap().definition_owner
+    ));
+}
+
+#[test]
 fn failed_candidate_can_retain_only_escaped_exact_bodies() {
     let mut published = registry();
     let candidate = FunctionRegistry::new(HashMap::from([
@@ -637,7 +820,7 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     let old = registry
         .owned_view(FunctionId(1), &authority)
         .expect("old owned definition and helper");
-    assert!(std::sync::Arc::ptr_eq(&old.data, &registry.data));
+    assert!(std::rc::Rc::ptr_eq(&old.data, &registry.data));
     assert!(old.get(FunctionId(1)).is_some());
     assert!(old.get(FunctionId(2)).is_some());
     assert!(old.static_binding(FunctionId(2)).is_some());
@@ -878,6 +1061,7 @@ fn retained_execution_stack_does_not_borrow_published_method_targets() {
         methods: vec![crate::bytecode::instr::BytecodeClassMethod {
             name: "pure".into(),
             function_name: "Example.pure".into(),
+            role: runmat_types::ClassMethodRole::Ordinary,
             is_static: false,
             is_abstract: false,
             is_sealed: false,

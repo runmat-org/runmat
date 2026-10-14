@@ -22,8 +22,10 @@ impl RuntimeAccelerationService for Service {
         self.0.borrow_mut().push(request.numerical_domain());
         assert_eq!(request.admission().binding.variant, "default");
         assert_eq!(request.form().data_arguments, &[0]);
-        let output = PreparedBuiltinOperands::passthrough(request.into_operands());
-        Box::pin(async move { Ok(output) })
+        let output = request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinOperands::passthrough);
+        Box::pin(async move { output })
     }
 }
 

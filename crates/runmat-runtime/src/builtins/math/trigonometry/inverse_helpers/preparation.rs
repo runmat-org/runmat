@@ -1,7 +1,9 @@
 //! Domain admission for shape-preserving floating trigonometric data operands.
 //! Controls and output prototypes remain in the identity's parsed state.
 use crate::builtins::common::gpu_helpers;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinPreparationFormId};
 use runmat_value::{NumericDType, Value};
@@ -45,34 +47,39 @@ fn admits(value: &Value, identity: BuiltinCatalogIdentity) -> BuiltinResult<bool
 }
 
 pub(crate) async fn unary<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
     value: Value,
     execute: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
-    unary_form(identity, value, 0, 1, execute).await
+    unary_form(runtime, identity, value, 0, 1, execute).await
 }
 
 pub(crate) async fn unary_form<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
     value: Value,
     signature: usize,
     input_count: usize,
     execute: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     if !admits(&value, identity)? {
         // These representations use the identity's exact host/complex or
         // owner-restoring path; they are not inputs to a real floating hook.
         return execute(value).await;
     }
-    execute_current_invocation(
+    execute_invocation(
+        runtime,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: identity,

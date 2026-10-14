@@ -39,6 +39,7 @@ impl BrowserHttpService {
 impl RuntimeHttpService for BrowserHttpService {
     fn send(
         &self,
+        _runtime: crate::context::RuntimeContext,
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         Box::pin(async move { send_impl(request).await })
@@ -46,6 +47,7 @@ impl RuntimeHttpService for BrowserHttpService {
 
     fn open_bounded(
         &self,
+        _runtime: crate::context::RuntimeContext,
         request: HttpRequest,
         accepted_limit: u64,
     ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
@@ -267,10 +269,17 @@ fn parse_response_headers(raw: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
     use std::error::Error;
     use std::pin::Pin;
+    use std::rc::Rc;
     use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    fn runtime() -> RuntimeContext {
+        RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+    }
 
     fn blob_request() -> (HttpRequest, String) {
         let parts = js_sys::Array::new();
@@ -292,7 +301,7 @@ mod tests {
     async fn browser_http_service_fetches_without_synchronous_xhr() {
         let (request, url) = blob_request();
         let response = BrowserHttpService::new()
-            .send(request)
+            .send(runtime(), request)
             .await
             .expect("async XHR");
         web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
@@ -302,7 +311,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn dropping_pending_browser_request_is_safe() {
         let (request, url) = blob_request();
-        let mut request = BrowserHttpService::new().send(request);
+        let mut request = BrowserHttpService::new().send(runtime(), request);
         let waker = futures::task::noop_waker();
         assert!(matches!(
             Pin::as_mut(&mut request).poll(&mut Context::from_waker(&waker)),

@@ -130,16 +130,16 @@ fn finite_host_workspace_and_completed_fspecial_publication() {
         &args,
     ))
     .expect("exact 32-byte host workspace must be admitted");
-    let Value::GpuTensor(output) = published else {
+    let Value::GpuTensor(output) = published.value() else {
         panic!("supported average form must publish resident output")
     };
     assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(output.device_id(), provider.device_id());
     assert_eq!(
-        runmat_accelerate_api::handle_precision(&output),
+        runmat_accelerate_api::handle_precision(output),
         Some(provider.precision())
     );
-    let numeric = block_on(provider.download_numeric(&output)).expect("read resident kernel");
+    let numeric = block_on(provider.download_numeric(output)).expect("read resident kernel");
     match numeric.data {
         HostNumericDataOwned::F32(values) => assert_eq!(values, vec![0.25_f32; 4]),
         HostNumericDataOwned::F64(values) => assert_eq!(values, vec![0.25_f64; 4]),
@@ -200,7 +200,7 @@ fn provider_unsupported_host_fallback_is_one_completed_conditional_route() {
         &args,
     ))
     .expect("actual Unsupported hook permits host fallback");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("unsupported hook must publish the host double tensor")
     };
     assert_eq!(output.shape(), [2, 2]);

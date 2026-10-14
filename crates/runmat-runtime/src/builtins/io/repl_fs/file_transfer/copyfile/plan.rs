@@ -1,5 +1,6 @@
-use std::io;
 use std::path::PathBuf;
+
+use super::super::authority::CopyOperationError;
 
 #[derive(Debug, Clone)]
 pub(super) struct CopyPlanEntry {
@@ -20,7 +21,7 @@ pub(super) enum TargetKind {
 pub(super) struct CopyFailure {
     pub(super) source: String,
     pub(super) target: String,
-    pub(super) error: io::Error,
+    pub(super) error: CopyOperationError,
 }
 
 pub(super) async fn execute(
@@ -46,10 +47,10 @@ pub(super) async fn execute(
     Ok(())
 }
 
-fn failure(entry: &CopyPlanEntry, error: io::Error) -> CopyFailure {
+fn failure(entry: &CopyPlanEntry, error: impl Into<CopyOperationError>) -> CopyFailure {
     CopyFailure {
         source: entry.source_display.clone(),
         target: entry.target_display.clone(),
-        error,
+        error: error.into(),
     }
 }

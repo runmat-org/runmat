@@ -43,7 +43,9 @@ pub(super) async fn evaluate_pulse_train(
                             err,
                         )
                     })?;
-                let samples = callback_samples(value, times.len()).await?;
+                let samples = value
+                    .with_owned_async(|value| callback_samples(value, times.len()))
+                    .await?;
                 for (idx, sample) in samples.into_iter().enumerate() {
                     out[idx] += pulse.amplitude * sample;
                 }

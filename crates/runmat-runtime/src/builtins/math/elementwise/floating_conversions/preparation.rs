@@ -1,6 +1,8 @@
 //! Unary data preparation after the owning conversion admits its output template.
 use crate::builtins::common::gpu_helpers;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinPreparationFormId};
 use runmat_value::Value;
@@ -10,16 +12,17 @@ use std::future::Future;
 mod tests;
 
 pub(super) async fn execute<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
     value: Value,
     signature: usize,
     input_count: usize,
     form: BuiltinPreparationFormId,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
     // Text, sparse, complex and symbolic conversions retain their specialized
     // runtime-owned representation routes. Unsupported values reach the same
@@ -41,7 +44,8 @@ where
     if !admitted {
         return body(value).await;
     }
-    execute_current_invocation(
+    execute_invocation(
+        runtime,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: identity,

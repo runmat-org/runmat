@@ -24,6 +24,7 @@ pub(super) async fn dispatch(
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
+                crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
                 call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
             }
             call_args.extend(args);
@@ -40,15 +41,23 @@ pub(super) async fn dispatch(
                     *out_count,
                     function_registry,
                     context.runtime.clone(),
+                    context.process_driver.clone(),
+                    context.lexical_environment.clone(),
                 )
                 .await?;
-            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
-                if *slot < vars.len() {
-                    crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                    vars[*slot] = value;
+            updated_captures.with_owned_values(|captures| {
+                if context.lexical_environment.is_some() {
+                    return Ok::<_, RuntimeError>(());
                 }
-            }
-            calls::publish_fixed_outputs(stack, result, *out_count)?;
+                for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
+                    if *slot < vars.len() {
+                        crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
+                        vars[*slot] = value;
+                    }
+                }
+                Ok::<_, RuntimeError>(())
+            })?;
+            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -63,6 +72,7 @@ pub(super) async fn dispatch(
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
+                crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
                 call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
             }
             call_args.extend(args);
@@ -79,15 +89,23 @@ pub(super) async fn dispatch(
                     out_count,
                     function_registry,
                     context.runtime.clone(),
+                    context.process_driver.clone(),
+                    context.lexical_environment.clone(),
                 )
                 .await?;
-            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
-                if *slot < vars.len() {
-                    crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                    vars[*slot] = value;
+            updated_captures.with_owned_values(|captures| {
+                if context.lexical_environment.is_some() {
+                    return Ok::<_, RuntimeError>(());
                 }
-            }
-            sequence_register.stage_call_output_sequence(stack, result)?;
+                for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
+                    if *slot < vars.len() {
+                        crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
+                        vars[*slot] = value;
+                    }
+                }
+                Ok::<_, RuntimeError>(())
+            })?;
+            sequence_register.stage_rooted_call_output_sequence(stack, result)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

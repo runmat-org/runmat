@@ -77,12 +77,12 @@ fn scalar_extrema_use_native_single_storage_selection() {
                 &[left.clone(), right],
             ))
             .unwrap();
-            let Value::Tensor(result) = result else {
+            let Value::Tensor(result) = result.value() else {
                 panic!("{name}: Single scalar must retain its native carrier");
             };
             assert_eq!(result.shape(), shape);
             assert_eq!(
-                result.into_numeric_storage().unwrap(),
+                result.clone().into_numeric_storage().unwrap(),
                 NumericStorage::F32(vec![expected])
             );
 
@@ -105,12 +105,12 @@ fn scalar_extrema_use_native_single_storage_selection() {
             ];
             let result =
                 futures::executor::block_on(crate::call_builtin_async(name, &args)).unwrap();
-            let Value::ComplexTensor(result) = result else {
+            let Value::ComplexTensor(result) = result.value() else {
                 panic!("{name}: complex Single scalar must retain its native carrier");
             };
             assert_eq!(result.shape(), shape);
             assert_eq!(
-                result.into_complex_storage(),
+                result.clone().into_complex_storage(),
                 ComplexStorage::F32(vec![(expected, 0.0)].into())
             );
         }
@@ -208,6 +208,7 @@ impl AccelProvider for Provider {
                 requested_peak_buffer_bytes: 0,
                 clear_commands: 0,
                 map_callbacks: 0,
+                wgpu_compute_query: None,
             })
         } else {
             ProviderObservationCapability::Unsupported

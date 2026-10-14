@@ -28,7 +28,8 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
                 Box::pin(async move {
                     let _probe = probe;
                     futures::future::pending::<()>().await;
-                    Ok(ValueSequence::single(Value::Bool(true)).unwrap())
+                    rooted_sequence(ValueSequence::single(Value::Bool(true)).unwrap())
+                        .map_err(|error| *error)
                 })
             }),
         ));

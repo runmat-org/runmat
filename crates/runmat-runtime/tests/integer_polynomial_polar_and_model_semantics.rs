@@ -395,5 +395,5 @@ fn perfcurve_keeps_wide_integer_labels_distinct_without_a_f64_mirror() {
         ],
     ))
     .expect("wide labels remain distinct");
-    assert!(matches!(output, Value::Tensor(_)));
+    assert!(matches!(output.value(), Value::Tensor(_)));
 }

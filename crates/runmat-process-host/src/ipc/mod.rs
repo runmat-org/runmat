@@ -13,7 +13,7 @@ pub mod windows;
 pub use endpoint::LocalEndpoint;
 pub use frame::{
     read_frame, read_payload, read_payload_blocking, write_frame, write_payload,
-    write_payload_blocking, FrameLimits,
+    write_payload_blocking, FrameLimits, PendingFrameWrite,
 };
 pub use handshake::{negotiate_handshake, HostHandshake};
 pub use session::{

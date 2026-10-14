@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use runmat_execution_runner::AttemptReport;
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameLimits};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::protocol::{RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_VERSION};
 use super::route::RemoteFrameRoute;
@@ -13,7 +13,7 @@ use super::route::RemoteFrameRoute;
 /// strand the request correlation at the driver.
 pub(super) struct AttemptReply {
     completed: AtomicBool,
-    reports: mpsc::UnboundedSender<AttemptReport>,
+    reports: mpsc::UnboundedSender<(AttemptReport, Option<oneshot::Sender<()>>)>,
 }
 
 impl AttemptReply {
@@ -23,9 +23,10 @@ impl AttemptReply {
         limits: FrameLimits,
         correlation_id: String,
     ) -> Arc<Self> {
-        let (reports, mut receiver) = mpsc::unbounded_channel();
+        let (reports, mut receiver) =
+            mpsc::unbounded_channel::<(AttemptReport, Option<oneshot::Sender<()>>)>();
         tokio::task::spawn_local(async move {
-            let Some(report) = receiver.recv().await else {
+            let Some((report, delivered)) = receiver.recv().await else {
                 return;
             };
             let _ = super::worker_protocol::reply(
@@ -39,6 +40,9 @@ impl AttemptReply {
                 },
             )
             .await;
+            if let Some(delivered) = delivered {
+                let _ = delivered.send(());
+            }
         });
         Arc::new(Self {
             completed: AtomicBool::new(false),
@@ -52,7 +56,22 @@ impl AttemptReply {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            let _ = self.reports.send(report);
+            let _ = self.reports.send((report, None));
+        }
+    }
+
+    /// A fatal Graph retirement report must be attempted on the encrypted
+    /// channel before its unhealthy worker drains and closes that channel.
+    pub(super) async fn complete_before_drain(&self, report: AttemptReport) {
+        if self
+            .completed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            let (delivered, receipt) = oneshot::channel();
+            if self.reports.send((report, Some(delivered))).is_ok() {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), receipt).await;
+            }
         }
     }
 }

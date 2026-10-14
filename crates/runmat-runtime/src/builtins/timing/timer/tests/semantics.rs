@@ -143,7 +143,8 @@ fn timer_tasks_to_execute_preserves_typed_integer_storage_exactly() {
             let invoker_calls = Arc::clone(&invoker_calls);
             Box::pin(async move {
                 *invoker_calls.lock().unwrap() += 1;
-                Ok(crate::sequence::ValueSequence::empty())
+                crate::execution::RootedValueSequence::new(crate::sequence::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
             })
         },
     )));

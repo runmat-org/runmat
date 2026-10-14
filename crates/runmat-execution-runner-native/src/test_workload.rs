@@ -1,20 +1,40 @@
 use runmat_execution_artifact::{
-    ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
+    ExecutableForm, GraphExecutionRequest, ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_test_runner::worker::WorkerExecution;
 use runmat_test_runner_execution::TestAttemptWorkload;
+use std::path::Path;
+use std::rc::Rc;
+use std::sync::Arc;
+
+/// A one-shot child must not release a selected host whose lifecycle callback
+/// refused retirement. The parent receives a fatal wire marker and reaps the
+/// process tree while this owner remains live in the child.
+pub(crate) enum GraphHostExecution {
+    Completed(ProgramExecutionResponse),
+    RetirementUnverified {
+        message: String,
+        owner: Box<RetainedGraphHost>,
+    },
+}
+
+pub(crate) struct RetainedGraphHost {
+    _hosts: Vec<Option<runmat_core::ForeignUnitHost>>,
+    _materialized: Vec<Option<Rc<runmat_core::foreign_artifacts::SelectedForeignMaterialization>>>,
+    _cleanup: runmat_vm::SelectedGraphCleanupContexts,
+    _session: runmat_core::RunMatSession,
+    _cause: Option<runmat_runtime::RuntimeError>,
+}
+
+struct SelectedRetirementFault {
+    message: String,
+    cause: Option<runmat_runtime::RuntimeError>,
+}
 
 pub async fn execute_host_program_request(
     request: ProgramExecutionRequest,
 ) -> ProgramExecutionResponse {
     execute_host_program_request_with_project_and_collective(request, None, None).await
-}
-
-pub(crate) async fn execute_host_program_request_with_project(
-    request: ProgramExecutionRequest,
-    materialized: Option<&crate::materialized_project::MaterializedProject>,
-) -> ProgramExecutionResponse {
-    execute_host_program_request_with_project_and_collective(request, materialized, None).await
 }
 
 pub(crate) async fn execute_host_program_request_with_collective(
@@ -29,10 +49,20 @@ pub(crate) async fn execute_host_program_request_with_project_and_collective(
     materialized: Option<&crate::materialized_project::MaterializedProject>,
     collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
 ) -> ProgramExecutionResponse {
+    execute_host_program_request_with_validated_bundle(request, materialized, collective, None)
+        .await
+}
+
+pub(crate) async fn execute_host_program_request_with_validated_bundle(
+    request: ProgramExecutionRequest,
+    materialized: Option<&crate::materialized_project::MaterializedProject>,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+) -> ProgramExecutionResponse {
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
-        return execute_portable_request(request, materialized, collective).await;
+        return execute_portable_request(request, materialized, collective, bundle).await;
     }
-    match execute_test_attempt(&request, materialized).await {
+    match execute_test_attempt(&request, materialized, bundle).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
             Ok(value) => ProgramExecutionResponse::Success {
                 outputs: vec![value],
@@ -47,199 +77,399 @@ async fn execute_portable_request(
     request: ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
     collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
 ) -> ProgramExecutionResponse {
-    let interop = match request.artifact.executable_unit() {
-        Ok(Some(envelope)) => envelope.manifest.interop.clone(),
-        Ok(None) => runmat_types::InteropManifest::empty(),
+    execute_host_unit_request(
+        HostUnitRequest::Direct(request),
+        materialized,
+        collective,
+        bundle,
+    )
+    .await
+}
+
+pub(crate) async fn execute_host_graph_request(
+    request: GraphExecutionRequest,
+    materialized: Option<&crate::materialized_project::MaterializedProject>,
+) -> ProgramExecutionResponse {
+    if request.selected_bundle_archives.iter().any(Option::is_some) {
+        return ProgramExecutionResponse::Failure {
+            message: "archive-bearing Graph interop requires an isolated attempt worker with exact selected-unit materialization".into(),
+        };
+    }
+    execute_host_unit_request(HostUnitRequest::Graph(request), materialized, None, None).await
+}
+
+pub(crate) async fn execute_host_graph_request_in_parent_scratch(
+    request: GraphExecutionRequest,
+    cancellation: runmat_execution::cancellation::CancellationToken,
+    scratch: &Path,
+) -> GraphHostExecution {
+    execute_host_selected_graph_request(request, Some(cancellation), Some(scratch)).await
+}
+
+async fn execute_host_selected_graph_request(
+    request: GraphExecutionRequest,
+    cancellation: Option<runmat_execution::cancellation::CancellationToken>,
+    scratch: Option<&Path>,
+) -> GraphHostExecution {
+    let admitted = match request.into_validated() {
+        Ok(admitted) => admitted,
         Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid executable unit: {error}"),
-            }
+            return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid graph bundle: {error}"),
+            });
         }
     };
-    if interop.adapters.is_empty() && interop.foreign_types.is_empty() && collective.is_none() {
-        return runmat_vm::execute_program_request(request).await;
+    let selected = match admitted.request().selected_unit_host_requirements() {
+        Ok(selected) => selected,
+        Err(error) => {
+            return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid graph unit: {error}"),
+            });
+        }
+    };
+    if scratch.is_none() && admitted.selected_bundles().iter().any(Option::is_some) {
+        return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+            message: "selected foreign bundles require parent-owned attempt scratch".into(),
+        });
     }
-
-    let mut session = match runmat_core::RunMatSession::with_options(true, false) {
+    // All bundle objects are authenticated before any foreign adapter is
+    // constructed or installed. The child's typed path views never delete
+    // parent-owned attempt bytes before verified process-tree retirement.
+    let materialized = match admitted
+        .selected_bundles()
+        .iter()
+        .enumerate()
+        .map(|(index, bundle)| {
+            bundle
+                .as_ref()
+                .map(|bundle| {
+                    runmat_core::foreign_artifacts::SelectedForeignMaterialization::from_bundle_in_parent_scratch(
+                        bundle,
+                        scratch.expect("checked selected scratch"),
+                        index,
+                    ).map(Rc::new)
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, String>>()
+    {
+        Ok(materialized) => materialized,
+        Err(error) => {
+            return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                message: format!("worker could not materialize selected graph bundles: {error}"),
+            });
+        }
+    };
+    if let Err(message) = validate_inprocess_python_unit_namespaces(&materialized) {
+        return GraphHostExecution::Completed(ProgramExecutionResponse::Failure { message });
+    }
+    let (admitted, admitted_bundles) = admitted.into_admitted_with_bundles();
+    let session = match runmat_core::RunMatSession::with_options(true, false) {
         Ok(session) => session,
         Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("failed to initialize foreign execution session: {error}"),
-            }
+            return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                message: format!("failed to initialize graph execution session: {error}"),
+            });
         }
     };
-    if let Err(error) = session.set_native_ffi_isolation_policy(
-        runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(None),
-    ) {
-        return ProgramExecutionResponse::Failure {
-            message: format!("failed to configure native-library isolation: {error}"),
-        };
-    }
-    for requirement in &interop.adapters {
-        if requirement.adapter.as_str() != runmat_native_ffi::NATIVE_FFI_ADAPTER_ID {
-            continue;
-        }
-        for identity in &requirement.artifact_identities {
-            let Some(interface) = materialized
-                .and_then(|materialized| materialized.native_interface(identity.as_str()))
-            else {
-                return ProgramExecutionResponse::Failure {
-                    message: format!(
-                        "worker has no materialized native interface for required artifact {identity}"
-                    ),
-                };
-            };
-            if let Err(error) = session.install_native_interface_artifact(
-                &interface.library_path,
-                &interface.manifest_path,
-            ) {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker could not install native interface: {error}"),
-                };
-            }
-        }
-    }
-    if let Some(requirement) = interop
-        .adapters
-        .iter()
-        .find(|requirement| requirement.adapter.as_str() == runmat_mex::MEX_ADAPTER_ID)
-    {
-        for identity in &requirement.artifact_identities {
-            let Some(artifact) =
-                materialized.and_then(|materialized| materialized.mex_artifact(identity.as_str()))
-            else {
-                return ProgramExecutionResponse::Failure {
-                    message: format!(
-                        "worker has no materialized MEX module for required artifact {identity}"
-                    ),
-                };
-            };
-            if artifact.manifest.source_language == runmat_mex::MexSourceLanguage::Cuda {
-                if let Err(message) = ensure_cuda_mex_provider("worker") {
-                    return ProgramExecutionResponse::Failure { message };
-                }
-            }
-            if let Err(error) = session.install_mex_artifact(&artifact.module_path) {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker could not install MEX artifact: {error}"),
-                };
-            }
-        }
-    }
-    if let Some(requirement) = interop
-        .adapters
-        .iter()
-        .find(|requirement| requirement.adapter.as_str() == runmat_python::PYTHON_ADAPTER_ID)
-    {
-        let Some(bundle) = materialized.and_then(|materialized| materialized.python_bundle())
-        else {
-            return ProgramExecutionResponse::Failure {
-                message: "worker has no materialized Python artifact bundle".into(),
-            };
-        };
-        let available = bundle.artifact_identities();
-        if let Some(missing) = requirement
-            .artifact_identities
-            .iter()
-            .find(|identity| !available.contains(identity.as_str()))
-        {
-            return ProgramExecutionResponse::Failure {
-                message: format!(
-                    "worker has no materialized Python environment or wheel for required identity {missing}"
-                ),
-            };
-        }
-        if let Err(error) = session.install_portable_python_artifact_bundle(bundle) {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker could not install Python artifacts: {error}"),
-            };
-        }
-    }
-    if let Some(requirement) = interop
-        .adapters
-        .iter()
-        .find(|requirement| requirement.adapter.as_str() == runmat_java::JAVA_ADAPTER_ID)
-    {
-        let Some(materialized) = materialized else {
-            return ProgramExecutionResponse::Failure {
-                message: "worker has no materialized Java artifacts".into(),
-            };
-        };
-        for identity in &requirement.artifact_identities {
-            if materialized.java_artifact(identity.as_str()).is_none() {
-                return ProgramExecutionResponse::Failure {
-                    message: format!(
-                        "worker has no materialized Java artifact for required identity {identity}"
-                    ),
-                };
-            }
-        }
-        let required = requirement
-            .artifact_identities
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        let artifacts = materialized
-            .java_artifacts()
-            .iter()
-            .filter(|artifact| required.contains(artifact.identity.to_string().as_str()))
-            .map(|artifact| (artifact.identity.clone(), artifact.path.clone()))
-            .collect::<Vec<_>>();
-        if let Err(error) = session.install_java_project_artifacts(&artifacts) {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker could not install Java artifacts: {error}"),
-            };
-        }
-    }
-    if let Err(error) = session.admit_interop_manifest(&interop) {
-        return ProgramExecutionResponse::Failure {
-            message: format!("worker rejected foreign interoperability requirements: {error}"),
-        };
-    }
-    let runtime = session.execution_runtime_context(request.recipe.program_revision.clone());
-    let runtime = if let Some(collective) = collective {
-        let ports = runtime.service_ports().clone().with_collective(collective);
-        runtime.with_service_ports(ports)
+    let runtime =
+        session.execution_runtime_context(admitted.request().recipe.program_revision.clone());
+    let runtime = if let Some(cancellation) = cancellation {
+        let combined = runtime.cancellation().or(&cancellation);
+        runtime.with_cancellation_token(combined)
     } else {
         runtime
     };
     let driver = session.local_task_driver();
-    let mut response = match driver
-        .participate_foreground(runmat_vm::execute_program_request_with_context(
-            request,
-            runtime.clone(),
-        ))
-        .await
-    {
-        Ok(response) => response,
-        Err(error) => runmat_vm::runtime_failure_response(error, &runtime),
-    };
-    if let Err(error) = session.close_gracefully().await {
-        if matches!(
-            &response,
-            ProgramExecutionResponse::Failure { .. }
-                | ProgramExecutionResponse::RuntimeFailure { .. }
-        ) {
-            eprintln!("cleanup callback failed after worker execution error: {error}");
+    let mut unit_hosts = Vec::with_capacity(selected.len());
+    let mut foreign_ports = Vec::with_capacity(selected.len());
+    // Construct ports without installing any foreign object. The VM can now
+    // bind every exact V3 source table once before an installer or its abort
+    // cleanup gains the ability to run a MEX lifecycle callback.
+    for project in &materialized {
+        if let Some(project) = project {
+            let host =
+                match runmat_core::ForeignUnitHost::new_in_graph_containment(project.as_ref()) {
+                    Ok(host) => host,
+                    Err(error) => {
+                        let _ = session.close_gracefully().await;
+                        return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                            message: format!(
+                                "worker could not initialize selected foreign host: {error}"
+                            ),
+                        });
+                    }
+                };
+            foreign_ports.push(Some(
+                runmat_core::foreign_artifacts::selected_foreign_service(&host, Rc::clone(project)),
+            ));
+            unit_hosts.push(Some(host));
         } else {
-            response = runmat_vm::runtime_failure_response(error, &runtime);
+            foreign_ports.push(None);
+            unit_hosts.push(None);
         }
     }
-    if let Err(error) = session.shutdown_foreign_runtime().await {
-        return ProgramExecutionResponse::Failure {
-            message: format!("worker could not shut down foreign execution session: {error}"),
+    let recorder = runmat_vm::GraphFailureSourceRecorder::new();
+    let (prepared, cleanup) =
+        match runmat_vm::prepare_graph_request_with_selected_foreign_ports_recording(
+            admitted,
+            admitted_bundles,
+            runtime.clone(),
+            runmat_vm::SelectedGraphForeignPorts::new(foreign_ports),
+            &recorder,
+        ) {
+            Ok(prepared) => prepared,
+            Err(response) => {
+                let _ = session.close_gracefully().await;
+                return GraphHostExecution::Completed(response);
+            }
+        };
+    let mut install_error = None;
+    for (index, ((unit, project), host)) in selected
+        .iter()
+        .zip(&materialized)
+        .zip(&unit_hosts)
+        .enumerate()
+    {
+        let (Some(project), Some(host)) = (project, host) else {
+            continue;
+        };
+        let result = cleanup
+            .with_unit_context(index, |_| {
+                runmat_core::foreign_artifacts::install_selected_interop(
+                    host,
+                    &unit.interop,
+                    project.as_ref(),
+                )
+            })
+            .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                install_error = Some(error.into_runtime_error());
+                break;
+            }
+            Err(message) => {
+                install_error = Some(
+                    runmat_runtime::build_runtime_error(message)
+                        .with_identifier("RunMat:SelectedForeignScope")
+                        .build(),
+                );
+                break;
+            }
+        }
+    }
+    if let Some(error) = install_error {
+        drop(prepared);
+        let mut response = recorder.encode_runtime_failure(error, &runtime);
+        if let Err(fault) = retire_selected_unit_hosts(
+            &unit_hosts,
+            &cleanup,
+            &driver,
+            &recorder,
+            &runtime,
+            &mut response,
+        )
+        .await
+        {
+            return GraphHostExecution::RetirementUnverified {
+                message: fault.message,
+                owner: Box::new(RetainedGraphHost {
+                    _hosts: unit_hosts,
+                    _materialized: materialized,
+                    _cleanup: cleanup,
+                    _session: session,
+                    _cause: fault.cause,
+                }),
+            };
+        }
+        match session.close_gracefully_retirement().await {
+            runmat_core::SessionRetirement::Retained(error) => {
+                return GraphHostExecution::RetirementUnverified {
+                    message: format!("graph worker session lifecycle could not retire: {error}"),
+                    owner: Box::new(RetainedGraphHost {
+                        _hosts: unit_hosts,
+                        _materialized: materialized,
+                        _cleanup: cleanup,
+                        _session: session,
+                        _cause: Some(error),
+                    }),
+                };
+            }
+            runmat_core::SessionRetirement::Retired(Err(error)) => {
+                eprintln!("graph worker cleanup failed after execution error: {error}");
+            }
+            runmat_core::SessionRetirement::Retired(Ok(())) => {}
+        }
+        drop(cleanup);
+        return GraphHostExecution::Completed(response);
+    }
+    let execution = runmat_vm::execute_prepared_graph_request(prepared);
+    let mut response = match driver.participate_foreground(execution).await {
+        Ok(response) => response,
+        Err(error) => recorder.encode_runtime_failure(error, &runtime),
+    };
+    // Selected foreign adapters may run authenticated local callbacks during
+    // retirement, so close them while the shared local-task host is still live.
+    if let Err(fault) = retire_selected_unit_hosts(
+        &unit_hosts,
+        &cleanup,
+        &driver,
+        &recorder,
+        &runtime,
+        &mut response,
+    )
+    .await
+    {
+        return GraphHostExecution::RetirementUnverified {
+            message: fault.message,
+            owner: Box::new(RetainedGraphHost {
+                _hosts: unit_hosts,
+                _materialized: materialized,
+                _cleanup: cleanup,
+                _session: session,
+                _cause: fault.cause,
+            }),
         };
     }
-    response
+    match session.close_gracefully_retirement().await {
+        runmat_core::SessionRetirement::Retained(error) => {
+            return GraphHostExecution::RetirementUnverified {
+                message: format!("graph worker session lifecycle could not retire: {error}"),
+                owner: Box::new(RetainedGraphHost {
+                    _hosts: unit_hosts,
+                    _materialized: materialized,
+                    _cleanup: cleanup,
+                    _session: session,
+                    _cause: Some(error),
+                }),
+            };
+        }
+        runmat_core::SessionRetirement::Retired(Err(error)) => {
+            if matches!(&response, ProgramExecutionResponse::GraphSuccess { .. }) {
+                response = recorder.encode_runtime_failure(error, &runtime);
+            } else {
+                eprintln!("graph worker cleanup failed after execution error: {error}");
+            }
+        }
+        runmat_core::SessionRetirement::Retired(Ok(())) => {}
+    }
+    drop(cleanup);
+    GraphHostExecution::Completed(response)
 }
 
-async fn execute_test_attempt(
+async fn retire_selected_unit_hosts(
+    hosts: &[Option<runmat_core::ForeignUnitHost>],
+    contexts: &runmat_vm::SelectedGraphCleanupContexts,
+    driver: &runmat_runtime::context::RuntimeLocalTaskSupervisor,
+    recorder: &runmat_vm::GraphFailureSourceRecorder,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    response: &mut ProgramExecutionResponse,
+) -> Result<(), SelectedRetirementFault> {
+    for (index, host) in hosts.iter().enumerate() {
+        let Some(host) = host else { continue };
+        let retirement = contexts
+            .with_unit_context(index, |context| host.shutdown_retirement(context, driver))
+            .await;
+        match retirement {
+            Ok(runmat_core::ForeignUnitRetirement::Retired(Ok(()))) => {}
+            Ok(runmat_core::ForeignUnitRetirement::Retired(Err(error))) => {
+                if matches!(response, ProgramExecutionResponse::GraphSuccess { .. }) {
+                    *response = recorder.encode_runtime_failure(error, runtime);
+                } else {
+                    eprintln!(
+                        "selected foreign host cleanup failed after execution error: {error}"
+                    );
+                }
+            }
+            Ok(runmat_core::ForeignUnitRetirement::Retained(error)) => {
+                return Err(SelectedRetirementFault {
+                    message: format!("selected foreign host lifecycle could not retire: {error}"),
+                    cause: Some(error),
+                });
+            }
+            Err(message) => {
+                return Err(SelectedRetirementFault {
+                    message: format!("selected foreign host exact cleanup scope failed: {message}"),
+                    cause: None,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_inprocess_python_unit_namespaces(
+    materialized: &[Option<Rc<runmat_core::foreign_artifacts::SelectedForeignMaterialization>>],
+) -> Result<(), String> {
+    use runmat_core::foreign_artifacts::MaterializedForeignView as _;
+
+    let mut environment = None;
+    let mut modules = std::collections::BTreeMap::<String, String>::new();
+    for project in materialized {
+        let Some(bundle) = project.as_ref().and_then(|project| project.python_bundle()) else {
+            continue;
+        };
+        if bundle.environment.as_ref().is_some_and(|identity| {
+            identity.execution_mode == runmat_python::PythonExecutionMode::OutOfProcess
+        }) {
+            continue;
+        }
+        if let Some(selected) = &bundle.environment {
+            if environment.as_ref().is_some_and(|prior| prior != selected) {
+                return Err(
+                    "selected in-process Python units require incompatible interpreters; an explicitly admitted isolated mode is required".into(),
+                );
+            }
+            environment = Some(selected.clone());
+        }
+        for artifact in &bundle.artifacts {
+            if let Some(prior) = modules.insert(
+                artifact.module.clone(),
+                artifact.identity.as_str().to_owned(),
+            ) {
+                if prior != artifact.identity.as_str() {
+                    return Err(
+                        "selected in-process Python units contain conflicting module identities; an explicitly admitted isolated mode is required".into(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+mod program_host;
+use program_host::{execute_host_unit_request, HostUnitRequest};
+
+fn execute_test_attempt<'a>(
+    request: &'a ProgramExecutionRequest,
+    materialized: Option<&'a crate::materialized_project::MaterializedProject>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<WorkerExecution, String>> + 'a>> {
+    // Own the test lifecycle independently of the Direct request frame, just
+    // as the selected program host owns its interpreter continuation.
+    Box::pin(execute_test_attempt_inner(request, materialized, bundle))
+}
+
+async fn execute_test_attempt_inner(
     request: &ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
 ) -> Result<WorkerExecution, String> {
     let workload = TestAttemptWorkload::from_program_request(request)?;
     let project = materialized.and_then(|materialized| materialized.handoff());
+    if project.is_none()
+        && (request.recipe.foreign_policy.is_some()
+            || request.recipe.interop != runmat_types::InteropManifest::empty())
+    {
+        return Err("selected test foreign policy requires its exact project bundle".into());
+    }
+    if project.is_some() && bundle.is_none() {
+        return Err("selected test project requires its exact validated bundle".into());
+    }
     if let Some(project) = project {
         let revision = project.revision();
         if request.recipe.program_revision.graph_digest().bytes() != revision.graph_digest.bytes()
@@ -251,20 +481,46 @@ async fn execute_test_attempt(
             );
         }
     }
+    // Validate the selected closure and every rebased private byte before
+    // installing any handoff adapter into the session.
+    let prepared = match (materialized, project, bundle.as_ref()) {
+        (Some(materialized), Some(project), Some(bundle)) => Some(
+            runmat_core::foreign_artifacts::PreparedSelectedForeignInput::from_validated_bundle(
+                Arc::clone(bundle),
+                &request.recipe,
+                Arc::new(project.clone()),
+                materialized.private_root(),
+            )?,
+        ),
+        _ => None,
+    };
     let mut session = runmat_core::RunMatSession::with_options(true, false)
         .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
-    if materialized.is_some_and(|materialized| materialized.requires_cuda_mex()) {
-        ensure_cuda_mex_provider("test worker")?;
+    if let Some(materialized) = materialized {
+        session
+            .attach_foreign_private_root(materialized.private_root())
+            .map_err(|error| format!("failed to bind foreign private bytes: {error}"))?;
     }
     if let Some(project) = project {
+        let materialized = materialized.ok_or("selected test project has no materialization")?;
+        let original_bundle = bundle
+            .as_deref()
+            .ok_or("selected test project has no bundle")?;
+        let view = crate::materialized_project::SelectedMaterializedView::from_admitted_recipe(
+            materialized,
+            original_bundle,
+            &request.recipe,
+        )?;
+        let prepared = prepared.ok_or("selected test project has no admitted foreign input")?;
         session
-            .install_project_handoff(project.clone())
+            .install_selected_project_handoff(
+                project.clone(),
+                prepared,
+                &request.recipe.interop,
+                &view,
+            )
+            .await
             .map_err(|error| format!("failed to install exact test project: {error}"))?;
-    }
-    if let Some(bundle) = materialized.and_then(|materialized| materialized.python_bundle()) {
-        session
-            .install_portable_python_artifact_bundle(bundle)
-            .map_err(|error| format!("failed to install exact Python test artifacts: {error}"))?;
     }
     let execution = session
         .execute_planned_test(
@@ -290,36 +546,19 @@ async fn execute_test_attempt(
     }
 }
 
-fn ensure_cuda_mex_provider(host: &str) -> Result<(), String> {
-    if runmat_accelerate_api::provider_for_native_device(
-        runmat_accelerate_api::NativeDeviceApi::Cuda,
-    )
-    .is_some()
-    {
-        return Ok(());
-    }
-    match runmat_accelerate::backend::cuda::register_cuda_provider() {
-        Ok(Some(_)) => Ok(()),
-        Ok(None) => Err(format!(
-            "{host} requires an available CUDA driver and device for this MEX artifact"
-        )),
-        Err(error) => Err(format!(
-            "{host} could not initialize its CUDA MEX provider: {error}"
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
     use std::process::Command;
+    use std::sync::Arc;
 
-    use runmat_execution::value::{InlineValue, ValuePayload};
+    use runmat_execution::value::{InlineValue, PayloadGraph, ValuePayload};
     use runmat_execution::{Digest, ProgramCallable, ProgramFunctionId};
     use runmat_execution_artifact::{
-        ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
-        ObjectNamespace, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, GraphExecutionRequest,
+        GraphInvocationRoots, LogicalObject, ObjectNamespace, ProgramArtifact, ProgramBuildRecipe,
+        ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
+        GRAPH_EXECUTION_REQUEST_SCHEMA_V11, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
     use runmat_test::descriptor::TestSelector;
@@ -328,7 +567,7 @@ mod tests {
     use runmat_test_runner::worker::RunSubmission;
     use runmat_test_runner_execution::{decode_execution, TestAttemptWorkload};
 
-    use super::{execute_host_program_request, execute_host_program_request_with_project};
+    use super::{execute_host_program_request, execute_host_program_request_with_validated_bundle};
 
     #[tokio::test]
     async fn host_executes_an_exact_test_workload_and_returns_canonical_result() {
@@ -416,8 +655,20 @@ mod tests {
         let envelope = unit
             .portable_envelope_for_with_interop(None, interop.clone())
             .unwrap();
-        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let function = usize::try_from(
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected native fixture has a callable entrypoint")
+                .0,
+        )
+        .unwrap();
         let entrypoint = envelope.manifest.identity.entrypoint.clone();
+        let mut policy_config = runmat_config::runtime::ForeignConfig::default();
+        policy_config.native.timeout_ms = Some(std::num::NonZeroU64::new(15_000).unwrap());
+        let policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&policy_config).unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: unit.revision().program_revision.clone(),
@@ -428,6 +679,7 @@ mod tests {
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("runner-native-interface-test"),
             interop,
+            foreign_policy: Some(policy.descriptor),
             accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
@@ -518,7 +770,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 runmat_core::ExecutableSource::new(
                     "remote-mex-test@1",
                     "remote_mex.m",
-                    "function value = main(); value = remote_fixture(); end\n",
+                    "function value = main(); value = remote_fixture(); end\nfunction value = pureHelper(); value = 11; end\n",
                 ),
                 Some(revision),
             )
@@ -528,8 +780,20 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let envelope = unit
             .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
-        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let function = usize::try_from(
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected MEX fixture has a callable entrypoint")
+                .0,
+        )
+        .unwrap();
         let entrypoint = envelope.manifest.identity.entrypoint.clone();
+        let mut policy_config = runmat_config::runtime::ForeignConfig::default();
+        policy_config.mex.timeout_ms = Some(std::num::NonZeroU64::new(15_000).unwrap());
+        let policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&policy_config).unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: unit.revision().program_revision.clone(),
@@ -540,6 +804,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-mex-execution"),
             interop,
+            foreign_policy: Some(policy.descriptor.clone()),
             accelerators: manifest.accelerator_requirements().unwrap(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
@@ -579,6 +844,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 .unwrap()
                 .with_foreign_artifact_closure(closure)
                 .unwrap()
+                .with_foreign_policy_object(policy.clone())
+                .unwrap()
                 .with_materialized_program(
                     recipe,
                     ExecutableForm::ExecutableUnitV3,
@@ -589,11 +856,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         std::fs::remove_file(&output.manifest).unwrap();
         std::fs::remove_file(&output.module).unwrap();
 
+        let bundle = Arc::new(bundle);
         let materialized =
             crate::materialized_project::MaterializedProject::from_bundle(&bundle).unwrap();
         let recipe = bundle.manifest.recipes.first().cloned().unwrap();
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
-        let response = execute_host_program_request_with_project(
+        let response = execute_host_program_request_with_validated_bundle(
             ProgramExecutionRequest {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
@@ -609,6 +877,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 requested_outputs: 1,
             },
             Some(&materialized),
+            None,
+            Some(Arc::clone(&bundle)),
         )
         .await;
         assert_eq!(
@@ -619,6 +889,94 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 )))],
             }
         );
+        let mut archive = Vec::new();
+        runmat_execution_artifact::archive::write_bundle(
+            &bundle,
+            &mut archive,
+            runmat_execution_artifact::archive::ArchiveLimits::default(),
+        )
+        .unwrap();
+        let empty_envelope = unit
+            .portable_envelope_for_with_interop(
+                Some("pureHelper"),
+                runmat_types::InteropManifest::empty(),
+            )
+            .unwrap();
+        assert_ne!(
+            empty_envelope.manifest.identity.entrypoint_function,
+            envelope.manifest.identity.entrypoint_function,
+        );
+        assert_eq!(
+            empty_envelope.manifest.interop,
+            runmat_types::InteropManifest::empty(),
+        );
+        let empty_bytes = empty_envelope.canonical_bytes().unwrap();
+        let mut empty_recipe = bundle.manifest.recipes[0].clone();
+        empty_recipe.entrypoint = empty_envelope.manifest.identity.entrypoint.clone();
+        empty_recipe.interop = runmat_types::InteropManifest::empty();
+        empty_recipe.accelerators.clear();
+        let empty_bundle =
+            ExecutionBundleBuilder::native(&project, unit.revision().program_revision.clone())
+                .unwrap()
+                .with_compiled_package_closure()
+                .with_foreign_policy_object(policy)
+                .unwrap()
+                .with_materialized_program(
+                    empty_recipe,
+                    ExecutableForm::ExecutableUnitV3,
+                    empty_bytes.clone(),
+                )
+                .build()
+                .unwrap();
+        let mut empty_archive = Vec::new();
+        runmat_execution_artifact::archive::write_bundle(
+            &empty_bundle,
+            &mut empty_archive,
+            runmat_execution_artifact::archive::ArchiveLimits::default(),
+        )
+        .unwrap();
+        let policy_ref = runmat_execution_artifact::foreign_policy_ref(
+            bundle.manifest.recipes[0].foreign_policy.as_ref().unwrap(),
+        )
+        .unwrap();
+        let graph_request = GraphExecutionRequest {
+            schema_version: GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
+            recipe: bundle.manifest.recipes[0].clone(),
+            artifact: bundle.manifest.artifacts[0].clone(),
+            retained_units: vec![empty_bytes],
+            class_dependencies: Vec::new(),
+            class_method_dependencies: Vec::new(),
+            static_dependencies: Vec::new(),
+            selected_bundle_archives: vec![Some(archive), Some(empty_archive)],
+            selected_foreign_policies: vec![Some(policy_ref), Some(policy_ref)],
+            graph: PayloadGraph {
+                roots: Vec::new(),
+                nodes: Vec::new(),
+            },
+            roots: GraphInvocationRoots::Builtin {
+                name: runmat_types::BuiltinId("sum".into()),
+                arguments: Vec::new(),
+            },
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
+            requested_outputs: 1,
+        };
+        let admitted = graph_request.validate_and_admit_bundles().unwrap();
+        assert!(admitted[0].is_some());
+        assert!(admitted[1].is_some());
+        let mut missing = graph_request.clone();
+        missing.selected_bundle_archives[1] = None;
+        assert!(missing.validate_and_admit_bundles().is_err());
+        let mut mismatched = graph_request.clone();
+        mismatched.selected_foreign_policies[1] = None;
+        assert!(mismatched.validate_and_admit_bundles().is_err());
+        let mut tampered = graph_request;
+        tampered.selected_bundle_archives[0]
+            .as_mut()
+            .unwrap()
+            .push(0);
+        assert!(tampered.validate_and_admit_bundles().is_err());
     }
 
     #[tokio::test]
@@ -689,10 +1047,24 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
         session
             .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+            .await
             .unwrap();
+        let primary_path = std::fs::canonicalize(project_root.join("src/main.m"))
+            .expect("canonical Java fixture source path");
+        let primary = project
+            .all_sources()
+            .find(|(_, access)| {
+                std::fs::canonicalize(access).ok().as_deref() == Some(primary_path.as_path())
+            })
+            .map(|(descriptor, _)| descriptor.id.clone())
+            .expect("Java fixture source belongs to the frozen project");
         let unit = session
             .compile_executable_unit(
-                runmat_core::ExecutableSource::new("root", "src/main.m", source_text),
+                runmat_core::ExecutableSource::new(
+                    primary.package_instance.to_string(),
+                    primary.relative_path.to_string(),
+                    source_text,
+                ),
                 Some(revision.clone()),
             )
             .await
@@ -719,8 +1091,20 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let envelope = unit
             .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
-        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let function = usize::try_from(
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected Java fixture has a callable entrypoint")
+                .0,
+        )
+        .unwrap();
         let entrypoint = envelope.manifest.identity.entrypoint.clone();
+        let mut policy_config = runmat_config::runtime::ForeignConfig::default();
+        policy_config.java.home = Some(java_home);
+        let policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&policy_config).unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
@@ -731,6 +1115,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-java-execution"),
             interop,
+            foreign_policy: Some(policy.descriptor.clone()),
             accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
@@ -757,6 +1142,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .unwrap()
             .with_foreign_artifact_closure(closure)
             .unwrap()
+            .with_foreign_policy_object(policy)
+            .unwrap()
             .with_materialized_program(
                 recipe,
                 ExecutableForm::ExecutableUnitV3,
@@ -764,11 +1151,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             )
             .build()
             .unwrap();
+        let bundle = Arc::new(bundle);
         let materialized =
             crate::materialized_project::MaterializedProject::from_bundle(&bundle).unwrap();
         let recipe = bundle.manifest.recipes.first().cloned().unwrap();
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
-        let response = execute_host_program_request_with_project(
+        let response = execute_host_program_request_with_validated_bundle(
             ProgramExecutionRequest {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
@@ -784,6 +1172,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 requested_outputs: 1,
             },
             Some(&materialized),
+            None,
+            Some(Arc::clone(&bundle)),
         )
         .await;
         assert_eq!(

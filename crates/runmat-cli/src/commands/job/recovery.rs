@@ -280,25 +280,13 @@ async fn recover(
                 }))?
             );
         } else {
-            match result {
-                ProgramExecutionResponse::Success { outputs } => {
-                    println!("{}", serde_json::to_string_pretty(&outputs)?);
-                }
-                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-                    bail!("recovered result requires an artifact-aware consumer")
-                }
-                ProgramExecutionResponse::SpmdSuccess { .. } => {
-                    bail!("recovered per-rank SPMD results require the gang execution consumer")
-                }
-                ProgramExecutionResponse::Failure { message } => bail!("{message}"),
-                ProgramExecutionResponse::RuntimeFailure { failure } => {
-                    bail!(
-                        "{}",
-                        crate::diagnostics::format_program_runtime_failure(failure)
-                            .map_err(anyhow::Error::msg)?
-                    )
-                }
-            }
+            println!(
+                "{}",
+                super::result::format_terminal_result(
+                    result,
+                    super::result::ResultOrigin::Recovered,
+                )?
+            );
         }
         return Ok(());
     }

@@ -1,7 +1,8 @@
 use runmat_hir::{lower, LoweringContext};
 
 use super::{
-    analyze_reachability, ReachabilityCertainty, ReachabilityNames, ReachabilityNodeKind,
+    analyze_reachability, analyze_reachability_with_functions, function_dependencies,
+    selected_function_closure, ReachabilityCertainty, ReachabilityNames, ReachabilityNodeKind,
     ReachabilityReason,
 };
 
@@ -65,6 +66,67 @@ fn dotted_semantic_fallback_is_a_reachable_alternative_not_a_definite_call() {
             && edge.reason == ReachabilityReason::MethodDispatch
             && edge.certainty == ReachabilityCertainty::FiniteDynamic
     }));
+}
+
+#[test]
+fn function_dependencies_keep_typed_dotted_fallback_edges() {
+    let assembly = lower_mir(
+        "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n out = receiver + value;\nend",
+    );
+    let caller = assembly.entrypoints[0];
+    let callee = *assembly
+        .functions
+        .iter()
+        .find(|(_, metadata)| metadata.name.0 == "bump")
+        .map(|(id, _)| id)
+        .expect("bound fallback");
+    assert!(
+        function_dependencies(&assembly, &std::iter::once(caller).collect())
+            .get(&caller)
+            .is_some_and(|children| children.contains(&callee))
+    );
+}
+
+#[test]
+fn selected_static_closure_does_not_seed_unrelated_public_functions() {
+    let assembly = lower_mir(
+        "out = helper(4);\nfunction y = helper(x)\n y = x + 1;\nend\nfunction y = unused(x)\n y = x + 2;\nend",
+    );
+    let root = assembly.entrypoints[0];
+    let function = |name: &str| {
+        *assembly
+            .functions
+            .iter()
+            .find(|(_, metadata)| metadata.name.0 == name)
+            .map(|(id, _)| id)
+            .expect("named function")
+    };
+    let selected = selected_function_closure(&assembly, &std::iter::once(root).collect());
+    assert!(selected.contains(&root));
+    assert!(selected.contains(&function("helper")));
+    assert!(!selected.contains(&function("unused")));
+    let (_, public_report_retention) =
+        analyze_reachability_with_functions(&assembly, &ReachabilityNames::default());
+    assert!(public_report_retention.contains(&function("unused")));
+}
+
+#[test]
+fn typed_retention_does_not_depend_on_report_node_spelling() {
+    let assembly =
+        lower_mir("result = helper(4);\nfunction out = helper(value)\n out = value + 1;\nend");
+    let (mut report, retained) =
+        analyze_reachability_with_functions(&assembly, &ReachabilityNames::default());
+    let helper = *assembly
+        .functions
+        .iter()
+        .find(|(_, metadata)| metadata.name.0 == "helper")
+        .map(|(function, _)| function)
+        .expect("helper function");
+    assert!(retained.contains(&helper));
+    for node in &mut report.nodes {
+        node.id = "presentation-only".into();
+    }
+    assert!(retained.contains(&helper));
 }
 
 #[test]

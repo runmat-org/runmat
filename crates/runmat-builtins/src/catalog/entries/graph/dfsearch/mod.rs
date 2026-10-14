@@ -8,6 +8,7 @@ pub use contract::DFSEARCH_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DFSEARCH_CATALOG_ENTRY];
 
 pub const DFSEARCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dfsearch" },
     category: "graph",

@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_program_batch,
-    prepare_batch_driver, BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState,
-    LocalSupervisorClient,
+    complete_batch_driver, complete_batch_driver_with_response, execute_graph_batch,
+    execute_program_batch, prepare_batch_driver, BatchDriverInvocation, BatchSubmission,
+    LocalJobRecord, LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -129,6 +129,19 @@ pub async fn run_driver() -> std::process::ExitCode {
                 response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
+            if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
+                Err(error.to_string())
+            } else if success {
+                return std::process::ExitCode::SUCCESS;
+            } else {
+                return std::process::ExitCode::from(1);
+            }
+        }
+        BatchDriverInvocation::Graph {
+            job_id, submission, ..
+        } => {
+            let response = execute_graph_batch(*submission, job_id).await;
+            let success = matches!(response, WorkerResponse::GraphSuccess { .. });
             if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
                 Err(error.to_string())
             } else if success {

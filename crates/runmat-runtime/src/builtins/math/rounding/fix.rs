@@ -8,8 +8,7 @@ use runmat_builtins::{
 use runmat_builtins::{FIX_DESCRIPTOR, FIX_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, ObjectInstance, StructValue, Tensor,
-    Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, ObjectInstance, Tensor, Value,
 };
 
 use crate::builtins::common::spec::{
@@ -18,6 +17,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::fix")]
@@ -74,40 +75,38 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "fix",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::rounding::fix"
+    builtin_path = "crate::builtins::math::rounding::fix",
+    context = true
 )]
-async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
+async fn fix_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &FIX_ERROR_TOO_MANY_OUTPUTS)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    super::preparation::unary(&runmat_builtins::FIX_CATALOG_ENTRY, value, fix_value).await
+    super::preparation::unary(
+        runtime.as_ref(),
+        &runmat_builtins::FIX_CATALOG_ENTRY,
+        value,
+        fix_value,
+    )
+    .await
 }
 
-async fn fix_value(value: Value) -> BuiltinResult<Value> {
+async fn fix_value(value: Value) -> BuiltinResult<RootedValue> {
+    let _input =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     match value {
-        Value::GpuTensor(handle) => fix_gpu(handle).await,
+        Value::GpuTensor(handle) => super::unary::root_output(fix_gpu(handle).await?),
         Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
             fix_table(object).await
         }
-        Value::Complex(re, im) => Ok(Value::Complex(fix_scalar(re), fix_scalar(im))),
-        Value::ComplexTensor(ct) => fix_complex_tensor(ct),
-        Value::CharArray(ca) => fix_char_array(ca),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INVALID_INPUT, err))?;
-            fix_tensor(tensor).map(tensor::tensor_into_value)
-        }
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
-            &FIX_ERROR_INVALID_INPUT,
-            "expected numeric or logical input",
-        )),
-        other => fix_numeric(other),
+        other => super::unary::root_output(fix_host_value(other)?),
     }
 }
 
-async fn fix_table(object: ObjectInstance) -> BuiltinResult<Value> {
+async fn fix_table(object: ObjectInstance) -> BuiltinResult<RootedValue> {
     let variables = crate::builtins::table::table_variables(&object)
         .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INVALID_INPUT, err.message))?;
-    let mut rounded = StructValue::new();
+    let mut names = Vec::with_capacity(variables.fields.len());
+    let mut rounded = RootedValuesBuilder::with_capacity(variables.fields.len());
     for (name, value) in variables.fields {
         crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
         let value = match value {
@@ -120,9 +119,13 @@ async fn fix_table(object: ObjectInstance) -> BuiltinResult<Value> {
             }
             other => fix_host_value(other)?,
         };
-        rounded.insert(name, value);
+        names.push(name);
+        rounded.push_owned(super::unary::root_output(value)?);
     }
-    crate::builtins::table::table_replace_variables_like(&object, rounded)
+    let rounded = rounded
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+    crate::builtins::table::table_replace_variables_like_owned(&object, names, rounded)
         .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INTERNAL, err.message))
 }
 
@@ -292,7 +295,7 @@ pub(crate) mod tests {
     use runmat_value::{ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray};
 
     fn fix_builtin(value: Value) -> BuiltinResult<Value> {
-        block_on(super::fix_builtin(value))
+        block_on(super::fix_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[test]
@@ -539,11 +542,11 @@ pub(crate) mod tests {
             columns.into_iter().map(Value::Tensor).collect(),
         )
         .unwrap();
-        let output = block_on(super::fix_builtin(input)).unwrap();
-        let Value::Object(output) = output else {
+        let output = block_on(super::fix_builtin(None, input)).unwrap();
+        let Value::Object(output) = output.value() else {
             panic!("expected table output");
         };
-        let variables = crate::builtins::table::table_variables(&output).unwrap();
+        let variables = crate::builtins::table::table_variables(output).unwrap();
         for (value, expected) in variables.fields.values().zip(expected) {
             assert_eq!(value, &Value::Tensor(expected));
         }

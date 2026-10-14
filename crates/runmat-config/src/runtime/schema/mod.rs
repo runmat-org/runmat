@@ -16,8 +16,9 @@ pub use accelerate::{
 pub use execution::{GcConfig, GcPreset, JitConfig, JitOptLevel, RuntimeConfig};
 pub use fea::{FeaArtifactStoreMode, FeaConfig};
 pub use foreign::{
-    ForeignConfig, JavaConfig, MexConfig, NativeFfiConfig, NativeFfiIsolation, PythonConfig,
-    PythonExecutionModeConfig, UnmanifestedMexPolicy,
+    ForeignConfig, JavaConfig, MexConfig, NativeFfiConfig, NativeFfiIsolation, NativeFfiTimeout,
+    PythonConfig, PythonExactVersion, PythonExecutionModeConfig, PythonInstalledModulePaths,
+    UnmanifestedMexPolicy,
 };
 pub use language::{error_namespace_for_language_compat, LanguageCompatMode, LanguageConfig};
 pub use logging::{LogLevel, LoggingConfig};

@@ -7,7 +7,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::context::{RuntimeTcpIssuer, RuntimeTcpReadMode};
+use crate::context::{RuntimeTcpInvocation, RuntimeTcpReadMode};
 use crate::tcp::TcpTransportErrorKind;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -66,7 +66,7 @@ pub(super) async fn readline_builtin(
     let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let outcome = work
         .await_service(service.read(
-            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
             authority,
             RuntimeTcpReadMode::Line,
         ))

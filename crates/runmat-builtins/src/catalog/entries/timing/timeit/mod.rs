@@ -25,6 +25,7 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 pub(crate) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TIMEIT_CATALOG_ENTRY];
 
 pub const TIMEIT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "timeit" },
     category: "timing",

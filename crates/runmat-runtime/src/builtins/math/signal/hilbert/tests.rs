@@ -249,7 +249,7 @@ fn hilbert_gpu_input_returns_owner_resident_analytic_signal() {
 #[test]
 fn hilbert_wgpu_input_returns_resident_complex_gpu_tensor() {
     use crate::builtins::common::test_support;
-    use runmat_accelerate::backend::wgpu::provider::{WgpuProviderOptions, register_wgpu_provider};
+    use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::AccelProvider;
 
     let _guard = test_support::accel_test_lock();
@@ -289,7 +289,7 @@ fn hilbert_wgpu_input_returns_resident_complex_gpu_tensor() {
 #[test]
 fn hilbert_wgpu_length_argument_matches_cpu_and_stays_resident() {
     use crate::builtins::common::test_support;
-    use runmat_accelerate::backend::wgpu::provider::{WgpuProviderOptions, register_wgpu_provider};
+    use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::AccelProvider;
 
     let _guard = test_support::accel_test_lock();

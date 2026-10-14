@@ -242,7 +242,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
     for (class, input) in all_integer_vectors() {
         let output =
             block_on(runmat_runtime::call_builtin_async("perms", &[input])).expect("integer perms");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("{class}: expected tensor");
         };
         assert_ne!(output.numeric_dtype(), NumericDType::F64, "{class}");
@@ -274,7 +274,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
             &[data, order],
         ))
         .expect("integer permute");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("{class}: expected permuted tensor");
         };
         assert_eq!(
@@ -301,7 +301,7 @@ fn pdist2_typed_selection_count_remains_structural() {
         ],
     ))
     .expect("structural selection count");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected selected distances");
     };
     assert_eq!(output.shape(), &[2, 1]);
@@ -317,7 +317,7 @@ fn pdist2_typed_selection_count_remains_structural() {
         ],
     ))
     .expect("wide structural selection count clamps to observation count");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected selected distances");
     };
     assert_eq!(output.shape(), &[2, 1]);
@@ -345,7 +345,7 @@ fn distance_cache_size_controls_accept_every_integer_class() {
             ],
         ))
         .expect("typed pdist CacheSize");
-        assert!(matches!(output, Value::Num(_) | Value::Tensor(_)));
+        assert!(matches!(output.value(), Value::Num(_) | Value::Tensor(_)));
 
         let output = block_on(runmat_runtime::call_builtin_async(
             "pdist2",
@@ -357,6 +357,6 @@ fn distance_cache_size_controls_accept_every_integer_class() {
             ],
         ))
         .expect("typed pdist2 CacheSize");
-        assert!(matches!(output, Value::Tensor(_)));
+        assert!(matches!(output.value(), Value::Tensor(_)));
     }
 }

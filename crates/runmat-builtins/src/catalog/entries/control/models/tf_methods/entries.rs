@@ -4,6 +4,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 macro_rules! method_entry {
     ($constant:ident, $name:literal, $documentation:ident, $descriptor:ident, $inference:ident, $extensions:expr, $integers:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "control",

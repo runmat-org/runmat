@@ -33,10 +33,31 @@ pub fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeE
         .iter()
         .map(|index| *index as usize)
         .collect::<Vec<_>>();
-    array
-        .select_linear(&indices, plan.output_shape.clone())
-        .map(Value::ObjectArray)
-        .map_err(|error| semantic_error("IndexOutOfBounds", error))
+    Ok(Value::ObjectArray(select_linear_with_provenance(
+        &array,
+        &indices,
+        plan.output_shape.clone(),
+    )?))
+}
+
+pub(crate) fn select_linear_with_provenance(
+    array: &ObjectArray,
+    indices: &[usize],
+    shape: Vec<usize>,
+) -> Result<ObjectArray, RuntimeError> {
+    let mut selected = array
+        .select_linear(indices, shape)
+        .map_err(|error| semantic_error("IndexOutOfBounds", error))?;
+    if selected.is_empty() {
+        let (provenance, unselected) = empty_result_provenance(array)?;
+        selected = selected
+            .with_selected_provenance(provenance)
+            .map_err(|error| semantic_error("SelectedObjectReceiverInvalid", error))?;
+        if unselected {
+            selected = selected.with_unselected_provenance();
+        }
+    }
+    Ok(selected)
 }
 
 pub fn assign_scalar_indices(
@@ -83,7 +104,22 @@ pub fn assign_with_plan(
     }
     let rhs_values = assignment_values(&rhs, array.class_name(), plan.indices.len())?;
     let data = growth::assign(&array, plan, rhs_values)?;
-    finish_array(array.class_name(), data, plan.base_shape.clone())
+    let value = finish_array(array.class_name(), data, plan.base_shape.clone())?;
+    if let Value::ObjectArray(result) = value {
+        if result.is_empty() {
+            let (provenance, unselected) = empty_result_provenance(&array)?;
+            let result = result
+                .with_selected_provenance(provenance)
+                .map_err(|error| semantic_error("ObjectArrayAssignment", error))?;
+            return Ok(Value::ObjectArray(if unselected {
+                result.with_unselected_provenance()
+            } else {
+                result
+            }));
+        }
+        return Ok(Value::ObjectArray(result));
+    }
+    Ok(value)
 }
 
 fn delete_with_plan(
@@ -119,6 +155,11 @@ fn delete_with_plan(
     removed.sort_unstable();
     removed.dedup();
     let class_name = array.class_name().clone();
+    let empty_provenance = if removed.len() == array.len() {
+        Some(empty_result_provenance(&array)?)
+    } else {
+        None
+    };
     let mut data = array.into_data();
     for index in removed.into_iter().rev() {
         if index >= data.len() {
@@ -134,7 +175,45 @@ fn delete_with_plan(
     } else {
         vec![data.len(), 1]
     };
-    finish_array(&class_name, data, shape)
+    let value = finish_array(&class_name, data, shape)?;
+    if let Value::ObjectArray(array) = value {
+        if array.is_empty() {
+            let (selected_provenance, unselected_provenance) =
+                empty_provenance.expect("all object-array elements were removed");
+            let array = array
+                .with_selected_provenance(selected_provenance)
+                .map_err(|error| semantic_error("ObjectArrayAssignment", error))?;
+            return Ok(Value::ObjectArray(if unselected_provenance {
+                array.with_unselected_provenance()
+            } else {
+                array
+            }));
+        }
+        return Ok(Value::ObjectArray(array));
+    }
+    Ok(value)
+}
+
+pub(crate) fn empty_result_provenance(
+    array: &ObjectArray,
+) -> Result<
+    (
+        Vec<std::rc::Rc<runmat_value::SelectedObjectClassFacts>>,
+        bool,
+    ),
+    RuntimeError,
+> {
+    // A handle receiver keeps its selected facts in the GC target. Capture
+    // those exact facts before an empty operation discards every element.
+    let mut provenance = array.selected_provenance().to_vec();
+    let mut unselected = array.has_unselected_provenance();
+    for element in array.data() {
+        match crate::object::protocol::selected_receiver_facts(element)? {
+            Some(facts) => provenance.push(facts),
+            None => unselected = true,
+        }
+    }
+    Ok((provenance, unselected))
 }
 
 fn finish_array(

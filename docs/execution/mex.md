@@ -181,6 +181,8 @@ addpath("build");
 [a, b] = native_filter(x);
 ```
 
+An anonymous function handle can capture an installed project MEX artifact, for example `call_filter = @() native_filter(x)`. Calls through that handle retain the selected artifact identity and packaged module across later requests in the same session; they do not choose a new binary from the then-current search path.
+
 The supported targets are:
 
 | Host | Suffix |
@@ -244,13 +246,17 @@ Calls through `mexCallMATLAB`, `mexEvalString`, `mexGetVariable`, `mexPutVariabl
 
 A callback may call another MEX module. Recursive entry into the same module is rejected with `RunMat:MEX:ReentrantInvocation` rather than deadlocking the module's persistent state. Cancellation is checked before native entry and whenever a gateway calls back into RunMat. An in-process gateway cannot be safely preempted while it is executing.
 
+Callbacks can await RunMat work without blocking the session's callback servicing. An independently ready callback can proceed while another is suspended. Accepted cancellation of an asynchronous Engine request cooperatively cancels that request's callback work, not unrelated requests; session cancellation still applies to work carrying the session's cancellation token.
+
 Console output from `mexPrintf` and C/C++ standard output is attached to the invocation. MEX warnings enter RunMat's warning diagnostics. `mexErrMsgTxt`, `mexErrMsgIdAndTxt`, and uncaught C++ exceptions stop the gateway at the C boundary; they do not unwind through Rust.
 
 ## Module State And Lifecycle
 
 A loaded module belongs to one RunMat session. Static data, persistent arrays and memory, the modern C++ gateway object, registered `mexAtExit` handlers, and `mexLock` state all belong to that loaded module.
 
-`clear name`, `clear mex`, `clear functions`, and `clear all` unload eligible modules and run their exit handlers with the originating callback services still available. A locked, executing, or asynchronously active module remains loaded. `mexUnlock` makes a locked module clearable; it does not unload it immediately. Session and standalone-program shutdown force final teardown and run exit handlers even when a module remains locked.
+`clear name`, `clear mex`, `clear functions`, and `clear all` unload eligible modules and run their exit handlers with the originating callback services still available. A locked, executing, or asynchronously active module remains loaded. `mexUnlock` makes a locked module clearable; it does not unload it immediately. Explicit graceful session or standalone-program shutdown awaits admitted calls, exit handlers (even for locked modules), and the native or isolated-host retirement acknowledgement before releasing callback services. A lifecycle diagnostic after unload does not mean the module remains live.
+
+Dropping a host without graceful shutdown is forced abandonment, not a successful `mexAtExit` run. Late native callbacks lose access to the originating RunMat services; an in-progress callback retains its own origin lease until it returns. An isolated host is owned by its driver and is killed on driver drop. An in-process gateway is arbitrary native code and cannot be guaranteed to finish or be preempted by host disposal. Embedders should drive and await graceful close while their session and callback driver are still live.
 
 Only one session can own a canonical native library image in-process at a time because the image may contain process-global state. If another session needs the same exact image concurrently, RunMat gives it a separate isolated host and independent module state. Invocation-only workspace frames and host services are released after the call unless asynchronous work explicitly retains them.
 
@@ -267,6 +273,8 @@ RunMat distinguishes binaries by how strongly it can prove their identity and AB
 Source compatibility is not arbitrary third-party binary compatibility. A binary linked against another host's private exports should be rebuilt from source with `runmat mex`. If a sidecar exists but does not match the module, RunMat rejects the artifact; it does not silently downgrade it to the unmanifested tier.
 
 The isolated host uses authenticated bounded local messages. Large canonical values move through private, digest-verified snapshots, and callbacks are routed to the originating runtime context. A native crash, cancellation, or configured timeout terminates the host without terminating the RunMat driver.
+
+A broken isolated-host transport rejects further calls while the driver attempts to retire the host. RunMat does not retry a partially executed gateway. During graceful shutdown, callback services and retained values remain owned until process-tree retirement succeeds; an unconfirmed retirement is reported as a shutdown failure rather than a successful unload.
 
 Isolation is crash containment, not a security sandbox. Native code retains the child process's filesystem, network, and user permissions.
 

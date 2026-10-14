@@ -16,6 +16,7 @@ pub use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult};
 
 async fn invoke_native(
@@ -23,7 +24,7 @@ async fn invoke_native(
     operation: NativeFfiOperation,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (context, operation, arguments, requested_outputs);
@@ -58,9 +59,14 @@ async fn invoke_native(
                 },
             ))
             .await?;
-        Ok(crate::call::arguments::project_legacy_builtin_value_abi(
-            sequence,
-        ))
+        sequence.try_map_owned(
+            |sequence| {
+                Ok::<_, crate::RuntimeError>(
+                    crate::call::arguments::project_legacy_builtin_value_abi(sequence),
+                )
+            },
+            |error| error.into_runtime_error(),
+        )
     }
 }
 
@@ -75,7 +81,7 @@ async fn loadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&LOADLIBRARY_DESCRIPTOR, "loadlibrary", requested_outputs)?;
     if arguments.is_empty() {
         return Err(invalid_builtin_call("loadlibrary expects a library path"));
@@ -149,22 +155,27 @@ async fn loadlibrary_builtin(
     }
     arguments.extend(preparation_options);
     let report = invoke_native(context, NativeFfiOperation::LoadReport, arguments, 2).await?;
-    let Value::OutputList(mut report) = report else {
-        return Err(invalid_builtin_call(
-            "native library loader returned an invalid preparation report",
-        ));
-    };
-    if report.len() != 2 {
-        return Err(invalid_builtin_call(
-            "native library loader returned an incomplete preparation report",
-        ));
-    }
     let requested = requested_outputs.unwrap_or(0);
-    Ok(match requested {
-        0 => Value::OutputList(Vec::new()),
-        1 => report.remove(0),
-        _ => Value::OutputList(report),
-    })
+    report.try_map_owned(
+        |report| {
+            let Value::OutputList(mut report) = report else {
+                return Err(invalid_builtin_call(
+                    "native library loader returned an invalid preparation report",
+                ));
+            };
+            if report.len() != 2 {
+                return Err(invalid_builtin_call(
+                    "native library loader returned an incomplete preparation report",
+                ));
+            }
+            Ok(match requested {
+                0 => Value::OutputList(Vec::new()),
+                1 => report.remove(0),
+                _ => Value::OutputList(report),
+            })
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 #[runtime_builtin(
@@ -178,7 +189,7 @@ async fn calllib_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.len() < 2 {
         return Err(invalid_builtin_call(
             "calllib requires a library alias and function name",
@@ -202,7 +213,7 @@ async fn unloadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     alias: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(
         &UNLOADLIBRARY_DESCRIPTOR,
         "unloadlibrary",
@@ -210,7 +221,7 @@ async fn unloadlibrary_builtin(
     )?;
     text_argument(&alias, "unloadlibrary alias")?;
     invoke_native(context, NativeFfiOperation::Unload, vec![alias], 1).await?;
-    Ok(Value::OutputList(Vec::new()))
+    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -224,7 +235,7 @@ async fn libisloaded_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     alias: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&LIBISLOADED_DESCRIPTOR, "libisloaded", requested_outputs)?;
     text_argument(&alias, "libisloaded alias")?;
     invoke_native(context, NativeFfiOperation::IsLoaded, vec![alias], 1).await
@@ -241,7 +252,7 @@ async fn libfunctions_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&LIBFUNCTIONS_DESCRIPTOR, "libfunctions", requested_outputs)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(
@@ -271,7 +282,7 @@ async fn libpointer_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&LIBPOINTER_DESCRIPTOR, "libpointer", requested_outputs)?;
     if arguments.len() > 2 {
         return Err(invalid_builtin_call(
@@ -295,7 +306,7 @@ async fn setdatatype_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&SETDATATYPE_DESCRIPTOR, "setdatatype", requested_outputs)?;
     if arguments.len() < 3 {
         return Err(invalid_builtin_call(
@@ -310,7 +321,7 @@ async fn setdatatype_builtin(
     text_argument(&arguments[1], "setdatatype pointer type")?;
     arguments.insert(1, Value::String("setdatatype".into()));
     invoke_native(context, NativeFfiOperation::InvokeMember, arguments, 1).await?;
-    Ok(Value::OutputList(Vec::new()))
+    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -324,7 +335,7 @@ async fn libstruct_builtin(
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     validate_output_count(&LIBSTRUCT_DESCRIPTOR, "libstruct", requested_outputs)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(

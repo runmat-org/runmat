@@ -173,14 +173,14 @@ fn cell_paren_scalar_index_returns_cell_container() {
     let vars = execute_source("C={10,20,30}; D=C(2); x=D{1};").unwrap();
     let mut saw_container = false;
     let mut saw_unwrapped = false;
-    for value in vars {
+    for value in vars.values() {
         match value {
             Value::Cell(cell) if cell.data.len() == 1 => {
                 if matches!(cell.data[0].clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
                     saw_container = true;
                 }
             }
-            Value::Num(n) if (n - 20.0).abs() < 1e-9 => saw_unwrapped = true,
+            Value::Num(n) if (*n - 20.0).abs() < 1e-9 => saw_unwrapped = true,
             _ => {}
         }
     }
@@ -200,7 +200,7 @@ fn cell_paren_range_index_returns_cell_subset() {
     let mut saw_subset = false;
     let mut saw_x = false;
     let mut saw_y = false;
-    for value in vars {
+    for value in vars.values() {
         match value {
             Value::Cell(cell) if cell.data.len() == 2 => {
                 let first = cell.data[0].clone();
@@ -211,8 +211,8 @@ fn cell_paren_range_index_returns_cell_subset() {
                     saw_subset = true;
                 }
             }
-            Value::Num(n) if (n - 2.0).abs() < 1e-9 => saw_x = true,
-            Value::Num(n) if (n - 3.0).abs() < 1e-9 => saw_y = true,
+            Value::Num(n) if (*n - 2.0).abs() < 1e-9 => saw_x = true,
+            Value::Num(n) if (*n - 3.0).abs() < 1e-9 => saw_y = true,
             _ => {}
         }
     }

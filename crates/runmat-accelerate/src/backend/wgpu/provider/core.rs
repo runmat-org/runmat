@@ -8,7 +8,6 @@ use runmat_accelerate_api::{
 };
 use std::sync::atomic::Ordering as AtomicOrdering;
 use tracing::info_span;
-use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
 use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
@@ -40,10 +39,19 @@ impl WgpuProvider {
         action: impl for<'p> FnOnce(&WgpuEmission<'p>, &mut PendingSubmissions) -> T,
     ) -> Result<T> {
         // Declared outside the gate so unwind cleanup also runs after unlock.
-        let mut pending = PendingSubmissions::new(self.access.clone());
+        let mut pending = PendingSubmissions::new(self.access.clone()).with_profiling(
+            self.timestamp_capability,
+            self.observation_budget.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            self.observation_progress
+                .clone()
+                .map(|progress| progress as _),
+        );
         let result = self
             .access
-            .with_shared(|emission| action(emission, &mut pending));
+            .with_profiled_shared(&self.emission_authority, |emission| {
+                action(emission, &mut pending)
+            });
         pending.commit();
         #[cfg(target_arch = "wasm32")]
         self.access.poll(wgpu::Maintain::Poll);
@@ -360,13 +368,13 @@ impl WgpuProvider {
         label: &str,
     ) -> Result<wgpu::Buffer> {
         emission.ensure_device(&self.access)?;
-        Ok(emission
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        Ok(
+            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: bytes_of(data),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }))
+            }),
+        )
     }
 
     pub(super) fn prepare_matmul_pipeline(
@@ -375,11 +383,12 @@ impl WgpuProvider {
         pending: &mut PendingSubmissions,
     ) -> Result<()> {
         emission.ensure_device(&self.access)?;
-        let mut enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-warmup"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-matmul-warmup-pass"),
@@ -389,11 +398,12 @@ impl WgpuProvider {
         }
         self.submit(emission, pending, enc)?;
 
-        let enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-flush-gap"),
-            });
+            },
+        );
         self.submit(emission, pending, enc)?;
         Ok(())
     }
@@ -404,11 +414,12 @@ impl WgpuProvider {
         pending: &mut PendingSubmissions,
     ) -> Result<()> {
         emission.ensure_device(&self.access)?;
-        let mut enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-warmup"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-matmul-vec4-warmup-pass"),
@@ -418,11 +429,12 @@ impl WgpuProvider {
         }
         self.submit(emission, pending, enc)?;
 
-        let enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-flush-gap"),
-            });
+            },
+        );
         self.submit(emission, pending, enc)?;
         Ok(())
     }
@@ -431,7 +443,7 @@ impl WgpuProvider {
         &self,
         emission: &WgpuEmission<'_>,
         pending: &mut PendingSubmissions,
-        encoder: wgpu::CommandEncoder,
+        encoder: impl crate::backend::wgpu::dispatch::observation::SubmissionEncoder,
     ) -> Result<u32> {
         emission.ensure_device(&self.access)?;
         let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);

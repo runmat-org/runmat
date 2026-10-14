@@ -101,6 +101,7 @@ pub(in crate::builtins) fn ensure_network_class_registered(
                     access: MemberAccess::Public,
                     function_name: name.into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }

@@ -12,7 +12,11 @@ use super::{
 #[path = "tests/cooperation.rs"]
 mod cooperation;
 
-async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+async fn datetime_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::operators::datetime_subsref(obj, subscript).await
 }
@@ -22,7 +26,7 @@ async fn datetime_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::operators::datetime_subsasgn(obj, subscript, rhs).await
 }
@@ -958,7 +962,9 @@ fn datetime_supports_indexing_and_comparison() {
     let indexed =
         futures::executor::block_on(datetime_subsref(value.clone(), "()".to_string(), payload))
             .expect("subsref");
-    let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
+    let year = indexed
+        .with_owned(|value| futures::executor::block_on(year_builtin(value, Vec::new())))
+        .expect("year");
     assert_eq!(year, Value::Num(2025.0));
 
     let lhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(1.0)]);
@@ -989,7 +995,9 @@ fn datetime_typed_integer_index_selectors_are_exact() {
     );
     let indexed = futures::executor::block_on(datetime_subsref(value, "()".to_string(), payload))
         .expect("subsref");
-    let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
+    let year = indexed
+        .with_owned(|value| futures::executor::block_on(year_builtin(value, Vec::new())))
+        .expect("year");
     assert_eq!(year, Value::Num(2025.0));
 }
 

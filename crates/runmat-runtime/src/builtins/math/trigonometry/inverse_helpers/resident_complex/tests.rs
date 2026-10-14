@@ -28,13 +28,14 @@ fn check(provider: &'static dyn AccelProvider, single: bool) {
             1,
         ))
         .unwrap();
-        let Value::GpuTensor(output_handle) = &result else {
+        let Value::GpuTensor(output_handle) = result.value() else {
             panic!("{name}: owner restoration required")
         };
         assert_eq!(output_handle.device_id(), handle.device_id());
         assert!(!gpu_helpers::same_gpu_handle(output_handle, &handle));
-        let actual = block_on(gpu_helpers::gather_value_async(&result)).unwrap();
-        let (Value::ComplexTensor(actual), Value::ComplexTensor(expected)) = (actual, expected)
+        let actual = block_on(gpu_helpers::gather_value_async(result.value())).unwrap();
+        let (Value::ComplexTensor(actual), Value::ComplexTensor(expected)) =
+            (actual, expected.value())
         else {
             panic!("{name}: complex array required");
         };

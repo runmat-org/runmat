@@ -59,6 +59,7 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
                 access: MemberAccess::Public,
                 function_name: "PendingSelectedGetfieldSession.get.p".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });

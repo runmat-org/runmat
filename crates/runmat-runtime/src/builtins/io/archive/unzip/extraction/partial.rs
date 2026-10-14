@@ -1,6 +1,9 @@
 use super::*;
 use std::sync::Arc;
 
+#[cfg(target_arch = "wasm32")]
+mod cleanup;
+
 /// An entry is not published until its complete body is synced and renamed.
 /// Closing the owned handle precedes cleanup, including on a dropped future.
 pub(super) struct PartialEntry {
@@ -8,6 +11,8 @@ pub(super) struct PartialEntry {
     file: Option<Box<dyn vfs::FileHandle>>,
     provider: Arc<dyn vfs::FsProvider>,
     committed: bool,
+    #[cfg(target_arch = "wasm32")]
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
 }
 
 impl PartialEntry {
@@ -35,7 +40,22 @@ impl PartialEntry {
             file: Some(file),
             provider,
             committed: false,
+            #[cfg(target_arch = "wasm32")]
+            command_origin: None,
         })
+    }
+
+    /// This private staging entry retains only the extraction invocation's
+    /// candidate origin. A lease is admitted later, only if rollback detaches.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) async fn create_with_origin(
+        path: PathBuf,
+        provider: Arc<dyn vfs::FsProvider>,
+        command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
+    ) -> BuiltinResult<Self> {
+        let mut partial = Self::create(path, provider).await?;
+        partial.command_origin = command_origin;
+        Ok(partial)
     }
 
     pub(super) fn path(&self) -> &Path {
@@ -97,8 +117,16 @@ impl Drop for PartialEntry {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = vfs::remove_file_in_provider(provider, &path);
         #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = provider.remove_file(&path).await;
-        });
+        {
+            let token = self
+                .command_origin
+                .take()
+                .and_then(|origin| origin.begin_deferred_work());
+            cleanup::spawn(provider, path, token);
+        }
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+#[path = "partial/tests.rs"]
+mod tests;

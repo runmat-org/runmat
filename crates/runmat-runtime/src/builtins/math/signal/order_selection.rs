@@ -1,7 +1,7 @@
 use runmat_value::Value;
 
-use crate::RuntimeError;
 use crate::builtins::math::signal::common::{parse_scalar_f64, value_to_complex_vector};
+use crate::RuntimeError;
 
 const EPS: f64 = 1.0e-12;
 const GOLDEN_RATIO_CONJUGATE: f64 = 0.381_966_011_250_105_1;

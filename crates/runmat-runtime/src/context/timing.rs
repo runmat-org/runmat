@@ -3,8 +3,10 @@
 mod platform;
 
 use super::RuntimeServiceFuture;
+use runmat_execution::profiling::CommandThreadCpuSampler;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) fn platform_service() -> std::rc::Rc<dyn RuntimeTimingService> {
@@ -45,6 +47,12 @@ pub trait RuntimeTimingService {
 
     /// Process CPU seconds; browser hosts must report unavailable, not wall time.
     fn process_cpu_seconds(&self) -> Option<f64>;
+
+    /// Optional per-thread CPU counter for attributed command profiling.
+    /// Custom clocks and unsupported hosts remain unknown by default.
+    fn command_thread_cpu_sampler(&self) -> Option<Arc<dyn CommandThreadCpuSampler>> {
+        None
+    }
 
     /// A cold, nonblocking wait; dropping its future abandons this wait.
     fn sleep(&self, duration: Duration) -> RuntimeServiceFuture<Result<(), crate::RuntimeError>>;

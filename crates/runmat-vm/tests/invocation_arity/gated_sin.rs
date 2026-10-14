@@ -49,8 +49,11 @@ fn invoke(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         pending
             .await
             .map_err(|_| runmat_runtime::RuntimeError::new("sin gate abandoned"))?;
-        ValueSequence::single(Value::Num(0.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        runmat_runtime::execution::RootedValueSequence::new(
+            ValueSequence::single(Value::Num(0.0))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        )
+        .map_err(|error| error.into_runtime_error())
     })
 }
 

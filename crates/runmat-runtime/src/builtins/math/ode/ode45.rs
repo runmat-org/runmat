@@ -195,7 +195,11 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -y,
+                    ))
+                })
             },
         )));
         drop(entry);
@@ -266,7 +270,9 @@ mod tests {
             |function, _args, _requested_outputs| {
                 assert_eq!(function, 903);
                 Box::pin(async move {
-                    crate::sequence::single_value_sequence(Value::Int(IntValue::I32(-1)))
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Int(
+                        IntValue::I32(-1),
+                    ))
                 })
             },
         )));
@@ -296,9 +302,11 @@ mod tests {
                 crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_function, _args, _requested_outputs| {
-                    Box::pin(
-                        async move { crate::sequence::single_value_sequence(Value::Num(-1.0)) },
-                    )
+                    Box::pin(async move {
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Num(-1.0),
+                        )
+                    })
                 }),
             ));
             let times = [0.0, 0.1];
@@ -357,9 +365,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, _args, _requested_outputs| {
                 assert_eq!(function, 904);
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(f64::NAN)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f64::NAN,
+                    ))
+                })
             },
         )));
         drop(entry);
@@ -391,13 +401,17 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -y,
+                    ))
+                })
             },
         )));
         drop(entry);
 
         let out = block_on(runtime.scope(ode45_builtin(
-            Value::ExternalFunctionHandle("pkg.decay".to_string()),
+            Value::ExternalFunctionHandle("pkg.decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
             Vec::new(),

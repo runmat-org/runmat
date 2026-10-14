@@ -9,6 +9,7 @@ use crate::*;
 use runmat_types::EffectKind;
 
 pub const PYARGS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pyargs" },
     category: "interop/python",

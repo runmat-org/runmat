@@ -141,7 +141,7 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
                     .await
             })))
             .unwrap();
-        let Value::OutputList(outputs) = output else {
+        let Value::OutputList(outputs) = output.value() else {
             panic!("coordinate outputs")
         };
         let expected = [vec![2.0, 3.0], vec![0.0, 0.0], vec![7.0, 7.0]];

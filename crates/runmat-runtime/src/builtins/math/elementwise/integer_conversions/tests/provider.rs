@@ -26,17 +26,19 @@ fn singleton_resident_inference_matches_actual_opaque_result() {
             let source = Value::GpuTensor(input.clone());
             let inferred = infer_numeric_conversion(&value_fact(&source), target).fact;
             let output = crate::dispatcher::call_builtin(name, &[source]).unwrap();
-            let actual = value_fact(&output);
+            let actual = value_fact(output.value());
             assert_eq!(inferred.kind, actual.kind);
             assert_eq!(inferred.shape, actual.shape);
             assert_eq!(inferred.storage, actual.storage);
             assert_eq!(inferred.residency, actual.residency);
-            let Value::GpuTensor(output) = output else {
-                panic!("resident output")
-            };
-            let weak = output.downgrade();
-            output.release().expect("release conversion result");
-            assert!(weak.acquire().is_err());
+            output.with_owned(|value| {
+                let Value::GpuTensor(output) = value else {
+                    panic!("resident output")
+                };
+                let weak = output.downgrade();
+                output.release().expect("release conversion result");
+                assert!(weak.acquire().is_err());
+            });
         }
         let weak = input.downgrade();
         let original = block_on(provider.download(&input)).expect("caller survives conversions");
@@ -69,11 +71,11 @@ fn every_identity_returns_typed_resident_storage() {
                 .expect("upload");
             let output = crate::dispatcher::call_builtin(name, &[Value::GpuTensor(input)])
                 .expect("resident conversion");
-            let Value::GpuTensor(output) = output else {
+            let Value::GpuTensor(output) = output.value() else {
                 panic!("{name} must remain resident");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_integer_type(&output),
+                runmat_accelerate_api::handle_integer_type(output),
                 Some(element_type)
             );
             assert_eq!(output.device_id(), provider.device_id());
@@ -104,16 +106,16 @@ fn resident_conversion_uses_the_input_owner_and_preserves_exact_wide_values() {
 
     let output = crate::dispatcher::call_builtin("int64", &[Value::GpuTensor(input)])
         .expect("int64 conversion");
-    let Value::GpuTensor(output) = output else {
+    let Value::GpuTensor(output) = output.value() else {
         panic!("conversion must remain resident");
     };
     assert_eq!(output.device_id(), owner.device_id());
     assert_eq!(
-        runmat_accelerate_api::handle_integer_class(&output),
+        runmat_accelerate_api::handle_integer_class(output),
         Some(IntegerClass::Int64)
     );
     assert_eq!(
-        block_on(owner.download_integer(&output))
+        block_on(owner.download_integer(output))
             .expect("download")
             .data,
         HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])

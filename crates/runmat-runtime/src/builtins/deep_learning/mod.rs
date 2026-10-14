@@ -19,6 +19,7 @@ pub(crate) mod supervised;
 pub(crate) mod training;
 #[cfg(test)]
 mod tests;
+pub(crate) mod fixtures;
 
 pub(super) use self::arguments::{
     logical_scalar, numeric_scalar, numeric_values, numeric_vector, object, object_with_identity,

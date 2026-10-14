@@ -16,7 +16,7 @@ impl BuiltinPreparationObservation for Observation {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -66,21 +66,20 @@ impl RuntimeAccelerationService for Service {
             if admission.signature == 0 { 1 } else { 3 }
         );
         self.events.borrow_mut().push("prepare");
-        let mut operands = request.into_operands();
-        assert_eq!(
-            operands.len(),
-            1,
-            "option and prototype must stay domain-local"
-        );
-        if self.replace {
-            operands[0] = Value::OutputList(vec![]);
-        }
+        let replace = self.replace;
         let observer = Observation(self.events.clone());
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                operands,
-                Some(Box::new(observer)),
-            ))
+            request.into_operands().with_owned_values(|mut operands| {
+                assert_eq!(
+                    operands.len(),
+                    1,
+                    "option and prototype must stay domain-local"
+                );
+                if replace {
+                    operands[0] = Value::OutputList(vec![]);
+                }
+                PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
+            })
         })
     }
 }
@@ -118,7 +117,7 @@ fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
                     args.extend([Value::from("like"), Value::Num(0.0)]);
                 }
                 let result = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
-                let Value::Tensor(output) = result else {
+                let Value::Tensor(output) = result.value() else {
                     panic!("dense shape-preserving output");
                 };
                 assert_eq!(output.shape(), shape.as_slice());

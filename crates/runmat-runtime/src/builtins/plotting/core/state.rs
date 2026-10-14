@@ -32,6 +32,9 @@ pub(crate) mod callbacks;
 mod shared_figure;
 #[path = "state/scene_mutation.rs"]
 mod scene_mutation;
+#[path = "state/recent_figures.rs"]
+mod recent_figures;
+pub(crate) use recent_figures::FigureReceiptOwner;
 use scene_mutation::{
     existing_axes_state_mut, existing_state_mut, get_state_for_future_plot_style,
     get_state_for_query, get_state_mut,
@@ -5079,9 +5082,13 @@ fn notify_without_figure(handle: FigureHandle, kind: FigureEventKind) {
 }
 
 fn note_recent_figure(handle: FigureHandle) {
-    RECENT_FIGURES.with(|set| {
-        set.borrow_mut().insert(handle);
-    });
+    if let Some(runtime) = crate::context::legacy::active() {
+        runtime.plot_receipts().record(handle);
+    } else {
+        RECENT_FIGURES.with(|set| {
+            set.borrow_mut().insert(handle);
+        });
+    }
 }
 
 pub fn record_recent_figure(handle: FigureHandle) {
@@ -5089,7 +5096,11 @@ pub fn record_recent_figure(handle: FigureHandle) {
 }
 
 pub fn reset_recent_figures() {
-    RECENT_FIGURES.with(|set| set.borrow_mut().clear());
+    if let Some(runtime) = crate::context::legacy::active() {
+        runtime.plot_receipts().reset();
+    } else {
+        RECENT_FIGURES.with(|set| set.borrow_mut().clear());
+    }
 }
 
 pub fn reset_plot_state() {
@@ -5112,7 +5123,11 @@ pub fn reset_plot_state() {
 }
 
 pub fn take_recent_figures() -> Vec<FigureHandle> {
-    RECENT_FIGURES.with(|set| set.borrow_mut().drain().collect())
+    if let Some(runtime) = crate::context::legacy::active() {
+        runtime.plot_receipts().take()
+    } else {
+        RECENT_FIGURES.with(|set| set.borrow_mut().drain().collect())
+    }
 }
 
 pub fn select_figure(handle: FigureHandle) {

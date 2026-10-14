@@ -86,13 +86,8 @@ impl Drop for TaskStack<'_> {
 }
 
 pub(super) enum DecodeProgress {
-    Pending {
-        completed_work: usize,
-    },
-    Complete {
-        value: RootedValueMember,
-        completed_work: usize,
-    },
+    Pending { completed_work: usize },
+    Complete { completed_work: usize },
 }
 
 pub(super) type PartialValue = RootedValueMember;
@@ -135,6 +130,7 @@ pub(super) struct DecodeMachine<'a> {
     tasks: TaskStack<'a>,
     values: Vec<PartialValue>,
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+    frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
 }
 
 impl<'a> DecodeMachine<'a> {
@@ -150,11 +146,25 @@ impl<'a> DecodeMachine<'a> {
         path: String,
         source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
     ) -> Self {
+        Self::new_with_frame_sources(payload, path, source_resolver, None)
+    }
+
+    pub(super) fn new_with_frame_sources(
+        payload: &'a ValuePayload,
+        path: String,
+        source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+        frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
+    ) -> Self {
         Self {
             tasks: TaskStack::new(Task::Decode { payload, path }),
             values: Vec::new(),
             source_resolver,
+            frame_sources,
         }
+    }
+
+    pub(super) fn frame_sources(&self) -> Option<&'a dyn super::InlineFrameSourceAuthority> {
+        self.frame_sources
     }
 
     pub(super) fn source_resolver(
@@ -170,21 +180,15 @@ impl<'a> DecodeMachine<'a> {
         let mut remaining = maximum_work.get();
         while remaining != 0 {
             let Some(task) = self.tasks.pop() else {
-                let value = self
-                    .values
-                    .pop()
-                    .expect("a completed decoder owns one result");
+                debug_assert_eq!(self.values.len(), 1);
                 return Ok(DecodeProgress::Complete {
-                    value,
                     completed_work: maximum_work.get() - remaining,
                 });
             };
             let completed = task::advance(task, self, remaining)?;
             debug_assert!(completed != 0 && completed <= remaining);
             if self.tasks.is_empty() && self.values.len() == 1 {
-                let value = self.values.pop().expect("completed decoder result");
                 return Ok(DecodeProgress::Complete {
-                    value,
                     completed_work: maximum_work.get() - remaining + completed,
                 });
             }
@@ -193,6 +197,14 @@ impl<'a> DecodeMachine<'a> {
         Ok(DecodeProgress::Pending {
             completed_work: maximum_work.get(),
         })
+    }
+
+    /// Transfer the completed value only after the caller's cooperation
+    /// checkpoint. The machine keeps its explicit root alive across that await.
+    pub(super) fn take_completed(&mut self) -> RootedValueMember {
+        assert!(self.tasks.is_empty(), "decoder still has pending work");
+        assert_eq!(self.values.len(), 1, "completed decoder owns one result");
+        self.values.pop().expect("completed decoder result")
     }
 
     pub(super) fn push_value(&mut self, value: Value, path: &str) -> Result<(), ValueCodecError> {
@@ -246,14 +258,16 @@ mod tests {
                 tasks: TaskStack::empty(),
                 values: Vec::new(),
                 source_resolver: None,
+                frame_sources: None,
             };
             machine.push_aggregate(cell, children);
-            let DecodeProgress::Complete { value: decoded, .. } = machine
+            let DecodeProgress::Complete { .. } = machine
                 .advance(NonZeroUsize::new(1).unwrap())
                 .expect("complete aggregate")
             else {
                 panic!("aggregate should be complete");
             };
+            let decoded = machine.take_completed();
 
             runmat_gc::gc_collect_major().expect("collect with aggregate owner");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());

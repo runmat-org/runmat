@@ -163,6 +163,7 @@ fn cpu_selection_preserves_inaccessible_control_and_result() {
             target,
             valid: true,
         });
+        let output = rooted(value.clone());
         runmat_gc::gc_with_value_mut(&target, |_| {
             let prepared = NativeAutoOffload::new(provider, ThresholdConfig::default())
                 .prepare_operation(
@@ -172,7 +173,7 @@ fn cpu_selection_preserves_inaccessible_control_and_result() {
                     ArgumentOperation::Binary(BinaryOp::Elementwise),
                 )
                 .unwrap();
-            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }));
+            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(output) }));
             assert!(result.is_ok());
         })
         .unwrap();
@@ -197,14 +198,15 @@ fn inaccessible_result_retains_owned_payload_without_publication_scan() {
             target,
             valid: true,
         });
+        let output = rooted(value.clone());
         let result = runmat_gc::gc_with_value_mut(&target, |_| {
             assert!(
                 runmat_runtime::dispatcher::try_visit_gpu_handles(&value, &mut |_| {}).is_err()
             );
             assert!(runmat_runtime::dispatcher::value_contains_gpu(&value));
-            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }))
+            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(output) }))
                 .expect("returned managed owner needs no publication scan");
-            let Value::HandleObject(returned) = &result else {
+            let Value::HandleObject(returned) = result.value() else {
                 panic!("original managed owner");
             };
             assert_eq!(returned.target, target);
@@ -273,7 +275,13 @@ fn nary_preparation_releases_each_partial_upload_and_abandoned_execution() {
         let provider = provider(None);
         let prepared = prepare_nary(provider).unwrap();
         let mut future =
-            Box::pin(prepared.execute(|_| std::future::pending::<Result<Value, RuntimeError>>()));
+            Box::pin(
+                prepared.execute(|_| {
+                    std::future::pending::<
+                        Result<runmat_runtime::execution::RootedValue, RuntimeError>,
+                    >()
+                }),
+            );
         if poll_once {
             assert!(matches!(
                 future
@@ -296,7 +304,7 @@ fn abandoned_preparation_and_failed_call_release_uploads() {
             prepared
                 .into_execution()
                 .1
-                .finish(&Err(RuntimeError::new("call failure")))
+                .finish(Err(&RuntimeError::new("call failure")))
                 .unwrap();
         } else {
             drop(prepared);
@@ -311,7 +319,7 @@ fn nested_return_alias_adopts_only_its_own_upload() {
     let prepared = prepare(provider, &[host(), host()]).unwrap();
     let output = Value::OutputList(vec![Value::OutputList(vec![prepared.args()[0].clone()])]);
     let output = Ok(output);
-    prepared.into_execution().1.finish(&output).unwrap();
+    prepared.into_execution().1.finish(output.as_ref()).unwrap();
     assert_eq!(provider.retired(), vec![2]);
     drop(output);
     assert_eq!(provider.retired(), vec![1, 2]);
@@ -325,7 +333,7 @@ fn borrowed_input_is_never_released_on_call_failure() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("call failure")))
+        .finish(Err(&RuntimeError::new("call failure")))
         .unwrap();
     assert_eq!(provider.retired(), vec![1]);
 }
@@ -339,9 +347,14 @@ fn public_execution_future_releases_uploads_when_dropped_before_or_after_poll() 
     for poll_once in [false, true] {
         let provider = provider(None);
         let prepared = prepare(provider, &[host(), host()]).unwrap();
-        let mut future = Box::pin(
-            prepared.execute(|_args| std::future::pending::<Result<Value, RuntimeError>>()),
-        );
+        let mut future =
+            Box::pin(
+                prepared.execute(|_args| {
+                    std::future::pending::<
+                        Result<runmat_runtime::execution::RootedValue, RuntimeError>,
+                    >()
+                }),
+            );
         if poll_once {
             let mut context = Context::from_waker(futures::task::noop_waker_ref());
             assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
@@ -357,7 +370,8 @@ fn public_execution_adopts_nested_result_alias_and_releases_other_arguments() {
     let provider = provider(None);
     let prepared = prepare(provider, &[host(), host()]).unwrap();
     let result = futures::executor::block_on(
-        prepared.execute(|args| async move { Ok(Value::OutputList(vec![args[0].clone()])) }),
+        prepared
+            .execute(|args| async move { Ok(rooted(Value::OutputList(vec![args[0].clone()]))) }),
     )
     .unwrap();
     assert_eq!(provider.retired(), vec![2]);
@@ -378,7 +392,8 @@ fn failed_primary_leaves_original_arguments_valid_for_independent_preparation() 
         .iter()
         .all(|value| matches!(value, Value::Tensor(_))));
     let imported = prepare(provider, &original).unwrap();
-    let result = futures::executor::block_on(imported.execute(|_| async { Ok(Value::Num(1.)) }));
-    assert_eq!(result.unwrap(), Value::Num(1.));
+    let result =
+        futures::executor::block_on(imported.execute(|_| async { Ok(rooted(Value::Num(1.))) }));
+    assert_eq!(result.unwrap().value(), &Value::Num(1.));
     assert_eq!(provider.retired(), vec![1, 2, 3, 4]);
 }

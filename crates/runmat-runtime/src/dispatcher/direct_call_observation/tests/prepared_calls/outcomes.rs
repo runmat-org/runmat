@@ -1,6 +1,6 @@
 //! Prepared sum/nansum route, fence, and compatibility outcomes.
 use super::*;
-use runmat_value::{IntegerStorage, SparseTensor};
+use runmat_value::{IntegerStorage, SparseTensor, ValueSequence};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -184,8 +184,10 @@ fn compatibility_failure_does_not_publish_a_successful_prepared_body() {
                 IntegerStorage::U64(vec![u64::MAX]),
             )
             .unwrap();
-            ValueSequence::single(Value::SparseTensor(sparse))
-                .map_err(crate::sequence::sequence_error_to_runtime)
+            let sequence = ValueSequence::single(Value::SparseTensor(sparse))
+                .map_err(crate::sequence::sequence_error_to_runtime)?;
+            crate::execution::RootedValueSequence::new(sequence)
+                .map_err(|error| error.into_runtime_error())
         })
     }
     let actual = reduction_binding("sum");

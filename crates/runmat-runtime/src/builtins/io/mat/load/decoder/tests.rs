@@ -131,3 +131,57 @@ fn restoration_cancellation_drops_all_unpublished_entries() {
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert!(!source.token().is_cancelled());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn flat_restoration_publishes_exact_typed_numeric_entries() {
+    let entries = vec![
+        (
+            "unsigned".into(),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+        ),
+        (
+            "signed".into(),
+            Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                    vec![2, 1],
+                )
+                .expect("typed integer tensor"),
+            ),
+        ),
+        ("real".into(), Value::Num(42.25)),
+    ];
+    let expected = entries.clone();
+    let restored = block_on(super::super::reader::restore_loaded_entries(
+        entries, None, None,
+    ))
+    .expect("restore flat entries");
+    assert_eq!(restored.value().as_slice(), expected.as_slice());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn flat_restoration_checks_cancellation_after_rooting_before_publication() {
+    let source = CancellationSource::new();
+    let turns = Arc::new(AtomicUsize::new(0));
+    let observed = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err(ExecutionServiceError::Cancelled) })
+        },
+    );
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "load", &runmat_builtins::LOAD_ERROR_IO);
+    let error = block_on(super::super::reader::restore_loaded_entries(
+        vec![("first".into(), Value::Num(42.25))],
+        None,
+        Some(&mut cooperation),
+    ))
+    .expect_err("cancellation must suppress the entire result");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(turns.load(Ordering::SeqCst), 1);
+}

@@ -7,8 +7,8 @@ use runmat_accelerate_api::{
 };
 use std::future::Future;
 use std::sync::{
-    Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
+    Mutex,
 };
 use std::task::{Context, Poll};
 
@@ -84,12 +84,11 @@ impl AccelProvider for DownloadOwner {
                 })
                 .await;
             }
-            let words = self.probes.lock().unwrap()[ordinal]
-                .with_data(handle, |data| match data {
+            let words =
+                self.probes.lock().unwrap()[ordinal].with_data(handle, |data| match data {
                     HostNumericDataView::F32(words) => words.to_vec(),
                     _ => panic!("fixture allocation must retain its F32 native words"),
-                })
-                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+                })?;
             Ok(HostNumericTensorOwned {
                 data: HostNumericDataOwned::F32(words),
                 shape: handle.shape().to_vec(),

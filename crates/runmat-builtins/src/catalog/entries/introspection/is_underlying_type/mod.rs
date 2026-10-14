@@ -6,6 +6,7 @@ mod inference;
 mod tests;
 pub use contract::*;
 pub const IS_UNDERLYING_TYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "isUnderlyingType",

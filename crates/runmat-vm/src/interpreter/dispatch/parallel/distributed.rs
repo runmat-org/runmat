@@ -1,5 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{execution::RootedValueSequence, RuntimeError};
 use runmat_value::Value;
 
 mod arguments;
@@ -37,8 +37,11 @@ pub(super) async fn execute(
     operation: &crate::BytecodeDistributedOp,
     arguments: Vec<Value>,
     execution: &ExecutionContext,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     use crate::BytecodeDistributedOp as Op;
+
+    let _argument_roots = runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
+        .map_err(|error| error.into_runtime_error())?;
 
     let service = execution
         .runtime
@@ -52,14 +55,15 @@ pub(super) async fn execute(
         requested_outputs,
     } = operation
     {
-        return indices::execute(
+        let sequence = indices::execute(
             &*service,
             *has_lab,
             *requested_outputs,
             arguments,
             execution,
         )
-        .await;
+        .await?;
+        return RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error());
     }
     let value = match operation {
         Op::Create { id, owner, scheme } => {
@@ -114,7 +118,13 @@ pub(super) async fn execute(
                     "getLocalPart requires an SPMD rank context for a multi-partition value",
                 ));
             };
-            service.local_part(*handle, rank).await
+            return service.local_part(*handle, rank).await?.try_map_owned(
+                |value| {
+                    runmat_value::ValueSequence::single(value)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            );
         }
         Op::Materialize => {
             let [input] = arguments::decode(arguments)?;
@@ -125,7 +135,13 @@ pub(super) async fn execute(
                 ));
             };
             runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
-            service.materialize(*handle).await
+            return service.materialize(*handle).await?.try_map_owned(
+                |value| {
+                    runmat_value::ValueSequence::single(value)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            );
         }
         Op::Codistributor => {
             let [input] = arguments::decode(arguments)?;
@@ -162,6 +178,7 @@ pub(super) async fn execute(
                 .map(|handle| Value::Distributed(Box::new(handle)))
         }
     }?;
-    runmat_value::ValueSequence::single(value)
-        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+    let sequence = runmat_value::ValueSequence::single(value)
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+    RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
 }

@@ -2,6 +2,7 @@ use super::errors;
 use super::object;
 use super::selector::assign_with_selector;
 use crate::builtins::structs::core::field_path::{FieldStep, IndexComponent, IndexSelector};
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_builtins::{
     SETFIELD_ERROR_FIELD_EXPECTED, SETFIELD_ERROR_INDEX_SHAPE, SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT,
@@ -13,7 +14,9 @@ pub(super) async fn assign_value(
     leading_index: Option<IndexSelector>,
     steps: Vec<FieldStep>,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs_root = RootedValueLease::for_values([&base, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     if steps.is_empty() {
         return Err(errors::with_message(
             SETFIELD_ERROR_FIELD_EXPECTED.message,
@@ -32,7 +35,7 @@ async fn assign_with_leading_index(
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     match base {
         Value::StructArray(array) => {
             super::struct_array::assign_into_struct_array(array, selector, steps, rhs).await
@@ -48,7 +51,7 @@ async fn assign_without_leading_index(
     base: Value,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     match base {
         Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
         Value::Object(object) => object::assign_into_object(object, steps, rhs).await,
@@ -85,9 +88,9 @@ pub(super) async fn assign_into_value(
     value: Value,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if steps.is_empty() {
-        return Ok(rhs);
+        return root(rhs);
     }
     match value {
         Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
@@ -115,7 +118,11 @@ async fn assign_into_struct(
     mut struct_value: StructValue,
     steps: &[FieldStep],
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _aggregate_root =
+        RootedValueLease::for_traced(&struct_value).map_err(|error| error.into_runtime_error())?;
+    let _rhs_root =
+        RootedValueLease::for_traced(&rhs).map_err(|error| error.into_runtime_error())?;
     let (first, rest) = steps
         .split_first()
         .expect("assignment path is validated before traversal");
@@ -131,12 +138,15 @@ async fn assign_into_struct(
                         &runmat_builtins::SETFIELD_ERROR_MISSING_FIELD,
                     )
                 })?;
-            assign_with_selector(current, selector, rest, rhs).await?
+            let updated = assign_with_selector(current, selector, rest, rhs).await?;
+            let output = updated.value().clone();
+            struct_value.fields.insert(first.name.clone(), output);
+            return root(Value::Struct(struct_value));
         } else {
             rhs
         };
         struct_value.fields.insert(first.name.clone(), updated);
-        return Ok(Value::Struct(struct_value));
+        return root(Value::Struct(struct_value));
     }
     if let Some(selector) = &first.index {
         let current = struct_value
@@ -150,8 +160,10 @@ async fn assign_into_struct(
                 )
             })?;
         let updated = assign_with_selector(current, selector, rest, rhs).await?;
-        struct_value.fields.insert(first.name.clone(), updated);
-        return Ok(Value::Struct(struct_value));
+        struct_value
+            .fields
+            .insert(first.name.clone(), updated.value().clone());
+        return root(Value::Struct(struct_value));
     }
     let current = struct_value
         .fields
@@ -159,6 +171,12 @@ async fn assign_into_struct(
         .cloned()
         .unwrap_or_else(|| Value::Struct(StructValue::new()));
     let updated = assign_into_value(current, rest, rhs).await?;
-    struct_value.fields.insert(first.name.clone(), updated);
-    Ok(Value::Struct(struct_value))
+    struct_value
+        .fields
+        .insert(first.name.clone(), updated.value().clone());
+    root(Value::Struct(struct_value))
+}
+
+pub(super) fn root(value: Value) -> BuiltinResult<RootedValue> {
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }

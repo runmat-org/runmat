@@ -103,6 +103,7 @@ const EFFECTS: [runmat_types::EffectKind; 2] = [
     runmat_types::EffectKind::MayThrow,
 ];
 pub const IND2SUB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ind2sub" },
     category: "array/indexing",

@@ -5,7 +5,7 @@ use test_helpers::execute_source;
 
 fn execute_source_with_extensions(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(source).map_err(Box::new)
 }

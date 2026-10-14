@@ -6,7 +6,9 @@ use runmat_execution::Digest;
 use runmat_hir::FunctionId;
 use runmat_jit::{
     entry::{EntryKey, EntryRegistry, PublishedEntry},
-    invalidation::{DependencyKey, DependencyTracker},
+    invalidation::{
+        DependencyKey, DependencyTracker, PreparedDependencyObservation, ReadyDependencyObservation,
+    },
     tiering::{CompilationMode, RepresentationProfile, TierDecision, TierSiteId, TieringSession},
 };
 
@@ -27,6 +29,58 @@ pub(crate) struct GenericNativeCache {
     failed_compilations: BTreeSet<CompilationKey>,
     #[cfg(test)]
     compilations: usize,
+}
+
+pub(crate) struct PreparedProjectRevision {
+    baseline_namespace: String,
+    observation: PreparedDependencyObservation,
+}
+
+pub(crate) struct ReadyProjectRevision<'a> {
+    observation: ReadyDependencyObservation<'a>,
+    project_scope_revision: &'a mut String,
+    failed_compilations: &'a mut BTreeSet<CompilationKey>,
+    entries: &'a mut EntryRegistry,
+    namespace: String,
+}
+
+impl PreparedProjectRevision {
+    pub(crate) fn admit_commit(
+        self,
+        cache: &mut GenericNativeCache,
+    ) -> Result<ReadyProjectRevision<'_>, runmat_runtime::RuntimeError> {
+        if cache.project_scope_revision != self.baseline_namespace {
+            return Err(super::error::stage(
+                "NativeDependency",
+                "project scope changed after preparation",
+            ));
+        }
+        let namespace = self.observation.revision().to_owned();
+        let observation = self
+            .observation
+            .admit_commit(&mut cache.dependencies)
+            .map_err(|error| super::error::stage("NativeDependency", error))?;
+        Ok(ReadyProjectRevision {
+            observation,
+            project_scope_revision: &mut cache.project_scope_revision,
+            failed_compilations: &mut cache.failed_compilations,
+            entries: &mut cache.entries,
+            namespace,
+        })
+    }
+}
+
+impl ReadyProjectRevision<'_> {
+    pub(crate) fn commit(self) {
+        if self.namespace == *self.project_scope_revision {
+            self.observation.commit();
+            return;
+        }
+        let (_, current) = self.observation.commit_with_snapshot();
+        *self.project_scope_revision = self.namespace;
+        self.failed_compilations.clear();
+        self.entries.invalidate(&current);
+    }
 }
 
 struct PendingCompilation {
@@ -93,7 +147,7 @@ impl GenericNativeCache {
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
     ) -> Result<PublishedEntry, runmat_runtime::RuntimeError> {
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
         let key = entry_key(unit, preferred_function)?;
         if let Some(entry) = self.entries.resolve(&key, &current) {
@@ -128,7 +182,7 @@ impl GenericNativeCache {
         preferred_function: Option<&str>,
         invocation_profile: Option<&RepresentationProfile>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
         let key = entry_key(unit, preferred_function)?;
         self.publish_completed(&current)?;
@@ -316,7 +370,7 @@ impl GenericNativeCache {
         let Some(profile) = profile else {
             return Ok(None);
         };
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
         self.publish_completed(&current)?;
         let key = entry_key(unit, preferred_function)?;
@@ -574,27 +628,27 @@ impl GenericNativeCache {
         Ok(())
     }
 
-    pub(crate) fn publish_project_revision(
-        &mut self,
+    pub(crate) fn prepare_project_revision(
+        &self,
         revision: Option<&runmat_package::ProjectRevision>,
-    ) -> Result<(), runmat_runtime::RuntimeError> {
-        let revision = revision
+    ) -> Result<PreparedProjectRevision, runmat_runtime::RuntimeError> {
+        let namespace = revision
             .map(runmat_package::ProjectRevision::cache_namespace)
             .unwrap_or_else(|| "loose".to_string());
-        if revision == self.project_scope_revision {
-            return Ok(());
-        }
-        self.project_scope_revision = revision.clone();
-        self.failed_compilations.clear();
-        self.observe(DependencyKey::Program("session-project".into()), revision)?;
-        let current = self.dependencies.snapshot_all();
-        self.entries.invalidate(&current);
-        Ok(())
+        let observation = self
+            .dependencies
+            .prepare_observation(DependencyKey::Program("session-project".into()), namespace)
+            .map_err(|error| super::error::stage("NativeDependency", error))?;
+        Ok(PreparedProjectRevision {
+            baseline_namespace: self.project_scope_revision.clone(),
+            observation,
+        })
     }
 
     fn observe_unit_dependencies(
         &mut self,
         unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
     ) -> Result<BTreeSet<DependencyKey>, runmat_runtime::RuntimeError> {
         let revision = &unit.revision().program_revision;
         let program_key = DependencyKey::Program(revision.graph_digest().to_string());
@@ -611,7 +665,30 @@ impl GenericNativeCache {
         )?;
         let mut keys = BTreeSet::from([program_key, project_scope_key, catalog_key]);
 
-        let referenced = super::dependencies::analyze(unit.mir());
+        let roots = unit
+            .script_entrypoint()
+            .into_iter()
+            .chain(preferred_function.and_then(|name| unit.native_function_id(name)))
+            .collect::<BTreeSet<_>>();
+        if roots.is_empty() {
+            return Err(super::error::stage(
+                "NativeTierIdentity",
+                "entry function is missing",
+            ));
+        }
+        let selected = runmat_mir::analysis::selected_function_closure(unit.mir(), &roots);
+        let mut referenced = super::dependencies::analyze(unit.mir(), &selected);
+        if !referenced.super_callers.is_empty() {
+            let registry = unit.bytecode().function_registry();
+            for caller in &referenced.super_callers {
+                for target in registry
+                    .retained_super_constructor_targets_for(*caller)
+                    .map_err(|error| super::error::stage("NativeSuperConstructorOwner", error))?
+                {
+                    referenced.functions.insert(target.function);
+                }
+            }
+        }
         for function in referenced.functions {
             let mut names = unit
                 .functions()
@@ -800,6 +877,7 @@ mod revision_tests {
             declaring_class: runmat_types::ClassIdentity::new("RevisionOwner").unwrap(),
             method: runmat_types::MethodName::from("revisionTarget"),
             is_static: false,
+            role: runmat_types::ClassMethodRole::Ordinary,
         });
         assert_ne!(
             before_owner,

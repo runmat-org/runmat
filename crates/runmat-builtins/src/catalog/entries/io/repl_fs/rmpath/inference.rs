@@ -39,8 +39,8 @@ pub(in crate::catalog::entries::io::repl_fs) fn infer(
 mod tests {
     use super::*;
     use runmat_types::{
-        CapabilityRequirement, LiteralContext, NumericClass, NumericDomain, NumericFact,
-        OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
+        CapabilityRequirement, EffectKind, LiteralContext, NumericClass, NumericDomain,
+        NumericFact, OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
     };
 
     fn request(arguments: Vec<ValueFact>) -> CallRequest {
@@ -71,6 +71,15 @@ mod tests {
             .capabilities
             .0
             .contains(&CapabilityRequirement::Filesystem));
+        let expected_effects = [
+            EffectKind::EnvironmentRead,
+            EffectKind::EnvironmentWrite,
+            EffectKind::FilesystemRead,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ];
+        assert_eq!(entry.contract.effects, expected_effects.as_slice());
+        assert_eq!(valid.effects.0, expected_effects.into_iter().collect());
         assert!(valid.diagnostics.is_empty());
         assert_eq!(invalid.diagnostics.len(), 1);
         assert_eq!(invalid.outputs[0].kind, ValueKindFact::Character);

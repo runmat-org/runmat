@@ -8,12 +8,13 @@ fn parses_supported_uniform_controls() {
         Value::Int(runmat_value::IntValue::I32(0)),
         Value::String("off".into()),
     ] {
-        let Value::Struct(_) = call(
+        let result = call(
             Value::FunctionHandle("class".into()),
             numbers(),
             vec![Value::String("UniformOutput".into()), value],
         )
-        .unwrap() else {
+        .unwrap();
+        let Value::Struct(_) = result.value() else {
             panic!("expected nonuniform structure")
         };
     }

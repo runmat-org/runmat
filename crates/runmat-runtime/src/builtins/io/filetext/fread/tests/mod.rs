@@ -138,7 +138,7 @@ fn double_values(tensor: &Tensor) -> &[f64] {
 }
 
 #[cfg(feature = "wgpu")]
-fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<crate::execution::RootedValue> {
     crate::call_builtin(name, args)
 }
 

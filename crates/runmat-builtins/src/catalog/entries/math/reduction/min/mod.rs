@@ -13,6 +13,7 @@ pub use contract::{
 };
 
 pub const MIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "min" },
     category: "math/reduction",

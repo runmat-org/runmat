@@ -37,7 +37,7 @@ impl Drop for CountingProvenance {
 struct PendingEvaluation(Rc<Cell<usize>>);
 
 impl Future for PendingEvaluation {
-    type Output = Result<ValueSequence, RuntimeError>;
+    type Output = Result<crate::execution::RootedValueSequence, RuntimeError>;
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Pending
     }
@@ -111,7 +111,7 @@ impl RuntimeSourceEvaluationService for PendingExecutor {
         &self,
         _: RuntimeContext,
         _: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         self.entries.set(self.entries.get() + 1);
         Box::pin(PendingEvaluation(self.drops.clone()))
     }

@@ -10,6 +10,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 pub use contract::{ANYMISSING_DESCRIPTOR, ANYMISSING_INTEGER_CAPABILITIES};
 
 pub const ANYMISSING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "anymissing" },
     category: "missing",

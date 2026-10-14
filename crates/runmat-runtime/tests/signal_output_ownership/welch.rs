@@ -87,10 +87,10 @@ fn explicit_window_is_caller_intent_not_a_provider_sibling() {
         "pwelch", &arguments, 2,
     ))
     .unwrap();
-    let Value::OutputList(values) = output else {
+    let Value::OutputList(values) = output.value() else {
         panic!("two Welch outputs")
     };
-    for value in &values {
+    for value in values.iter() {
         let Value::GpuTensor(handle) = value else {
             panic!("explicit caller output")
         };
@@ -100,7 +100,7 @@ fn explicit_window_is_caller_intent_not_a_provider_sibling() {
         );
         assert!(!handle.shares_allocation_with(&window.handle));
     }
-    drop(values);
+    drop(output);
     provider.assert_retired();
     assert_eq!(source.probe.retirements(), 0);
     assert_eq!(window.probe.retirements(), 0);
@@ -183,13 +183,15 @@ fn welch_nonzero_psd_and_typed_complex_fallback_match_host() {
             "pwelch", &host_args, 2,
         ))
         .unwrap();
-        let resident = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let resident_output = block_on(runmat_runtime::call_builtin_async_with_outputs(
             "pwelch",
             &args(&source.handle),
             2,
         ))
         .unwrap();
-        let (Value::OutputList(host), Value::OutputList(resident)) = (host, resident) else {
+        let (Value::OutputList(host), Value::OutputList(resident)) =
+            (host.value(), resident_output.value())
+        else {
             panic!("two Welch outputs")
         };
         let rows = if imaginary.is_some() { 4 } else { 3 };
@@ -199,7 +201,7 @@ fn welch_nonzero_psd_and_typed_complex_fallback_match_host() {
         } else {
             expected[1] *= 2.0;
         }
-        for (index, (host, resident)) in host.iter().zip(&resident).enumerate() {
+        for (index, (host, resident)) in host.iter().zip(resident.iter()).enumerate() {
             let (Value::Tensor(host), Value::GpuTensor(resident)) = (host, resident) else {
                 panic!("host and restored native outputs")
             };
@@ -231,7 +233,7 @@ fn welch_nonzero_psd_and_typed_complex_fallback_match_host() {
         }
         assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
-        drop(resident);
+        drop(resident_output);
         provider.assert_retired();
         assert_eq!(source.probe.retirements(), 0);
     }
@@ -339,7 +341,7 @@ fn welch_native_psd_and_frequencies_preserve_class_and_output_intent() {
                     2,
                 ))
                 .unwrap();
-                let Value::OutputList(values) = output else {
+                let Value::OutputList(values) = output.value() else {
                     panic!("Welch two-output carrier")
                 };
                 assert_eq!(values.len(), 2);
@@ -391,7 +393,7 @@ fn welch_native_psd_and_frequencies_preserve_class_and_output_intent() {
                     provider.downloads.load(Ordering::SeqCst),
                     usize::from(matches!(mode, Mode::Unsupported))
                 );
-                drop(values);
+                drop(output);
                 provider.assert_retired();
                 assert_eq!(input.probe.retirements(), 0);
             }

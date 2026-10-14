@@ -1,12 +1,20 @@
+use runmat_process_host::private_bytes::PrivateByteLease;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use crate::cpython::Interpreter;
-use crate::object::{PythonCallbackCommand, PythonLaneEvent};
+use crate::session::import_owner::ProcessImportReservation;
+use crate::session::protocol::{
+    PythonCallbackCommand, PythonCallbackMailbox, PythonLaneCompletion, PythonLaneEvent,
+    PythonLaneEventSink, PythonLaneReply,
+};
 use crate::{
-    PythonCallbackInvocation, PythonError, PythonInstallation, PythonObjectMetadata, PythonValue,
+    InstalledPythonArtifacts, PythonCallbackInvocation, PythonError, PythonInstallation,
+    PythonObjectMetadata, PythonValue,
 };
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -14,7 +22,7 @@ static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone)]
 struct ActiveReentry {
     session: u64,
-    commands: mpsc::SyncSender<PythonCallbackCommand>,
+    mailbox: PythonCallbackMailbox,
 }
 
 thread_local! {
@@ -75,14 +83,17 @@ pub enum PythonCall {
     },
 }
 
+enum LaneOperation {
+    Invoke(PythonCall),
+    Metadata(crate::PythonObjectHandle),
+}
+
 enum LaneRequest {
-    Invoke {
-        call: PythonCall,
-        events: mpsc::SyncSender<PythonLaneEvent>,
-    },
-    Metadata {
-        handle: crate::PythonObjectHandle,
-        reply: mpsc::SyncSender<Result<PythonObjectMetadata, PythonError>>,
+    Operation {
+        operation: LaneOperation,
+        events: PythonLaneEventSink,
+        admitted: Option<OwnedActiveCall>,
+        observer: Option<Box<dyn super::PythonLaneObserver>>,
     },
     Shutdown,
 }
@@ -90,15 +101,83 @@ enum LaneRequest {
 struct SessionInner {
     id: u64,
     requests: mpsc::Sender<LaneRequest>,
-    lane: Mutex<Option<JoinHandle<()>>>,
+    lane: Mutex<Option<JoinHandle<bool>>>,
     interrupt: crate::cpython::PythonInterrupt,
+    // Kept by every cloned session until the interpreter lane has joined.
+    _byte_leases: Vec<PrivateByteLease>,
+    admission: Arc<Mutex<SessionAdmission>>,
+}
+
+#[derive(Default)]
+struct SessionAdmission {
+    retirement_requested: bool,
+    active_calls: usize,
+    joined_cleanly: Option<bool>,
+}
+
+struct ActiveCall<'a>(&'a SessionInner);
+
+struct OwnedActiveCall(Arc<Mutex<SessionAdmission>>);
+
+struct LaneByteGuard {
+    leases: Vec<PrivateByteLease>,
+    cleaned: bool,
+}
+
+impl Drop for LaneByteGuard {
+    fn drop(&mut self) {
+        if !self.cleaned {
+            for bytes in &self.leases {
+                let _ =
+                    bytes.persist_unverified(None, "Python execution lane did not verify cleanup");
+            }
+        }
+    }
+}
+
+impl Drop for OwnedActiveCall {
+    fn drop(&mut self) {
+        let mut admission = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        admission.active_calls -= 1;
+    }
+}
+
+impl Drop for ActiveCall<'_> {
+    fn drop(&mut self) {
+        let mut admission = self
+            .0
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        admission.active_calls -= 1;
+    }
 }
 
 impl Drop for SessionInner {
     fn drop(&mut self) {
         let _ = self.requests.send(LaneRequest::Shutdown);
         if let Some(lane) = self.lane.get_mut().ok().and_then(Option::take) {
-            let _ = lane.join();
+            if self
+                .admission
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .active_calls
+                != 0
+            {
+                // The lane still owns its selected byte guard and will clean
+                // or persist it after the admitted call actually completes.
+                // Joining here would block a cancelled Runtime future.
+                drop(lane);
+                return;
+            }
+            if !matches!(lane.join(), Ok(true)) {
+                for bytes in &self._byte_leases {
+                    let _ = bytes.persist_unverified(None, "Python interpreter lane panicked");
+                }
+            }
         }
     }
 }
@@ -109,41 +188,251 @@ pub struct PythonSession {
 }
 
 impl PythonSession {
+    /// Identity only: stale matching authority remains an error at the
+    /// reentry submission boundary, not a reason to ordinary-submit.
+    pub fn owns_reentry_authority(&self, authority: &super::PythonReentryAuthority) -> bool {
+        authority.same_session(self.inner.id)
+    }
+
+    /// A selected owner may retire only when no invocation clone can still
+    /// submit work. This never blocks on a potentially uninterruptible lane.
+    pub fn request_retirement(&self) -> bool {
+        {
+            let mut admission = self
+                .inner
+                .admission
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !admission.retirement_requested {
+                if Arc::strong_count(&self.inner) != 1 || admission.active_calls != 0 {
+                    return false;
+                }
+                admission.retirement_requested = true;
+                let _ = self.inner.requests.send(LaneRequest::Shutdown);
+            }
+        }
+        self.retirement_complete()
+    }
+
+    pub fn retirement_complete(&self) -> bool {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !admission.retirement_requested {
+            return false;
+        }
+        if let Some(joined_cleanly) = admission.joined_cleanly {
+            return joined_cleanly;
+        }
+        let mut lane = self
+            .inner
+            .lane
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if lane.as_ref().is_some_and(|lane| !lane.is_finished()) {
+            return false;
+        }
+        let joined_cleanly = lane
+            .take()
+            .is_none_or(|lane| matches!(lane.join(), Ok(true)));
+        if !joined_cleanly {
+            for bytes in &self.inner._byte_leases {
+                let _ = bytes.persist_unverified(None, "Python interpreter lane panicked");
+            }
+        }
+        admission.joined_cleanly = Some(joined_cleanly);
+        joined_cleanly
+    }
+
+    fn admit_call(&self) -> Result<ActiveCall<'_>, PythonError> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if admission.retirement_requested {
+            return Err(PythonError::host(
+                "PythonHostError",
+                "the Python execution lane is retiring",
+            ));
+        }
+        admission.active_calls += 1;
+        Ok(ActiveCall(&self.inner))
+    }
+
+    fn admit_owned_call(&self) -> Result<OwnedActiveCall, PythonError> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if admission.retirement_requested {
+            return Err(PythonError::host(
+                "PythonHostError",
+                "the Python execution lane is retiring",
+            ));
+        }
+        admission.active_calls += 1;
+        Ok(OwnedActiveCall(Arc::clone(&self.inner.admission)))
+    }
+
     pub fn start(config: PythonSessionConfig) -> Result<Self, PythonError> {
+        Self::start_with_lease(config, None)
+    }
+
+    pub fn start_with_lease(
+        config: PythonSessionConfig,
+        selected_bytes: Option<PrivateByteLease>,
+    ) -> Result<Self, PythonError> {
+        Self::start_with_leases(config, selected_bytes.into_iter().collect())
+    }
+
+    pub fn start_with_leases(
+        config: PythonSessionConfig,
+        byte_leases: Vec<PrivateByteLease>,
+    ) -> Result<Self, PythonError> {
+        Self::start_with_installed_artifacts(config, byte_leases, None)
+    }
+
+    /// The installed owner, not caller-supplied module paths, certifies which
+    /// private wheel imports this lane may remove when it retires.
+    pub fn start_with_installed_artifacts(
+        config: PythonSessionConfig,
+        mut byte_leases: Vec<PrivateByteLease>,
+        installed: Option<&InstalledPythonArtifacts>,
+    ) -> Result<Self, PythonError> {
+        if let Some(installed) = installed {
+            let installed_lease = installed.byte_lease();
+            if !byte_leases
+                .iter()
+                .any(|lease| lease.path() == installed_lease.path())
+            {
+                byte_leases.push(installed_lease);
+            }
+        }
+        if installed.is_some_and(|installed| {
+            !installed
+                .module_paths()
+                .iter()
+                .all(|path| config.module_paths.contains(path))
+        }) {
+            return Err(PythonError::host(
+                "PythonImportOwnerError",
+                "installed wheel roots differ from the active Python configuration",
+            ));
+        }
+        let import_owner = installed
+            .map(ProcessImportReservation::reserve)
+            .transpose()?;
         let (requests, receiver) = mpsc::channel();
         let (started, startup) = mpsc::sync_channel(1);
+        let lane_bytes = byte_leases.clone();
         let lane = thread::Builder::new()
             .name("runmat-python".to_owned())
             .spawn(move || {
-                let interpreter = match Interpreter::start(&config.installation) {
-                    Ok(interpreter) => {
-                        if let Err(error) = interpreter.prepend_module_paths(&config.module_paths) {
-                            let _ = started.send(Err(error));
-                            interpreter.clear();
-                            return;
-                        }
-                        let _ = started.send(Ok(interpreter.interrupt_handle()));
-                        interpreter
-                    }
-                    Err(error) => {
-                        let _ = started.send(Err(error));
-                        return;
-                    }
+                let mut lane_guard = LaneByteGuard {
+                    leases: lane_bytes,
+                    cleaned: false,
                 };
-                while let Ok(request) = receiver.recv() {
-                    match request {
-                        LaneRequest::Invoke { call, events } => {
-                            let result = interpreter
-                                .with_callback_events(events.clone(), || interpreter.invoke(call));
-                            let _ = events.send(PythonLaneEvent::Complete(result));
+                let cleaned = (|| {
+                    let mut import_owner = import_owner;
+                    let empty_names = BTreeSet::new();
+                    let interpreter = match Interpreter::start(&config.installation) {
+                        Ok(interpreter) => {
+                            if let Some(owner) = import_owner.as_ref() {
+                                if let Err(error) =
+                                    interpreter.admit_managed_imports(&owner.imports().names)
+                                {
+                                    let _ = started.send(Err(error));
+                                    return interpreter
+                                        .clear_with_import_roots(&[], &owner.imports().names);
+                                }
+                            }
+                            let managed = import_owner.as_ref().map(|owner| {
+                                (
+                                    owner.imports().roots.as_slice(),
+                                    &owner.imports().byte_lease,
+                                )
+                            });
+                            if let Err(error) =
+                                interpreter.prepend_module_paths(&config.module_paths, managed)
+                            {
+                                let _ = started.send(Err(error));
+                                let cleaned = interpreter.clear_with_import_roots(
+                                    import_owner
+                                        .as_ref()
+                                        .map_or(&[][..], |owner| owner.imports().roots.as_slice()),
+                                    import_owner
+                                        .as_ref()
+                                        .map_or(&empty_names, |owner| &owner.imports().names),
+                                ) && !interpreter.managed_exposure_unverified();
+                                if !cleaned {
+                                    if let Some(owner) = import_owner.as_mut() {
+                                        owner.retain_conflict();
+                                    }
+                                }
+                                return cleaned;
+                            }
+                            let _ = started.send(Ok(interpreter.interrupt_handle()));
+                            interpreter
                         }
-                        LaneRequest::Metadata { handle, reply } => {
-                            let _ = reply.send(interpreter.metadata(handle));
+                        Err(error) => {
+                            let _ = started.send(Err(error));
+                            return true;
                         }
-                        LaneRequest::Shutdown => break,
+                    };
+                    while let Ok(request) = receiver.recv() {
+                        match request {
+                            LaneRequest::Operation {
+                                operation,
+                                events,
+                                admitted,
+                                observer,
+                            } => {
+                                let result = super::observation::observe(observer, || {
+                                    interpreter.with_callback_events(events.clone(), || {
+                                        match operation {
+                                            LaneOperation::Invoke(call) => interpreter
+                                                .invoke(
+                                                    call,
+                                                    import_owner
+                                                        .as_ref()
+                                                        .map_or(&[][..], |owner| {
+                                                            owner.imports().roots.as_slice()
+                                                        }),
+                                                )
+                                                .map(PythonLaneCompletion::Values),
+                                            LaneOperation::Metadata(handle) => interpreter
+                                                .metadata(handle)
+                                                .map(PythonLaneCompletion::Metadata),
+                                        }
+                                    })
+                                });
+                                let _ = events.send(PythonLaneEvent::Complete(result));
+                                drop(admitted);
+                            }
+                            LaneRequest::Shutdown => break,
+                        }
                     }
-                }
-                interpreter.clear();
+                    let cleaned = interpreter.clear_with_import_roots(
+                        import_owner
+                            .as_ref()
+                            .map_or(&[][..], |owner| owner.imports().roots.as_slice()),
+                        import_owner
+                            .as_ref()
+                            .map_or(&empty_names, |owner| &owner.imports().names),
+                    );
+                    if !cleaned {
+                        if let Some(owner) = import_owner.as_mut() {
+                            owner.retain_conflict();
+                        }
+                    }
+                    cleaned
+                })();
+                lane_guard.cleaned = cleaned;
+                cleaned
             })
             .map_err(|error| {
                 PythonError::host(
@@ -158,14 +447,24 @@ impl PythonSession {
                     requests,
                     lane: Mutex::new(Some(lane)),
                     interrupt,
+                    _byte_leases: byte_leases,
+                    admission: Arc::new(Mutex::new(SessionAdmission::default())),
                 }),
             }),
             Ok(Err(error)) => {
-                let _ = lane.join();
+                if !matches!(lane.join(), Ok(true)) {
+                    for bytes in &byte_leases {
+                        let _ = bytes.persist_unverified(None, "Python startup lane panicked");
+                    }
+                }
                 Err(error)
             }
             Err(error) => {
-                let _ = lane.join();
+                if !matches!(lane.join(), Ok(true)) {
+                    for bytes in &byte_leases {
+                        let _ = bytes.persist_unverified(None, "Python startup lane panicked");
+                    }
+                }
                 Err(PythonError::host(
                     "PythonHostError",
                     format!("Python execution lane ended during startup: {error}"),
@@ -197,21 +496,43 @@ impl PythonSession {
         cancellation: Option<&dyn Fn() -> bool>,
         mut callback: impl FnMut(PythonCallbackInvocation) -> Result<PythonValue, PythonError>,
     ) -> Result<Vec<PythonValue>, PythonError> {
+        let _active_call = self.admit_call()?;
         if let Some(active) = ACTIVE_REENTRY.with(|active| active.borrow().clone()) {
             if active.session == self.inner.id {
-                let (reply, response) = mpsc::sync_channel(1);
-                active
-                    .commands
-                    .send(PythonCallbackCommand::Reenter { call, reply })
-                    .map_err(lane_ended)?;
-                return response.recv().map_err(lane_ended)?;
+                let (events, response) = mpsc::sync_channel(1);
+                active.mailbox.command(PythonCallbackCommand::Reenter {
+                    call,
+                    reply: PythonLaneReply::Events {
+                        sink: PythonLaneEventSink::Sync(events),
+                        completion: PythonLaneCompletion::Values,
+                    },
+                    observer: None,
+                })?;
+                // A synchronous callback handler can service nested callbacks
+                // on the same typed event protocol. It cannot safely request
+                // an interrupt while the callback lane holds the GIL.
+                return self.drive_sync_events(response, None, &mut callback);
             }
         }
         let (events, response) = mpsc::sync_channel(1);
         self.inner
             .requests
-            .send(LaneRequest::Invoke { call, events })
+            .send(LaneRequest::Operation {
+                operation: LaneOperation::Invoke(call),
+                events: PythonLaneEventSink::Sync(events),
+                admitted: None,
+                observer: None,
+            })
             .map_err(lane_ended)?;
+        self.drive_sync_events(response, cancellation, &mut callback)
+    }
+
+    fn drive_sync_events(
+        &self,
+        response: mpsc::Receiver<PythonLaneEvent>,
+        cancellation: Option<&dyn Fn() -> bool>,
+        callback: &mut impl FnMut(PythonCallbackInvocation) -> Result<PythonValue, PythonError>,
+    ) -> Result<Vec<PythonValue>, PythonError> {
         let mut interrupted = false;
         loop {
             let event = match response.recv_timeout(std::time::Duration::from_millis(10)) {
@@ -231,15 +552,13 @@ impl PythonSession {
                 Err(error) => return Err(lane_ended(error)),
             };
             match event {
-                PythonLaneEvent::Complete(result) => return result,
-                PythonLaneEvent::Callback {
-                    invocation,
-                    commands,
-                } => {
+                PythonLaneEvent::Complete(result) => return result?.into_values(),
+                PythonLaneEvent::Callback(mut event) => {
+                    let (invocation, completion) = event.take_parts();
                     let previous = ACTIVE_REENTRY.with(|active| {
                         active.replace(Some(ActiveReentry {
                             session: self.inner.id,
-                            commands: commands.clone(),
+                            mailbox: completion.mailbox(),
                         }))
                     });
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -254,28 +573,150 @@ impl PythonSession {
                     ACTIVE_REENTRY.with(|active| {
                         active.replace(previous);
                     });
-                    commands
-                        .send(PythonCallbackCommand::Return(result))
-                        .map_err(lane_ended)?;
+                    completion.finish(result);
                 }
             }
         }
+    }
+
+    /// The Runtime path yields to its VM continuation while the single
+    /// interpreter lane services callback and exact-session reentry events.
+    pub async fn invoke_with_async_callback<F, Fut>(
+        &self,
+        call: PythonCall,
+        reentry: Option<&super::PythonReentryAuthority>,
+        observer: Option<Box<dyn super::PythonLaneObserver>>,
+        callback: F,
+    ) -> Result<Vec<PythonValue>, PythonError>
+    where
+        F: FnMut(PythonCallbackInvocation, super::PythonReentryAuthority) -> Fut,
+        Fut: Future<Output = Result<PythonValue, PythonError>> + 'static,
+    {
+        if let Some(reentry) = reentry {
+            if !reentry.matches(self.inner.id) {
+                return Err(PythonError::host(
+                    "PythonCallbackError",
+                    "Python callback reentry authority is stale or belongs to another session",
+                ));
+            }
+            let admitted = self.admit_call()?;
+            let result = reentry.invoke(call, observer, callback).await;
+            drop(admitted);
+            return result;
+        }
+        let admitted = self.admit_owned_call()?;
+        let (events, response) = futures::channel::mpsc::unbounded();
+        self.inner
+            .requests
+            .send(LaneRequest::Operation {
+                operation: LaneOperation::Invoke(call),
+                events: PythonLaneEventSink::Async(events),
+                admitted: Some(admitted),
+                observer,
+            })
+            .map_err(lane_ended)?;
+        super::event_pump::drive(self.inner.id, response, callback)
+            .await?
+            .into_values()
     }
 
     pub fn metadata(
         &self,
         handle: crate::PythonObjectHandle,
     ) -> Result<PythonObjectMetadata, PythonError> {
-        let (reply, response) = mpsc::sync_channel(1);
+        self.metadata_with_reentry(handle, None)
+    }
+
+    pub fn metadata_with_reentry(
+        &self,
+        handle: crate::PythonObjectHandle,
+        reentry: Option<&super::PythonReentryAuthority>,
+    ) -> Result<PythonObjectMetadata, PythonError> {
+        let _active_call = self.admit_call()?;
+        if let Some(reentry) = reentry {
+            if !reentry.matches(self.inner.id) {
+                return Err(PythonError::host(
+                    "PythonCallbackError",
+                    "Python callback reentry authority is stale or belongs to another session",
+                ));
+            }
+            return reentry.metadata(handle);
+        }
+        if let Some(active) = ACTIVE_REENTRY.with(|active| active.borrow().clone()) {
+            if active.session == self.inner.id {
+                let (reply, response) = mpsc::sync_channel(1);
+                active.mailbox.command(PythonCallbackCommand::Metadata {
+                    handle,
+                    reply: PythonLaneReply::Sync(reply),
+                    observer: None,
+                })?;
+                return response.recv().map_err(lane_ended)?;
+            }
+        }
+        let (events, response) = mpsc::sync_channel(1);
         self.inner
             .requests
-            .send(LaneRequest::Metadata { handle, reply })
+            .send(LaneRequest::Operation {
+                operation: LaneOperation::Metadata(handle),
+                events: PythonLaneEventSink::Sync(events),
+                admitted: None,
+                observer: None,
+            })
             .map_err(lane_ended)?;
-        response.recv().map_err(lane_ended)?
+        loop {
+            match response.recv().map_err(lane_ended)? {
+                PythonLaneEvent::Complete(result) => return result?.into_metadata(),
+                PythonLaneEvent::Callback(mut event) => {
+                    let (_, completion) = event.take_parts();
+                    completion.finish(Err(PythonError::host(
+                        "PythonCallbackError",
+                        "metadata has no RunMat callback handler",
+                    )));
+                }
+            }
+        }
+    }
+
+    pub async fn metadata_with_reentry_async<F, Fut>(
+        &self,
+        handle: crate::PythonObjectHandle,
+        reentry: Option<&super::PythonReentryAuthority>,
+        observer: Option<Box<dyn super::PythonLaneObserver>>,
+        callback: F,
+    ) -> Result<PythonObjectMetadata, PythonError>
+    where
+        F: FnMut(PythonCallbackInvocation, super::PythonReentryAuthority) -> Fut,
+        Fut: Future<Output = Result<PythonValue, PythonError>> + 'static,
+    {
+        if let Some(reentry) = reentry {
+            let _active_call = self.admit_call()?;
+            if !reentry.matches(self.inner.id) {
+                return Err(PythonError::host(
+                    "PythonCallbackError",
+                    "Python callback reentry authority is stale or belongs to another session",
+                ));
+            }
+            reentry.metadata_async(handle, observer, callback).await
+        } else {
+            let admitted = self.admit_owned_call()?;
+            let (events, response) = futures::channel::mpsc::unbounded();
+            self.inner
+                .requests
+                .send(LaneRequest::Operation {
+                    operation: LaneOperation::Metadata(handle),
+                    events: PythonLaneEventSink::Async(events),
+                    admitted: Some(admitted),
+                    observer,
+                })
+                .map_err(lane_ended)?;
+            super::event_pump::drive(self.inner.id, response, callback)
+                .await?
+                .into_metadata()
+        }
     }
 }
 
-fn lane_ended(error: impl std::fmt::Display) -> PythonError {
+pub(super) fn lane_ended(error: impl std::fmt::Display) -> PythonError {
     PythonError::host(
         "PythonHostError",
         format!("Python execution lane is unavailable: {error}"),
@@ -319,6 +760,39 @@ mod tests {
             })
             .expect("start selected CPython"),
         )
+    }
+
+    #[test]
+    fn selected_bytes_outlive_cloned_lane_until_retirement() {
+        let installation = match discover_python(&PythonDiscoveryRequest::default()) {
+            Ok(installation) => installation,
+            Err(error) => {
+                eprintln!("Python byte-retirement execution unavailable: {error}");
+                return;
+            }
+        };
+        let lease = PrivateByteLease::new_attempt_scratch().expect("private byte owner");
+        let private_path = lease.path().to_path_buf();
+        let session = PythonSession::start_with_lease(
+            PythonSessionConfig {
+                installation,
+                module_paths: Vec::new(),
+            },
+            Some(lease.clone()),
+        )
+        .expect("start selected CPython");
+        drop(lease);
+        let active = session.clone();
+        assert!(!session.request_retirement());
+        assert!(private_path.exists());
+        drop(active);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !session.request_retirement() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(session.retirement_complete());
+        drop(session);
+        assert!(!private_path.exists());
     }
 
     #[test]
@@ -381,6 +855,35 @@ mod tests {
         };
         let metadata = session.metadata(*handle).expect("inspect live object");
         assert_eq!(metadata.type_name, "object");
+        let probe = session
+            .invoke_with_callback(
+                PythonCall::ExecutePersistent {
+                    code: "class Meta(type):\n    def __getattribute__(cls, name):\n        if name == '__name__':\n            return callback()\n        return super().__getattribute__(name)\nclass Probe(metaclass=Meta):\n    def __iter__(self):\n        raise TypeError('metadata must not iterate')\nresult = Probe()".into(),
+                    inputs: vec![("callback".into(), PythonValue::Callback(17))],
+                    outputs: vec!["result".into()],
+                },
+                |_| Ok(PythonValue::String("Probe".into())),
+            )
+            .expect("construct metadata callback probe");
+        let [PythonValue::Object(probe_handle)] = probe.as_slice() else {
+            panic!("expected metadata probe object");
+        };
+        let sync_error = session
+            .metadata(*probe_handle)
+            .expect_err("metadata without a callback service must fail");
+        assert_eq!(sync_error.type_name, "RuntimeError");
+        let probed = futures::executor::block_on(session.metadata_with_reentry_async(
+            *probe_handle,
+            None,
+            None,
+            |invocation, _| async move {
+                assert_eq!(invocation.callback, 17);
+                Ok(PythonValue::String("Probe".into()))
+            },
+        ))
+        .expect("metadata callback runs through the origin event pump");
+        assert_eq!(probed.type_name, "Probe");
+        assert_eq!(probed.iterable, Some(true));
         session
             .invoke(PythonCall::Release { handle: *handle })
             .expect("release object");
@@ -589,6 +1092,45 @@ mod tests {
                 },
             )
             .expect("callback and nested Python call");
+        assert!(matches!(result.as_slice(), [PythonValue::Signed(42)]));
+
+        let nested = session.clone();
+        let result = session
+            .invoke_with_callback(
+                PythonCall::ExecutePersistent {
+                    code: "result = callback(40)".into(),
+                    inputs: vec![("callback".into(), PythonValue::Callback(7))],
+                    outputs: vec!["result".into()],
+                },
+                move |invocation| {
+                    assert_eq!(invocation.callback, 7);
+                    nested
+                        .invoke_with_callback(
+                            PythonCall::ExecutePersistent {
+                                code: "result = callback(41)".into(),
+                                inputs: vec![("callback".into(), PythonValue::Callback(8))],
+                                outputs: vec!["result".into()],
+                            },
+                            |nested_invocation| {
+                                assert_eq!(nested_invocation.callback, 8);
+                                assert!(matches!(
+                                    nested_invocation.arguments.as_slice(),
+                                    [PythonValue::Signed(41)]
+                                ));
+                                Ok(PythonValue::Signed(42))
+                            },
+                        )?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            PythonError::host(
+                                "PythonCallbackError",
+                                "nested callback returned no value",
+                            )
+                        })
+                },
+            )
+            .expect("nested callback uses its own synchronous event pump");
         assert!(matches!(result.as_slice(), [PythonValue::Signed(42)]));
     }
 

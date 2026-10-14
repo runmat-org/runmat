@@ -9,13 +9,20 @@ fn array(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
 }
 
-fn invoke(args: &[Value], outputs: usize) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+fn invoke(
+    args: &[Value],
+    outputs: usize,
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     block_on(call_builtin_async_with_outputs("discretize", args, outputs))
-        .map(|value| match value {
-            Value::OutputList(values) => values,
-            value => vec![value],
+        .map_err(Box::new)?
+        .with_owned(|value| {
+            let values = match value {
+                Value::OutputList(values) => values,
+                value => vec![value],
+            };
+            runmat_runtime::execution::RootedValues::new(values)
+                .map_err(|error| Box::new(error.into_runtime_error()))
         })
-        .map_err(Box::new)
 }
 
 #[test]

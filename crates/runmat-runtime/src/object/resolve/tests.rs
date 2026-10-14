@@ -1,5 +1,3 @@
-use crate::sequence::ResolveValueSequence;
-
 use super::{
     is_possible_graphics_handle_value, load_member, load_static_member,
     read_member_sequence_with_context, store_member,
@@ -46,15 +44,10 @@ fn object_array_member_access_returns_comma_separated_values_in_order() {
         false,
         None,
     ))
-    .unwrap()
-    .resolve(
-        runmat_types::SequenceUse::ExpandAll,
-        crate::sequence::SequenceResolutionContext::default(),
-    )
     .unwrap();
     assert_eq!(
-        loaded,
-        vec![
+        loaded.as_slice(),
+        &[
             Value::String("first".into()),
             Value::String("second".into())
         ]
@@ -165,6 +158,7 @@ fn load_static_member_resolves_inherited_static_method() {
             access: MemberAccess::Public,
             function_name: "build_impl".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -206,6 +200,7 @@ fn load_member_uses_inherited_subsref_for_missing_property() {
             access: MemberAccess::Public,
             function_name: "OverIdx.subsref".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -245,6 +240,7 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
             access: MemberAccess::Public,
             function_name: "OverIdx.subsasgn".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -271,7 +267,7 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
         |_old, _new| {},
     ))
     .expect("missing member store should dispatch to inherited subsasgn");
-    let Value::Object(obj) = out else {
+    let Value::Object(obj) = &*out else {
         panic!("expected object result from inherited subsasgn");
     };
     assert_eq!(obj.properties.get("missing"), Some(&Value::Num(13.0)));

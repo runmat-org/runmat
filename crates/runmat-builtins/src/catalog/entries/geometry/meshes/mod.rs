@@ -68,6 +68,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 };
 
 pub const GEOMETRY_MESHES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "geometry.meshes",

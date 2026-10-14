@@ -104,6 +104,7 @@ pub struct DriverBootstrapCredential {
     pub fencing_token: u64,
     pub credential: String,
     pub expires_at_millis: i64,
+    pub ready_v1: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +121,7 @@ pub struct WorkerBootstrapCredential {
     pub relay_path: String,
     pub relay_protocol: String,
     pub relay_ticket: String,
+    pub ready_v1: bool,
 }
 
 #[async_trait]

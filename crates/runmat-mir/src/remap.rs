@@ -8,6 +8,10 @@ use crate::{
     MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 
+#[cfg(test)]
+#[path = "remap/tests.rs"]
+mod tests;
+
 /// Remap unit-local HIR function ordinals into an immutable program/session
 /// namespace after HIR lowering. MIR owns this traversal so new MIR constructs
 /// cannot be silently omitted by Core, VM, or native codegen.
@@ -15,7 +19,36 @@ pub fn remap_function_ids(
     assembly: &mut MirAssembly,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
-    if remap.is_empty() {
+    remap_with_policy(assembly, remap, RemapPolicy::EvalLocal)
+}
+
+/// Rebind a proved closed compilation product. Unlike eval-local lowering,
+/// externally encoded references to its fresh IDs belong to this unit.
+pub fn remap_closed_function_ids(
+    assembly: &mut MirAssembly,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    remap_with_policy(assembly, remap, RemapPolicy::ClosedUnit)
+}
+
+#[derive(Clone, Copy)]
+enum RemapPolicy {
+    EvalLocal,
+    ClosedUnit,
+}
+
+struct RemapContext<'a> {
+    ids: &'a HashMap<FunctionId, FunctionId>,
+    policy: RemapPolicy,
+}
+
+fn remap_with_policy(
+    assembly: &mut MirAssembly,
+    ids: &HashMap<FunctionId, FunctionId>,
+    policy: RemapPolicy,
+) -> Result<(), String> {
+    let remap = &RemapContext { ids, policy };
+    if remap.ids.is_empty() {
         return Ok(());
     }
     let mut bodies = BTreeMap::new();
@@ -53,16 +86,20 @@ pub fn remap_function_ids(
     Ok(())
 }
 
-fn mapped(function: FunctionId, remap: &HashMap<FunctionId, FunctionId>) -> FunctionId {
-    remap.get(&function).copied().unwrap_or(function)
+fn mapped(function: FunctionId, remap: &RemapContext<'_>) -> FunctionId {
+    remap.ids.get(&function).copied().unwrap_or(function)
 }
 
-fn remap_identity(identity: &mut CallableIdentity, remap: &HashMap<FunctionId, FunctionId>) {
+fn remap_identity(identity: &mut CallableIdentity, remap: &RemapContext<'_>) {
     match identity {
         CallableIdentity::BoundFunction(function)
         | CallableIdentity::AnonymousFunction(function) => *function = mapped(*function, remap),
-        CallableIdentity::ExternalFunction { .. }
-        | CallableIdentity::Builtin(_)
+        CallableIdentity::ExternalFunction { function, .. } => {
+            if matches!(remap.policy, RemapPolicy::ClosedUnit) {
+                *function = mapped(*function, remap);
+            }
+        }
+        CallableIdentity::Builtin(_)
         | CallableIdentity::Imported(_)
         | CallableIdentity::Method(_)
         | CallableIdentity::DynamicName(_)
@@ -70,16 +107,13 @@ fn remap_identity(identity: &mut CallableIdentity, remap: &HashMap<FunctionId, F
     }
 }
 
-fn remap_operand(operand: &mut MirOperand, remap: &HashMap<FunctionId, FunctionId>) {
+fn remap_operand(operand: &mut MirOperand, remap: &RemapContext<'_>) {
     if let MirOperand::FunctionHandle(identity) = operand {
         remap_identity(identity, remap);
     }
 }
 
-fn remap_call_arg(
-    argument: &mut MirCallArg,
-    remap: &HashMap<FunctionId, FunctionId>,
-) -> Result<(), String> {
+fn remap_call_arg(argument: &mut MirCallArg, remap: &RemapContext<'_>) -> Result<(), String> {
     match argument {
         MirCallArg::Single(operand) => remap_operand(operand, remap),
         MirCallArg::Expansion(source) => remap_expansion_source(source, remap)?,
@@ -90,7 +124,7 @@ fn remap_call_arg(
 
 fn remap_expansion_source(
     source: &mut crate::MirExpansionSource,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     match source {
         crate::MirExpansionSource::SubscriptChain(chain) => {
@@ -110,10 +144,7 @@ fn remap_expansion_source(
     Ok(())
 }
 
-fn remap_indexing(
-    indexing: &mut MirIndexing,
-    remap: &HashMap<FunctionId, FunctionId>,
-) -> Result<(), String> {
+fn remap_indexing(indexing: &mut MirIndexing, remap: &RemapContext<'_>) -> Result<(), String> {
     for component in &mut indexing.components {
         match component {
             MirIndexComponent::Expr(operand) => remap_operand(operand, remap),
@@ -132,7 +163,7 @@ fn remap_indexing(
 
 fn remap_chain(
     chain: &mut crate::MirSubscriptChain,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     remap_operand(&mut chain.root, remap);
     for step in &mut chain.steps {
@@ -179,7 +210,7 @@ fn remap_chain(
 
 fn remap_region(
     region: &mut crate::MirExpressionRegion,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     region.try_visit_rvalues_mut(|value| remap_rvalue(value, remap))?;
     region.try_visit_capture_sources_mut(|source| remap_expansion_source(source, remap))?;
@@ -187,10 +218,7 @@ fn remap_region(
     Ok(())
 }
 
-fn remap_place(
-    place: &mut MirPlace,
-    remap: &HashMap<FunctionId, FunctionId>,
-) -> Result<(), String> {
+fn remap_place(place: &mut MirPlace, remap: &RemapContext<'_>) -> Result<(), String> {
     match place {
         MirPlace::DynamicMember(base, member) => {
             remap_place(base, remap)?;
@@ -206,10 +234,7 @@ fn remap_place(
     Ok(())
 }
 
-fn remap_rvalue(
-    value: &mut MirRvalue,
-    remap: &HashMap<FunctionId, FunctionId>,
-) -> Result<(), String> {
+fn remap_rvalue(value: &mut MirRvalue, remap: &RemapContext<'_>) -> Result<(), String> {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) | MirRvalue::Spawn(operand) => {
             remap_operand(operand, remap)
@@ -287,10 +312,7 @@ fn remap_rvalue(
     Ok(())
 }
 
-fn remap_statement(
-    statement: &mut MirStmt,
-    remap: &HashMap<FunctionId, FunctionId>,
-) -> Result<(), String> {
+fn remap_statement(statement: &mut MirStmt, remap: &RemapContext<'_>) -> Result<(), String> {
     match &mut statement.kind {
         MirStmtKind::Assign { place, value } => {
             remap_place(place, remap)?;
@@ -334,7 +356,7 @@ fn remap_statement(
 
 fn remap_sequence_target(
     target: &mut crate::MirSequenceTarget,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     match target {
         crate::MirSequenceTarget::Member { base, .. } => remap_place(base, remap)?,
@@ -352,7 +374,7 @@ fn remap_sequence_target(
 
 fn remap_terminator(
     terminator: &mut MirTerminatorKind,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     match terminator {
         MirTerminatorKind::Branch { cond, .. } => remap_operand(cond, remap),
@@ -411,7 +433,7 @@ fn remap_terminator(
 
 fn remap_distributed(
     operation: &mut MirDistributedOp,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     match operation {
         MirDistributedOp::Create {
@@ -512,7 +534,7 @@ fn remap_distributed(
 
 fn remap_collective(
     operation: &mut MirCollectiveOp,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     remap_parallel_region(&mut operation.id_mut().region, remap)?;
     operation.for_each_operand_mut(|operand| remap_operand(operand, remap));
@@ -521,14 +543,14 @@ fn remap_collective(
 
 fn remap_parallel_region(
     region: &mut runmat_types::ParallelRegionId,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     remap_program_function(&mut region.0.function, remap)
 }
 
 fn remap_program_function(
     function: &mut runmat_types::ProgramFunctionId,
-    remap: &HashMap<FunctionId, FunctionId>,
+    remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     let old = FunctionId(function.0 as usize);
     let new = mapped(old, remap);

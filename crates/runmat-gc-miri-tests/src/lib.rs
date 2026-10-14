@@ -203,13 +203,14 @@ mod tests {
                 enabled: true,
                 valid: true,
             });
-            let closure = Value::Closure(Closure {
-                function_name: "callback".into(),
-                binding: None,
-                source_role: Default::default(),
-                source_file: None,
-                captures: vec![Value::OutputList(vec![handle, listener])],
-            });
+            let closure = Value::Closure(Closure::new(
+                "callback".into(),
+                None,
+                Default::default(),
+                None,
+                vec![Value::OutputList(vec![handle, listener])],
+                None,
+            ));
 
             let mut object = ObjectInstance::new("Owner".to_string());
             object.properties.insert("capture".to_string(), closure);

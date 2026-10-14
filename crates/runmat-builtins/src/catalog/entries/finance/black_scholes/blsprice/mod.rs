@@ -9,6 +9,7 @@ mod tests;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&BLSPRICE_CATALOG_ENTRY];
 
 pub const BLSPRICE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "blsprice" },
     category: "finance/black_scholes",

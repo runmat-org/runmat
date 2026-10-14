@@ -36,6 +36,7 @@ pub(super) async fn dispatch(
     let result = handle_builtin_call_multi(
         calls::BuiltinCallContext {
             runtime: &context.runtime,
+            process_driver: context.process_driver.clone(),
             stack,
             name,
             arg_count,
@@ -59,10 +60,10 @@ pub(super) async fn dispatch(
     match result {
         BuiltinHandling::Completed(sequence) => match publication {
             OutputPublication::Fixed(count) => {
-                calls::publish_fixed_outputs(stack, sequence, count)?
+                calls::publish_rooted_fixed_outputs(stack, sequence, count)?
             }
             OutputPublication::Sequence => {
-                sequence_register.stage_call_output_sequence(stack, sequence)?;
+                sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
             }
         },
         BuiltinHandling::Caught => {

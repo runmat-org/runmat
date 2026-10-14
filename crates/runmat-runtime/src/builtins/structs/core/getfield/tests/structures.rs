@@ -6,7 +6,7 @@ fn getfield_scalar_struct() {
     let mut st = StructValue::new();
     st.fields.insert("answer".to_string(), Value::Num(42.0));
     let value = run_getfield(Value::Struct(st), vec![Value::from("answer")]).expect("getfield");
-    assert_eq!(value, Value::Num(42.0));
+    assert_eq!(value.value(), &Value::Num(42.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -23,7 +23,7 @@ fn getfield_nested_structs() {
         vec![Value::from("inner"), Value::from("depth")],
     )
     .expect("nested getfield");
-    assert_eq!(result, Value::Num(3.0));
+    assert_eq!(result.value(), &Value::Num(3.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -44,7 +44,7 @@ fn getfield_struct_array_element() {
         vec![Value::Cell(index), Value::from("name")],
     )
     .expect("struct array element");
-    assert_eq!(result, Value::from("entry-b"));
+    assert_eq!(result.value(), &Value::from("entry-b"));
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn getfield_index_selectors_read_typed_integer_storage_exactly() {
         vec![Value::Cell(index), Value::from("name")],
     )
     .expect("struct array element");
-    assert_eq!(result, Value::from("entry-b"));
+    assert_eq!(result.value(), &Value::from("entry-b"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -85,5 +85,5 @@ fn getfield_struct_array_defaults_to_first() {
     let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
     let result =
         run_getfield(Value::StructArray(array), vec![Value::from("name")]).expect("default index");
-    assert_eq!(result, Value::from("entry-a"));
+    assert_eq!(result.value(), &Value::from("entry-a"));
 }

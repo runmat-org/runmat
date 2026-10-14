@@ -8,7 +8,7 @@ use runmat_value::{
 use super::*;
 
 fn real_builtin(value: Value) -> BuiltinResult<Value> {
-    block_on(super::real_builtin(value))
+    block_on(super::real_builtin(None, value)).map(|owned| owned.value().clone())
 }
 
 mod host;

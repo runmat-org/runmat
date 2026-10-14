@@ -11,6 +11,7 @@ pub use contract::*;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GPU_INFO_CATALOG_ENTRY];
 
 pub const GPU_INFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "gpuInfo" },
     category: "acceleration/gpu",

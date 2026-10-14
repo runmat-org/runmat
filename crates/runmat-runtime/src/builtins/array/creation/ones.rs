@@ -1140,7 +1140,12 @@ pub(crate) mod tests {
             &[Value::Tensor(proto)],
         ))
         .expect("gpuArray");
-        let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("like"), g];
+        let args = vec![
+            Value::Num(2.0),
+            Value::Num(2.0),
+            Value::from("like"),
+            g.value().clone(),
+        ];
         let result = block_on(ones_builtin(args)).expect("ones like gpu");
         match result {
             Value::GpuTensor(h) => {
@@ -1202,10 +1207,13 @@ pub(crate) mod tests {
         let args = vec![Value::Num(2.0), Value::Num(2.0)];
         let o = block_on(ones_builtin(args)).expect("ones");
         let s = block_on(crate::call_builtin_async("sin", &[o])).expect("sin");
-        let summed =
-            block_on(crate::call_builtin_async("sum", &[s, Value::Num(1.0)])).expect("sum");
+        let summed = block_on(crate::call_builtin_async(
+            "sum",
+            &[s.value().clone(), Value::Num(1.0)],
+        ))
+        .expect("sum");
         // Gather and validate shapes; values are deterministic for sin(1)
-        let gathered = test_support::gather(summed).expect("gather");
+        let gathered = test_support::gather_rooted(summed).expect("gather");
         assert_eq!(gathered.shape(), vec![1, 2]);
     }
 }

@@ -234,7 +234,7 @@ fn summarize_value(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Future(_)

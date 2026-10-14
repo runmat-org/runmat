@@ -11,6 +11,7 @@ const EFFECTS: &[EffectKind] = &[
 const CAPABILITIES: &[CapabilityRequirement] = &[CapabilityRequirement::Filesystem];
 
 pub const FILEATTRIB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fileattrib" },
     category: "io/repl_fs",

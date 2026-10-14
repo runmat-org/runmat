@@ -11,6 +11,7 @@ macro_rules! parallel_entry {
         $effects:expr
     ) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -63,6 +64,7 @@ macro_rules! descriptor {
 macro_rules! documented_parallel_data_entry {
     ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -104,6 +106,7 @@ macro_rules! codistributor_entry {
     };
     ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident, $placement:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",

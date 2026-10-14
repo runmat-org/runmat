@@ -45,6 +45,7 @@ pub const LIBFUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer aliases/options are converted to text and the result contains strings; no C ABI integer payload is accepted." };
 
 pub const LIBFUNCTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "libfunctions",

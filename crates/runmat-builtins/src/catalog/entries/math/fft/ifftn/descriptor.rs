@@ -238,7 +238,8 @@ pub const IFFTN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
 pub const IFFTN_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IFFTN.PROVIDER_INTEGRITY",
     identifier: Some("RunMat:ifftn:ProviderIntegrity"),
-    when: "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
     message: "ifftn: provider integrity error",
 };
 

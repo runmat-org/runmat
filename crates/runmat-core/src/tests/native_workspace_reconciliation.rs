@@ -13,7 +13,7 @@ mod public_self_clear;
 fn execute_workspace_outcome(
     session: &mut RunMatSession,
     source: &str,
-) -> crate::abi::ExecutionOutcome {
+) -> runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome> {
     let outcome = super::execute_text_request(session, source).expect("workspace execution");
     assert!(
         !outcome

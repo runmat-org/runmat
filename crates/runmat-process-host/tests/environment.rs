@@ -27,6 +27,27 @@ async fn clear_policy_exposes_only_explicit_environment() {
     assert_eq!(output, "yes:unset");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn inherit_except_removes_only_named_variable() {
+    let Ok(expected_path) = std::env::var("PATH") else {
+        return;
+    };
+    let mut spec = HostCommand::new("/bin/sh");
+    spec.arguments = vec![
+        "-c".into(),
+        "printf '%s:%s' \"${HOME-unset}\" \"${PATH-unset}\"".into(),
+    ];
+    spec.environment_policy = EnvironmentPolicy::InheritExcept(vec!["HOME".into()]);
+    let mut child = spec.spawn().await.unwrap();
+    let mut stdio = child.take_stdio().unwrap();
+    let mut output = String::new();
+    stdio.stdout.read_to_string(&mut output).await.unwrap();
+    let exit = child.wait().await.unwrap();
+    assert!(exit.success);
+    assert_eq!(output, format!("unset:{expected_path}"));
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn platform_runtime_policy_preserves_loader_state_without_application_state() {

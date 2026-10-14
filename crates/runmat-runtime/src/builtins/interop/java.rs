@@ -3,6 +3,7 @@
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 
 mod dispatch;
@@ -19,7 +20,7 @@ const JAVA_ADAPTER: &str = "java";
 async fn java_object_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::Construct, arguments).await
 }
 
@@ -32,7 +33,7 @@ async fn java_object_builtin(
 async fn java_object_edt_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::ConstructEdt, arguments).await
 }
 
@@ -45,7 +46,7 @@ async fn java_object_edt_builtin(
 async fn java_method_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     java_method_dispatch(
         context,
         arguments,
@@ -65,7 +66,7 @@ async fn java_method_builtin(
 async fn java_method_edt_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     java_method_dispatch(
         context,
         arguments,
@@ -82,7 +83,7 @@ async fn java_method_dispatch(
     member_operation: JavaOperation,
     static_operation: JavaOperation,
     builtin: &str,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.len() < 2 {
         return Err(invalid_call(format!(
             "{builtin} expects a method and class or object"
@@ -113,7 +114,7 @@ async fn java_method_dispatch(
 async fn java_array_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::NewArray, arguments).await
 }
 
@@ -126,7 +127,7 @@ async fn java_array_builtin(
 async fn java_add_path_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let mut entries = text_entries(arguments, "javaaddpath")?;
     let position = entries
         .last()
@@ -152,7 +153,7 @@ async fn java_add_path_builtin(
         )
         .await?;
     }
-    Ok(Value::OutputList(Vec::new()))
+    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -164,7 +165,7 @@ async fn java_add_path_builtin(
 async fn java_remove_path_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     for entry in text_entries(arguments, "javarmpath")? {
         invoke_java(
             context.clone(),
@@ -173,7 +174,7 @@ async fn java_remove_path_builtin(
         )
         .await?;
     }
-    Ok(Value::OutputList(Vec::new()))
+    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -185,7 +186,7 @@ async fn java_remove_path_builtin(
 async fn java_class_path_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         return invoke_java(
             context,
@@ -212,7 +213,8 @@ async fn java_class_path_builtin(
                     .await;
                 }
                 runmat_builtins::JavaClasspathControl::Verbosity => {
-                    return Ok(Value::OutputList(Vec::new()));
+                    return RootedValue::new(Value::OutputList(Vec::new()))
+                        .map_err(|error| error.into_runtime_error());
                 }
                 runmat_builtins::JavaClasspathControl::Path => {}
             }
@@ -223,7 +225,7 @@ async fn java_class_path_builtin(
         .map(Value::String)
         .collect();
     invoke_java(context, JavaOperation::SetClasspath, entries).await?;
-    Ok(Value::OutputList(Vec::new()))
+    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -235,7 +237,7 @@ async fn java_class_path_builtin(
 async fn jenv_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         invoke_java(context, JavaOperation::Status, Vec::new()).await
     } else {
@@ -252,7 +254,7 @@ async fn jenv_builtin(
 async fn use_java_builtin(
     context: Option<crate::context::RuntimeContext>,
     feature: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = context;
@@ -263,7 +265,7 @@ async fn use_java_builtin(
                 "usejava feature must be jvm, desktop, awt, or swing",
             ));
         }
-        Ok(Value::Bool(false))
+        RootedValue::new(Value::Bool(false)).map_err(|error| error.into_runtime_error())
     }
     #[cfg(not(target_arch = "wasm32"))]
     invoke_java(context, JavaOperation::UseJava, vec![feature]).await

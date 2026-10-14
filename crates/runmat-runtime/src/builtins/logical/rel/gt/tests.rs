@@ -11,7 +11,9 @@ use runmat_builtins::{
 use runmat_value::{CharArray, StringArray, Tensor};
 
 fn run_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(super::gt_builtin(lhs, rhs))
+    // Terminal fixture projection: comparison emits only logical, symbolic
+    // expression, or external GPU values, never a GC-managed child.
+    block_on(super::gt_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[test]

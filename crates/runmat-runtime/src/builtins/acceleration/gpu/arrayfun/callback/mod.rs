@@ -1,6 +1,7 @@
 mod error_map;
 
 use crate::builtins::common::mapped_callable::MappedCallable;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_builtins::BuiltinCatalogIdentity;
 use runmat_value::Value;
@@ -25,7 +26,7 @@ impl Callable {
         &self,
         context: Option<&crate::context::RuntimeContext>,
         arguments: &[Value],
-    ) -> BuiltinResult<Value> {
+    ) -> BuiltinResult<RootedValue> {
         self.0
             .invoke_with_outputs_in_context(context, arguments, 1)
             .await

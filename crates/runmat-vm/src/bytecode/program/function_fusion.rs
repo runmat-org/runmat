@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{FunctionBytecode, FunctionRegistry, FusionCandidateGroup, FusionInstructionWindow};
 use crate::bytecode::{
-    compile::{derive_semantic_fusion_instruction_windows, instr_fusion_signal_kind},
+    compile::{
+        derive_semantic_fusion_instruction_windows, fusion_windows::FusionWindowGroup,
+        instr_fusion_signal_kind,
+    },
     FusionInstructionKind, Instr,
 };
 
@@ -75,15 +78,20 @@ impl FunctionFusionScaffold {
                 .windows
                 .windows(2)
                 .all(|pair| pair[0].span.end < pair[1].span.start)
-            && {
-                let mut derived = derive_semantic_fusion_instruction_windows(
-                    instructions,
-                    instr_spans,
-                    &self.candidates,
-                );
-                derived.sort_by_key(|window| (window.span.start, window.span.end));
-                derived == self.windows
-            }
+    }
+
+    /// MIR source spans are a useful initial hint, but only the selected
+    /// statement projection can identify which emitted signal PCs belong to
+    /// a function candidate after constructor/default lowering.
+    pub(crate) fn source_windows_match(
+        &self,
+        instructions: &[Instr],
+        instr_spans: &[runmat_hir::Span],
+    ) -> bool {
+        let mut derived =
+            derive_semantic_fusion_instruction_windows(instructions, instr_spans, &self.candidates);
+        derived.sort_by_key(|window| (window.span.start, window.span.end));
+        derived == self.windows
     }
 }
 
@@ -104,18 +112,56 @@ impl FunctionBytecode {
         {
             return Err("function private layout disagrees with selected body".into());
         }
-        let mut authorized_signal_pcs = HashSet::new();
-        for candidate in &scaffold.candidates {
-            authorized_signal_pcs
-                .extend(index.certify_candidate(candidate, scaffold.private_layout.as_ref())?);
-        }
-        if scaffold.windows.iter().any(|window| {
-            (window.span.start..=window.span.end).any(|pc| !authorized_signal_pcs.contains(&pc))
-        }) {
-            return Err("function fusion hint escapes selected signal statements".into());
+        if scaffold.windows
+            != selected_function_windows(
+                self,
+                &index,
+                &scaffold.candidates,
+                scaffold.private_layout.as_ref(),
+            )?
+        {
+            return Err("function fusion hint disagrees with selected signal statements".into());
         }
         Ok(())
     }
+}
+
+/// Rebuild the exact function-local windows from certified statement PCs.
+/// Source-span containment is not a PC authority: synthesized constructor
+/// defaults can share spans with other emitted instructions.
+pub(crate) fn selected_function_windows(
+    body: &FunctionBytecode,
+    index: &FunctionFusionCertificateIndex<'_>,
+    candidates: &[FusionCandidateGroup],
+    layout: Option<&FunctionPrivateSlotLayout>,
+) -> Result<Vec<FusionInstructionWindow>, String> {
+    let mut windows = Vec::new();
+    let mut used = HashSet::new();
+    for candidate in candidates {
+        let mut signals = index.certify_candidate(candidate, layout)?;
+        signals.sort_unstable();
+        let mut group = FusionWindowGroup::default();
+        for pc in signals {
+            if !used.insert(pc) {
+                return Err("function fusion hint reuses a selected signal".into());
+            }
+            let kind = body
+                .instructions
+                .get(pc)
+                .and_then(instr_fusion_signal_kind)
+                .ok_or_else(|| "function fusion hint names a non-signal instruction".to_string())?;
+            group.push(pc, kind, &mut windows);
+        }
+        group.finish(&mut windows);
+    }
+    windows.sort_by_key(|window| (window.span.start, window.span.end));
+    if windows
+        .windows(2)
+        .any(|pair| pair[0].span.end >= pair[1].span.start)
+    {
+        return Err("function fusion hint has overlapping selected windows".into());
+    }
+    Ok(windows)
 }
 
 /// Reusable selected-statement authority for both compiler slicing and strict

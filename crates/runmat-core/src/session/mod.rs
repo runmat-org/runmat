@@ -11,6 +11,7 @@ use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
 use runmat_time::Instant;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -23,7 +24,7 @@ use crate::execution::{
     InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
-use crate::profiling::{gather_profiling, reset_provider_telemetry};
+use crate::profiling::execution_profiling;
 use crate::source_pool::SourcePool;
 use crate::telemetry::{TelemetryPlatformInfo, TelemetrySink};
 use crate::workspace::{
@@ -47,34 +48,44 @@ fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLa
     }
 }
 
-mod compile;
-pub(crate) mod semantic_definition;
+mod application_settings;
 mod cancellation;
+mod command_profiling;
+mod compile;
+pub(crate) use compile::program_sources::SourceCompileProjection;
 mod config;
 mod dynamic;
 mod dynamic_cache;
+mod error_conversion;
 mod executable;
-mod host_services;
-mod input;
-mod application_settings;
 #[cfg(not(target_arch = "wasm32"))]
 mod host_driver;
+mod host_services;
 mod http_host;
-#[cfg(not(target_arch = "wasm32"))]
-mod process_host;
-#[cfg(not(target_arch = "wasm32"))]
-mod tcp_host;
 mod init;
+mod input;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod local_tasks_tests;
-mod project;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mex_close_tests;
 mod private_source_owner;
+#[cfg(not(target_arch = "wasm32"))]
+mod process_host;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profiling_tests;
+mod project;
+mod retirement;
 mod run;
-mod source_evaluation;
-mod user_path;
-mod workspace;
 #[cfg(test)]
 mod s1_compiled_call_tests;
+pub(crate) mod semantic_definition;
+mod source_evaluation;
+#[cfg(not(target_arch = "wasm32"))]
+mod tcp_host;
+mod user_path;
+mod workspace;
+
+pub use retirement::SessionRetirement;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,7 +99,7 @@ pub struct RunMatSession {
     /// Execution statistics
     stats: ExecutionStats,
     /// Current workspace bindings with stable ABI identity and current VM slot.
-    workspace_bindings: HashMap<String, SessionWorkspaceBinding>,
+    workspace_bindings: Rc<RefCell<HashMap<String, SessionWorkspaceBinding>>>,
     /// Canonical, rooted base-workspace state for this session. Executors use
     /// invocation-local slot projections and publish ordered mutations here.
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
@@ -125,6 +136,17 @@ pub struct RunMatSession {
     native_tiering_enabled: bool,
     /// Optional host-frozen project snapshot used by every compilation in this session.
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    /// Immutable foreign bytes whose rebased paths are published by the project handoff.
+    #[cfg(not(target_arch = "wasm32"))]
+    private_project_root: Option<crate::foreign_artifacts::PrivateArtifactRoot>,
+    #[cfg(not(target_arch = "wasm32"))]
+    prepared_project_foreign:
+        Option<std::sync::Arc<crate::foreign_artifacts::PreparedProjectForeignArtifacts>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    prepared_selected_foreign_input:
+        Option<std::sync::Arc<crate::foreign_artifacts::PreparedSelectedForeignInput>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    selected_foreign_config: Option<std::sync::Arc<runmat_config::runtime::RunMatRuntimeConfig>>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Session-owned compiler/executor entry for asynchronous source callbacks.
@@ -133,6 +155,12 @@ pub struct RunMatSession {
     cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
+    /// Exact Core-installed effect ports. Workspace-only invocation overlays
+    /// may change without conferring a new call/acceleration/foreign owner.
+    canonical_device_route_ports: runmat_runtime::context::RuntimeServicePorts,
+    /// Only a test child created from an active caller borrows its original
+    /// command. Ordinary session entrypoints create their own seal authority.
+    inherited_command_profiling: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     /// Strong callback owner stays with the session; its presentation service
     /// holds only a weak reference, so retained selected contexts cannot cycle.
     graphics_callbacks: Option<runmat_runtime::context::RuntimeGraphicsCallbackQueue>,
@@ -165,8 +193,6 @@ pub struct RunMatSession {
     compat_mode: CompatMode,
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
-    /// Persisted numeric display format for this session (survives across executions).
-    format_mode: runmat_value::FormatMode,
     /// Preloaded companion statements discovered asynchronously by the request path.
     pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
@@ -196,27 +222,14 @@ impl RunMatSession {
     /// Stop and release local callback jobs before host disposal. Idempotent;
     /// subsequent scheduling reports a stable closed-session error.
     pub fn shutdown_local_tasks(&self) {
-        self.lifecycle_host.force_close();
-    }
-
-    /// Gracefully retire session-owned workspace values and drain only
-    /// admitted cleanup callbacks. Externally owned Active handles are not
-    /// waited on; forced disposal later records their Abandoned outcome.
-    pub async fn close_gracefully(&self) -> std::result::Result<(), RuntimeError> {
-        let runtime = self.runtime_context.clone();
         #[cfg(not(target_arch = "wasm32"))]
-        self.local_tasks
-            .participate_foreground(self.lifecycle_host.retire_workspace_and_drain(&runtime))
-            .await??;
-        #[cfg(target_arch = "wasm32")]
-        self.lifecycle_host
-            .retire_workspace_and_drain(&runtime)
-            .await?;
-        self.base_workspace
-            .close()
-            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
+        if self.mex_runtime.has_unretired_work() {
+            self.mex_runtime.force_abandon();
+            tracing::warn!(
+                "abandoned MEX lifecycle before forced local-task shutdown; mexAtExit completion is not guaranteed"
+            );
+        }
         self.lifecycle_host.force_close();
-        Ok(())
     }
 
     /// Drive one callback from session-owned native work. Interactive hosts
@@ -234,7 +247,10 @@ pub(crate) struct PreparedExecution {
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
     portable_source_map: Option<crate::ExecutableSourceMap>,
+    source_projection: compile::program_sources::SourceCompileProjection,
     function_registry_after_success: runmat_vm::FunctionRegistry,
+    published_registry_for_reuse: runmat_vm::FunctionRegistry,
+    private_companion_function_names: HashSet<String>,
     current_function_ids: std::collections::HashSet<runmat_hir::FunctionId>,
     next_semantic_function_id_after_success: usize,
 }
@@ -270,7 +286,18 @@ struct DynamicFunctionCacheEntry {
     source_records: Arc<[runmat_runtime::source_context::ProgramSourceRecord]>,
     entrypoint_origin: runmat_execution::FunctionBindingOrigin,
     binding: runmat_value::BoundFunctionBinding,
+    super_constructors: Vec<runmat_runtime::context::RetainedSuperConstructorBinding>,
+    super_dependency_origins: HashSet<DynamicDependencyIdentity>,
     dependencies: Arc<[DynamicFunctionDependency]>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum DynamicDependencyIdentity {
+    Callable(runmat_execution::FunctionBindingOrigin),
+    DeclarationOnly {
+        class: runmat_types::ClassIdentity,
+        program: runmat_execution::Digest,
+    },
 }
 
 #[derive(Clone)]
@@ -391,13 +418,31 @@ impl Drop for RunMatSession {
         if let Some(callbacks) = self.graphics_callbacks.take() {
             callbacks.close();
         }
-        if let Err(error) = self.base_workspace.close() {
-            tracing::warn!(%error, "could not revoke base workspace during session shutdown");
+        // Forced disposal has no native completion acknowledgement. Revoke
+        // MEX callback authority explicitly before closing its dependent
+        // local-task driver; a service/context/session Rc cycle means waiting
+        // for NativeMexLane::drop would be too late.
+        #[cfg(not(target_arch = "wasm32"))]
+        let abandoned_mex = self.mex_runtime.has_unretired_work();
+        #[cfg(not(target_arch = "wasm32"))]
+        if abandoned_mex {
+            if let Err(error) = self.mex_runtime.persist_installed_bytes_unverified(
+                "MEX host retirement unverified at Session drop",
+            ) {
+                tracing::warn!(%error, "could not persist MEX private bytes after forced disposal");
+            }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_runtime.force_abandon();
         self.lifecycle_host.force_close();
         #[cfg(not(target_arch = "wasm32"))]
-        if let Err(error) = self.mex_runtime.shutdown(self.runtime_context.clone()) {
-            tracing::warn!(%error, "could not finish MEX lifecycle during session shutdown");
+        if abandoned_mex {
+            tracing::warn!(
+                "abandoned MEX lifecycle during forced session disposal; mexAtExit completion is not guaranteed"
+            );
+        }
+        if let Err(error) = self.base_workspace.close() {
+            tracing::warn!(%error, "could not revoke base workspace during session shutdown");
         }
         self.runtime_context
             .execution()

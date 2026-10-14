@@ -338,8 +338,8 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             .map(Value::StructArray)
             .map_err(|error| reshape_error(format!("reshape: {error}"))),
         Value::ObjectArray(array) => {
-            let class_name = array.class_name().to_string();
-            runmat_value::ObjectArray::new(class_name, array.into_data(), dims.to_vec())
+            array
+                .reshape_preserving_provenance(dims.to_vec())
                 .map(Value::ObjectArray)
                 .map_err(|error| reshape_error(format!("reshape: {error}")))
         }

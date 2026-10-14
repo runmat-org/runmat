@@ -259,9 +259,17 @@ fn omission_counts_map_warmup_and_each_dimensional_reduction() {
     assert_eq!(one_work.estimate.transient_bytes, None);
     #[cfg(feature = "wgpu")]
     {
+        use runmat_accelerate_api::observation::ProviderObservationCapability;
         assert!(one_work.nan_map);
         assert_eq!(one_work.queue_submissions, 3);
         assert_eq!(one_work.allocations, 5);
+        let ProviderObservationCapability::Supported(overhead) =
+            observation_capability(&provider, &one)
+        else {
+            panic!("audited omit-NaN route");
+        };
+        assert_eq!(overhead.submissions, 3);
+        assert_eq!(overhead.wgpu_compute_query.unwrap().max_query_sets, 3);
     }
     let mut all = query(ProviderElementType::F64, &[2, 3], &[0, 1]);
     all.workload.sum.as_mut().unwrap().missing = ReductionNaN::Omit;

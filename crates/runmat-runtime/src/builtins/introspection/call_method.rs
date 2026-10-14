@@ -1,80 +1,13 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use crate::execution::RootedValue;
+use runmat_builtins::{CALL_METHOD_ERROR_NAME_INVALID, CALL_METHOD_ERROR_RECEIVER_INVALID};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-
-const CALL_METHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Method return value(s).",
-}];
-
-const CALL_METHOD_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "base",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Method name.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Method arguments.",
-    },
-];
-
-const CALL_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[out] = call_method(base, method, varargin)",
-    inputs: &CALL_METHOD_INPUTS,
-    outputs: &CALL_METHOD_OUTPUT,
-}];
-
-pub(crate) const CALL_METHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CALL_METHOD.NAME_INVALID",
-    identifier: Some("RunMat:CallMethodNameInvalid"),
-    when: "The method name is empty or missing.",
-    message: "call_method: method name must not be empty",
-};
-
-pub(crate) const CALL_METHOD_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.CALL_METHOD.RECEIVER_INVALID",
-        identifier: Some("RunMat:InvalidObjectDispatch"),
-        when: "Receiver is not an object or handle object.",
-        message: "call_method: requires object receiver",
-    };
-
-const CALL_METHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    CALL_METHOD_ERROR_NAME_INVALID,
-    CALL_METHOD_ERROR_RECEIVER_INVALID,
-];
-
-pub const CALL_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CALL_METHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &CALL_METHOD_ERRORS,
-};
 
 pub(crate) async fn dispatch_call_method(
     base: Value,
     method: String,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let method = method.trim().to_string();
     if method.is_empty() {
         return Err(crate::runtime_descriptor_error(
@@ -117,17 +50,13 @@ pub(crate) async fn dispatch_call_method(
 
 #[runtime_builtin(
     name = "call_method",
-    execution_stack = "process",
-    category = "introspection",
-    summary = "Dispatch object member calls with MATLAB method semantics.",
-    keywords = "classdef,method,dispatch,object",
-    descriptor(crate::builtins::introspection::call_method::CALL_METHOD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::call_method"
 )]
 pub async fn call_method_builtin(
     base: Value,
     method: String,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     dispatch_call_method(base, method, rest).await
 }

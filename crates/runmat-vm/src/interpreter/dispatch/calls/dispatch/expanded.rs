@@ -28,11 +28,11 @@ pub(super) async fn dispatch(
             let result = crate::call::call_builtin_async_with_outputs(
                 &context.runtime,
                 name,
-                &args,
+                args.values(),
                 *out_count,
             )
             .await?;
-            calls::publish_fixed_outputs(stack, result, *out_count)?;
+            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -51,18 +51,22 @@ pub(super) async fn dispatch(
             )
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let _roots = crate::call::root_values(&args)?;
-            let result = runmat_runtime::call_super_constructor(
-                current_class.clone(),
-                super_class.clone(),
-                args,
-            )
-            .await?;
-            calls::publish_fixed_outputs(
-                stack,
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
-                *out_count,
+            let result = args
+                .with_owned_values_async(|args| async move {
+                    runmat_runtime::call_super_constructor(
+                        &context.runtime,
+                        current_class.clone(),
+                        super_class.clone(),
+                        args,
+                    )
+                    .await
+                })
+                .await?;
+            let result = result.try_map_owned(
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result,
+                |error| error.into_runtime_error(),
             )?;
+            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -82,19 +86,23 @@ pub(super) async fn dispatch(
             )
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let _roots = crate::call::root_values(&args)?;
-            let result = runmat_runtime::call_super_method(
-                current_class.clone(),
-                super_class.clone(),
-                method.clone(),
-                args,
-            )
-            .await?;
-            calls::publish_fixed_outputs(
-                stack,
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
-                *out_count,
+            let result = args
+                .with_owned_values_async(|args| async move {
+                    runmat_runtime::call_super_method_in_context(
+                        &context.runtime,
+                        current_class.clone(),
+                        super_class.clone(),
+                        method.clone(),
+                        args,
+                    )
+                    .await
+                })
+                .await?;
+            let result = result.try_map_owned(
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result,
+                |error| error.into_runtime_error(),
             )?;
+            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -105,6 +113,14 @@ pub(super) async fn dispatch(
             specs,
             out_count,
         } => {
+            let selected_bound = match identity {
+                runmat_hir::CallableIdentity::BoundFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                | runmat_hir::CallableIdentity::ExternalFunction { function, .. } => {
+                    calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
+                }
+                _ => None,
+            };
             let args = build_user_function_expand_multi_args(
                 stack,
                 specs,
@@ -112,32 +128,36 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            match handle_prepared_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: identity.clone(),
-                    bound: None,
-                    fallback_policy: *fallback_policy,
-                    out_count: *out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                args,
-                refresh_workspace_state,
-            )
-            .await?
+            match args
+                .with_owned_values_async(|args| {
+                    handle_prepared_user_function_call(
+                        calls::UserCallContext {
+                            stack,
+                            runtime: &context.runtime,
+                            process_driver: context.process_driver.clone(),
+                            identity: identity.clone(),
+                            bound: selected_bound,
+                            fallback_policy: *fallback_policy,
+                            out_count: *out_count,
+                            source_id,
+                            call_arg_spans: call_arg_spans.as_ref().cloned(),
+                            current_function_name,
+                            imports: imports.as_slice(),
+                            exception: calls::ExceptionRouteContext {
+                                try_stack,
+                                vars,
+                                last_exception,
+                                pc,
+                            },
+                        },
+                        args,
+                        refresh_workspace_state,
+                    )
+                })
+                .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                    calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
@@ -165,34 +185,38 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            match handle_workspace_first_prepared_call(
-                calls::WorkspaceFirstCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    workspace_name: name,
-                    identity: identity.clone(),
-                    fallback_policy: *fallback_policy,
-                    bare_identifier: *bare_identifier,
-                    out_count: *out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    function_registry,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                args,
-                refresh_workspace_state,
-            )
-            .await?
+            match args
+                .with_owned_values_async(|args| {
+                    handle_workspace_first_prepared_call(
+                        calls::WorkspaceFirstCallContext {
+                            stack,
+                            runtime: &context.runtime,
+                            process_driver: context.process_driver.clone(),
+                            workspace_name: name,
+                            identity: identity.clone(),
+                            fallback_policy: *fallback_policy,
+                            bare_identifier: *bare_identifier,
+                            out_count: *out_count,
+                            source_id,
+                            call_arg_spans: call_arg_spans.as_ref().cloned(),
+                            current_function_name,
+                            imports: imports.as_slice(),
+                            function_registry,
+                            exception: calls::ExceptionRouteContext {
+                                try_stack,
+                                vars,
+                                last_exception,
+                                pc,
+                            },
+                        },
+                        args,
+                        refresh_workspace_state,
+                    )
+                })
+                .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                    calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
@@ -221,34 +245,38 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            match handle_workspace_first_prepared_call(
-                calls::WorkspaceFirstCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    workspace_name: name,
-                    identity: identity.clone(),
-                    fallback_policy: *fallback_policy,
-                    bare_identifier: *bare_identifier,
-                    out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    function_registry,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                args,
-                refresh_workspace_state,
-            )
-            .await?
+            match args
+                .with_owned_values_async(|args| {
+                    handle_workspace_first_prepared_call(
+                        calls::WorkspaceFirstCallContext {
+                            stack,
+                            runtime: &context.runtime,
+                            process_driver: context.process_driver.clone(),
+                            workspace_name: name,
+                            identity: identity.clone(),
+                            fallback_policy: *fallback_policy,
+                            bare_identifier: *bare_identifier,
+                            out_count,
+                            source_id,
+                            call_arg_spans: call_arg_spans.as_ref().cloned(),
+                            current_function_name,
+                            imports: imports.as_slice(),
+                            function_registry,
+                            exception: calls::ExceptionRouteContext {
+                                try_stack,
+                                vars,
+                                last_exception,
+                                pc,
+                            },
+                        },
+                        args,
+                        refresh_workspace_state,
+                    )
+                })
+                .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                    sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
@@ -262,6 +290,9 @@ pub(super) async fn dispatch(
             )))
         }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
+            let selected_bound =
+                calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
+                    .or_else(|| function_registry.static_binding(*function));
             let args = build_user_function_expand_multi_args(
                 stack,
                 specs,
@@ -269,32 +300,36 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            match handle_prepared_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
-                    bound: function_registry.static_binding(*function),
-                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
-                    out_count: *out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                args,
-                refresh_workspace_state,
-            )
-            .await?
+            match args
+                .with_owned_values_async(|args| {
+                    handle_prepared_user_function_call(
+                        calls::UserCallContext {
+                            stack,
+                            runtime: &context.runtime,
+                            process_driver: context.process_driver.clone(),
+                            identity: runmat_hir::CallableIdentity::BoundFunction(*function),
+                            bound: selected_bound,
+                            fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                            out_count: *out_count,
+                            source_id,
+                            call_arg_spans: call_arg_spans.as_ref().cloned(),
+                            current_function_name,
+                            imports: imports.as_slice(),
+                            exception: calls::ExceptionRouteContext {
+                                try_stack,
+                                vars,
+                                last_exception,
+                                pc,
+                            },
+                        },
+                        args,
+                        refresh_workspace_state,
+                    )
+                })
+                .await?
             {
                 UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                    calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
                 }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
@@ -320,28 +355,40 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
-            for slot in capture_slots {
-                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
-            }
-            call_args.extend(args);
+            let call_args = args.with_owned_values(|args| {
+                let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
+                for slot in capture_slots {
+                    crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
+                    call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+                }
+                call_args.extend(args);
+                runmat_runtime::execution::RootedValues::new(call_args)
+                    .map_err(|error| error.into_runtime_error())
+            })?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
                     function.0,
-                    &call_args,
+                    call_args.values(),
                     *out_count,
                     function_registry,
                     context.runtime.clone(),
+                    context.process_driver.clone(),
+                    context.lexical_environment.clone(),
                 )
                 .await?;
-            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
-                if *slot < vars.len() {
-                    crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                    vars[*slot] = value;
+            updated_captures.with_owned_values(|captures| {
+                if context.lexical_environment.is_none() {
+                    for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
+                        if *slot < vars.len() {
+                            crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
+                            vars[*slot] = value;
+                        }
+                    }
                 }
-            }
-            calls::publish_fixed_outputs(stack, result, *out_count)?;
+                Ok::<_, RuntimeError>(())
+            })?;
+            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

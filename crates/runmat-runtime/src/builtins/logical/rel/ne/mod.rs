@@ -56,10 +56,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ne",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::logical::rel::ne"
 )]
-async fn ne_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    comparison::evaluate(lhs, rhs, RelationalOperator::NotEqual).await
+async fn ne_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    comparison::evaluate(runtime.as_ref(), lhs, rhs, RelationalOperator::NotEqual).await
 }
 
 #[cfg(test)]

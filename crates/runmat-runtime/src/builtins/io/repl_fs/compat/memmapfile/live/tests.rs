@@ -133,7 +133,8 @@ fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
     };
     assert!(object.memmap_receiver().is_some());
     assert!(!object.properties.contains_key("Data"));
-    let alias = mapped.clone();
+    let alias =
+        crate::execution::RootedValue::new(mapped.clone()).expect("root mapped receiver alias");
     let replacement = Arc::new(MemoryFsProvider::with_current_dir(root.join("replacement")));
     replacement
         .write_project_path(root.join("replacement/data.bin"), b"xxxx")
@@ -159,10 +160,12 @@ fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
         b"xxxx"
     );
     for receiver in [alias, updated] {
-        let Value::Tensor(data) =
-            futures::executor::block_on(subsref(None, receiver, property("Data")))
-                .expect("live read through original owner")
-        else {
+        let data = receiver
+            .with_owned(|receiver| {
+                futures::executor::block_on(subsref(None, receiver, property("Data")))
+            })
+            .expect("live read through original owner");
+        let Value::Tensor(data) = data.value() else {
             panic!("numeric Data")
         };
         assert_eq!(
@@ -209,18 +212,23 @@ fn mapped_receiver_controls_clone_independently_without_changing_backing() {
     ))
     .unwrap();
     assert_eq!(
-        futures::executor::block_on(subsref(None, finite.clone(), property("Repeat"))).unwrap(),
+        futures::executor::block_on(subsref(None, finite.value().clone(), property("Repeat")))
+            .unwrap(),
         Value::Num(1.0)
     );
     let unlimited = futures::executor::block_on(subsasgn(
         None,
-        finite,
+        finite.value().clone(),
         property("Repeat"),
         Value::Num(f64::INFINITY),
     ))
     .unwrap();
     assert_eq!(
-        futures::executor::block_on(subsref(None, unlimited, property("Repeat"))).unwrap(),
+        unlimited
+            .with_owned(|receiver| {
+                futures::executor::block_on(subsref(None, receiver, property("Repeat")))
+            })
+            .unwrap(),
         Value::Num(f64::INFINITY)
     );
     let read_only_clone = futures::executor::block_on(subsasgn(
@@ -235,12 +243,19 @@ fn mapped_receiver_controls_clone_independently_without_changing_backing() {
         Value::Bool(true)
     );
     assert_eq!(
-        futures::executor::block_on(subsref(None, read_only_clone.clone(), property("Writable")))
-            .unwrap(),
+        futures::executor::block_on(subsref(
+            None,
+            read_only_clone.value().clone(),
+            property("Writable")
+        ))
+        .unwrap(),
         Value::Bool(false)
     );
     let rhs = Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![7]), vec![1, 1]).unwrap());
-    let error = futures::executor::block_on(subsasgn(None, read_only_clone, property("Data"), rhs))
+    let error = read_only_clone
+        .with_owned(|receiver| {
+            futures::executor::block_on(subsasgn(None, receiver, property("Data"), rhs))
+        })
         .unwrap_err();
     assert!(error.message().contains("read-only"));
 }
@@ -277,7 +292,7 @@ fn indexed_read_observes_only_current_selected_byte_and_forged_class_has_no_auth
     ))
     .unwrap();
     let selected = futures::executor::block_on(subsref(None, mapped, indexed_data(2))).unwrap();
-    let Value::Tensor(selected) = selected else {
+    let Value::Tensor(selected) = selected.value() else {
         panic!("selected tensor")
     };
     assert_eq!(
@@ -355,9 +370,10 @@ fn indexed_named_field_write_preserves_other_fields_and_elements() {
         provider.read_project_path(root.join("record.bin")).unwrap(),
         b"\x01\x02\x09\x04"
     );
-    let Value::Tensor(field) =
-        futures::executor::block_on(subsref(None, updated, selected)).unwrap()
-    else {
+    let field = updated
+        .with_owned(|receiver| futures::executor::block_on(subsref(None, receiver, selected)))
+        .unwrap();
+    let Value::Tensor(field) = field.value() else {
         panic!("selected field tensor")
     };
     assert_eq!(field.integer_storage(), Some(&IntegerStorage::U8(vec![9])));

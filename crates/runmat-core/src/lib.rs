@@ -10,6 +10,10 @@ mod executable;
 mod execution;
 mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod foreign_artifacts;
+#[cfg(not(target_arch = "wasm32"))]
+mod foreign_unit_host;
+#[cfg(not(target_arch = "wasm32"))]
 mod generic_native;
 mod parallel_runtime;
 mod profiling;
@@ -23,9 +27,11 @@ mod workspace;
 pub use error::{runtime_error_telemetry_failure_info, RunError};
 pub use executable::*;
 pub use execution::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use foreign_unit_host::{ForeignUnitHost, ForeignUnitRetirement};
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
-pub use session::RunMatSession;
+pub use session::{RunMatSession, SessionRetirement};
 pub use telemetry::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
     TelemetryRunFinish, TelemetryRunGuard, TelemetrySink,
@@ -44,7 +50,7 @@ mod tests;
 pub fn execute_text_request_for_testing(
     session: &mut RunMatSession,
     source_text: &str,
-) -> Result<SessionExecutionResult, RunError> {
+) -> Result<RootedSessionExecutionResult, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Text {
             name: "<test>".into(),
@@ -77,18 +83,23 @@ pub fn execute_text_request_for_testing(
                 .with_call_frames_elided(diag.callstack_elided)
                 .build()
         });
-    Ok(SessionExecutionResult {
-        value: outcome.flow.durable_workspace_value().cloned(),
-        execution_time_ms: outcome.execution_time_ms,
-        used_jit: outcome.used_jit,
-        error,
-        type_info: outcome.type_info,
-        streams: outcome.streams,
-        workspace,
-        figures_touched: outcome.figures_touched,
-        warnings,
-        profiling: outcome.profiling,
-        fusion_plan: outcome.fusion_plan,
-        stdin_events: outcome.stdin_events,
-    })
+    outcome.try_map_owned(
+        |outcome| {
+            Ok(SessionExecutionResult {
+                value: outcome.flow.durable_workspace_value().cloned(),
+                execution_time_ms: outcome.execution_time_ms,
+                used_jit: outcome.used_jit,
+                error,
+                type_info: outcome.type_info,
+                streams: outcome.streams,
+                workspace,
+                figures_touched: outcome.figures_touched,
+                warnings,
+                profiling: outcome.profiling,
+                fusion_plan: outcome.fusion_plan,
+                stdin_events: outcome.stdin_events,
+            })
+        },
+        |error| RunError::Runtime(error.into_runtime_error()),
+    )
 }

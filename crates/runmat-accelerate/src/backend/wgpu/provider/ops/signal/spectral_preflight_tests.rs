@@ -168,7 +168,7 @@ fn request(input: &GpuTensorHandle) -> ProviderSpectralRequest<'_> {
 #[ignore = "requires actual WGPU adapter; no unavailable-device skip"]
 fn spectral_invalid_request_and_foreign_owner_have_zero_upload_or_dispatch() {
     use runmat_accelerate_api::observation::{
-        ProviderObservationStatus, ProviderOperationReceipt, with_provider_observation,
+        with_provider_observation, ProviderObservationStatus, ProviderOperationReceipt,
     };
     let provider = provider();
     let input = upload(&provider, &[1.; 16], &[8, 2]);
@@ -277,11 +277,9 @@ fn envelope_scalar_readback_failure_and_pending_drop_retire_validation_intermedi
         .complete(Err(anyhow::Error::new(EnvelopeScalarReadbackFault)))
         .expect_err("scalar readback fault is terminal after device effects");
     assert!(error.is_after_effect());
-    assert!(
-        std::error::Error::source(&error)
-            .and_then(|source| source.downcast_ref::<EnvelopeScalarReadbackFault>())
-            .is_some()
-    );
+    assert!(std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<EnvelopeScalarReadbackFault>())
+        .is_some());
     assert_eq!(provider.allocations.retained_bytes(), retained_input);
     input.allocation_lease().validate_live().unwrap();
     let next = upload(&provider, &[9.], &[1, 1]);

@@ -1,11 +1,14 @@
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) enum TieredInteractiveInvocation {
     Cold,
-    Native(std::result::Result<Box<crate::generic_native::NativeExecution>, Box<RuntimeError>>),
+    Native(
+        std::result::Result<Box<crate::generic_native::RootedNativeExecution>, Box<RuntimeError>>,
+    ),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -82,7 +85,7 @@ impl RunMatSession {
         preferred_function: Option<&str>,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         let published = self
             .generic_native_cache
             .resolve_or_compile(unit, preferred_function)?;
@@ -95,12 +98,18 @@ impl RunMatSession {
                 arguments,
                 requested_outputs,
                 runtime: runtime.clone(),
+                dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
                 runtime_functions,
                 workspace: None,
             },
         )
         .await
-        .map(|execution| execution.outputs)
+        .and_then(|execution| {
+            execution.try_map_owned(
+                |execution| Ok(execution.outputs),
+                |error| error.into_runtime_error(),
+            )
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -209,6 +218,7 @@ impl RunMatSession {
                 arguments: Vec::new(),
                 requested_outputs: 0,
                 runtime: runtime.clone(),
+                dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
                 runtime_functions,
                 workspace: Some(workspace.clone()),
             },
@@ -256,7 +266,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
-    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
             return self
                 .invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
@@ -288,18 +298,27 @@ impl RunMatSession {
                         arguments: Vec::new(),
                         requested_outputs: 0,
                         runtime: runtime.clone(),
+                        dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
                         runtime_functions: &runtime_bytecode.function_registry,
                         workspace: None,
                     },
                 )
                 .await;
                 match execution {
-                    Ok(execution) => (
-                        Ok(execution.outputs),
-                        execution.loop_backedges,
-                        execution.osr_entry,
-                        execution.vectorized_regions,
-                    ),
+                    Ok(execution) => {
+                        let backedges = execution.loop_backedges.clone();
+                        let osr_entry = execution.osr_entry;
+                        let vectorized_regions = execution.vectorized_regions;
+                        (
+                            execution.try_map_owned(
+                                |execution| Ok(execution.outputs),
+                                |error| error.into_runtime_error(),
+                            ),
+                            backedges,
+                            osr_entry,
+                            vectorized_regions,
+                        )
+                    }
                     Err(error) => (Err(error), BTreeMap::new(), None, 0),
                 }
             }
@@ -345,7 +364,7 @@ impl RunMatSession {
         target: NativeProcedureTarget<'_>,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         let NativeProcedureTarget { function, name } = target;
         if !self.native_tiering_enabled {
             return self
@@ -385,18 +404,27 @@ impl RunMatSession {
                         arguments,
                         requested_outputs,
                         runtime: runtime.clone(),
+                        dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
                         runtime_functions: &runtime_bytecode.function_registry,
                         workspace: None,
                     },
                 )
                 .await;
                 match execution {
-                    Ok(execution) => (
-                        Ok(execution.outputs),
-                        execution.loop_backedges,
-                        execution.osr_entry,
-                        execution.vectorized_regions,
-                    ),
+                    Ok(execution) => {
+                        let backedges = execution.loop_backedges.clone();
+                        let osr_entry = execution.osr_entry;
+                        let vectorized_regions = execution.vectorized_regions;
+                        (
+                            execution.try_map_owned(
+                                |execution| Ok(execution.outputs),
+                                |error| error.into_runtime_error(),
+                            ),
+                            backedges,
+                            osr_entry,
+                            vectorized_regions,
+                        )
+                    }
                     Err(error) => (Err(error), BTreeMap::new(), None, 0),
                 }
             }
@@ -496,21 +524,45 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
-        let result = self
+        let profiling_root = self.admit_command_profiling();
+        let receipt = self
+            .runtime_context
+            .command_profiling()
+            .cloned()
+            .expect("admitted command");
+        let result = runmat_execution::profiling::observe_command_future(
+            receipt,
+            self.invoke_executable_and_cleanup(unit, invocation, control),
+        )
+        .await;
+        if let Some(admission) = profiling_root {
+            self.observe_command_device_time_at_seal(&admission.root);
+            let _ = admission.root.seal();
+        }
+        result
+    }
+
+    async fn invoke_executable_and_cleanup(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
+        let mut result = self
             .invoke_executable_inner(unit, invocation, control)
             .await;
-        let result = result.and_then(|value| {
-            runmat_runtime::execution::RootedValueSequence::new(value)
-                .map_err(|error| RunError::Runtime(error.into_runtime_error()))
-        });
-        self.lifecycle_host
-            .service_safepoint(&self.runtime_context)
-            .map_err(RunError::Runtime)?;
-        match self
+        if let Err(error) = self.lifecycle_host.service_safepoint(&self.runtime_context) {
+            if result.is_ok() {
+                result = Err(RunError::Runtime(error));
+            } else {
+                tracing::warn!(%error, "cleanup safepoint failed after an invocation error");
+            }
+        }
+        let cleanup = self
             .lifecycle_host
             .drain_gracefully(&self.runtime_context)
-            .await
-        {
+            .await;
+        match cleanup {
             Ok(()) => result,
             Err(error) if result.is_ok() => Err(RunError::Runtime(error)),
             Err(error) => {
@@ -525,7 +577,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         let _admission = self.admit_execution(control.cancellation());
         self.ensure_user_path_hydrated().await?;
         let runtime = self.execution_runtime_context(unit.revision().program_revision.clone());
@@ -535,6 +587,41 @@ impl RunMatSession {
         let runtime_bytecode = unit
             .runtime_bytecode(&runtime)
             .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
+        let current_functions = runtime_bytecode
+            .function_registry
+            .functions
+            .keys()
+            .copied()
+            .collect();
+        let selected = super::source_evaluation::SelectedGraphPrimary::new(
+            super::source_evaluation::SelectedGraphSource {
+                unit: Rc::new(unit.clone()),
+                primary_source: unit
+                    .source_map()
+                    .entries()
+                    .first()
+                    .map(|entry| entry.source_id),
+                already_published: None,
+            },
+            &runtime,
+            runtime_bytecode.function_registry.clone(),
+            super::source_evaluation::SelectedGraphPublication::new(
+                &runtime_bytecode.function_registry,
+                &std::collections::HashSet::new(),
+            ),
+            super::source_evaluation::SelectedGraphSelection {
+                current_functions,
+                interop: runmat_types::InteropManifest::empty(),
+                static_targets: Vec::new(),
+            },
+        )
+        .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
+        let runtime = runtime
+            .without_selected_graph_program()
+            .with_selected_graph_program(super::source_evaluation::SelectedGraphSnapshot::program(
+                Rc::new(selected),
+                &self.source_evaluator,
+            ));
         runtime
             .scope(self.invoke_executable_in_context(
                 unit,
@@ -553,12 +640,14 @@ impl RunMatSession {
         control: &crate::InvocationControl,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
-    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         let (_input_guard, _input_events) = self.install_execution_input();
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
                 self.project_handoff.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                self.local_tasks.child_scope_factory(),
             ),
         );
         // Builtin class registration is session-owned. Register the testing
@@ -679,17 +768,25 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
-    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         let mut variables = vec![Value::Num(0.0); runtime_bytecode.var_count];
-        match runmat_vm::interpret_with_vars_in_context(
+        match runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
             runtime_bytecode,
             &mut variables,
             Some(&unit.source().relative_path),
             runtime.clone(),
+            None,
+            Some(self.source_evaluator.dynamic_admission_port()),
         )
-        .await?
+        .await
+        .outcome?
         {
-            runmat_vm::InterpreterOutcome::Completed(_) => Ok(runmat_value::ValueSequence::empty()),
+            runmat_vm::InterpreterOutcome::Completed(_) => {
+                runmat_runtime::execution::RootedValueSequence::new(
+                    runmat_value::ValueSequence::empty(),
+                )
+                .map_err(|error| error.into_runtime_error())
+            }
         }
     }
 
@@ -701,13 +798,15 @@ impl RunMatSession {
         function: runmat_hir::FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
-        runmat_vm::invoke_semantic_function_value_in_context(
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+        runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
             function.0,
             &arguments,
             requested_outputs,
             &runtime_bytecode.function_registry,
             runtime.clone(),
+            None,
+            self.source_evaluator.dynamic_admission_port(),
         )
         .await
     }

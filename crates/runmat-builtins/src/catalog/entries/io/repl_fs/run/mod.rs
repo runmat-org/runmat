@@ -8,6 +8,7 @@ pub use contract::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub const RUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "run" },
     category: "io/repl_fs",

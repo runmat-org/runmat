@@ -3500,6 +3500,10 @@ pub(crate) mod tests {
         }
     }
 
+    fn expect_rooted_sparse(value: crate::execution::RootedValue) -> SparseTensor {
+        value.with_owned(expect_sparse)
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn sparse_conversion_keeps_full_rank_admission_for_real_and_complex() {
@@ -3934,7 +3938,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let result =
                 crate::dispatcher::call_builtin("sparse", &[Value::Tensor(integer)]).unwrap();
-            let sparse = expect_sparse(result);
+            let sparse = expect_rooted_sparse(result);
             assert_eq!(
                 sparse.integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX]))
@@ -3948,7 +3952,7 @@ pub(crate) mod tests {
                 ],
             )
             .expect("RunMat mode accepts sparse integer triplet values");
-            let sparse = expect_sparse(result);
+            let sparse = expect_rooted_sparse(result);
             assert_eq!(
                 sparse.integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX]))
@@ -3994,7 +3998,7 @@ pub(crate) mod tests {
             let cast = crate::dispatcher::call_builtin("uint16", &[Value::SparseTensor(floating)])
                 .unwrap();
             assert!(matches!(
-                cast,
+                cast.value(),
                 Value::SparseTensor(ref sparse)
                     if sparse.integer_storage() == Some(&IntegerStorage::U16(vec![7]))
             ));
@@ -4004,7 +4008,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             assert!(matches!(
-                sum,
+                sum.value(),
                 Value::SparseTensor(ref sparse)
                     if sparse.integer_storage() == Some(&IntegerStorage::U16(vec![7]))
             ));
@@ -4272,7 +4276,7 @@ pub(crate) mod tests {
                 shape: &[2, 2],
             })
             .expect("upload WGPU input");
-        let sparse = expect_sparse(
+        let sparse = expect_rooted_sparse(
             crate::dispatcher::call_builtin("sparse", &[Value::GpuTensor(handle)])
                 .expect("gather WGPU sparse input"),
         );
@@ -4305,7 +4309,7 @@ pub(crate) mod tests {
             }
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-                let sparse = expect_sparse(
+                let sparse = expect_rooted_sparse(
                     crate::dispatcher::call_builtin("sparse", &[Value::GpuTensor(handle)])
                         .expect("RunMat mode sparse integer gather"),
                 );

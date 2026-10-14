@@ -1,9 +1,18 @@
 use super::*;
 use runmat_execution::{Digest, FunctionBindingOrigin};
-use runmat_hir::{FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span};
+use runmat_hir::{
+    EntrypointId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span,
+    WorkspaceExportPolicy,
+};
 use runmat_mir::{MirAssembly, MirBody, MirFunctionMetadata};
-use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
-use runmat_vm::{Bytecode, FunctionBytecode, FunctionRegistry};
+use runmat_types::{
+    ClassIdentity, ClassMethodOwner, ClassMethodRole, FunctionSourceRole, MethodName,
+    ProgramFunctionId, ProgramSourceId,
+};
+use runmat_vm::{
+    Bytecode, FunctionBytecode, FunctionRegistry, VmAssemblyLayout, VmEntrypointLayout, VmFrameAbi,
+    VmFunctionLayout,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn body(function: FunctionId) -> MirBody {
@@ -37,6 +46,105 @@ fn declaration(name: &str, kind: FunctionKind) -> MirFunctionMetadata {
         modifiers: FunctionModifiers::default(),
         span: Span { start: 0, end: 1 },
     }
+}
+
+#[test]
+fn constructor_class_entrypoint_uses_exact_typed_owner_only() {
+    let constructor = FunctionId(1);
+    let ordinary = FunctionId(2);
+    let duplicate = FunctionId(3);
+    let class = ClassIdentity::new("pkg.Seed").unwrap();
+    let mut mir = MirAssembly::default();
+    let mut constructor_metadata = declaration(
+        "pkg.Seed.Seed",
+        FunctionKind::ClassMethod {
+            is_static: false,
+            role: ClassMethodRole::Constructor,
+        },
+    );
+    constructor_metadata.class_method_owner = Some(ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: MethodName::from("Seed"),
+        is_static: false,
+        role: ClassMethodRole::Constructor,
+    });
+    mir.functions
+        .insert(constructor, constructor_metadata.clone());
+    let mut ordinary_metadata = declaration(
+        "pkg.Seed.bump",
+        FunctionKind::ClassMethod {
+            is_static: false,
+            role: ClassMethodRole::Ordinary,
+        },
+    );
+    ordinary_metadata.class_method_owner = Some(ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: MethodName::from("bump"),
+        is_static: false,
+        role: ClassMethodRole::Ordinary,
+    });
+    mir.functions.insert(ordinary, ordinary_metadata);
+
+    assert_eq!(
+        native_function_id_in_mir(&mir, "pkg.Seed"),
+        Some(constructor)
+    );
+    assert_eq!(
+        native_function_id_in_mir(&mir, "pkg.Seed.Seed"),
+        Some(constructor)
+    );
+    assert_eq!(
+        native_function_id_in_mir(&mir, "pkg.Seed.bump"),
+        Some(ordinary)
+    );
+    assert_eq!(native_function_id_in_mir(&mir, "bump"), None);
+    assert_eq!(native_function_id_in_mir(&mir, "pkg.Other"), None);
+    assert_eq!(
+        constructor_function_id_in_mir(&mir, &class, Some(ProgramSourceId(0))),
+        Some(constructor)
+    );
+
+    mir.functions.get_mut(&constructor).unwrap().source = ProgramSourceId(1);
+    assert_eq!(
+        constructor_function_id_in_mir(&mir, &class, Some(ProgramSourceId(0))),
+        None,
+        "a companion constructor cannot replace the primary class source"
+    );
+    mir.functions.get_mut(&constructor).unwrap().source = ProgramSourceId(0);
+
+    mir.functions.insert(duplicate, constructor_metadata);
+    assert_eq!(native_function_id_in_mir(&mir, "pkg.Seed"), None);
+    assert_eq!(
+        constructor_function_id_in_mir(&mir, &class, Some(ProgramSourceId(0))),
+        None,
+        "ambiguous primary constructors cannot select an arbitrary body"
+    );
+    assert_eq!(
+        native_function_id_in_mir(&mir, "pkg.Seed.Seed"),
+        Some(constructor)
+    );
+
+    mir.functions.remove(&duplicate);
+    let constructor_metadata = mir.functions.get_mut(&constructor).unwrap();
+    constructor_metadata.kind = FunctionKind::ClassMethod {
+        is_static: true,
+        role: ClassMethodRole::Constructor,
+    };
+    constructor_metadata
+        .class_method_owner
+        .as_mut()
+        .unwrap()
+        .is_static = true;
+    assert_eq!(native_function_id_in_mir(&mir, "pkg.Seed"), None);
+    assert_eq!(
+        constructor_function_id_in_mir(&mir, &class, Some(ProgramSourceId(0))),
+        None,
+        "static methods cannot own a source constructor entrypoint"
+    );
+    assert_eq!(
+        native_function_id_in_mir(&mir, "pkg.Seed.Seed"),
+        Some(constructor)
+    );
 }
 
 fn function(id: usize, program: Digest, portable: u32) -> (FunctionId, FunctionBytecode) {
@@ -82,13 +190,72 @@ fn compiled_owners_exclude_inherited_mir_bodies_and_declarations() {
     );
     let mut bytecode = Bytecode::empty();
     bytecode.function_registry = FunctionRegistry::new(HashMap::from([
+        function(entrypoint.0, inherited, 9),
         function(inherited_function.0, inherited, 0),
         function(current_function.0, current, 1),
     ]));
+    bytecode.bound_functions = bytecode.function_registry.functions.clone();
+    bytecode.layout = Some(VmAssemblyLayout {
+        functions: HashMap::from([(
+            entrypoint,
+            VmFunctionLayout {
+                function: entrypoint,
+                parent: None,
+                display_name: "entrypoint".into(),
+                source_role: FunctionSourceRole::Local,
+                private_owner_scope: String::new(),
+                frame_abi: VmFrameAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                binding_slots: HashMap::new(),
+                mir_local_slots: HashMap::new(),
+                captures: Vec::new(),
+                local_count: 0,
+                resume_points: BTreeMap::new(),
+            },
+        )]),
+        entrypoints: HashMap::from([(
+            EntrypointId(0),
+            VmEntrypointLayout {
+                entrypoint: EntrypointId(0),
+                target: entrypoint,
+                workspace_export: WorkspaceExportPolicy::HostDefined,
+                exports: Vec::new(),
+            },
+        )]),
+        storage_bindings: HashMap::new(),
+    });
 
+    let owners = compiled_function_owners(current, &mir, &bytecode).unwrap();
     assert_eq!(
-        compiled_function_owners(current, &mir, &bytecode).unwrap(),
+        owners.assembly,
         BTreeSet::from([entrypoint, current_function])
+    );
+    assert_eq!(owners.registered_bodies, BTreeSet::from([current_function]));
+    let old = bytecode.function_registry.functions[&entrypoint].clone();
+    bytecode
+        .install_regions_for_product(&[], &owners.assembly, &owners.registered_bodies)
+        .unwrap();
+    bytecode
+        .install_parallel_regions_for_product(
+            &mir,
+            &runmat_types::ParallelManifest::empty(),
+            &owners.assembly,
+            &owners.registered_bodies,
+        )
+        .unwrap();
+    assert_eq!(
+        bytecode.function_registry.functions[&entrypoint].binding_origin,
+        old.binding_origin
+    );
+    assert_eq!(
+        bytecode.bound_functions[&entrypoint].binding_origin,
+        old.binding_origin
     );
 }
 

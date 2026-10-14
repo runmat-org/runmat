@@ -34,11 +34,11 @@ fn protected_provider_siblings_cannot_change_automatic_caller_intent() {
             count,
         ))
         .unwrap();
-        let Value::OutputList(values) = output else {
+        let Value::OutputList(values) = output.value() else {
             panic!("envelope output list")
         };
         assert_eq!(values.len(), count);
-        for value in &values {
+        for value in values.iter() {
             let Value::GpuTensor(handle) = value else {
                 panic!("resident output")
             };
@@ -48,7 +48,7 @@ fn protected_provider_siblings_cannot_change_automatic_caller_intent() {
             );
             assert!(!handle.shares_allocation_with(&input.handle));
         }
-        drop(values);
+        drop(output);
         provider.assert_retired();
         assert_eq!(input.probe.retirements(), 0);
         assert!(!handle_is_explicit(&input.handle));
@@ -133,12 +133,10 @@ fn pending_envelope_drop_retires_private_outputs_without_replaying_host() {
     let mut future = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
         "envelope", &args, 2,
     ));
-    assert!(
-        future
-            .as_mut()
-            .poll(&mut Context::from_waker(&noop_waker()))
-            .is_pending()
-    );
+    assert!(future
+        .as_mut()
+        .poll(&mut Context::from_waker(&noop_waker()))
+        .is_pending());
     assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     drop(future);

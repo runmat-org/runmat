@@ -164,17 +164,17 @@ pub fn value_fact(value: &Value) -> ValueFact {
             outputs: values.iter().map(value_fact).collect(),
             variadic: false,
         })),
-        Value::FunctionHandle(name) => {
-            callable(CallableIdentity::DynamicName(SymbolName(name.clone())))
-        }
+        Value::FunctionHandle(name) => callable(CallableIdentity::DynamicName(SymbolName(
+            name.name().to_owned(),
+        ))),
         Value::ExternalFunctionHandle(name) => {
             callable(CallableIdentity::ExternalName(qualified_name(name)))
         }
         Value::MethodFunctionHandle(name) => callable(CallableIdentity::Method(
-            runmat_types::MethodId(name.clone()),
+            runmat_types::MethodId(name.name().to_owned()),
         )),
-        Value::BoundFunctionHandle { function, .. } => callable(CallableIdentity::BoundFunction(
-            runmat_types::FunctionId(*function),
+        Value::BoundFunctionHandle(handle) => callable(CallableIdentity::BoundFunction(
+            runmat_types::FunctionId(handle.function),
         )),
         Value::Closure(value) => {
             let mut fact = callable_kind(CallableIdentity::DynamicName(SymbolName(

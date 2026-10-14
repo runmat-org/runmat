@@ -112,7 +112,7 @@ fn visit_gpu_handles(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Future(_)
@@ -234,13 +234,16 @@ mod tests {
             Some("RunMat:TransientSequenceNotStorable")
         );
 
-        let closure = Value::Closure(runmat_value::Closure {
-            function_name: "capture_target".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![Value::OutputList(Vec::new())],
-        });
+        let closure = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "capture_target".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: vec![Value::OutputList(Vec::new())],
+            },
+        ));
         let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");
         assert_eq!(
             error.identifier(),
@@ -260,13 +263,16 @@ mod tests {
             Some("RunMat:SpawnGpuHandleUnsupported")
         );
 
-        let closure = Value::Closure(runmat_value::Closure {
-            function_name: "worker".into(),
-            binding: None,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-            captures: vec![gpu(&reject_provider().owner)],
-        });
+        let closure = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "worker".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: vec![gpu(&reject_provider().owner)],
+            },
+        ));
         assert_eq!(
             validate_spawn_capture(&closure).unwrap_err().identifier(),
             Some("RunMat:SpawnGpuHandleUnsupported")

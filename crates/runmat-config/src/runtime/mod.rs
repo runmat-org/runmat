@@ -8,7 +8,8 @@ pub use schema::{
     AccelerateProviderPreference, AutoOffloadConfig, AutoOffloadLogLevel, ExportConfig,
     ExportFormat, FeaArtifactStoreMode, FeaConfig, ForeignConfig, GcConfig, GcPreset, GuiConfig,
     JavaConfig, JitConfig, JitOptLevel, LanguageCompatMode, LanguageConfig, LogLevel,
-    LoggingConfig, MexConfig, NativeFfiConfig, NativeFfiIsolation, PlotBackend, PlotMode,
-    PlottingConfig, PythonConfig, PythonExecutionModeConfig, RunMatRuntimeConfig, RuntimeConfig,
-    TelemetryConfig, TelemetryDrainMode, UnmanifestedMexPolicy,
+    LoggingConfig, MexConfig, NativeFfiConfig, NativeFfiIsolation, NativeFfiTimeout, PlotBackend,
+    PlotMode, PlottingConfig, PythonConfig, PythonExactVersion, PythonExecutionModeConfig,
+    PythonInstalledModulePaths, RunMatRuntimeConfig, RuntimeConfig, TelemetryConfig,
+    TelemetryDrainMode, UnmanifestedMexPolicy,
 };

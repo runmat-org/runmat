@@ -28,7 +28,7 @@ impl BuiltinPreparationObservation for Observer {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -69,26 +69,26 @@ impl RuntimeAccelerationService for Service {
             }
         );
         self.events.borrow_mut().push("prepare");
-        let mut operands = request.into_operands();
-        if let Some(replacement) = &self.replacement {
-            operands[0] = replacement.clone();
-        }
-        if let Some(replacement) = &self.map_replacement {
-            operands[1] = replacement.clone();
-        }
-        let prepared =
-            PreparedBuiltinOperands::new(operands, Some(Box::new(Observer(self.events.clone()))));
+        let prepared = request.into_operands().with_owned_values(|mut operands| {
+            if let Some(replacement) = &self.replacement {
+                operands[0] = replacement.clone();
+            }
+            if let Some(replacement) = &self.map_replacement {
+                operands[1] = replacement.clone();
+            }
+            PreparedBuiltinOperands::new(operands, Some(Box::new(Observer(self.events.clone()))))
+        });
         let pause = self.pause;
         Box::pin(async move {
             if pause {
                 std::future::pending::<()>().await;
             }
-            Ok(prepared)
+            prepared
         })
     }
 }
 
-fn enter(events: &Events, pause: bool) -> RuntimeContextGuard {
+fn enter(events: &Events, pause: bool) -> (RuntimeContext, RuntimeContextGuard) {
     enter_with_replacement(events, pause, None)
 }
 
@@ -96,7 +96,7 @@ fn enter_with_replacement(
     events: &Events,
     pause: bool,
     replacement: Option<Value>,
-) -> RuntimeContextGuard {
+) -> (RuntimeContext, RuntimeContextGuard) {
     enter_with_replacements(events, pause, replacement, None)
 }
 
@@ -105,18 +105,18 @@ fn enter_with_replacements(
     pause: bool,
     replacement: Option<Value>,
     map_replacement: Option<Value>,
-) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
-                Service {
-                    events: events.clone(),
-                    pause,
-                    replacement,
-                    map_replacement,
-                },
-            ))),
-    )
+) -> (RuntimeContext, RuntimeContextGuard) {
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_acceleration(Rc::new(Service {
+                events: events.clone(),
+                pause,
+                replacement,
+                map_replacement,
+            })),
+        );
+    let guard = RuntimeContextGuard::enter(runtime.clone());
+    (runtime, guard)
 }
 
 #[test]
@@ -137,20 +137,22 @@ fn prepared_host_operand_is_consumed_once_but_result_restores_to_original_reside
         );
         for name in ["rgb2gray", "rgb2hsv"] {
             let events = Events::default();
-            let _context = enter_with_replacement(&events, false, Some(prepared_green.clone()));
-            let result = block_on(dispatcher::call_builtin_async(
+            let (runtime, _context) =
+                enter_with_replacement(&events, false, Some(prepared_green.clone()));
+            let result = block_on(dispatcher::call_builtin_async_in_context(
+                &runtime,
                 name,
                 &[Value::GpuTensor(source.clone())],
             ))
             .unwrap();
-            let Value::GpuTensor(output) = result else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("explicit result must be resident");
             };
-            let owner = runmat_accelerate_api::provider_for_handle(&output).unwrap();
+            let owner = runmat_accelerate_api::provider_for_handle(output).unwrap();
             assert!(runmat_accelerate_api::same_provider_instance(
                 owner, provider
             ));
-            let observed = test_support::gather(Value::GpuTensor(output))
+            let observed = test_support::gather_rooted(result)
                 .unwrap()
                 .materialize_f64();
             if name == "rgb2gray" {
@@ -182,21 +184,22 @@ fn prepared_hsv_operand_is_used_once_and_restores_original_owner() {
         let prepared =
             Value::Tensor(Tensor::new(vec![1.0 / 3.0, 1.0, 1.0], vec![1, 1, 3]).unwrap());
         let events = Events::default();
-        let _context = enter_with_replacement(&events, false, Some(prepared));
-        let result = block_on(dispatcher::call_builtin_async(
+        let (runtime, _context) = enter_with_replacement(&events, false, Some(prepared));
+        let result = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             "hsv2rgb",
             &[Value::GpuTensor(source.clone())],
         ))
         .unwrap();
-        let Value::GpuTensor(output) = result else {
+        let Value::GpuTensor(output) = result.value() else {
             panic!("explicit result must be resident");
         };
-        let owner = runmat_accelerate_api::provider_for_handle(&output).unwrap();
+        let owner = runmat_accelerate_api::provider_for_handle(output).unwrap();
         assert!(runmat_accelerate_api::same_provider_instance(
             owner, provider
         ));
         assert_eq!(
-            test_support::gather(Value::GpuTensor(output))
+            test_support::gather_rooted(result)
                 .unwrap()
                 .materialize_f64(),
             vec![0.0, 1.0, 0.0]
@@ -214,7 +217,7 @@ fn prepared_hsv_operand_is_used_once_and_restores_original_owner() {
 #[test]
 fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_prepare() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     let map = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap());
     let valid = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
     let entry = runmat_builtins::builtin_catalog_primary_entry_by_name("ind2rgb").unwrap();
@@ -223,19 +226,21 @@ fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_
     };
     assert_eq!(forms[0].data_arguments, &[0, 1]);
     assert!(runmat_builtins::validate_builtin_preparation(entry).is_empty());
-    let output = block_on(dispatcher::call_builtin_async(
+    let output = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "ind2rgb",
         &[valid.clone(), map.clone()],
     ))
     .unwrap();
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("RGB output tensor");
     };
     assert_eq!(output.shape(), &[1, 1, 3]);
     assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
     events.borrow_mut().clear();
     let invalid = Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap());
-    let error = block_on(dispatcher::call_builtin_async(
+    let error = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "ind2rgb",
         &[invalid, map.clone()],
     ))
@@ -245,7 +250,8 @@ fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_
     let invalid_map = Value::Tensor(
         Tensor::new_with_dtype(vec![1.0, 0.0, 0.0], vec![1, 3], NumericDType::F32).unwrap(),
     );
-    let error = block_on(dispatcher::call_builtin_async(
+    let error = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "ind2rgb",
         &[valid, invalid_map],
     ))
@@ -269,21 +275,23 @@ fn scalar_index_uses_two_operand_preparation_and_prepared_resident_map_once() {
             Value::Int(IntValue::U16(0)),
         ] {
             let events = Events::default();
-            let _context = enter_with_replacements(&events, false, None, Some(prepared.clone()));
+            let (runtime, _context) =
+                enter_with_replacements(&events, false, None, Some(prepared.clone()));
             provider.reset_telemetry();
-            let output = block_on(dispatcher::call_builtin_async(
+            let result = block_on(dispatcher::call_builtin_async_in_context(
+                &runtime,
                 "ind2rgb",
                 &[index, Value::GpuTensor(map.clone())],
             ))
             .unwrap();
-            let Value::GpuTensor(output) = output else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("resident map must restore a resident RGB result");
             };
             assert_eq!(output.shape(), &[1, 1, 3]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
             assert_eq!(
-                test_support::gather(Value::GpuTensor(output))
+                test_support::gather_rooted(result)
                     .unwrap()
                     .materialize_f64(),
                 vec![0.0, 1.0, 0.0]
@@ -293,9 +301,10 @@ fn scalar_index_uses_two_operand_preparation_and_prepared_resident_map_once() {
 
         for invalid in [Value::Num(f64::NAN), Value::Num(1.5)] {
             let events = Events::default();
-            let _context = enter(&events, false);
+            let (runtime, _context) = enter(&events, false);
             provider.reset_telemetry();
-            let error = block_on(dispatcher::call_builtin_async(
+            let error = block_on(dispatcher::call_builtin_async_in_context(
+                &runtime,
                 "ind2rgb",
                 &[invalid, Value::GpuTensor(map.clone())],
             ))
@@ -312,14 +321,18 @@ fn scalar_index_uses_two_operand_preparation_and_prepared_resident_map_once() {
 #[test]
 fn indexed_color_unpolled_and_pending_calls_do_not_publish_preparation() {
     let events = Events::default();
-    let _context = enter(&events, true);
+    let (runtime, _context) = enter(&events, true);
     let args = [
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap()),
     ];
-    drop(dispatcher::call_builtin_async("ind2rgb", &args));
+    drop(dispatcher::call_builtin_async_in_context(
+        &runtime, "ind2rgb", &args,
+    ));
     assert!(events.borrow().is_empty());
-    let mut call = Box::pin(dispatcher::call_builtin_async("ind2rgb", &args));
+    let mut call = Box::pin(dispatcher::call_builtin_async_in_context(
+        &runtime, "ind2rgb", &args,
+    ));
     let waker = futures::task::noop_waker();
     let mut context = Context::from_waker(&waker);
     assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
@@ -331,9 +344,10 @@ fn indexed_color_unpolled_and_pending_calls_do_not_publish_preparation() {
 #[test]
 fn lab_output_type_is_parsed_before_preparation_and_controls_native_class() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     let lab = Value::Tensor(Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 1, 3]).unwrap());
-    let invalid = block_on(dispatcher::call_builtin_async(
+    let invalid = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "lab2rgb",
         &[
             lab.clone(),
@@ -344,7 +358,8 @@ fn lab_output_type_is_parsed_before_preparation_and_controls_native_class() {
     .unwrap_err();
     assert_eq!(invalid.identifier(), Some("RunMat:lab2rgb:InvalidOption"));
     assert!(events.borrow().is_empty());
-    let result = block_on(dispatcher::call_builtin_async(
+    let result = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "lab2rgb",
         &[
             lab,
@@ -353,7 +368,7 @@ fn lab_output_type_is_parsed_before_preparation_and_controls_native_class() {
         ],
     ))
     .unwrap();
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("uint8 RGB tensor");
     };
     assert_eq!(result.numeric_dtype(), NumericDType::U8);
@@ -372,7 +387,7 @@ fn valid(name: &str) -> Value {
 #[test]
 fn color_forms_are_typed_gather_and_valid_calls_observe_once() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
@@ -387,10 +402,16 @@ fn color_forms_are_typed_gather_and_valid_calls_observe_once() {
             BuiltinPreparationOperation::Sink(BuiltinSinkPreparation::Gather)
         );
         assert!(runmat_builtins::validate_builtin_preparation(entry).is_empty());
-        block_on(dispatcher::call_builtin_async(name, &[valid(name)])).unwrap();
+        block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
+            name,
+            &[valid(name)],
+        ))
+        .unwrap();
         assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
         events.borrow_mut().clear();
-        block_on(dispatcher::call_builtin_async_with_outputs(
+        block_on(dispatcher::call_builtin_async_with_outputs_in_context(
+            &runtime,
             name,
             &[valid(name)],
             0,
@@ -404,10 +425,11 @@ fn color_forms_are_typed_gather_and_valid_calls_observe_once() {
 #[test]
 fn extension_gate_and_empty_rgb_inputs_precede_service() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     {
         let _disabled = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(dispatcher::call_builtin_async(
+        let error = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             "gray2rgb",
             &[valid("gray2rgb")],
         ))
@@ -420,15 +442,25 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
     }
     for name in ["hsv2rgb", "rgb2gray", "rgb2hsv", "rgb2lab"] {
         let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1, 3]).unwrap());
-        let error = block_on(dispatcher::call_builtin_async(name, &[empty])).unwrap_err();
+        let error = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
+            name,
+            &[empty],
+        ))
+        .unwrap_err();
         let expected = format!("RunMat:{name}:InvalidInput");
         assert_eq!(error.identifier(), Some(expected.as_str()));
         assert!(events.borrow().is_empty());
     }
     let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
     let empty_gray = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
-    let output = block_on(dispatcher::call_builtin_async("gray2rgb", &[empty_gray])).unwrap();
-    let Value::Tensor(output) = output else {
+    let output = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
+        "gray2rgb",
+        &[empty_gray],
+    ))
+    .unwrap();
+    let Value::Tensor(output) = output.value() else {
         panic!("empty RGB remains a tensor");
     };
     assert_eq!(output.shape(), &[0, 2, 3]);
@@ -446,9 +478,10 @@ fn invalid_logical_hsv_resident_geometry_precedes_service() {
             })
             .unwrap();
         let events = Events::default();
-        let _context = enter(&events, false);
+        let (runtime, _context) = enter(&events, false);
         provider.reset_telemetry();
-        let error = block_on(dispatcher::call_builtin_async(
+        let error = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             "hsv2rgb",
             &[Value::GpuTensor(handle.clone())],
         ))
@@ -464,15 +497,18 @@ fn invalid_logical_hsv_resident_geometry_precedes_service() {
 #[test]
 fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
-        assert!(block_on(dispatcher::call_builtin_async_with_outputs(
-            name,
-            &[valid(name)],
-            2
-        ))
-        .is_err());
+        assert!(
+            block_on(dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                name,
+                &[valid(name)],
+                2
+            ))
+            .is_err()
+        );
         assert!(events.borrow().is_empty());
         let invalid = if name == "gray2rgb" {
             Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 1, 3]).unwrap())
@@ -491,10 +527,16 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
                 Tensor::new_with_dtype(vec![1.0; 3], vec![1, 3], NumericDType::U8).unwrap(),
             )
         };
-        assert!(block_on(dispatcher::call_builtin_async(name, &[invalid])).is_err());
+        assert!(block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
+            name,
+            &[invalid]
+        ))
+        .is_err());
         assert!(events.borrow().is_empty());
     }
-    let invalid_option = block_on(dispatcher::call_builtin_async(
+    let invalid_option = block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "rgb2lab",
         &[
             valid("rgb2lab"),
@@ -513,7 +555,7 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
 #[test]
 fn unsupported_resident_metadata_rejects_before_service_or_download() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let (runtime, _context) = enter(&events, false);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
@@ -532,7 +574,8 @@ fn unsupported_resident_metadata_rejects_before_service_or_download() {
             .allocate_zeroed(shape, dtype, runmat_accelerate_api::GpuTensorStorage::Real)
             .unwrap()
             .handle;
-        let error = block_on(dispatcher::call_builtin_async(
+        let error = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[Value::GpuTensor(handle)],
         ))
@@ -546,13 +589,17 @@ fn unsupported_resident_metadata_rejects_before_service_or_download() {
 #[test]
 fn dropped_unpolled_and_polled_calls_keep_observation_transactional() {
     let events = Events::default();
-    let _context = enter(&events, true);
+    let (runtime, _context) = enter(&events, true);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let args = [valid(name)];
-        drop(dispatcher::call_builtin_async(name, &args));
+        drop(dispatcher::call_builtin_async_in_context(
+            &runtime, name, &args,
+        ));
         assert!(events.borrow().is_empty());
-        let mut call = Box::pin(dispatcher::call_builtin_async(name, &args));
+        let mut call = Box::pin(dispatcher::call_builtin_async_in_context(
+            &runtime, name, &args,
+        ));
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));

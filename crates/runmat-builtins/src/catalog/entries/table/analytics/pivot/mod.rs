@@ -67,6 +67,7 @@ pub const PIVOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 pub(super) const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pivot" },
     category: "table",

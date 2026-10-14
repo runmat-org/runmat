@@ -8,6 +8,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const ISPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ispref" },
     category: "io/repl_fs",

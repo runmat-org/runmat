@@ -56,7 +56,7 @@ fn resident_double_h_host_uint8_a_preserves_class_and_pre_effect_budget() {
         &args,
     ))
     .expect("admitted host result");
-    let Value::Tensor(result) = result else {
+    let Value::Tensor(result) = result.value() else {
         panic!("multi-element uint8 output must remain a host tensor")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::U8);

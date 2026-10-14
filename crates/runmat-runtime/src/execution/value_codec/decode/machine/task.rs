@@ -254,9 +254,16 @@ fn decode_task<'a>(
                     path,
                 }));
         }
-        InlineValue::Exception(value) => machine
-            .tasks
-            .push(Task::Exception(Box::new(ExceptionTask::new(value, path)))),
+        InlineValue::Exception(value) => {
+            let frame_sources = machine.frame_sources();
+            machine
+                .tasks
+                .push(Task::Exception(Box::new(ExceptionTask::new(
+                    value,
+                    path,
+                    frame_sources,
+                ))));
+        }
         InlineValue::Callable(callable) => {
             machine
                 .tasks

@@ -12,18 +12,20 @@ use runmat_process_host::shared_memory::SharedSnapshotStore;
 use runmat_value::Value;
 
 use super::{
-    decode_portable, encode_portable, wire_error, NativeCallbackRequest, NativeDriverMessage,
-    NativeHostMessage, NativeInvocationRequest, NativeInvocationResult, NativeRemoteReference,
-    NativeShutdownResult, NativeWireError, NativeWireValue, NATIVE_FFI_HOST_FRONTEND_ENV,
-    NATIVE_FFI_HOST_MAX_CALLBACK_DEPTH, NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
-    NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION, NATIVE_FFI_HOST_SECRET_ENV,
-    NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
+    decode_portable, encode_portable, root_plain_value, wire_error, NativeCallbackRequest,
+    NativeDriverMessage, NativeHostMessage, NativeInvocationRequest, NativeInvocationResult,
+    NativeRemoteReference, NativeShutdownResult, NativeWireError, NativeWireValue,
+    NATIVE_FFI_HOST_FRONTEND_ENV, NATIVE_FFI_HOST_MAX_CALLBACK_DEPTH,
+    NATIVE_FFI_HOST_MAX_MESSAGE_BYTES, NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION,
+    NATIVE_FFI_HOST_SECRET_ENV, NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{
     ForeignCall, RuntimeContext, RuntimeLifecycleHost, RuntimeLocalTaskSupervisor,
     RuntimeServicePorts,
 };
-use crate::execution::RuntimeExecutionService;
+use crate::execution::{
+    RootedValue, RootedValueLease, RootedValueMember, RootedValuesBuilder, RuntimeExecutionService,
+};
 use crate::foreign::{
     ForeignAdapter, ForeignHandleRegistry, NativeFfiAdapter, NativeFfiCallbackRouter,
 };
@@ -102,6 +104,19 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
             .await
             .map_err(|error| error.to_string())??;
         match message {
+            NativeDriverMessage::ProjectLoad(request) => {
+                let request_id = request.request_id;
+                let outcome = adapter
+                    .install_project_load(request)
+                    .map_err(runtime_wire_error);
+                channel
+                    .borrow_mut()
+                    .write_host(&NativeHostMessage::Invocation(NativeInvocationResult {
+                        request_id,
+                        outcome: outcome.map(|()| Vec::new()),
+                        user_state_present: adapter.has_user_native_state(),
+                    }))?;
+            }
             NativeDriverMessage::Invoke(request) => {
                 let request_id = request.request_id;
                 callback_router.active_request.set(request_id);
@@ -121,21 +136,25 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
                     .write_host(&NativeHostMessage::Invocation(NativeInvocationResult {
                         request_id,
                         outcome,
+                        user_state_present: adapter.has_user_native_state(),
                     }))?;
             }
             NativeDriverMessage::Shutdown {
                 request_id,
                 releases,
             } => {
+                // Extension hosts own this handle table, not a source workspace.
+                resources.release(&releases);
+                resources.values.clear();
+                resources.identities.clear();
                 let cleanup = supervisor
-                    .participate_foreground(lifecycle.retire_workspace_and_drain(&context))
+                    .participate_foreground(lifecycle.drain_gracefully(&context))
                     .await;
                 let outcome = match cleanup {
                     Ok(outcome) => outcome.map_err(runtime_wire_error),
                     Err(error) => Err(runtime_wire_error(error)),
                 };
                 lifecycle.force_close();
-                resources.release(&releases);
                 channel
                     .borrow_mut()
                     .write_host(&NativeHostMessage::Shutdown(NativeShutdownResult {
@@ -161,13 +180,15 @@ async fn invoke(
     resources: &mut RemoteResources,
 ) -> Result<Vec<NativeWireValue>, NativeWireError> {
     resources.release(&request.releases);
-    let arguments = request
-        .arguments
-        .into_iter()
-        .map(|value| decode_host_value(value, snapshots, resources))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut arguments = RootedValuesBuilder::with_capacity(request.arguments.len());
+    for value in request.arguments {
+        arguments.push_rooted(decode_host_value(value, snapshots, resources)?);
+    }
+    let arguments = arguments
+        .finish()
+        .map_err(|error| wire_error("RunMat:NativeFFI:ValueDecode", error.to_string()))?;
     let value = supervisor
-        .participate_foreground(async {
+        .participate_foreground(arguments.with_owned_values_async(|arguments| async {
             let value = context
                 .clone()
                 .scope(adapter.invoke(
@@ -180,12 +201,10 @@ async fn invoke(
                     },
                 ))
                 .await?;
-            let value = crate::execution::RootedValueSequence::new(value)
-                .map_err(|error| error.into_runtime_error())?;
             lifecycle.service_safepoint(context)?;
             lifecycle.drain_gracefully(context).await?;
             Ok(value)
-        })
+        }))
         .await
         .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?;
@@ -214,18 +233,25 @@ fn decode_host_value(
     value: NativeWireValue,
     snapshots: &SharedSnapshotStore,
     resources: &RemoteResources,
-) -> Result<Value, NativeWireError> {
+) -> Result<RootedValueMember, NativeWireError> {
     match value {
         NativeWireValue::Portable(transfer) => decode_portable(&transfer, snapshots),
         NativeWireValue::Foreign(reference) => {
-            resources.values.get(&reference.id).cloned().ok_or_else(|| {
-                wire_error(
-                    "RunMat:NativeFFI:StaleHandle",
-                    "native pointer has been released by the isolated host",
-                )
-            })
+            let value = resources
+                .values
+                .get(&reference.id)
+                .cloned()
+                .ok_or_else(|| {
+                    wire_error(
+                        "RunMat:NativeFFI:StaleHandle",
+                        "native pointer has been released by the isolated host",
+                    )
+                })?;
+            root_plain_value(value)
         }
-        NativeWireValue::Callback { id } => Ok(super::super::isolated_callback_value(id)),
+        NativeWireValue::Callback { id } => {
+            root_plain_value(super::super::isolated_callback_value(id))
+        }
     }
 }
 
@@ -347,7 +373,9 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
         // Channel and snapshot storage contain serialized payloads only.
         Some(())
     }
-    fn dispatch(&self, callback_id: u64, arguments: &[Value]) -> Result<Value, String> {
+    fn dispatch(&self, callback_id: u64, arguments: &[Value]) -> Result<RootedValue, String> {
+        let _input_roots =
+            RootedValueLease::for_values(arguments.iter()).map_err(|error| error.to_string())?;
         let request_id = self.active_request.get();
         if request_id == 0 {
             return Err("native callback has no active invocation".into());
@@ -384,9 +412,10 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
                 return Err("native callback did not return exactly one value".into());
             };
             match value {
-                NativeWireValue::Portable(transfer) => {
-                    decode_portable(transfer, &self.snapshots).map_err(|error| error.message)
-                }
+                NativeWireValue::Portable(transfer) => decode_portable(transfer, &self.snapshots)
+                    .map_err(|error| error.message)?
+                    .into_rooted_value()
+                    .map_err(|error| error.to_string()),
                 _ => Err("native callback returned a nonportable value".into()),
             }
         })();

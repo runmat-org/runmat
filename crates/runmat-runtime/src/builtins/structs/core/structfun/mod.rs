@@ -28,7 +28,7 @@ async fn structfun_builtin(
     function: Value,
     structure: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     execution::execute(function, structure, rest).await
 }
 

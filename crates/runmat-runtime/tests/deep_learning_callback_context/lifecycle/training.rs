@@ -9,16 +9,25 @@ fn supervised_initializers_suspend_and_resume_once_per_caller() {
         let (runtime, service) = scoped_runtime();
         let weak = Rc::downgrade(&service);
         let id = runtime.local_identity();
-        let mut args = vec![
+        let layers = super::super::training_layers(name == "trainNetwork");
+        let options = super::super::training_options();
+        let mut owned_args = runmat_runtime::execution::RootedValuesBuilder::with_capacity(5);
+        let args = vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
-            super::super::training_layers(name == "trainNetwork"),
         ];
-        if name == "trainnet" {
-            args.push(Value::String("mse".into()));
+        for arg in args {
+            owned_args.push(arg).expect("root training input");
         }
-        args.push(super::super::training_options());
-        let mut future = invoke(name, runtime.clone(), &args);
+        owned_args.push_owned(layers);
+        if name == "trainnet" {
+            owned_args
+                .push(Value::String("mse".into()))
+                .expect("root loss name");
+        }
+        owned_args.push_owned(options);
+        let args = owned_args.finish().expect("root training arguments");
+        let mut future = invoke(name, runtime.clone(), args.values());
         assert!(
             poll_once(&mut future).is_pending(),
             "{name} initializer suspended"

@@ -8,11 +8,12 @@ pub(crate) fn run(
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-qr-power-encoder"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-qr-power-pass"),

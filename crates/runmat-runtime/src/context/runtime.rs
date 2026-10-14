@@ -4,6 +4,9 @@ use super::{
 };
 use crate::execution::RuntimeExecutionServices;
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
+use runmat_execution::profiling::CommandProfilingReceipt;
+use runmat_execution::value::GraphStaticReferenceSite;
+use runmat_execution::FunctionBindingOrigin;
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
@@ -18,6 +21,17 @@ use source_selection::InvocationSourceSelection;
 pub use source_selection::ProgramSourceSelectionError;
 
 static NEXT_RUNTIME_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+pub type SelectedMethodBodyOwner = (
+    Rc<runmat_value::SelectedObjectClassFacts>,
+    runmat_types::ClassMethodOwner,
+);
+
+pub type SelectedStaticSiteResolver =
+    dyn Fn(
+        Option<FunctionBindingOrigin>,
+        GraphStaticReferenceSite,
+    ) -> Result<Option<runmat_value::BoundFunctionBinding>, &'static str>;
 
 /// Process-local identity for one runtime context state allocation.
 ///
@@ -107,6 +121,19 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 #[derive(Clone)]
 pub struct RuntimeContext {
     execution: Rc<dyn RuntimeExecutionServices>,
+    /// Call-local selected V3 graph authority. This carrier retains no
+    /// execution port and snapshots Values only when a task is spawned.
+    selected_graph_program: Option<crate::execution::DeferredGraphProgram>,
+    /// Call-local target admission for native MIR futures. The selected Core
+    /// registry is captured without a RuntimeContext or execution service.
+    selected_graph_function_resolver:
+        Option<Rc<dyn Fn(runmat_types::FunctionId) -> Option<runmat_value::BoundFunctionBinding>>>,
+    /// Selected graph admission supplies one unit-local site map. The caller
+    /// origin changes with the VM frame; no numeric ID or display name selects
+    /// a cross-unit target.
+    selected_static_site_resolver: Option<Rc<SelectedStaticSiteResolver>>,
+    selected_static_caller: Option<FunctionBindingOrigin>,
+    native_resolution_scope: crate::user_functions::NativeResolutionScope,
     program_revision: Option<runmat_execution::ProgramRevision>,
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
     source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
@@ -114,11 +141,56 @@ pub struct RuntimeContext {
     source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
     debug_projection: Rc<RefCell<crate::debug_context::DebugFrameProjection>>,
     output_projection: Rc<RefCell<super::output_projection::InvocationOutputProjection>>,
+    call_projection: Rc<RefCell<super::call_projection::CallProjection>>,
+    call_projection_lineage: Rc<()>,
+    console_capture_projection: Rc<RefCell<crate::console::ConsoleCaptureProjection>>,
+    #[cfg(feature = "plot-core")]
+    plot_receipts: crate::builtins::plotting::state::FigureReceiptOwner,
+    // Clones admitted for one command share this exact origin. The next
+    // command installs a new owner; deferred Send feedback retains only its
+    // linear contribution, not this Rc-backed RuntimeContext.
+    command_profiling: Option<CommandProfilingReceipt>,
+    /// Core's exact, already-registered WGPU façade at command admission.
+    /// This is a negative comparison fact, not public completeness authority.
+    command_device_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    command_device_access: Option<runmat_accelerate_api::WgpuDeviceAccess>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
     invocation_language_policy: Option<Rc<Cell<RuntimeLanguagePolicy>>>,
     invocation_arity: Option<RuntimeInvocationArity>,
+    // Captured at semantic-call admission before a child executor can be
+    // polled outside the caller's constructor-receiver selection.
+    constructor_receiver: Option<crate::execution::RootedValue>,
+    selected_classes: Option<Rc<crate::class_registry::SelectedClassProjection>>,
+    selected_object_class: Option<Rc<runmat_value::SelectedObjectClassFacts>>,
+    selected_method_body: Option<(
+        Rc<runmat_value::SelectedObjectClassFacts>,
+        runmat_types::ClassMethodOwner,
+        runmat_value::BoundFunctionBinding,
+    )>,
+    retained_super_constructors: Option<Rc<[super::RetainedSuperConstructorBinding]>>,
+    retained_super_caller_origin: Option<runmat_execution::FunctionBindingOrigin>,
+    // One exact superclass-body dispatch, never an ambient constructor mode.
+    retained_super_body: Option<(
+        runmat_types::ClassMethodOwner,
+        runmat_value::BoundFunctionBinding,
+    )>,
+    // A typed invocation-lineage fact, propagated by context clones. It is
+    // never inferred from a class name, TLS depth, or a session-global flag.
+    pub(super) native_invocation_lineage: Option<Rc<()>>,
+    /// Invocation-local logical MEX callback ancestry, never a count of
+    /// suspended sibling callbacks or a session-global reentry flag.
+    #[cfg(not(target_arch = "wasm32"))]
+    mex_callback_ancestry: crate::foreign::MexCallbackAncestry,
+    #[cfg(not(target_arch = "wasm32"))]
+    python_reentry: Option<
+        Rc<super::foreign_callback_lineage::CallbackLineage<runmat_python::PythonReentryAuthority>>,
+    >,
+    #[cfg(not(target_arch = "wasm32"))]
+    java_reentry: Option<
+        Rc<super::foreign_callback_lineage::CallbackLineage<runmat_java::JavaReentryAuthority>>,
+    >,
     // VM-owned, poll-local execution evidence. Clones may carry it only within
     // the selected instruction; nested invocations explicitly clear it.
     vm_fusion_host_route: Option<super::VmFusionHostRoute>,
@@ -155,6 +227,11 @@ impl RuntimeContext {
         crate::class_registry::register_context_state(&state);
         let context = Self {
             execution,
+            selected_graph_program: None,
+            selected_graph_function_resolver: None,
+            selected_static_site_resolver: None,
+            selected_static_caller: None,
+            native_resolution_scope: crate::user_functions::NativeResolutionScope::Session,
             program_revision: None,
             program_sources: None,
             source_current: None,
@@ -162,11 +239,33 @@ impl RuntimeContext {
             source_catalog_view: None,
             debug_projection: Rc::new(RefCell::new(Default::default())),
             output_projection: Rc::new(RefCell::new(Default::default())),
+            call_projection: Rc::new(RefCell::new(Default::default())),
+            call_projection_lineage: Rc::new(()),
+            console_capture_projection: Rc::new(RefCell::new(Default::default())),
+            #[cfg(feature = "plot-core")]
+            plot_receipts: Default::default(),
+            command_profiling: None,
+            command_device_provider: None,
+            command_device_access: None,
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
             invocation_language_policy: None,
             invocation_arity: None,
+            constructor_receiver: None,
+            selected_classes: None,
+            selected_object_class: None,
+            selected_method_body: None,
+            retained_super_constructors: None,
+            retained_super_caller_origin: None,
+            retained_super_body: None,
+            native_invocation_lineage: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            mex_callback_ancestry: crate::foreign::MexCallbackAncestry::ROOT,
+            #[cfg(not(target_arch = "wasm32"))]
+            python_reentry: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            java_reentry: None,
             vm_fusion_host_route: None,
             vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
@@ -182,8 +281,393 @@ impl RuntimeContext {
         &self.execution
     }
 
+    pub fn with_selected_graph_program(
+        mut self,
+        program: crate::execution::DeferredGraphProgram,
+    ) -> Self {
+        self.selected_graph_program = Some(program);
+        self.selected_graph_function_resolver = None;
+        self.selected_static_site_resolver = None;
+        self.selected_static_caller = None;
+        self
+    }
+
+    /// An admitted nested product must not inherit its caller's selected V3
+    /// graph authority while its own exact product is being bound.
+    pub fn without_selected_graph_program(mut self) -> Self {
+        self.selected_graph_program = None;
+        self.selected_graph_function_resolver = None;
+        self.selected_static_site_resolver = None;
+        self.selected_static_caller = None;
+        self
+    }
+
+    pub fn with_selected_native_route(
+        mut self,
+        route: Option<Rc<crate::user_functions::SelectedNativeRoute>>,
+    ) -> Self {
+        self.native_resolution_scope = match route {
+            Some(route) => crate::user_functions::NativeResolutionScope::Selected(route),
+            None => crate::user_functions::NativeResolutionScope::SelectedClosed,
+        };
+        self
+    }
+
+    pub fn native_resolution_scope(&self) -> &crate::user_functions::NativeResolutionScope {
+        &self.native_resolution_scope
+    }
+
+    /// Install a short-lived, already-admitted site resolver for one selected
+    /// V3 unit. It is carried by this invocation context, never by bytecode or
+    /// a durable definition product.
+    pub fn with_selected_static_site_resolver(
+        mut self,
+        resolver: Rc<SelectedStaticSiteResolver>,
+    ) -> Self {
+        self.selected_static_site_resolver = Some(resolver);
+        self.selected_static_caller = None;
+        self
+    }
+
+    /// The VM sets this from the exact body it entered; None denotes the
+    /// selected script stream, not an arbitrary unnamed function.
+    pub fn with_selected_static_caller(mut self, caller: Option<FunctionBindingOrigin>) -> Self {
+        if self.selected_static_site_resolver.is_some() {
+            self.selected_static_caller = caller;
+        }
+        self
+    }
+
+    pub fn selected_static_binding(
+        &self,
+        site: GraphStaticReferenceSite,
+    ) -> Result<Option<runmat_value::BoundFunctionBinding>, &'static str> {
+        let Some(resolve) = self.selected_static_site_resolver.as_ref() else {
+            return Ok(None);
+        };
+        resolve(self.selected_static_caller, site)
+    }
+
+    pub fn has_selected_static_site_resolver(&self) -> bool {
+        self.selected_static_site_resolver.is_some()
+    }
+
+    pub fn selected_graph_program(&self) -> Option<&crate::execution::DeferredGraphProgram> {
+        self.selected_graph_program.as_ref()
+    }
+
+    /// Bind Native MIR function IDs through the exact selected registry for
+    /// this invocation. Installing a different selected program clears this
+    /// resolver, preventing a nested unit from inheriting caller authority.
+    pub fn with_selected_graph_function_resolver(
+        mut self,
+        resolver: Rc<
+            dyn Fn(runmat_types::FunctionId) -> Option<runmat_value::BoundFunctionBinding>,
+        >,
+    ) -> Self {
+        if self.selected_graph_program.is_some() {
+            self.selected_graph_function_resolver = Some(resolver);
+        }
+        self
+    }
+
+    pub fn selected_graph_function_binding(
+        &self,
+        function: runmat_types::FunctionId,
+    ) -> Option<runmat_value::BoundFunctionBinding> {
+        self.selected_graph_program.as_ref()?;
+        self.selected_graph_function_resolver.as_ref()?(function)
+    }
+
     pub fn service_ports(&self) -> &RuntimeServicePorts {
         &self.services
+    }
+
+    /// Capture the typed constructor instance at call admission. The active
+    /// receiver stack is poll-local, while a semantic child may be scheduled
+    /// for a later poll. Ordinary methods explicitly clear any inherited seed.
+    pub fn with_constructor_receiver_for_method(
+        mut self,
+        owner: Option<&runmat_types::ClassMethodOwner>,
+    ) -> Result<Self, crate::RuntimeError> {
+        let Some(owner) = owner else {
+            self.constructor_receiver = None;
+            return Ok(self);
+        };
+        if owner.role != runmat_types::ClassMethodRole::Constructor {
+            self.constructor_receiver = None;
+            return Ok(self);
+        }
+        if owner.is_static {
+            return Err(crate::build_runtime_error(
+                "a static method cannot own the constructor instance",
+            )
+            .with_identifier("RunMat:ConstructorOwnerInvalid")
+            .build());
+        }
+        let rooted = if let Some(receiver) =
+            crate::constructor_receiver_in_context(&self, &owner.declaring_class)
+        {
+            Some(
+                crate::execution::RootedValue::new(receiver)
+                    .map_err(|error| error.into_runtime_error())?,
+            )
+        } else {
+            self.constructor_receiver
+                .as_ref()
+                .filter(|rooted| {
+                    crate::constructor_receiver_matches_class(
+                        rooted.value(),
+                        &owner.declaring_class,
+                    )
+                })
+                .cloned()
+        };
+        self.constructor_receiver = rooted;
+        Ok(self)
+    }
+
+    /// The call-local constructor instance remains rooted by this context.
+    pub fn captured_constructor_receiver(&self) -> Option<&runmat_value::Value> {
+        self.constructor_receiver
+            .as_ref()
+            .map(|owner| owner.value())
+    }
+
+    /// Select one already-admitted class product for this invocation only.
+    /// Sibling futures may retain different revisions without changing the
+    /// session's ordinary name-resolved class registry.
+    pub fn with_selected_class_projection(
+        mut self,
+        projection: Rc<crate::class_registry::SelectedClassProjection>,
+    ) -> Self {
+        self.selected_classes = Some(projection);
+        self
+    }
+
+    pub fn with_selected_object_class(
+        mut self,
+        selected: Rc<runmat_value::SelectedObjectClassFacts>,
+    ) -> Self {
+        self.selected_object_class = Some(selected);
+        self
+    }
+
+    pub fn selected_object_class(&self) -> Option<&Rc<runmat_value::SelectedObjectClassFacts>> {
+        self.selected_object_class.as_ref()
+    }
+
+    /// A nested ordinary invocation does not inherit its caller's receiver
+    /// facts or one-shot method intent. Selected invocations install their own
+    /// checked product before entering the body.
+    pub fn without_selected_object_class(mut self) -> Self {
+        self.selected_classes = None;
+        self.selected_object_class = None;
+        self.selected_method_body = None;
+        self
+    }
+
+    pub(crate) fn with_selected_method_body(
+        mut self,
+        facts: Rc<runmat_value::SelectedObjectClassFacts>,
+        owner: runmat_types::ClassMethodOwner,
+        binding: runmat_value::BoundFunctionBinding,
+    ) -> Self {
+        self.selected_method_body = Some((facts, owner, binding));
+        self
+    }
+
+    /// One selected receiver's call intent. The exact executable body still
+    /// has to prove this typed owner at the bound-invoker admission boundary.
+    pub fn take_selected_method_body_for(
+        mut self,
+        binding: &runmat_value::BoundFunctionBinding,
+    ) -> Result<(Self, Option<SelectedMethodBodyOwner>), crate::RuntimeError> {
+        match self.selected_method_body.take() {
+            None => Ok((self, None)),
+            Some((facts, owner, expected)) if &expected == binding => {
+                Ok((self, Some((facts, owner))))
+            }
+            Some(_) => Err(crate::build_runtime_error(
+                "selected object method dispatch selected a different definition",
+            )
+            .with_identifier("RunMat:MethodOwnerInvalid")
+            .build()),
+        }
+    }
+
+    pub(crate) fn selected_class_projection(
+        &self,
+    ) -> Option<&Rc<crate::class_registry::SelectedClassProjection>> {
+        self.selected_classes.as_ref()
+    }
+
+    pub fn with_retained_super_constructors(
+        mut self,
+        bindings: Vec<super::RetainedSuperConstructorBinding>,
+        caller_origin: runmat_execution::FunctionBindingOrigin,
+    ) -> Result<Self, crate::RuntimeError> {
+        for (index, binding) in bindings.iter().enumerate() {
+            let valid_target = match &binding.target {
+                super::RetainedSuperConstructorTarget::Bound {
+                    origin,
+                    owner,
+                    binding: target,
+                    ..
+                } => {
+                    let local = target.authority.admits_local(&self.session_lease())
+                        && target.authority.local_lease(target.function).is_some();
+                    let portable = target.authority.portable_origin() == Some(*origin)
+                        && usize::try_from(origin.function.0).ok() == Some(target.function);
+                    owner.role == runmat_types::ClassMethodRole::Constructor
+                        && !owner.is_static
+                        && (local || portable)
+                        && target.authority.export_origin(&self.session_lease()) == Some(*origin)
+                }
+                super::RetainedSuperConstructorTarget::Implicit { .. } => true,
+            };
+            if !valid_target
+                || binding.target.parent() == &binding.requesting_class
+                || binding.caller_origin != caller_origin
+                || bindings[..index].iter().any(|previous| {
+                    previous.requesting_class == binding.requesting_class
+                        && previous.target.parent() == binding.target.parent()
+                        && previous.caller_origin == binding.caller_origin
+                })
+            {
+                return Err(crate::build_runtime_error(
+                    "retained super constructor has invalid or ambiguous authority",
+                )
+                .with_identifier("RunMat:ConstructorOwnerInvalid")
+                .build());
+            }
+        }
+        self.retained_super_constructors = Some(Rc::from(bindings));
+        self.retained_super_caller_origin = Some(caller_origin);
+        Ok(self)
+    }
+
+    /// Select the calling definition, not a same-named later class product.
+    pub fn with_retained_super_caller_origin(
+        mut self,
+        origin: runmat_execution::FunctionBindingOrigin,
+    ) -> Self {
+        self.retained_super_caller_origin = Some(origin);
+        self
+    }
+
+    pub(crate) fn with_retained_super_body(
+        mut self,
+        owner: runmat_types::ClassMethodOwner,
+        binding: runmat_value::BoundFunctionBinding,
+    ) -> Self {
+        self.retained_super_body = Some((owner, binding));
+        self
+    }
+
+    /// Consume the exact superclass-body intent before entering a child
+    /// executor. A sibling or nested ordinary constructor cannot inherit it.
+    pub fn take_retained_super_body_for(
+        mut self,
+        binding: &runmat_value::BoundFunctionBinding,
+    ) -> Result<(Self, Option<runmat_types::ClassMethodOwner>), crate::RuntimeError> {
+        match self.retained_super_body.take() {
+            None => Ok((self, None)),
+            Some((owner, expected)) if &expected == binding => Ok((self, Some(owner))),
+            Some(_) => Err(crate::build_runtime_error(
+                "superclass-body dispatch selected a different definition",
+            )
+            .with_identifier("RunMat:ConstructorOwnerInvalid")
+            .build()),
+        }
+    }
+
+    pub(crate) fn retained_super_constructor(
+        &self,
+        requesting_class: &runmat_types::ClassIdentity,
+        super_class: &runmat_types::ClassIdentity,
+    ) -> Result<Option<&super::RetainedSuperConstructorBinding>, crate::RuntimeError> {
+        let Some(bindings) = &self.retained_super_constructors else {
+            return Ok(None);
+        };
+        let selected = self.retained_super_caller_origin.and_then(|caller_origin| {
+            bindings
+                .iter()
+                .find(|binding| binding.matches(caller_origin, requesting_class, super_class))
+        });
+        if selected.is_none() {
+            return Err(crate::build_runtime_error(
+                "retained superclass call has no exact admitted target for its caller",
+            )
+            .with_identifier("RunMat:ConstructorOwnerInvalid")
+            .build());
+        }
+        Ok(selected)
+    }
+
+    /// Numeric presentation policy shared by this session's invocation frames.
+    pub fn display_format_owner(&self) -> &runmat_value::DisplayFormatOwner {
+        &self.state.display_format
+    }
+
+    /// Start a command with its own figure-change receipt. Clones made by
+    /// nested calls share it; previously selected callbacks retain theirs.
+    pub fn with_fresh_plot_receipts(self) -> Self {
+        #[cfg(feature = "plot-core")]
+        {
+            let mut context = self;
+            context.plot_receipts = Default::default();
+            context
+        }
+        #[cfg(not(feature = "plot-core"))]
+        {
+            self
+        }
+    }
+
+    pub fn with_command_profiling(mut self, receipt: CommandProfilingReceipt) -> Self {
+        self.command_profiling = Some(receipt);
+        self
+    }
+
+    pub fn with_command_device_provider(
+        mut self,
+        provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    ) -> Self {
+        self.command_device_provider = provider;
+        self.command_device_access = provider
+            .and_then(|provider| provider.wgpu_device_access())
+            .cloned();
+        self
+    }
+
+    pub fn command_device_provider(
+        &self,
+    ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+        self.command_device_provider
+    }
+
+    pub fn command_device_access(&self) -> Option<&runmat_accelerate_api::WgpuDeviceAccess> {
+        self.command_device_access.as_ref()
+    }
+
+    /// Select an exact queue-admission origin, including an explicit unknown
+    /// origin that must mask any later drainer's command.
+    pub(crate) fn with_cleanup_command_origin(
+        mut self,
+        origin: Option<CommandProfilingReceipt>,
+    ) -> Self {
+        self.command_profiling = origin;
+        self
+    }
+
+    pub fn command_profiling(&self) -> Option<&CommandProfilingReceipt> {
+        self.command_profiling.as_ref()
+    }
+
+    #[cfg(feature = "plot-core")]
+    pub(crate) fn plot_receipts(&self) -> &crate::builtins::plotting::state::FigureReceiptOwner {
+        &self.plot_receipts
     }
 
     pub(crate) fn state(&self) -> &Rc<RuntimeContextState> {
@@ -323,6 +807,137 @@ impl RuntimeContext {
         self.invocation_arity
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn mex_callback_ancestry(&self) -> crate::foreign::MexCallbackAncestry {
+        self.mex_callback_ancestry
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_mex_callback_ancestry(
+        mut self,
+        ancestry: crate::foreign::MexCallbackAncestry,
+    ) -> Self {
+        self.mex_callback_ancestry = ancestry;
+        self
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn python_reentry_for(
+        &self,
+        session: &runmat_python::PythonSession,
+    ) -> Option<&runmat_python::PythonReentryAuthority> {
+        self.python_reentry.as_deref().and_then(|lineage| {
+            lineage.newest_for(|authority| session.owns_reentry_authority(authority))
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_python_reentry(
+        mut self,
+        authority: runmat_python::PythonReentryAuthority,
+    ) -> Self {
+        self.python_reentry = Some(super::foreign_callback_lineage::CallbackLineage::push(
+            self.python_reentry.take(),
+            authority,
+        ));
+        self
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn java_reentry_for(
+        &self,
+        lane: &runmat_java::JavaLane,
+    ) -> Option<&runmat_java::JavaReentryAuthority> {
+        self.java_reentry.as_deref().and_then(|lineage| {
+            lineage.newest_for(|authority| lane.owns_reentry_authority(authority))
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_java_reentry(
+        mut self,
+        authority: runmat_java::JavaReentryAuthority,
+    ) -> Self {
+        self.java_reentry = Some(super::foreign_callback_lineage::CallbackLineage::push(
+            self.java_reentry.take(),
+            authority,
+        ));
+        self
+    }
+
+    /// Carry only callback ancestry into a newly allocated child session.
+    /// The child keeps its own execution and cancellation owners; this is not
+    /// the same-owner invocation projection used for captured callback targets.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_inherit_foreign_callback_lineage_for_child(
+        mut self,
+        parent: &RuntimeContext,
+    ) -> Option<Self> {
+        if self.local_identity() == parent.local_identity()
+            || Rc::ptr_eq(&self.execution, &parent.execution)
+            || Rc::ptr_eq(&self.cancellation, &parent.cancellation)
+        {
+            return None;
+        }
+        self.mex_callback_ancestry = parent.mex_callback_ancestry;
+        self.python_reentry = parent.python_reentry.clone();
+        self.java_reentry = parent.java_reentry.clone();
+        Some(self)
+    }
+
+    /// Project the current command's revocable callback and execution facts
+    /// onto a captured target. The target retains its code, source, policy,
+    /// foreign and base-workspace ports, and language owner. The workspace
+    /// frame belongs to the physical caller invocation, not the registration:
+    /// a callback registered in an earlier frame must not reenter that frame
+    /// after it closes. An older registration must not reuse stale
+    /// cancellation, profiling, device or native-placement authority.
+    pub fn try_with_inherited_callback_invocation_authority_from(
+        mut self,
+        parent: &RuntimeContext,
+    ) -> Option<Self> {
+        if self.local_identity() != parent.local_identity() {
+            return None;
+        }
+        self.services = match parent.services.workspace() {
+            Some(workspace) => self.services.with_workspace(Rc::clone(workspace)),
+            None => self.services.without_workspace(),
+        };
+        self.execution = Rc::clone(&parent.execution);
+        self.cancellation = Rc::clone(&parent.cancellation);
+        self.command_profiling = parent.command_profiling.clone();
+        if self.services.same_device_route_owners(&parent.services) {
+            self.command_device_provider = parent.command_device_provider;
+            self.command_device_access = parent.command_device_access.clone();
+        } else {
+            if let Some(owner) = &self.command_profiling {
+                owner.mark_unproven_device_route();
+            }
+            self.command_device_provider = None;
+            self.command_device_access = None;
+        }
+        self.native_invocation_lineage = parent.native_invocation_lineage.clone();
+        self.invocation_arity = None;
+        self.vm_fusion_host_route = None;
+        self.vm_fusion_selected_binding = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.mex_callback_ancestry = parent.mex_callback_ancestry;
+            self.python_reentry = parent.python_reentry.clone();
+            self.java_reentry = parent.java_reentry.clone();
+        }
+        Some(self)
+    }
+
+    /// Seed a checked logical MEX ancestry in host integration tests. The
+    /// ordinary invocation and wire paths cannot construct an unchecked fact.
+    #[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
+    #[doc(hidden)]
+    pub fn with_test_mex_callback_ancestry_depth(mut self, depth: u16) -> Option<Self> {
+        self.mex_callback_ancestry = crate::foreign::MexCallbackAncestry::from_wire(depth)?;
+        Some(self)
+    }
+
     /// Create work accounting for this invocation generation. The adapter
     /// owns the quantum and the actual scheduling primitive.
     pub fn cpu_cooperation(&self) -> crate::execution::CpuCooperationBudget {
@@ -396,11 +1011,38 @@ impl RuntimeContext {
     /// Issue session-local source leases for a complete immutable program.
     /// No caller-provided numeric source identity is imported into the issuer.
     pub fn with_program_sources(
-        mut self,
+        self,
         records: impl IntoIterator<Item = crate::source_context::ProgramSourceRecord>,
     ) -> Result<Self, crate::source_context::ProgramSourceBindingError> {
         let binding = crate::source_context::bind_program_sources(&self, records)?;
-        self.program_sources = Some(Rc::new(binding));
+        Ok(self.with_bound_program_sources(binding))
+    }
+
+    /// Project one already-issued source into a new selected invocation
+    /// without allocating a second session source identity.
+    pub fn with_existing_program_source(
+        self,
+        ordinal: runmat_types::ProgramSourceId,
+        lease: crate::source_context::RuntimeSourceLease,
+    ) -> Result<Self, crate::source_context::ProgramSourceBindingError> {
+        let binding = crate::source_context::bind_existing_program_source(&self, ordinal, lease)?;
+        Ok(self.with_bound_program_sources(binding))
+    }
+
+    fn with_bound_program_sources(
+        self,
+        binding: crate::source_context::ProgramSourceBinding,
+    ) -> Self {
+        self.with_selected_program_source_binding(Rc::new(binding))
+    }
+
+    /// Reuse an already-issued, admitted source table for an exact selected
+    /// invocation or its orderly cleanup. This never allocates source IDs.
+    pub(crate) fn with_selected_program_source_binding(
+        mut self,
+        binding: Rc<crate::source_context::ProgramSourceBinding>,
+    ) -> Self {
+        self.program_sources = Some(binding);
         self.source_current = Some(Rc::new(RefCell::new(
             crate::source_context::SourceCurrentProjection::new(None),
         )));
@@ -410,7 +1052,7 @@ impl RuntimeContext {
                 self.state.source.borrow().catalog.clone(),
             ),
         )));
-        Ok(self)
+        self
     }
 
     pub fn portable_program_source_map(&self) -> Option<&runmat_execution::ExecutableSourceMapV2> {
@@ -418,6 +1060,12 @@ impl RuntimeContext {
             .as_ref()
             .and_then(|binding| binding.portable_map())
             .map(|map| map.as_ref())
+    }
+
+    pub(crate) fn selected_program_source_binding(
+        &self,
+    ) -> Option<Rc<crate::source_context::ProgramSourceBinding>> {
+        self.program_sources.as_ref().map(Rc::clone)
     }
 
     pub fn portable_ordinal_for_source(
@@ -430,13 +1078,13 @@ impl RuntimeContext {
 
     pub(crate) fn retain_portable_program_source_map(
         &mut self,
-        map: std::sync::Arc<runmat_execution::ExecutableSourceMapV2>,
-    ) {
+        admitted: &crate::source_context::ValidatedPortableSourceMap,
+    ) -> Result<(), crate::source_context::PortableSourceIdentityError> {
         let binding =
             self.program_sources.as_mut().and_then(Rc::get_mut).expect(
                 "newly issued program binding is not shared before portable map attachment",
             );
-        binding.retain_portable_map(map);
+        binding.retain_portable_map(admitted)
     }
 
     pub(crate) fn source_catalog_view(
@@ -477,6 +1125,61 @@ impl RuntimeContext {
         &self.output_projection
     }
 
+    pub(crate) fn call_projection(&self) -> &Rc<RefCell<super::call_projection::CallProjection>> {
+        &self.call_projection
+    }
+
+    pub(crate) fn console_capture_projection(
+        &self,
+    ) -> &Rc<RefCell<crate::console::ConsoleCaptureProjection>> {
+        &self.console_capture_projection
+    }
+
+    pub(super) fn with_poll_console_capture_projection(mut self) -> Self {
+        let snapshot = self
+            .selected_console_capture_projection()
+            .borrow()
+            .snapshot();
+        self.console_capture_projection = Rc::new(RefCell::new(snapshot));
+        self
+    }
+
+    pub(crate) fn selected_console_capture_projection(
+        &self,
+    ) -> Rc<RefCell<crate::console::ConsoleCaptureProjection>> {
+        super::scope::active_runtime_context()
+            .filter(|active| {
+                Rc::ptr_eq(active.state(), &self.state)
+                    && Rc::ptr_eq(
+                        &active.call_projection_lineage,
+                        &self.call_projection_lineage,
+                    )
+            })
+            .map(|active| Rc::clone(active.console_capture_projection()))
+            .unwrap_or_else(|| Rc::clone(&self.console_capture_projection))
+    }
+
+    pub(super) fn with_poll_call_projection(mut self) -> Self {
+        let snapshot = self.selected_call_projection().borrow().snapshot();
+        self.call_projection = Rc::new(RefCell::new(snapshot));
+        self
+    }
+
+    pub(crate) fn selected_call_projection(
+        &self,
+    ) -> Rc<RefCell<super::call_projection::CallProjection>> {
+        super::scope::active_runtime_context()
+            .filter(|active| {
+                Rc::ptr_eq(active.state(), &self.state)
+                    && Rc::ptr_eq(
+                        &active.call_projection_lineage,
+                        &self.call_projection_lineage,
+                    )
+            })
+            .map(|active| Rc::clone(active.call_projection()))
+            .unwrap_or_else(|| Rc::clone(&self.call_projection))
+    }
+
     pub(crate) fn debug_projection(
         &self,
     ) -> &Rc<RefCell<crate::debug_context::DebugFrameProjection>> {
@@ -509,6 +1212,16 @@ impl RuntimeContext {
         ordinal: runmat_types::ProgramSourceId,
     ) -> Option<crate::source_context::RuntimeSourceRef> {
         self.program_sources.as_ref()?.source_ref(ordinal)
+    }
+
+    /// The local error-frame basis of this exact admitted source table. A
+    /// selected worker response must still validate its portable ordinal
+    /// against the admitted product before reattaching this token.
+    pub fn call_frame_source_owner_for_program_source(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<crate::CallFrameSourceOwner> {
+        self.program_sources.as_ref()?.frame_owner_for(ordinal)
     }
 
     pub fn with_program_revision(
@@ -723,6 +1436,11 @@ impl RuntimeContext {
     }
 
     pub fn with_service_ports(mut self, services: RuntimeServicePorts) -> Self {
+        if !self.services.same_device_route_owners(&services) {
+            if let Some(owner) = &self.command_profiling {
+                owner.mark_unproven_device_route();
+            }
+        }
         self.services = services;
         self
     }
@@ -753,9 +1471,19 @@ impl RuntimeContext {
         } else {
             child
         };
+        child
+            .display_format_owner()
+            .set(self.display_format_owner().get());
         *child.state.source.borrow_mut() = self.state.source.borrow().fork_snapshot();
         let mut child = child;
+        child.command_profiling = self.command_profiling.clone();
         child.invocation_arity = self.invocation_arity;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            child.mex_callback_ancestry = self.mex_callback_ancestry;
+            child.python_reentry = self.python_reentry.clone();
+            child.java_reentry = self.java_reentry.clone();
+        }
         if let Some(sources) = &self.program_sources {
             child.program_sources = Some(Rc::new(sources.fork_snapshot()));
         }
@@ -771,6 +1499,14 @@ impl RuntimeContext {
             )));
         }
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
+        child.call_projection = Rc::new(RefCell::new(
+            self.selected_call_projection().borrow().snapshot(),
+        ));
+        child.console_capture_projection = Rc::new(RefCell::new(
+            self.selected_console_capture_projection()
+                .borrow()
+                .snapshot(),
+        ));
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
         *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();
         child
@@ -801,6 +1537,12 @@ impl RuntimeContext {
     /// Scope every poll of `future` to this context. This is the supported
     /// bridge for async code that still reaches ambient compatibility APIs.
     pub fn scope<F: Future>(&self, future: F) -> ContextFuture<F> {
+        self.scope_pinned(Box::pin(future))
+    }
+
+    /// Adopt an already-pinned execution owner without moving its state
+    /// through another by-value scope constructor or allocating a second box.
+    pub fn scope_pinned<F: Future>(&self, future: std::pin::Pin<Box<F>>) -> ContextFuture<F> {
         ContextFuture::new(self.clone(), future)
     }
 
@@ -862,6 +1604,13 @@ impl RuntimeContext {
     /// extent. Async code should use [`Self::scope`] so the context is removed
     /// across yields.
     pub fn enter(&self) -> RuntimeContextGuard {
-        RuntimeContextGuard::enter(self.clone())
+        let mut context = self.clone();
+        // A synchronous host reentering an original handle during a scoped
+        // poll must see that invocation's overlays, not the original handle's
+        // pre-poll projection. Other sessions and isolated lineages keep their
+        // own selection. This shares the active owner; it does not snapshot it.
+        context.call_projection = self.selected_call_projection();
+        context.console_capture_projection = self.selected_console_capture_projection();
+        RuntimeContextGuard::enter(context)
     }
 }

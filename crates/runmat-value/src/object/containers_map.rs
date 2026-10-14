@@ -153,7 +153,7 @@ impl ContainersMapStorage {
         entries
     }
 
-    pub fn for_each_value(&self, mut visitor: impl FnMut(&Value)) {
+    pub fn for_each_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
         for entry in &self.entries {
             visitor(&entry.key_value);
             visitor(&entry.value);

@@ -199,3 +199,8 @@ version = "1.0"
 [build-dependencies]
 sha2 = "0.10"
 serde_json = "1.0"
+
+[[test]]
+name = "native_ffi_session"
+path = "tests/native_ffi_session.rs"
+harness = false

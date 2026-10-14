@@ -46,6 +46,7 @@ pub(super) fn geometry_asset_methods(
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )
     })

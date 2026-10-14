@@ -1,4 +1,5 @@
 use super::*;
+pub use runmat_builtins::{DATETIME_SUBSASGN_DESCRIPTOR, DATETIME_SUBSREF_DESCRIPTOR};
 
 pub(super) const DAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "legacy serial date number",
@@ -103,18 +104,6 @@ pub const DATETIME_SECOND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DATETIME_SECOND_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DATETIME_ERRORS,
-};
-pub const DATETIME_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DATETIME_SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &DATETIME_ERRORS,
-};
-pub const DATETIME_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DATETIME_SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
     errors: &DATETIME_ERRORS,
 };
 pub const DATETIME_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

@@ -788,7 +788,7 @@ impl WgpuProvider {
         }
         let receipt = self
             .access
-            .with_scoped(|emission| -> Result<_> {
+            .with_profiled_scoped(&self.emission_authority, |emission| -> Result<_> {
                 let layout = Arc::new(match kind {
                     ValidatedPipelineKind::Fusion {
                         inputs,

@@ -33,10 +33,12 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
                         "overload failed",
                     ));
                 }
-                crate::sequence::ValueSequence::comma_separated(
+                let sequence = crate::sequence::ValueSequence::comma_separated(
                     (0..requested).map(|n| Value::Num(n as f64)).collect(),
                 )
-                .map_err(crate::sequence::sequence_error_to_runtime)
+                .map_err(crate::sequence::sequence_error_to_runtime)?;
+                crate::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())
             })
         },
     )));
@@ -55,6 +57,7 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
                 access: MemberAccess::Public,
                 function_name: "cutover_sequence_subsref".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]
         .into(),

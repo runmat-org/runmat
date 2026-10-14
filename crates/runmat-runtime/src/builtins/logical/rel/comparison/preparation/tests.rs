@@ -22,9 +22,9 @@ impl RuntimeAccelerationService for RecordingService {
         assert_eq!(request.form().data_arguments, &[0, 1]);
         self.0.set(self.0.get() + 1);
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -37,7 +37,7 @@ fn relational_numeric_admission_precedes_service_and_preserves_broadcast() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(calls.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
+    let _context = RuntimeContextGuard::enter(context.clone());
     let data = || Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
     for op in [
         RelationalOperator::Equal,
@@ -48,19 +48,27 @@ fn relational_numeric_admission_precedes_service_and_preserves_broadcast() {
         RelationalOperator::GreaterThanOrEqual,
     ] {
         assert!(block_on(super::super::evaluate(
+            Some(&context),
             data(),
             Value::String("invalid".into()),
             op
         ))
         .is_err());
         assert!(block_on(super::super::evaluate(
+            Some(&context),
             data(),
             Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 3]).unwrap()),
             op
         ))
         .is_err());
-        let result = block_on(super::super::evaluate(data(), Value::Num(0.0), op)).unwrap();
-        let Value::LogicalArray(array) = result else {
+        let result = block_on(super::super::evaluate(
+            Some(&context),
+            data(),
+            Value::Num(0.0),
+            op,
+        ))
+        .unwrap();
+        let Value::LogicalArray(array) = result.value() else {
             panic!("logical array")
         };
         assert_eq!(array.shape, vec![1, 2]);

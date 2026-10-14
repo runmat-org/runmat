@@ -257,18 +257,19 @@ fn median_only_typed_unsupported_falls_back_without_replaying_operational_errors
                     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
                 }
                 _ => {
-                    let Value::GpuTensor(output) = result.unwrap() else {
+                    let result = result.unwrap();
+                    let Value::GpuTensor(output) = result.value() else {
                         panic!("resident result")
                     };
                     assert!(!output.shares_allocation_with(&input));
-                    let actual = block_on(provider.inner.download(&output)).unwrap();
+                    let actual = block_on(provider.inner.download(output)).unwrap();
                     assert_eq!(actual.data, if all { vec![2.5] } else { vec![2., 5.] });
                     assert_eq!(
                         provider.downloads.load(Ordering::SeqCst),
                         usize::from(matches!(mode, Mode::Unsupported))
                     );
                     let output_weak = output.allocation_lease().downgrade();
-                    drop(output);
+                    drop(result);
                     assert!(output_weak.acquire().is_none());
                 }
             }
@@ -350,7 +351,9 @@ fn median_intermediates_retire_on_later_failure_unsupported_alias_and_cancellati
         } else {
             let result = block_on(call_builtin_async_with_outputs("median", &args, 1));
             match mode {
-                Mode::LaterUnsupported => assert!(matches!(result.unwrap(), Value::GpuTensor(_))),
+                Mode::LaterUnsupported => {
+                    assert!(matches!(result.unwrap().value(), Value::GpuTensor(_)))
+                }
                 Mode::LaterFailure => assert_original_error(&result.unwrap_err()),
                 Mode::LaterAlias => {
                     assert_eq!(result.unwrap_err().gpu_gather_retry, GpuGatherRetry::Never)
@@ -419,8 +422,8 @@ fn median_native_single_double_and_all_match_actual_host_oracles() {
                 1,
             ))
             .unwrap();
-            let host_values = match host {
-                Value::Num(value) => vec![value],
+            let host_values = match host.value() {
+                Value::Num(value) => vec![*value],
                 Value::Tensor(tensor) => tensor.materialize_f64(),
                 other => panic!("host result: {other:?}"),
             };
@@ -431,7 +434,7 @@ fn median_native_single_double_and_all_match_actual_host_oracles() {
                 1,
             ))
             .unwrap();
-            let Value::GpuTensor(output) = result else {
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("resident native result")
             };
             assert_eq!(output.shape(), shape);
@@ -443,8 +446,8 @@ fn median_native_single_double_and_all_match_actual_host_oracles() {
                     NumericElementType::F64
                 }
             );
-            assert!(handle_is_explicit(&output));
-            let actual = block_on(provider.inner.download_numeric(&output)).unwrap();
+            assert!(handle_is_explicit(output));
+            let actual = block_on(provider.inner.download_numeric(output)).unwrap();
             match actual.data {
                 HostNumericDataOwned::F32(values) => assert_eq!(
                     values.iter().map(|&v| f64::from(v)).collect::<Vec<_>>(),
@@ -488,7 +491,7 @@ fn median_all_preserves_nan_empty_and_exact_integer_host_rules() {
         1,
     ))
     .unwrap();
-    assert!(matches!(included, Value::Num(value) if value.is_nan()));
+    assert!(matches!(included.value(), Value::Num(value) if value.is_nan()));
     let omitted = block_on(call_builtin_async_with_outputs(
         "median",
         &[
@@ -501,7 +504,7 @@ fn median_all_preserves_nan_empty_and_exact_integer_host_rules() {
     .unwrap();
     with_nan.retain(|value| !value.is_nan());
     with_nan.sort_by(f64::total_cmp);
-    assert!(matches!(omitted, Value::Num(value) if value == with_nan[3]));
+    assert!(matches!(omitted.value(), Value::Num(value) if *value == with_nan[3]));
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let exact = Value::Tensor(
         Tensor::new_integer(
@@ -516,8 +519,8 @@ fn median_all_preserves_nan_empty_and_exact_integer_host_rules() {
         1,
     ))
     .unwrap();
-    match result {
-        Value::Int(runmat_value::IntValue::U64(value)) => assert_eq!(value, u64::MAX - 3),
+    match result.value() {
+        Value::Int(runmat_value::IntValue::U64(value)) => assert_eq!(*value, u64::MAX - 3),
         Value::Tensor(tensor) => assert!(
             matches!(tensor.integer_storage(), Some(runmat_value::IntegerStorage::U64(values)) if values == &vec![u64::MAX-3])
         ),
@@ -530,5 +533,5 @@ fn median_all_preserves_nan_empty_and_exact_integer_host_rules() {
         1,
     ))
     .unwrap();
-    assert!(matches!(result, Value::Num(value) if value.is_nan()));
+    assert!(matches!(result.value(), Value::Num(value) if value.is_nan()));
 }

@@ -162,12 +162,12 @@ impl WgpuProvider {
                 let out_buffer =
                     self.create_storage_buffer(emission, rows * cols, "runmat-scatter-col-out")?;
                 {
-                    let mut enc =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-scatter-col-copy"),
-                            });
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-scatter-col-copy"),
+                        },
+                    );
                     enc.copy_buffer_to_buffer(
                         m_entry.buffer.as_ref(),
                         0,
@@ -423,15 +423,13 @@ impl WgpuProvider {
                     self.create_storage_buffer_checked(emission, len, "runmat-sub2ind-out")?;
                 let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
                 let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-sub2ind-error"),
-                            contents: &error_bytes,
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_SRC
-                                | wgpu::BufferUsages::COPY_DST,
-                        }),
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-sub2ind-error"),
+                        contents: &error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    }),
                 );
 
                 let bgl = validated.layout.as_ref();
@@ -500,12 +498,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-sub2ind-error-copy"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-sub2ind-error-copy"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
                 self.submit(emission, pending, encoder)?;
                 Ok((output_buffer, staging))
@@ -713,15 +711,13 @@ impl WgpuProvider {
 
                 let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
                 let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-ind2sub-error"),
-                            contents: &error_bytes,
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_SRC
-                                | wgpu::BufferUsages::COPY_DST,
-                        }),
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-ind2sub-error"),
+                        contents: &error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    }),
                 );
 
                 let bgl = validated.layout.as_ref();
@@ -790,12 +786,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-ind2sub-error-copy"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-ind2sub-error-copy"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
                 self.submit(emission, pending, encoder)?;
                 Ok((output_buffers, staging))
@@ -924,12 +920,12 @@ impl WgpuProvider {
                 let out_buffer =
                     self.create_storage_buffer(emission, rows * cols, "runmat-scatter-row-out")?;
                 {
-                    let mut enc =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-scatter-row-copy"),
-                            });
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-scatter-row-copy"),
+                        },
+                    );
                     enc.copy_buffer_to_buffer(
                         m_entry.buffer.as_ref(),
                         0,
@@ -1098,9 +1094,7 @@ impl WgpuProvider {
                     }),
                 );
                 if !indices.is_empty() {
-                    emission
-                        .queue()
-                        .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+                    emission.write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
                 }
                 log::trace!(
                     "gather_linear begin source_buffer={} ptr=0x{:x} out_shape={:?} count={}",
@@ -1318,7 +1312,7 @@ impl WgpuProvider {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
-        emission.queue().write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+        emission.write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
         log::trace!(
             "scatter_linear begin target_buffer={} target_ptr=0x{:x} values_buffer={} values_ptr=0x{:x} count={}",
             target.buffer_id(),
@@ -1474,11 +1468,7 @@ impl WgpuProvider {
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                emission.queue().write_buffer(
-                    &count_storage,
-                    0,
-                    bytemuck::cast_slice(&[0u32, 0u32]),
-                );
+                emission.write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
                 let count_staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-find-count-staging"),
                     size: 8,
@@ -1545,12 +1535,12 @@ impl WgpuProvider {
                     &bind_group,
                 )?;
 
-                let mut copy_encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-find-copy-count"),
-                        });
+                let mut copy_encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-find-copy-count"),
+                    },
+                );
                 copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
                 self.submit(emission, pending, copy_encoder)?;
                 Ok((

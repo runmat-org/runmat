@@ -338,7 +338,12 @@ fn compile_lowering(
             analysis,
         )?;
         let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
-        let mut bytecode = runmat_vm::Bytecode::empty();
+        let declarations = runmat_vm::compile_class_declarations(
+            &lowering.assembly,
+            mir,
+            lowering.assembly.primary_source,
+        );
+        let mut bytecode = runmat_vm::Bytecode::with_instructions(declarations, 0);
         bytecode.source_id = lowering
             .assembly
             .primary_source
@@ -651,6 +656,50 @@ mod tests {
             .bytecode
             .expect("generic source-less product remains valid");
         assert_eq!(source_less.source_id, None);
+    }
+
+    #[test]
+    fn constructorless_class_product_retains_primary_declaration_and_methods() {
+        let primary = runmat_types::ProgramSourceId(7);
+        for (source, expected_methods) in [
+            (
+                "classdef ColdBase < handle\n properties\n seed = 13\n end\nend",
+                0,
+            ),
+            (
+                "classdef ColdBase < handle\n properties\n seed = 13\n end\n methods\n function value = marker(obj)\n value = obj.seed;\n end\n function value = secondMarker(obj)\n value = obj.seed + 1;\n end\n end\nend",
+                2,
+            ),
+        ] {
+            let ast = runmat_parser::parse(source).expect("class source");
+            let sources = vec![primary; ast.body.len()];
+            let analysis = analyze_program_with_catalog(
+                &ast,
+                &LoweringContext::empty()
+                    .with_primary_source(primary)
+                    .with_top_level_sources(&sources),
+                None,
+            );
+            assert!(analysis.compile_failure.is_none(), "{source}");
+            let lowering = analysis.lowering.as_ref().expect("HIR");
+            assert!(lowering.assembly.entrypoints.is_empty());
+            let bytecode = analysis.bytecode.expect("declaration-only bytecode");
+            assert_eq!(
+                bytecode.source_id,
+                Some(runmat_vm::BytecodeSourceRef::Program(primary))
+            );
+            let declarations = bytecode.instructions.iter().filter_map(|instruction| {
+                if let runmat_vm::Instr::RegisterClass { name, methods, .. } = instruction {
+                    Some((name.display_name(), methods.len()))
+                } else {
+                    None
+                }
+            });
+            assert_eq!(
+                declarations.collect::<Vec<_>>(),
+                vec![("ColdBase", expected_methods)]
+            );
+        }
     }
 
     #[test]

@@ -48,7 +48,7 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
             &mut ordinary_vars,
         ))
         .expect("independent ordinary selected image source");
-    let expected = expected.values;
+    let expected = &expected.values;
     let publication_slots: Vec<_> = ["mu", "sigma", "out"]
         .into_iter()
         .map(|name| {

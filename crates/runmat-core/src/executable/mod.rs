@@ -1,4 +1,5 @@
 mod coverage;
+mod interop;
 mod invocation;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -10,6 +11,7 @@ mod source_map;
 mod unit;
 
 pub use coverage::CoveragePlan;
+pub(crate) use interop::python_environment_requirement;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use invocation::ExecutableBackendPolicy;
 pub use invocation::{InvocationControl, ProcedureInvocation, ProcedureTarget};
@@ -19,4 +21,5 @@ pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
+pub(crate) use unit::ExecutableUnitDraft;
 pub use unit::{reachability_requires_python, ExecutableUnit};

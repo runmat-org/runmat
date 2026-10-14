@@ -136,7 +136,7 @@ fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
         &[Value::String(path.to_string_lossy().into_owned())],
     ))
     .expect("implicit nested load returns a struct");
-    let Value::Struct(result) = value else {
+    let Value::Struct(result) = value.value() else {
         panic!("implicit nested load must not publish workspace bindings");
     };
     assert_eq!(result.fields.get("x"), Some(&Value::Num(7.0)));
@@ -334,8 +334,8 @@ fn load_roundtrip_numeric() {
 
     let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
         .expect("load numeric");
-    let struct_value = eval.first_output();
-    match struct_value {
+    let struct_value = eval.first_output().unwrap();
+    match struct_value.value() {
         Value::Struct(sv) => {
             assert!(sv.fields.contains_key("A"));
             match sv.fields.get("A").unwrap() {
@@ -448,8 +448,8 @@ fn load_string_array_roundtrip() {
 
     let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
         .expect("load strings");
-    let struct_value = eval.first_output();
-    match struct_value {
+    let struct_value = eval.first_output().unwrap();
+    match struct_value.value() {
         Value::Struct(sv) => {
             let value = sv
                 .fields
@@ -538,7 +538,8 @@ fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
 
     let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
         .expect("load nd values");
-    let Value::Struct(output) = eval.first_output() else {
+    let output = eval.first_output().unwrap();
+    let Value::Struct(output) = output.value() else {
         panic!("expected struct");
     };
     assert_eq!(output.fields.get("chars"), Some(&Value::CharArray(chars)));
@@ -895,7 +896,7 @@ fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let restored = crate::dispatcher::call_builtin("load", &args).expect("RunMat mode load");
         assert!(matches!(
-            restored,
+            restored.value(),
             Value::Struct(ref fields)
                 if matches!(
                     fields.fields.get("S"),
@@ -1180,8 +1181,8 @@ fn load_wgpu_tensor_roundtrip() {
 
     let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
         .expect("load wgpu file");
-    let struct_value = eval.first_output();
-    match struct_value {
+    let struct_value = eval.first_output().unwrap();
+    match struct_value.value() {
         Value::Struct(sv) => match sv.fields.get("gpu_var") {
             Some(Value::Tensor(t)) => {
                 assert_eq!(t.shape(), &[2, 2]);

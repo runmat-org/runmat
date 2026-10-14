@@ -9,8 +9,7 @@ use runmat_builtins::{
 use runmat_builtins::{FLOOR_DESCRIPTOR, FLOOR_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, ObjectInstance, StructValue, Tensor,
-    Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, ObjectInstance, Tensor, Value,
 };
 
 use crate::builtins::common::spec::{
@@ -19,6 +18,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::floor")]
@@ -70,9 +71,14 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "floor",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::rounding::floor"
+    builtin_path = "crate::builtins::math::rounding::floor",
+    context = true
 )]
-async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn floor_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &FLOOR_ERROR_TOO_MANY_OUTPUTS)?;
     if !rest.is_empty() {
         return Err(builtin_error_with_detail(
@@ -81,38 +87,32 @@ async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    super::preparation::unary(&runmat_builtins::FLOOR_CATALOG_ENTRY, value, floor_value).await
+    super::preparation::unary(
+        runtime.as_ref(),
+        &runmat_builtins::FLOOR_CATALOG_ENTRY,
+        value,
+        floor_value,
+    )
+    .await
 }
 
-async fn floor_value(value: Value) -> BuiltinResult<Value> {
+async fn floor_value(value: Value) -> BuiltinResult<RootedValue> {
+    let _input =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     match value {
-        Value::GpuTensor(handle) => floor_gpu(handle).await,
+        Value::GpuTensor(handle) => super::unary::root_output(floor_gpu(handle).await?),
         Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
             floor_table(object).await
         }
-        Value::Complex(re, im) => Ok(Value::Complex(
-            apply_floor_scalar(re),
-            apply_floor_scalar(im),
-        )),
-        Value::ComplexTensor(ct) => floor_complex_tensor(ct),
-        Value::CharArray(ca) => floor_char_array(ca),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err))?;
-            Ok(tensor::tensor_into_value(floor_tensor(tensor)?))
-        }
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_INPUT,
-            "expected numeric or logical input",
-        )),
-        other => floor_numeric(other),
+        other => super::unary::root_output(floor_host_value(other)?),
     }
 }
 
-async fn floor_table(object: ObjectInstance) -> BuiltinResult<Value> {
+async fn floor_table(object: ObjectInstance) -> BuiltinResult<RootedValue> {
     let variables = crate::builtins::table::table_variables(&object)
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err.message))?;
-    let mut rounded = StructValue::new();
+    let mut names = Vec::with_capacity(variables.fields.len());
+    let mut rounded = RootedValuesBuilder::with_capacity(variables.fields.len());
     for (name, value) in variables.fields {
         crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
         let value = match value {
@@ -125,9 +125,13 @@ async fn floor_table(object: ObjectInstance) -> BuiltinResult<Value> {
             }
             other => floor_host_value(other)?,
         };
-        rounded.insert(name, value);
+        names.push(name);
+        rounded.push_owned(super::unary::root_output(value)?);
     }
-    crate::builtins::table::table_replace_variables_like(&object, rounded)
+    let rounded = rounded
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+    crate::builtins::table::table_replace_variables_like_owned(&object, names, rounded)
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err.message))
 }
 
@@ -278,7 +282,7 @@ pub(crate) mod tests {
     };
 
     fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::floor_builtin(value, rest))
+        block_on(super::floor_builtin(None, value, rest)).map(|owned| owned.value().clone())
     }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
@@ -471,11 +475,11 @@ pub(crate) mod tests {
             columns.into_iter().map(Value::Tensor).collect(),
         )
         .unwrap();
-        let output = block_on(super::floor_builtin(input, Vec::new())).unwrap();
-        let Value::Object(output) = output else {
+        let output = block_on(super::floor_builtin(None, input, Vec::new())).unwrap();
+        let Value::Object(output) = output.value() else {
             panic!("expected table output");
         };
-        let variables = crate::builtins::table::table_variables(&output).unwrap();
+        let variables = crate::builtins::table::table_variables(output).unwrap();
         for (value, expected) in variables.fields.values().zip(expected) {
             assert_eq!(value, &Value::Tensor(expected));
         }

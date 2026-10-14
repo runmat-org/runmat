@@ -2,20 +2,37 @@ use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_native_executor::{
     deopt::{DeoptimizationPolicy, MaterializedFrame, ResumeTarget},
-    execute::{NativeExecution, NativeInvocationStep},
+    execute::{NativeExecution, NativeInvocationStep, RootedNativeExecution},
     NativeExecutor,
 };
 use runmat_value::Value;
 
 use crate::ExecutableUnit;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+thread_local! {
+    static NATIVE_LEXICAL_COMPLETIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) fn reset_native_lexical_completions() {
+    NATIVE_LEXICAL_COMPLETIONS.with(|count| count.set(0));
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) fn native_lexical_completions() -> usize {
+    NATIVE_LEXICAL_COMPLETIONS.with(std::cell::Cell::get)
+}
+
 struct DeoptimizationInvocation {
     executor: Rc<NativeExecutor>,
     function: runmat_types::ProgramFunctionId,
     captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
     policy: DeoptimizationPolicy,
     osr: Option<runmat_native_executor::osr::OsrTarget>,
     workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
@@ -25,9 +42,11 @@ pub(super) struct DeoptimizationRequest {
     pub executor: Rc<NativeExecutor>,
     pub function: runmat_types::ProgramFunctionId,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
+    pub dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
     pub osr: Option<runmat_native_executor::osr::OsrTarget>,
     pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
@@ -35,7 +54,26 @@ pub(super) struct DeoptimizationRequest {
 pub(super) async fn invoke(
     unit: &ExecutableUnit,
     request: DeoptimizationRequest,
-) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
+    let roots = runmat_runtime::execution::RootedValueLease::for_values(
+        request
+            .arguments
+            .iter()
+            .chain(request.captures.iter().map(|capture| &capture.value))
+            .chain(
+                request
+                    .workspace
+                    .iter()
+                    .flat_map(|workspace| workspace.values.values()),
+            ),
+    )
+    .map_err(|error| error.into_runtime_error())?;
+    let environment_roots = request
+        .lexical_environment
+        .as_ref()
+        .map(runmat_runtime::call::lexical::root_environment)
+        .transpose()?;
+    let (runtime, placement) = request.runtime.native_invocation_context();
     let policy = DeoptimizationPolicy {
         target: if request.workspace.is_some() {
             ResumeTarget::GenericNative
@@ -44,62 +82,91 @@ pub(super) async fn invoke(
         },
         ..DeoptimizationPolicy::default()
     };
-    invoke_with_policy(
-        unit,
-        DeoptimizationInvocation {
-            executor: request.executor,
-            function: request.function,
-            captures: request.captures,
-            arguments: request.arguments,
-            requested_outputs: request.requested_outputs,
-            runtime: request.runtime,
-            policy,
-            osr: request.osr,
-            workspace: request.workspace,
-        },
-    )
+    let selected = runtime.clone();
+    let invocation = DeoptimizationInvocation {
+        executor: request.executor,
+        function: request.function,
+        captures: request.captures,
+        lexical_environment: request.lexical_environment,
+        arguments: request.arguments,
+        requested_outputs: request.requested_outputs,
+        runtime: selected,
+        dynamic_admission: request.dynamic_admission,
+        policy,
+        osr: request.osr,
+        workspace: request.workspace,
+    };
+    if placement.is_direct() {
+        let _roots = roots;
+        let _environment_roots = environment_roots;
+        return runtime.scope(invoke_with_policy(unit, invocation)).await;
+    }
+    let unit = unit.clone();
+    runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+        let _environment_roots = environment_roots;
+        invoke_with_policy(&unit, invocation).await
+    })
     .await
 }
 
 async fn invoke_with_policy(
     unit: &ExecutableUnit,
     invocation: DeoptimizationInvocation,
-) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
     let DeoptimizationInvocation {
         executor,
         function,
         captures,
+        lexical_environment,
         arguments,
         requested_outputs,
         runtime,
+        dynamic_admission,
         policy,
         osr,
         workspace,
     } = invocation;
-    if workspace.is_some() && !captures.is_empty() {
+    if workspace.is_some() && (!captures.is_empty() || lexical_environment.is_some()) {
         return Err(super::error::stage(
             "NativeWorkspace",
-            "interactive entrypoints cannot carry lexical captures",
+            "interactive entrypoints cannot carry lexical captures or an activation",
         ));
     }
+    // Direct internal users (including deoptimization tests) retain their
+    // activation independently of the outer continuation admission lease.
+    let _environment_roots = lexical_environment
+        .as_ref()
+        .map(runmat_runtime::call::lexical::root_environment)
+        .transpose()?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let had_lexical_environment = lexical_environment.is_some();
     let mut invocation = executor
-        .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function,
-            captures,
-            arguments,
-            requested_outputs,
-            runtime: runtime.clone(),
-            deoptimization: policy,
-            osr_target: osr,
-            workspace,
-        })
+        .begin_request_with_environment(
+            runmat_native_executor::NativeInvocationRequest {
+                function,
+                captures,
+                arguments,
+                requested_outputs,
+                runtime: runtime.clone(),
+                deoptimization: policy,
+                osr_target: osr,
+                workspace,
+            },
+            lexical_environment,
+        )
         .map_err(super::error::from_native_executor_error)?;
     loop {
         match invocation
             .advance()
             .map_err(super::error::from_native_executor_error)?
         {
-            NativeInvocationStep::Completed(execution) => return Ok(execution),
+            NativeInvocationStep::Completed(execution) => {
+                #[cfg(all(test, not(target_arch = "wasm32")))]
+                if had_lexical_environment {
+                    NATIVE_LEXICAL_COMPLETIONS.with(|count| count.set(count.get() + 1));
+                }
+                return Ok(execution);
+            }
             NativeInvocationStep::Suspended {
                 continuation,
                 generation,
@@ -122,7 +189,22 @@ async fn invoke_with_policy(
                     .map_err(super::error::from_native_executor_error)?;
             }
             NativeInvocationStep::Deoptimized { frame, .. } => {
-                return resume_interpreter(unit, frame, requested_outputs, runtime).await;
+                let resume_environment = invocation
+                    .deoptimized_lexical_environment()
+                    .map_err(super::error::from_native_executor_error)?;
+                let _resume_roots = resume_environment
+                    .as_ref()
+                    .map(runmat_runtime::call::lexical::root_environment)
+                    .transpose()?;
+                return resume_interpreter(
+                    unit,
+                    frame,
+                    requested_outputs,
+                    runtime,
+                    resume_environment,
+                    dynamic_admission,
+                )
+                .await;
             }
         }
     }
@@ -133,7 +215,9 @@ async fn resume_interpreter(
     frame: MaterializedFrame,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
     let function_id = runmat_hir::FunctionId(frame.function.0 as usize);
     let layout = unit
         .vm_layout()
@@ -143,28 +227,33 @@ async fn resume_interpreter(
     let functions = unit
         .runtime_functions(&runtime)
         .map_err(|error| super::error::stage("NativeDeoptimization", error))?;
-    let (bytecode, function_name, var_count) = if let Some(function) = functions.get(function_id) {
-        (
-            runmat_vm::Bytecode::for_function(
-                function,
-                functions.clone(),
-                unit.vm_layout().clone(),
-            ),
-            function.display_name.clone(),
-            function.var_count,
-        )
-    } else {
-        (
-            unit.runtime_bytecode(&runtime)
-                .map_err(|error| super::error::stage("NativeDeoptimization", error))?,
-            unit.mir()
-                .functions
-                .get(&function_id)
-                .map(|metadata| metadata.name.0.clone())
-                .unwrap_or_else(|| "<main>".into()),
-            unit.bytecode().var_count,
-        )
-    };
+    let (bytecode, function_name, var_count, lexical_binding_slots, inherited_storage_slots) =
+        if let Some(function) = functions.get(function_id) {
+            (
+                runmat_vm::Bytecode::for_function(
+                    function,
+                    functions.clone(),
+                    unit.vm_layout().clone(),
+                ),
+                function.display_name.clone(),
+                function.var_count,
+                function.lexical_binding_slots.clone(),
+                function.inherited_storage_slots.clone(),
+            )
+        } else {
+            (
+                unit.runtime_bytecode(&runtime)
+                    .map_err(|error| super::error::stage("NativeDeoptimization", error))?,
+                unit.mir()
+                    .functions
+                    .get(&function_id)
+                    .map(|metadata| metadata.name.0.clone())
+                    .unwrap_or_else(|| "<main>".into()),
+                unit.bytecode().var_count,
+                Vec::new(),
+                Vec::new(),
+            )
+        };
     let pc = frame.site.bytecode_pc.ok_or_else(|| {
         super::error::stage(
             "NativeDeoptimization",
@@ -178,8 +267,28 @@ async fn resume_interpreter(
         )
     })?;
     let persistent_authority = runtime.session_variable_authority();
-    for continuation in frame.persistent_bindings.values() {
-        continuation.validate_selected(&persistent_authority, &function_name)?;
+    for (local, continuation) in &frame.persistent_bindings {
+        let slot = layout
+            .mir_local_slots
+            .get(&runmat_mir::MirLocalId(*local))
+            .ok_or_else(|| {
+                super::error::stage(
+                    "NativeDeoptimization",
+                    "native persistent alias has no canonical VM slot",
+                )
+            })?;
+        let owner = inherited_storage_slots
+            .iter()
+            .find(|entry| {
+                entry.slot == slot.0
+                    && entry.kind == runmat_vm::InheritedStorageKind::Persistent
+                    && entry.name == continuation.name
+                    && entry.owner_function == continuation.function
+            })
+            .map_or(function_name.as_str(), |entry| {
+                entry.owner_function.as_str()
+            });
+        continuation.validate_selected(&persistent_authority, owner)?;
     }
     let mut vars = vec![None; var_count];
     for local in frame.locals {
@@ -211,14 +320,29 @@ async fn resume_interpreter(
                         "native persistent alias has no canonical VM slot",
                     )
                 })?;
-            Ok((
-                slot.0,
+            let inherited = inherited_storage_slots.iter().find(|entry| {
+                entry.slot == slot.0
+                    && entry.kind == runmat_vm::InheritedStorageKind::Persistent
+                    && entry.name == continuation.name
+                    && entry.owner_function == continuation.function
+            });
+            let owner = inherited.map_or(function_name.as_str(), |entry| {
+                entry.owner_function.as_str()
+            });
+            let binding = if inherited.is_some() {
+                runmat_vm::PersistentBinding::from_inherited_native_continuation(
+                    continuation,
+                    &persistent_authority,
+                    owner,
+                )?
+            } else {
                 runmat_vm::PersistentBinding::from_native_continuation(
                     continuation,
                     &persistent_authority,
-                    &function_name,
-                )?,
-            ))
+                    owner,
+                )?
+            };
+            Ok((slot.0, binding))
         })
         .collect::<Result<std::collections::HashMap<_, _>, runmat_runtime::RuntimeError>>()?;
     let global_aliases = frame
@@ -265,14 +389,21 @@ async fn resume_interpreter(
         side_effect_epoch: frame.site.side_effect_epoch,
     };
     let runmat_vm::InterpreterOutcome::Completed(completion) =
-        runmat_vm::interpret_resume_in_context(
+        runmat_vm::interpret_resume_with_dynamic_admission_in_context(
             &bytecode,
             resume,
             Some(&function_name),
             runtime.clone(),
+            runmat_vm::DynamicResumeSelection {
+                lexical_environment,
+                lexical_binding_slots,
+                inherited_storage_slots,
+                dynamic_admission,
+            },
         )
         .await?;
-    let projection = runmat_vm::CompletedFrameProjection::new(completion.values)?;
+    let projection = completion
+        .with_owned(|completion| runmat_vm::CompletedFrameProjection::new(completion.values))?;
     let values = projection.values();
     let body = unit.mir().bodies.get(&function_id).ok_or_else(|| {
         super::error::stage("NativeDeoptimization", "MIR function body is unavailable")
@@ -318,8 +449,7 @@ async fn resume_interpreter(
             })
         })
         .collect();
-    drop(projection);
-    Ok(NativeExecution {
+    let execution = RootedNativeExecution::new(NativeExecution {
         outputs,
         captures,
         loop_backedges: BTreeMap::new(),
@@ -328,14 +458,17 @@ async fn resume_interpreter(
         workspace: None,
         expression: None,
     })
+    .map_err(|error| error.into_runtime_error())?;
+    drop(projection);
+    Ok(execution)
 }
 
 #[cfg(test)]
-#[path = "deopt_projection_tests.rs"]
-mod projection_tests;
-#[cfg(test)]
 #[path = "deopt_deal_tests.rs"]
 mod deal_tests;
+#[cfg(test)]
+#[path = "deopt_projection_tests.rs"]
+mod projection_tests;
 
 #[cfg(test)]
 mod tests {
@@ -382,9 +515,11 @@ mod tests {
                 executor: compiled.executor,
                 function: compiled.entrypoint,
                 captures: Vec::new(),
+                lexical_environment: None,
                 arguments: vec![Value::Num(81.0)],
                 requested_outputs: 2,
                 runtime,
+                dynamic_admission: None,
                 policy,
                 osr: None,
                 workspace: None,
@@ -392,6 +527,180 @@ mod tests {
         ))
         .expect("native execution should resume in the interpreter");
         assert_eq!(execution.outputs, vec![Value::Num(9.0), Value::Num(2.0)]);
+    }
+
+    #[test]
+    fn native_deopt_resumes_with_its_owned_shared_activation() {
+        runmat_gc::gc_test_context(|| {
+            let mut session = RunMatSession::with_options(false, false).expect("session init");
+            session.set_compat_mode(runmat_parser::CompatMode::RunMat);
+            session.configure_runtime_context();
+            let source_text = "function [y, h] = nativeLexicalDeopt(x)\nshared = x;\nh = @bump;\ny = sqrt(81);\ny = bump(2);\nfunction out = bump(delta)\nshared = shared + delta;\nout = shared;\nend\nend\n";
+            let unit = block_on(session.compile_executable_unit(
+                ExecutableSource::new(
+                    "native-lexical-deopt@1",
+                    "nativeLexicalDeopt.m",
+                    source_text,
+                ),
+                None,
+            ))
+            .expect("compile nested deoptimization fixture");
+            let compiled = super::super::compile::compile(&unit, Some("nativeLexicalDeopt"))
+                .expect("compile generic-native nested function");
+            let sqrt_safepoints = compiled
+                .safepoint_locations
+                .get(&compiled.entrypoint)
+                .into_iter()
+                .flatten()
+                .filter(|(_, location)| {
+                    source_text
+                        .get(location.span.start as usize..location.span.end as usize)
+                        .is_some_and(|site| site.contains("sqrt"))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                sqrt_safepoints.len(),
+                1,
+                "the lowered sqrt operation has one exact native safepoint"
+            );
+            let (safepoint, selected_source) = sqrt_safepoints
+                .into_iter()
+                .next()
+                .expect("typed sqrt call has a native safepoint");
+            let runtime = unit
+                .bind_runtime_sources(
+                    session.execution_runtime_context(unit.revision().program_revision.clone()),
+                )
+                .expect("bind selected nested source");
+            let owned_bindings = unit
+                .mir()
+                .lexical_environment_projection(runmat_hir::FunctionId(
+                    compiled.entrypoint.0 as usize,
+                ))
+                .expect("canonical nested ownership projection")
+                .owned;
+            assert_eq!(owned_bindings.len(), 1, "only shared is an owned cell");
+            let shared_binding = *owned_bindings.iter().next().expect("shared binding");
+            let (parent, _parent_roots) = runmat_runtime::call::lexical::allocate_environment(None)
+                .expect("parent activation");
+            let mut invocation = compiled
+                .executor
+                .begin_request_with_environment(
+                    runmat_native_executor::NativeInvocationRequest {
+                        function: compiled.entrypoint,
+                        captures: Vec::new(),
+                        arguments: vec![Value::Num(5.0)],
+                        requested_outputs: 2,
+                        runtime: runtime.clone(),
+                        deoptimization: DeoptimizationPolicy {
+                            target: ResumeTarget::Interpreter,
+                            ..Default::default()
+                        }
+                        .inject(FaultInjection::Safepoint(safepoint)),
+                        osr_target: None,
+                        workspace: None,
+                    },
+                    Some(parent.clone()),
+                )
+                .expect("begin native child activation");
+            let result = block_on(async {
+                loop {
+                    match invocation.advance().expect("advance native nested fixture") {
+                        super::NativeInvocationStep::Completed(_) => {
+                            panic!("selected safepoint must deoptimize")
+                        }
+                        super::NativeInvocationStep::Suspended {
+                            continuation,
+                            generation,
+                        } => invocation
+                            .resume_suspension(continuation, generation)
+                            .await
+                            .expect("resume native suspension"),
+                        super::NativeInvocationStep::Deoptimized { target, frame, .. } => {
+                            assert_eq!(
+                                target,
+                                runmat_runtime::native::NativeResumeKind::INTERPRETER
+                            );
+                            assert_eq!(frame.site.point.function, compiled.entrypoint);
+                            assert!(frame.site.bytecode_pc.is_some());
+                            assert_eq!(frame.site.source, selected_source.source);
+                            assert_eq!(frame.site.span, selected_source.span);
+                            let active_environment = invocation
+                                .deoptimized_lexical_environment()
+                                .expect("retained native activation")
+                                .expect("owned lexical cell activation");
+                            assert_ne!(active_environment, parent);
+                            assert_eq!(
+                                runmat_runtime::call::lexical::read_binding(
+                                    &active_environment,
+                                    shared_binding,
+                                )
+                                .expect("read pre-resume shared cell"),
+                                Some(Value::Num(5.0)),
+                                "native deopt must precede bump's shared-cell mutation"
+                            );
+                            let _roots = runmat_runtime::call::lexical::root_environment(
+                                &active_environment,
+                            )
+                            .expect("root resumed activation");
+                            let execution = super::resume_interpreter(
+                                &unit,
+                                frame,
+                                2,
+                                runtime.clone(),
+                                Some(active_environment.clone()),
+                                None,
+                            )
+                            .await
+                            .expect("resume in VM with the same child activation");
+                            assert_eq!(
+                                runmat_runtime::call::lexical::read_binding(
+                                    &active_environment,
+                                    shared_binding,
+                                )
+                                .expect("read post-resume shared cell"),
+                                Some(Value::Num(7.0)),
+                                "VM must mutate the same native-owned shared cell"
+                            );
+                            break (execution, active_environment);
+                        }
+                    }
+                }
+            });
+            assert_eq!(result.0.outputs[0], Value::Num(7.0));
+            let Value::Closure(handle) = &result.0.outputs[1] else {
+                panic!("second output must be escaped nested handle")
+            };
+            assert_eq!(handle.lexical_environment.as_ref(), Some(&result.1));
+
+            let production = block_on(super::invoke_with_policy(
+                &unit,
+                super::DeoptimizationInvocation {
+                    executor: compiled.executor,
+                    function: compiled.entrypoint,
+                    captures: Vec::new(),
+                    lexical_environment: Some(parent.clone()),
+                    arguments: vec![Value::Num(5.0)],
+                    requested_outputs: 2,
+                    runtime,
+                    dynamic_admission: None,
+                    policy: DeoptimizationPolicy {
+                        target: ResumeTarget::Interpreter,
+                        ..Default::default()
+                    }
+                    .inject(FaultInjection::Safepoint(safepoint)),
+                    osr: None,
+                    workspace: None,
+                },
+            ))
+            .expect("production deoptimization resumes its owned child activation");
+            assert_eq!(production.outputs[0], Value::Num(7.0));
+            let Value::Closure(handle) = &production.outputs[1] else {
+                panic!("production output must retain escaped nested handle")
+            };
+            assert_ne!(handle.lexical_environment.as_ref(), Some(&parent));
+        });
     }
 
     #[test]
@@ -464,9 +773,16 @@ mod tests {
                                 None,
                                 "clear must execute before physical deoptimization"
                             );
-                            break super::resume_interpreter(&unit, frame, 1, runtime.clone())
-                                .await
-                                .expect("resume cleared persistent frame in interpreter");
+                            break super::resume_interpreter(
+                                &unit,
+                                frame,
+                                1,
+                                runtime.clone(),
+                                None,
+                                None,
+                            )
+                            .await
+                            .expect("resume cleared persistent frame in interpreter");
                         }
                     }
                 }

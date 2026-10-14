@@ -90,7 +90,7 @@ fn unwrap_successful_resident_controls_leave_borrowed_allocations_live() {
             "unwrap", &arguments, 1,
         ))
         .expect("control download and host phase execution");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("unwrap must publish a host tensor");
         };
         assert_eq!(output.materialize_f64(), vec![0.0, 1.0]);
@@ -254,15 +254,15 @@ fn typed_complex_zero_and_tiny_imaginary_signals_keep_default_twosided_range() {
                 2,
             ))
             .unwrap();
-            let Value::OutputList(values) = actual else {
+            let Value::OutputList(values) = actual.value() else {
                 panic!("two spectral outputs")
             };
-            let Value::OutputList(expected) = expected else {
+            let Value::OutputList(expected) = expected.value() else {
                 panic!("host reference outputs")
             };
             assert_eq!(values.len(), expected.len());
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
-            for (actual, expected) in values.iter().zip(&expected) {
+            for (actual, expected) in values.iter().zip(expected.iter()) {
                 let Value::GpuTensor(handle) = actual else {
                     panic!("restored spectral output")
                 };
@@ -289,7 +289,7 @@ fn typed_complex_zero_and_tiny_imaginary_signals_keep_default_twosided_range() {
             assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 3);
             assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
-            drop(values);
+            drop(actual);
             provider.assert_retired();
             assert_eq!(source.probe.retirements(), 0);
         }

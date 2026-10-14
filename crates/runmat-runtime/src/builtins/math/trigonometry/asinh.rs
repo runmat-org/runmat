@@ -20,6 +20,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "asinh";
 
@@ -80,9 +82,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "asinh",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
-async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn asinh_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -97,9 +105,13 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::ASINH_ERROR_INVALID_INPUT,
     )?;
     super::inverse_helpers::preparation::unary(
+        runtime.as_ref(),
         runmat_builtins::ASINH_CATALOG_ENTRY.identity,
         value,
-        asinh_admitted,
+        |value| async move {
+            let output = asinh_admitted(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
 }
@@ -217,7 +229,7 @@ pub(crate) mod tests {
 
     fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::asinh_builtin(value))
+        block_on(super::asinh_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -239,29 +251,34 @@ pub(crate) mod tests {
     #[test]
     fn asinh_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::asinh_builtin(Value::Int(
-            runmat_value::IntValue::I8(1),
-        )))
+        let integer = block_on(super::asinh_builtin(
+            None,
+            Value::Int(runmat_value::IntValue::I8(1)),
+        ))
+        .map(|owned| owned.value().clone())
         .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             ASINH_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::asinh_builtin(Value::Bool(true)))
+        let logical = block_on(super::asinh_builtin(None, Value::Bool(true)))
+            .map(|owned| owned.value().clone())
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ASINH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::asinh_builtin(Value::CharArray(chars)))
+        let character = block_on(super::asinh_builtin(None, Value::CharArray(chars)))
+            .map(|owned| owned.value().clone())
             .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             ASINH_CHARACTER_INPUT_EXTENSION.error_identifier
         );
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity = block_on(super::asinh_builtin(Value::Num(0.0)))
+        let arity = block_on(super::asinh_builtin(None, Value::Num(0.0)))
+            .map(|owned| owned.value().clone())
             .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ASINH_ERROR_TOO_MANY_OUTPUTS.identifier);
     }

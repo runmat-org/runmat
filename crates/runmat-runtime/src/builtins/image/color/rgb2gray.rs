@@ -16,8 +16,7 @@ use crate::builtins::image::color::common;
 use crate::builtins::image::color::rgb_input;
 use crate::builtins::image::color::rgb_presentation::{self, SelectedRgbPresentation};
 use crate::context::preparation::{
-    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -63,7 +62,7 @@ async fn rgb2gray_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     rgb: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(rgb2gray_error(&RGB2GRAY_ERROR_TOO_MANY_INPUTS));
     }
@@ -109,17 +108,14 @@ async fn rgb2gray_builtin(
         )
         .await
     };
-    match runtime.as_ref() {
-        Some(runtime) => execute_admitted(runtime, request, execute).await,
-        None => execute_current_request(request, execute).await,
-    }
+    execute_request(runtime.as_ref(), request, execute).await
 }
 
 async fn rgb2gray_execute(
     rgb: Value,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
     mut selected: Option<SelectedRgbPresentation>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = match rgb {
         Value::Tensor(tensor) => tensor,
@@ -130,13 +126,15 @@ async fn rgb2gray_execute(
     resident_guard.restore();
     let out = rgb2gray_tensor(&tensor)
         .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INTERNAL))?;
-    rgb_presentation::publish(&mut selected, || {
+    let output = rgb_presentation::publish(&mut selected, || {
         common::restore_resident_numeric_result_for_sources(
             &resident_sources,
             common::image_value_from_tensor(out),
             NAME,
         )
-    })
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| rgb2gray_map_error(err.into_runtime_error(), &RGB2GRAY_ERROR_INTERNAL))
 }
 
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
@@ -231,6 +229,18 @@ fn grayscale_storage(values: Vec<f64>, dtype: NumericDType) -> NumericStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Terminal numerical test projection; these color outputs have no
+    // GC-managed children and do not escape into asynchronous work.
+    async fn rgb2gray_builtin(
+        runtime: Option<crate::context::RuntimeContext>,
+        rgb: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        super::rgb2gray_builtin(runtime, rgb, rest)
+            .await
+            .map(|owned| owned.with_owned(|value| value))
+    }
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
@@ -466,6 +476,6 @@ mod tests {
         let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
         let result = block_on(crate::call_builtin_async(NAME, &[Value::Tensor(rgb)]))
             .expect("rgb2gray registered");
-        assert!(matches!(result, Value::Num(value) if (value - 1.0).abs() < 1e-12));
+        assert!(matches!(result.value(), Value::Num(value) if (value - 1.0).abs() < 1e-12));
     }
 }

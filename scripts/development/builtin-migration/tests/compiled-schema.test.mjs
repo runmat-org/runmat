@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { constant, legacyFunction } from "../compiled-schema.mjs";
+import { catalogEntry, constant, legacyFunction } from "../compiled-schema.mjs";
+import { compiledInventoryFixture } from "./helpers.mjs";
+
+test("compiled catalog parses typed audience and operand preparation forms", () => {
+  const entry = compiledInventoryFixture().snapshot.declared.catalog_entries[0];
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation = { Forms: [{
+    id: 1, binding_variant: "default", signatures: [0], data_arguments: [0],
+    operation: { FloatingCast: "Double" }, provider_requirement: "F64",
+  }] };
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation.Forms[0].operation = { ElementwiseNary: { data_arity: 2 } };
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation.Forms[0].operation = { RealUnary: "closed_unit_interval" };
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "Modulus" };
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation.Forms[0].operation = { Sink: "Gather" };
+  assert.doesNotThrow(() => catalogEntry(entry));
+  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "modulus" };
+  assert.throws(() => catalogEntry(entry), /floating remainder kind/);
+  entry.placement.preparation.Forms[0].operation = "Unary";
+  entry.placement.preparation.Forms[0].data_arguments = [1, 0];
+  assert.throws(() => catalogEntry(entry), /strictly increasing/);
+  entry.placement.preparation = { Forms: [], guessed: true };
+  assert.throws(() => catalogEntry(entry), /operand preparation fields/);
+});
 
 test("extension schema distinguishes rejected forms and profile-dependent behavior", () => {
   const fixture = legacyFunctionFixture([]);

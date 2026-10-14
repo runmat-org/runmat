@@ -35,14 +35,17 @@ fn upload(value: &Value) -> GpuTensorHandle {
     }
 }
 
-fn mapped(name: &str, inputs: Vec<Value>) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn mapped(
+    name: &str,
+    inputs: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     let mut args = vec![Value::FunctionHandle(name.into())];
     args.extend(inputs);
     block_on(call_builtin_async_with_outputs("arrayfun", &args, 1)).map_err(Box::new)
 }
 
-fn host(value: Value) -> Value {
-    block_on(runmat_runtime::gather_if_needed_async(&value)).unwrap()
+fn host(value: &Value) -> Value {
+    block_on(runmat_runtime::gather_if_needed_async(value)).unwrap()
 }
 
 fn same_values(actual: &[f64], expected: &[f64], dtype: NumericDType, label: &str) {
@@ -62,7 +65,7 @@ fn same_values(actual: &[f64], expected: &[f64], dtype: NumericDType, label: &st
     }
 }
 
-fn same_result(actual: Value, expected: Value, label: &str) {
+fn same_result(actual: &Value, expected: &Value, label: &str) {
     match (host(actual), host(expected)) {
         (Value::Tensor(actual), Value::Tensor(expected)) => {
             assert_eq!(actual.shape(), expected.shape(), "{label}");
@@ -109,7 +112,7 @@ fn compare(name: &str, inputs: Vec<Value>) {
         handles.iter().cloned().map(Value::GpuTensor).collect(),
     );
     match (actual, expected) {
-        (Ok(actual), Ok(expected)) => same_result(actual, expected, name),
+        (Ok(actual), Ok(expected)) => same_result(actual.value(), expected.value(), name),
         (Err(actual), Err(expected)) => assert_eq!(
             actual.identifier(),
             expected.identifier(),
@@ -209,8 +212,10 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
         _: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
     ) -> RuntimeBuiltinFuture {
         Box::pin(async {
-            runmat_value::ValueSequence::single(Value::Num(99.0))
-                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+            let sequence = runmat_value::ValueSequence::single(Value::Num(99.0))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+            runmat_runtime::execution::RootedValueSequence::new(sequence)
+                .map_err(|error| error.into_runtime_error())
         })
     }
     impl RuntimeBuiltinService for Service {
@@ -248,8 +253,8 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
         ))
         .unwrap();
         same_result(
-            first,
-            Value::Tensor(Tensor::new(vec![0.0, 1.0f64.sin()], vec![1, 2]).unwrap()),
+            first.value(),
+            &Value::Tensor(Tensor::new(vec![0.0, 1.0f64.sin()], vec![1, 2]).unwrap()),
             "admitted sin",
         );
         assert_eq!(
@@ -262,8 +267,8 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
         ))
         .unwrap();
         same_result(
-            second,
-            Value::Tensor(Tensor::new(vec![99.0, 99.0], vec![1, 2]).unwrap()),
+            second.value(),
+            &Value::Tensor(Tensor::new(vec![99.0, 99.0], vec![1, 2]).unwrap()),
             "next invocation override",
         );
         assert_eq!(
@@ -308,8 +313,8 @@ fn empty_mapping_does_not_select_or_execute_the_callback() {
         ))
         .unwrap();
         same_result(
-            output,
-            Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()),
+            output.value(),
+            &Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()),
             "empty log",
         );
         source.allocation_lease().validate_live().unwrap();
@@ -333,8 +338,8 @@ fn rank_zero_owned_singleton_maps_to_the_same_uniform_shape_as_host() {
         .unwrap();
         let actual = mapped("sin", vec![Value::GpuTensor(scalar_view)]).unwrap();
         same_result(
-            actual,
-            expected,
+            actual.value(),
+            expected.value(),
             "rank-zero singleton is not an empty mapping",
         );
         source.allocation_lease().validate_live().unwrap();
@@ -370,7 +375,7 @@ fn asymmetric_mixed_class_batches_preserve_column_order_and_all_original_intents
                     ],
                 )
                 .unwrap();
-                let Value::GpuTensor(handle) = &output else {
+                let Value::GpuTensor(handle) = output.value() else {
                     panic!("native class-capable owner must preserve resident output for {name}")
                 };
                 assert_eq!(
@@ -392,8 +397,8 @@ fn asymmetric_mixed_class_batches_preserve_column_order_and_all_original_intents
                     }
                 }
                 same_result(
-                    output,
-                    Value::Tensor(Tensor::from_f32(expected, vec![2, 3]).unwrap()),
+                    output.value(),
+                    &Value::Tensor(Tensor::from_f32(expected, vec![2, 3]).unwrap()),
                     name,
                 );
                 left.allocation_lease().validate_live().unwrap();

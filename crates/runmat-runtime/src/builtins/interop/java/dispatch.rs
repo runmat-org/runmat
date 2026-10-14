@@ -9,6 +9,7 @@ use runmat_builtins::JAVA_ERROR_UNAVAILABLE;
 use runmat_builtins::{BuiltinErrorDescriptor, JAVA_ERROR_INVALID};
 use runmat_value::Value;
 
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult};
 
 #[derive(Clone, Copy)]
@@ -64,7 +65,7 @@ pub(super) async fn invoke_java(
     context: Option<crate::context::RuntimeContext>,
     operation: JavaOperation,
     arguments: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (context, operation, arguments);
@@ -99,19 +100,24 @@ pub(super) async fn invoke_java(
                 },
             ))
             .await?;
-        if output_count == 0 {
-            if !sequence.is_empty() {
-                return Err(invalid_call(format!(
-                    "Java {symbol} returned an unexpected result value"
-                )));
-            }
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        let mut values = sequence.resolve(
-            runmat_types::SequenceUse::RequireSingle,
-            crate::sequence::SequenceResolutionContext::default(),
-        )?;
-        Ok(values.remove(0))
+        sequence.try_map_owned(
+            |sequence| {
+                if output_count == 0 {
+                    if !sequence.is_empty() {
+                        return Err(invalid_call(format!(
+                            "Java {symbol} returned an unexpected result value"
+                        )));
+                    }
+                    return Ok(Value::OutputList(Vec::new()));
+                }
+                let mut values = sequence.resolve(
+                    runmat_types::SequenceUse::RequireSingle,
+                    crate::sequence::SequenceResolutionContext::default(),
+                )?;
+                Ok(values.remove(0))
+            },
+            |error| error.into_runtime_error(),
+        )
     }
 }
 

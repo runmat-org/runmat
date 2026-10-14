@@ -1,6 +1,7 @@
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 use super::CapturedStderr;
+use crate::command::ProcessGroupPlacement;
 use crate::{ProcessHostError, ProcessHostResult};
 
 pub struct ChildStdio {
@@ -22,6 +23,7 @@ pub struct ChildProcess {
     stderr: CapturedStderr,
     stdio: Option<ChildStdio>,
     _containment: Option<super::process_tree::ProcessContainment>,
+    process_group_placement: ProcessGroupPlacement,
 }
 
 impl ChildProcess {
@@ -30,6 +32,7 @@ impl ChildProcess {
         process_id: Option<u32>,
         stderr: CapturedStderr,
         containment: Option<super::process_tree::ProcessContainment>,
+        process_group_placement: ProcessGroupPlacement,
     ) -> Self {
         Self {
             child,
@@ -37,6 +40,7 @@ impl ChildProcess {
             stderr,
             stdio: None,
             _containment: containment,
+            process_group_placement,
         }
     }
 
@@ -81,6 +85,11 @@ impl ChildProcess {
         self.process_id
     }
 
+    /// A joined Unix member is not an independent process-tree certificate.
+    pub fn owns_process_tree(&self) -> bool {
+        self.process_group_placement == ProcessGroupPlacement::OwnGroup
+    }
+
     pub fn captured_stderr(&self) -> CapturedStderr {
         self.stderr.clone()
     }
@@ -99,8 +108,22 @@ impl ChildProcess {
             &mut self.child,
             self.process_id,
             self._containment.as_ref(),
+            self.process_group_placement,
         )
         .await?;
+        Ok(())
+    }
+
+    /// Bounded exceptional-Drop retirement for an owned child whose async
+    /// bootstrap future was cancelled. Joined children prove only member
+    /// retirement; their ancestor remains responsible for its process group.
+    pub(super) fn terminate_tree_blocking(&mut self) -> ProcessHostResult<()> {
+        super::process_tree::terminate_blocking(
+            &mut self.child,
+            self.process_id,
+            self._containment.as_ref(),
+            self.process_group_placement,
+        )?;
         Ok(())
     }
 }

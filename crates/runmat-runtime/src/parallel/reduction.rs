@@ -1,10 +1,14 @@
 use runmat_types::OperatorKind;
 use runmat_value::{LogicalArray, Value};
 
+use crate::execution::{RootedValue, RootedValues};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
-pub async fn identity(operator: OperatorKind, prototype: &Value) -> Result<Value, RuntimeError> {
+pub async fn identity(
+    operator: OperatorKind,
+    prototype: &Value,
+) -> Result<RootedValue, RuntimeError> {
     identity_in_context(None, operator, prototype).await
 }
 
@@ -12,15 +16,17 @@ pub async fn identity_in_context(
     context: Option<&crate::context::RuntimeContext>,
     operator: OperatorKind,
     prototype: &Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match operator {
         OperatorKind::Add | OperatorKind::Subtract => {
             like_constructor(context, "zeros", prototype).await
         }
         OperatorKind::ElementwiseMultiply => like_constructor(context, "ones", prototype).await,
         OperatorKind::MatrixMultiply => matrix_identity(context, prototype).await,
-        OperatorKind::ElementwiseAnd => logical_identity(prototype, true),
-        OperatorKind::ElementwiseOr => logical_identity(prototype, false),
+        OperatorKind::ElementwiseAnd => RootedValue::new(logical_identity(prototype, true)?)
+            .map_err(|error| error.into_runtime_error()),
+        OperatorKind::ElementwiseOr => RootedValue::new(logical_identity(prototype, false)?)
+            .map_err(|error| error.into_runtime_error()),
         _ => Err(unsupported(operator)),
     }
 }
@@ -29,16 +35,17 @@ pub async fn combine(
     operator: OperatorKind,
     accumulator: Value,
     contribution: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
+    let accumulator = RootedValue::new(accumulator).map_err(|error| error.into_runtime_error())?;
     combine_in_context(None, operator, accumulator, contribution).await
 }
 
 pub async fn combine_in_context(
     context: Option<&crate::context::RuntimeContext>,
     operator: OperatorKind,
-    accumulator: Value,
+    accumulator: RootedValue,
     contribution: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let name = match operator {
         OperatorKind::Add | OperatorKind::Subtract => "plus",
         OperatorKind::ElementwiseMultiply => "times",
@@ -47,14 +54,17 @@ pub async fn combine_in_context(
         OperatorKind::ElementwiseOr => "or",
         _ => return Err(unsupported(operator)),
     };
-    dispatch(context, name, &[accumulator, contribution]).await
+    let arguments = accumulator
+        .with_owned(|accumulator| RootedValues::new(vec![accumulator, contribution]))
+        .map_err(|error| error.into_runtime_error())?;
+    dispatch(context, name, arguments.values()).await
 }
 
 async fn dispatch(
     context: Option<&crate::context::RuntimeContext>,
     name: &str,
     arguments: &[Value],
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match context {
         Some(context) => crate::call_builtin_async_in_context(context, name, arguments).await,
         None => crate::call_builtin_async(name, arguments).await,
@@ -65,7 +75,7 @@ async fn like_constructor(
     context: Option<&crate::context::RuntimeContext>,
     name: &str,
     prototype: &Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     dispatch(
         context,
         name,
@@ -77,7 +87,7 @@ async fn like_constructor(
 async fn matrix_identity(
     context: Option<&crate::context::RuntimeContext>,
     prototype: &Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let shape =
         numeric_shape(prototype).ok_or_else(|| unsupported(OperatorKind::MatrixMultiply))?;
     let rows = shape.first().copied().unwrap_or(1);
@@ -185,7 +195,7 @@ mod tests {
         let identity =
             block_on(identity(OperatorKind::ElementwiseAnd, &prototype)).expect("logical identity");
         assert!(matches!(
-            identity,
+            identity.value(),
             Value::LogicalArray(value)
                 if value.shape == vec![2, 2] && value.data.as_slice() == [1, 1, 1, 1]
         ));

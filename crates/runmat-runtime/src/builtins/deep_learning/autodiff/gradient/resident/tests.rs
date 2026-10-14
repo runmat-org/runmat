@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
 };
 use runmat_value::CellArray;
 
-fn dense_network() -> Value {
+fn dense_network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -25,7 +25,7 @@ fn dense_network() -> Value {
     .unwrap()
 }
 
-fn scalar_network() -> Value {
+fn scalar_network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -81,7 +81,7 @@ fn public_single_resident_gradient_retains_native_precision() {
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let input = super::super::super::tape::annotate_tree(input).unwrap();
-        let network = super::super::super::tape::annotate_tree(network).unwrap();
+        let network = super::super::super::tape::annotate_tree(network.value().clone()).unwrap();
         let loss = block_on(model::forward_builtin(network, input.clone(), vec![])).unwrap();
         provider.reset_telemetry();
         let gradient = block_on(super::super::dlgradient_direct(loss, vec![input])).unwrap();
@@ -126,7 +126,9 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let input = super::super::super::tape::annotate_tree(input).unwrap();
-        let network = super::super::super::tape::annotate_tree(scalar_network()).unwrap();
+        let network_owner = scalar_network();
+        let network =
+            super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let first = block_on(model::forward_builtin(
             network.clone(),
             input.clone(),
@@ -211,7 +213,9 @@ fn truly_unconnected_resident_target_has_zero_gradient() {
         };
         let connected = wrapped(2.0);
         let disconnected = wrapped(7.0);
-        let network = super::super::super::tape::annotate_tree(scalar_network()).unwrap();
+        let network_owner = scalar_network();
+        let network =
+            super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let loss = block_on(model::forward_builtin(network, connected, vec![])).unwrap();
         provider.reset_telemetry();
         let result = block_on(super::super::dlgradient_direct(loss, vec![disconnected])).unwrap();
@@ -269,7 +273,9 @@ fn connected_unsupported_resident_parent_rejects_before_reverse_provider_effects
             lhs_shape: vec![1, 1],
             rhs_shape: vec![1, 1],
         };
-        let network = super::super::super::tape::annotate_tree(scalar_network()).unwrap();
+        let network_owner = scalar_network();
+        let network =
+            super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let loss = block_on(model::forward_builtin(network, connected, vec![])).unwrap();
         provider.reset_telemetry();
         let before = provider.telemetry_snapshot();
@@ -300,7 +306,9 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
         );
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
-        let network = super::super::super::tape::annotate_tree(dense_network()).unwrap();
+        let network_owner = dense_network();
+        let network =
+            super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let input = super::super::super::tape::annotate_tree(input).unwrap();
         provider.reset_telemetry();
         let loss = block_on(model::forward_builtin(
@@ -398,7 +406,9 @@ fn canonical_dlgradient_uses_explicit_output_count_and_cancellation() {
         );
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
-        let network = super::super::super::tape::annotate_tree(dense_network()).unwrap();
+        let network_owner = dense_network();
+        let network =
+            super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let input = super::super::super::tape::annotate_tree(input).unwrap();
         let loss = block_on(model::forward_builtin(network, input.clone(), vec![])).unwrap();
         let args = [loss, input];

@@ -4,9 +4,10 @@ use super::{
     ParsedArguments,
 };
 use crate::context::preparation::{
-    execute_current_request, AdmittedBuiltinPreparation, AdmittedSumReduction,
-    BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, AdmittedSumReduction, BuiltinPreparationAdmission,
 };
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical, handle_precision};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinOperandPreparation, SumOutputClass};
@@ -31,12 +32,13 @@ pub(super) fn eligible(value: &Value, output: SumOutputClass) -> bool {
 }
 
 pub(super) async fn execute(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     parsed: ParsedArguments,
     input_meta: InputMeta,
     input_count: usize,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let controls = controls(&value, &parsed)?;
     let entry = runmat_builtins::sum_invocation_entry(parsed.invocation);
     let BuiltinOperandPreparation::Forms([form]) = entry.placement.preparation else {
@@ -60,15 +62,16 @@ pub(super) async fn execute(
     )?
     .with_sum_reduction(controls)?
     .with_prepared_call_observation(observation);
-    execute_current_request(request, |mut operands| async move {
+    execute_request(runtime, request, |mut operands| async move {
         let value = operands.remove(0);
         if parsed.output == SumOutputClass::Native {
             if let Some(result) = sum_native_integer(&value, &parsed)? {
-                return Ok(result);
+                return RootedValue::new(result).map_err(|cause| cause.into_runtime_error());
             }
         }
         let raw = execute_raw(value, &parsed).await?;
-        apply_output_template(raw, &parsed.output, &input_meta).await
+        let published = apply_output_template(raw, &parsed.output, &input_meta).await?;
+        RootedValue::new(published).map_err(|cause| cause.into_runtime_error())
     })
     .await
 }

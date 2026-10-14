@@ -32,13 +32,13 @@ struct SuspendedCallback {
     runtime: RuntimeContext,
     origin: runmat_runtime::context::RuntimeContextLocalId,
     requested_outputs: Option<usize>,
-    input: Option<Value>,
+    input: Option<runmat_runtime::execution::RootedValue>,
     outcome: Outcome,
     first_poll: bool,
 }
 
 impl Future for SuspendedCallback {
-    type Output = Result<ValueSequence, RuntimeError>;
+    type Output = Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>;
 
     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         assert_eq!(self.runtime.local_identity(), self.origin);
@@ -51,12 +51,18 @@ impl Future for SuspendedCallback {
         match self.outcome {
             Outcome::Hold => Poll::Pending,
             Outcome::Error => Poll::Ready(Err(RuntimeError::new("selected callback error"))),
-            Outcome::Identity => Poll::Ready(
-                ValueSequence::single(self.input.take().expect("callback input"))
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
-            ),
+            Outcome::Identity => {
+                let input = self.input.take().expect("callback input");
+                Poll::Ready(input.with_owned(|input| {
+                    let sequence = ValueSequence::single(input)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+                    runmat_runtime::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
+                }))
+            }
             Outcome::Initializer => {
-                let Value::Tensor(shape) = self.input.take().expect("shape argument") else {
+                let input = self.input.take().expect("shape argument");
+                let Value::Tensor(shape) = input.value() else {
                     panic!("initializer receives a shape tensor");
                 };
                 let dimensions: Vec<usize> = shape
@@ -66,12 +72,15 @@ impl Future for SuspendedCallback {
                     .map(|size| size as usize)
                     .collect();
                 let count = dimensions.iter().product();
-                Poll::Ready(
-                    ValueSequence::single(Value::Tensor(
-                        Tensor::new(vec![0.25; count], dimensions).expect("fixture shape"),
-                    ))
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
-                )
+                let sequence = ValueSequence::single(Value::Tensor(
+                    Tensor::new(vec![0.25; count], dimensions).expect("fixture shape"),
+                ))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                .and_then(|sequence| {
+                    runmat_runtime::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
+                });
+                Poll::Ready(sequence)
             }
         }
     }
@@ -87,11 +96,21 @@ fn suspended_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
             .borrow_mut()
             .push((runtime.local_identity(), requested_outputs))
     });
+    let input = invocation
+        .args
+        .first()
+        .cloned()
+        .map(runmat_runtime::execution::RootedValue::new)
+        .transpose();
+    let input = match input {
+        Ok(input) => input,
+        Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+    };
     Box::pin(SuspendedCallback {
         origin: runtime.local_identity(),
         runtime,
         requested_outputs,
-        input: invocation.args.first().cloned(),
+        input,
         outcome: OUTCOME.with(Cell::get),
         first_poll: true,
     })
@@ -134,7 +153,9 @@ fn invoke(name: &str, runtime: RuntimeContext, args: &[Value]) -> RuntimeBuiltin
     (binding.implementation)(RuntimeBuiltinInvocation::new(args, Some(runtime), Some(1)))
 }
 
-fn poll_once(future: &mut RuntimeBuiltinFuture) -> Poll<Result<ValueSequence, RuntimeError>> {
+fn poll_once(
+    future: &mut RuntimeBuiltinFuture,
+) -> Poll<Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>> {
     let waker = noop_waker();
     let mut context = Context::from_waker(&waker);
     future.as_mut().poll(&mut context)
@@ -267,22 +288,24 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             panic!("callback must publish the resident alias");
         };
         assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
-        let values: [Value; 1] = sequence.into_values().try_into().unwrap();
-        let [Value::GpuTensor(output)] = values else {
-            panic!("callback must publish one resident alias");
-        };
-        assert_eq!(calls(), vec![(id, Some(1))]);
-        // Publication may create a provenance view. The physical lease, not
-        // the original view's weak reference, owns the shared allocation.
-        assert_eq!(output.allocation_identity(), identity);
-        output.allocation_lease().validate_live().unwrap();
-        assert!(output.allocation_lease().shares_allocation_with(
-            &weak_allocation
-                .acquire()
-                .expect("published output retains the original allocation lease")
-        ));
-        assert_eq!(retirement.retirements(), 0);
-        drop(output);
+        sequence.with_owned(|sequence| {
+            let values: [Value; 1] = sequence.into_values().try_into().unwrap();
+            let [Value::GpuTensor(output)] = values else {
+                panic!("callback must publish one resident alias");
+            };
+            assert_eq!(calls(), vec![(id, Some(1))]);
+            // Publication may create a provenance view. The physical lease, not
+            // the original view's weak reference, owns the shared allocation.
+            assert_eq!(output.allocation_identity(), identity);
+            output.allocation_lease().validate_live().unwrap();
+            assert!(output.allocation_lease().shares_allocation_with(
+                &weak_allocation
+                    .acquire()
+                    .expect("published output retains the original allocation lease")
+            ));
+            assert_eq!(retirement.retirements(), 0);
+            drop(output);
+        });
         drop(runtime);
         drop(service);
         drop(future);
@@ -299,7 +322,8 @@ fn pending_initializer_resumes_once_and_network_publishes_only_after_success() {
     let (runtime, service) = scoped_runtime();
     let weak = Rc::downgrade(&service);
     let id = runtime.local_identity();
-    let args = [training_layers(false)];
+    let layers = training_layers(false);
+    let args = [layers.value().clone()];
     let mut future = invoke("dlnetwork", runtime.clone(), &args);
     assert!(poll_once(&mut future).is_pending());
     assert_eq!(calls(), vec![(id, Some(1))]);
@@ -321,7 +345,8 @@ fn dropping_pending_initializer_does_not_publish_partial_network() {
     let (runtime, service) = scoped_runtime();
     let weak = Rc::downgrade(&service);
     let id = runtime.local_identity();
-    let args = [training_layers(false)];
+    let layers = training_layers(false);
+    let args = [layers.value().clone()];
     let original = args[0].clone();
     let mut future = invoke("dlnetwork", runtime.clone(), &args);
     assert!(poll_once(&mut future).is_pending());
@@ -341,7 +366,8 @@ fn failed_pending_initializer_preserves_cause_and_caller_layers() {
     let (runtime, service) = scoped_runtime();
     let weak = Rc::downgrade(&service);
     let id = runtime.local_identity();
-    let args = [training_layers(false)];
+    let layers = training_layers(false);
+    let args = [layers.value().clone()];
     let original = args[0].clone();
     let mut future = invoke("dlnetwork", runtime.clone(), &args);
     assert!(poll_once(&mut future).is_pending());
@@ -370,12 +396,28 @@ fn pending_dlupdate_network_traverses_canonical_learnables_without_replay() {
         &[Value::Num(1.0)],
     ))
     .expect("dense layer");
-    let source = Value::Cell(CellArray::new(vec![layers, dense], 2, 1).unwrap());
-    let network = block_on(call_builtin_async("dlnetwork", &[source])).expect("network");
+    let mut layer_batch = runmat_runtime::execution::RootedValuesBuilder::with_capacity(2);
+    layer_batch.push_owned(layers);
+    layer_batch.push_owned(dense);
+    let layer_batch = layer_batch.finish().expect("root layer batch");
+    let source = layer_batch.with_owned_values(|layers| {
+        runmat_runtime::execution::RootedValue::new(Value::Cell(
+            CellArray::new(layers, 2, 1).unwrap(),
+        ))
+        .expect("root source layers")
+    });
+    let network = block_on(
+        source
+            .with_owned_async(|source| async { call_builtin_async("dlnetwork", &[source]).await }),
+    )
+    .expect("network");
     let (runtime, service) = scoped_runtime();
     let weak = Rc::downgrade(&service);
     let id = runtime.local_identity();
-    let args = [Value::FunctionHandle("plus".into()), network];
+    let args = [
+        Value::FunctionHandle("plus".into()),
+        network.value().clone(),
+    ];
     let mut future = invoke("dlupdate", runtime.clone(), &args);
     assert!(poll_once(&mut future).is_pending());
     let result = loop {

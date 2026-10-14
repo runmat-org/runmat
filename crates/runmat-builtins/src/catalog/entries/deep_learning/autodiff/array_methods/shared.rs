@@ -3,6 +3,7 @@ use crate::*;
 macro_rules! array_method_entry {
     ($constant:ident, $name:literal, $descriptor:ident, $documentation:expr, $inference:path) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "deep_learning",

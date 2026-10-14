@@ -13,6 +13,7 @@ pub use contract::{
 };
 
 pub const ADDPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "addpath" },
     category: "io/repl_fs",

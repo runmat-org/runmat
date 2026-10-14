@@ -13,14 +13,28 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     assembly
         .verify()
         .map_err(|error| format!("standalone Native IR failed verification: {error}"))?;
+    let interop = &assembly.requirements.interop;
+    let paired_ir_is_pure = interop.foreign_types.is_empty()
+        && interop.adapters.is_empty()
+        && interop.adapter_contracts.is_empty();
     let program =
-        runmat_native_codegen::aot::AotProgramManifest::from_canonical_bytes(&input.program)
-            .map_err(|error| format!("standalone program manifest is invalid: {error}"))?;
+        runmat_native_codegen::aot::AotProgramManifest::from_canonical_bytes_allow_pure_v6(
+            &input.program,
+            paired_ir_is_pure,
+        )
+        .map_err(|error| format!("standalone program manifest is invalid: {error}"))?;
     if program.executable != assembly.executable_identity
         || program.native_ir_digest != runmat_execution::Digest::sha256(&input.native_ir)
         || assembly.selected_entrypoint != program.entrypoint
     {
         return Err("standalone program manifest does not match its Native IR".into());
+    }
+    if program.foreign_policy.is_none()
+        && (!interop.foreign_types.is_empty()
+            || !interop.adapters.is_empty()
+            || !interop.adapter_contracts.is_empty())
+    {
+        return Err("standalone foreign program has no captured policy".into());
     }
     let mut native_sources = assembly
         .functions
@@ -68,6 +82,23 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
     let requested_outputs = function.abi.fixed_outputs.len();
+    let native_id = runmat_types::ForeignAdapterId::new(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID)
+        .map_err(|error| error.to_string())?;
+    let mex_id = runmat_types::ForeignAdapterId::new(runmat_mex::MEX_ADAPTER_ID)
+        .map_err(|error| error.to_string())?;
+    let java_id = runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID)
+        .map_err(|error| error.to_string())?;
+    let python_id = runmat_types::ForeignAdapterId::new(runmat_python::PYTHON_ADAPTER_ID)
+        .map_err(|error| error.to_string())?;
+    let mut policy = crate::foreign_policy::AdmittedForeignPolicy::admit(
+        program.foreign_policy.as_ref(),
+        interop,
+        &input,
+        &native_id,
+        &mex_id,
+        &java_id,
+        &python_id,
+    )?;
     let mut runtime = runmat_runtime::source_context::bind_portable_source_map_v2(
         standalone_runtime(&assembly.program),
         &program.source_map,
@@ -92,39 +123,35 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     ));
     let native_ffi = runmat_runtime::foreign::NativeFfiAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
-    native_ffi
-        .set_isolation_policy(runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(
-            None,
-        ))
+    let java = runmat_runtime::foreign::JavaAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
+    let python = runmat_runtime::foreign::PythonAdapter::new(foreign.handles().clone())
+        .map_err(|error| error.to_string())?;
+    let mex = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
     foreign
         .register_adapter(native_ffi.clone())
-        .map_err(|error| error.to_string())?;
-    let java = runmat_runtime::foreign::JavaAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
     foreign
         .register_adapter(java.clone())
         .map_err(|error| error.to_string())?;
-    let python = runmat_runtime::foreign::PythonAdapter::new(foreign.handles().clone())
-        .map_err(|error| error.to_string())?;
     foreign
         .register_adapter(python.clone())
         .map_err(|error| error.to_string())?;
-    let mex = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
     foreign
         .register_adapter(mex.clone())
         .map_err(|error| error.to_string())?;
+    policy.apply(&native_ffi, &mex, &java, &python)?;
     let _native_interfaces =
-        crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
-    let _mex_artifacts = crate::mex_artifacts::install(&input.mex_artifacts, &mex)?;
-    let _java_artifacts = crate::java_artifacts::install(&input.java_artifacts, &java)?;
-    crate::python_artifacts::install(&input.python_artifacts, &python)?;
+        crate::native_interfaces::install_admitted(&policy.native_bundle, &native_ffi)?;
+    let _mex_artifacts = crate::mex_artifacts::install_admitted(&policy.mex_bundle, &mex)?;
+    let _java_artifacts = crate::java_artifacts::install_admitted(&policy.java_bundle, &java)?;
+    crate::python_artifacts::install_admitted(&policy.python_bundle, &python)?;
     foreign
         .admit(&assembly.requirements.interop)
         .map_err(|error| format!("standalone interop admission failed: {error}"))?;
     let ports = runtime.service_ports().clone().with_foreign(foreign);
     runtime = runtime.with_service_ports(ports);
-    let mut mex_guard = crate::mex::install(&runtime, mex);
+    let mut mex_guard = crate::mex::install(&runtime, mex, local_tasks.clone())?;
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
         // SAFETY: the generated resolver has the exact declared C ABI. It
@@ -199,91 +226,70 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                 )
                 .await
             };
-        // Execution results remain observable through foreign teardown and
-        // terminal rendering, so publish their roots before either can run.
-        let pending_result_roots = execution
-            .as_ref()
-            .ok()
-            .map(|value| {
-                runmat_runtime::execution::RootedValueLease::for_values(
-                    value
-                        .outputs
-                        .iter()
-                        .chain(value.expression.iter())
-                        .chain(value.captures.iter().map(|capture| &capture.value))
-                        .chain(
-                            value
-                                .workspace
-                                .iter()
-                                .flat_map(|workspace| workspace.values.values()),
-                        ),
-                )
-            })
-            .transpose()
-            .map_err(|error| format!("standalone result rooting failed: {error}"));
+        // The native producer retains result roots through cleanup callbacks
+        // and terminal rendering; no second result lease is needed here.
         // Cleanup callbacks may still call MEX or native foreign services.
         // Drain them before retiring those adapters, including on execution
         // failure. Teardown itself still runs after any cleanup error.
-        let cleanup_lifecycle = match &pending_result_roots {
-            Ok(_) => match lifecycle_host.service_safepoint(&runtime) {
-                Ok(()) => lifecycle_host
-                    .drain_gracefully(&runtime)
-                    .await
-                    .map_err(|error| format!("standalone cleanup callback failed: {error}")),
-                Err(error) => Err(format!("standalone cleanup safepoint failed: {error}")),
-            },
-            Err(_) => Ok(()),
+        let cleanup_lifecycle = match lifecycle_host.service_safepoint(&runtime) {
+            Ok(()) => lifecycle_host
+                .drain_gracefully(&runtime)
+                .await
+                .map_err(|error| format!("standalone cleanup callback failed: {error}")),
+            Err(error) => Err(format!("standalone cleanup safepoint failed: {error}")),
         };
-        let mut execution = execution;
-        if cleanup_lifecycle.is_ok() && pending_result_roots.is_ok() {
-            if let Ok(value) = execution.as_mut() {
-                if let Some(expression) = value.expression.take() {
-                    crate::output::value(&expression);
-                } else {
-                    for output in value.outputs.drain(..) {
-                        crate::output::value(&output);
+        let execution_failure = match execution {
+            Ok(value) => {
+                value.with_owned(|value| {
+                    if cleanup_lifecycle.is_ok() {
+                        if let Some(expression) = value.expression {
+                            crate::output::value(&expression);
+                        } else {
+                            for output in value.outputs {
+                                crate::output::value(&output);
+                            }
+                        }
                     }
-                }
+                });
+                None
             }
-        }
-        let execution_failure = execution
-            .err()
-            .map(|error| execution_diagnostic(error, &runtime));
-        let result_root_failure = pending_result_roots.err();
+            Err(error) => Some(execution_diagnostic(error, &runtime)),
+        };
         // Retire caller-visible output ownership and admit any final callbacks
         // before foreign adapters are closed.
         let final_cleanup = lifecycle_host
             .drain_gracefully(&runtime)
             .await
             .map_err(|error| format!("standalone final cleanup failed: {error}"));
-        let native_lifecycle = native_ffi.shutdown().await;
-        let mex_lifecycle = mex_guard.shutdown_gracefully().await;
-        if execution_failure.is_some() {
-            if let Err(error) = &cleanup_lifecycle {
-                crate::output::error(&format!("standalone cleanup callback also failed: {error}"));
-            }
-            if let Err(error) = &native_lifecycle {
-                crate::output::error(&format!(
-                    "standalone native-library shutdown also failed: {error}"
-                ));
-            }
-            if let Err(error) = &mex_lifecycle {
-                crate::output::error(&format!("standalone MEX shutdown also failed: {error}"));
-            }
+        let foreign_lifecycle = crate::foreign_retirement::retire(
+            &mut mex_guard,
+            native_ffi.as_ref(),
+            python.as_ref(),
+            java.as_ref(),
+        )
+        .await;
+        if let Err(error) = &cleanup_lifecycle {
+            crate::output::error(&format!("standalone cleanup callback failed: {error}"));
+        }
+        if let Err(error) = &final_cleanup {
+            crate::output::error(&format!("standalone final cleanup failed: {error}"));
+        }
+        if let Some(error) = foreign_lifecycle.error() {
+            crate::output::error(&format!("standalone foreign shutdown failed: {error}"));
         }
         if let Some(error) = execution_failure {
             return Err(error);
         }
-        if let Some(error) = result_root_failure {
-            return Err(error);
-        }
-        native_lifecycle
-            .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
-        mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
         cleanup_lifecycle?;
         final_cleanup?;
+        foreign_lifecycle
+            .into_result()
+            .map_err(|error| format!("standalone foreign shutdown failed: {error}"))?;
         Ok(())
     })));
+    // A rejected graceful close is Abandoned, not a reason to close the
+    // callback driver while worker requests still have origin authority.
+    mex_guard.force_abandon_if_needed();
     lifecycle_host.force_close();
     result.map_err(|error| format!("standalone local task driver failed: {error}"))?
 }

@@ -8,6 +8,7 @@ pub use contract::NEIGHBORS_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&NEIGHBORS_CATALOG_ENTRY];
 
 pub const NEIGHBORS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "neighbors" },
     category: "graph",

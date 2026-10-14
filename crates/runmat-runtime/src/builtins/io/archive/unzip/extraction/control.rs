@@ -41,6 +41,8 @@ pub(super) struct ExtractionControl {
     abandoned: Arc<AtomicBool>,
     #[cfg(target_arch = "wasm32")]
     budget: Option<crate::execution::CpuCooperationBudget>,
+    #[cfg(target_arch = "wasm32")]
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
 }
 
 impl ExtractionControl {
@@ -61,10 +63,12 @@ impl ExtractionControl {
     pub(super) fn browser(
         runtime: Option<&crate::context::RuntimeContext>,
         resource_lease: ArchiveResourceLease,
+        command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     ) -> Self {
         Self {
             cancellation: runtime.map(crate::context::RuntimeContext::cancellation),
             budget: runtime.map(crate::context::RuntimeContext::cpu_cooperation),
+            command_origin,
             resource_lease,
         }
     }
@@ -100,6 +104,13 @@ impl ExtractionControl {
 
     pub(super) fn resource_lease(&self) -> &ArchiveResourceLease {
         &self.resource_lease
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn command_origin(
+        &self,
+    ) -> Option<runmat_execution::profiling::CommandProfilingReceipt> {
+        self.command_origin.clone()
     }
 }
 

@@ -24,6 +24,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan";
@@ -87,9 +89,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atan",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::atan"
 )]
-async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn atan_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -114,6 +123,7 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
     let signature = usize::from(!rest.is_empty());
     super::inverse_helpers::preparation::unary_form(
+        runtime.as_ref(),
         runmat_builtins::ATAN_CATALOG_ENTRY.identity,
         value,
         signature,
@@ -126,7 +136,10 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                 atan_admitted,
                 |result, protected| {
                     let template = &template;
-                    async move { apply_output_template(result, template, &protected).await }
+                    async move {
+                        let output = apply_output_template(result, template, &protected).await?;
+                        RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+                    }
                 },
             )
             .await
@@ -135,7 +148,10 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     .await
 }
 
-async fn atan_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinResult<Value> {
+async fn atan_admitted(
+    value: Value,
+    protected: Vec<GpuTensorHandle>,
+) -> BuiltinResult<RootedValue> {
     let base = match value {
         Value::GpuTensor(handle) => atan_gpu(handle, &protected).await?,
         Value::Complex(re, im) => {
@@ -152,7 +168,7 @@ async fn atan_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> Builtin
         }
         other => atan_real(other)?,
     };
-    Ok(base)
+    RootedValue::new(base).map_err(|cause| cause.into_runtime_error())
 }
 
 async fn atan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
@@ -267,42 +283,53 @@ pub(crate) mod tests {
 
     fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::atan_builtin(value, rest))
+        block_on(super::atan_builtin(None, value, rest)).map(|owned| owned.value().clone())
     }
 
     #[test]
     fn atan_extensions_like_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer = block_on(super::atan_builtin(
+            None,
             Value::Int(runmat_value::IntValue::I8(1)),
             Vec::new(),
         ))
+        .map(|owned| owned.value().clone())
         .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             ATAN_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::atan_builtin(Value::Bool(true), Vec::new()))
+        let logical = block_on(super::atan_builtin(None, Value::Bool(true), Vec::new()))
+            .map(|owned| owned.value().clone())
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ATAN_LOGICAL_INPUT_EXTENSION.error_identifier
         );
         let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::atan_builtin(Value::CharArray(chars), Vec::new()))
-            .expect_err("character input must be gated");
+        let character = block_on(super::atan_builtin(
+            None,
+            Value::CharArray(chars),
+            Vec::new(),
+        ))
+        .map(|owned| owned.value().clone())
+        .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             ATAN_CHARACTER_INPUT_EXTENSION.error_identifier
         );
         let like = block_on(super::atan_builtin(
+            None,
             Value::Num(1.0),
             vec![Value::from("like"), Value::Num(0.0)],
         ))
+        .map(|owned| owned.value().clone())
         .expect_err("like form must be gated");
         assert_eq!(like.identifier(), ATAN_LIKE_EXTENSION.error_identifier);
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity = block_on(super::atan_builtin(Value::Num(0.0), Vec::new()))
+        let arity = block_on(super::atan_builtin(None, Value::Num(0.0), Vec::new()))
+            .map(|owned| owned.value().clone())
             .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ATAN_ERROR_TOO_MANY_OUTPUTS.identifier);
     }

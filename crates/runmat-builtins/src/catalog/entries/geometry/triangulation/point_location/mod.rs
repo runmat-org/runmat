@@ -20,6 +20,7 @@ const fn entry(
     descriptor: &'static BuiltinDescriptor,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name },
         category: "geometry/triangulation",

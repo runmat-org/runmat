@@ -505,7 +505,7 @@ fn plotting_command_gap_repros_execute() {
         "figure; plot([1 2], [3 4]); axis off; axis on; axis manual; axis ij; axis xy; drawnow;",
     )
     .unwrap();
-    if let Some(error) = result.error {
+    if let Some(error) = result.error.as_ref() {
         assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
     }
 }

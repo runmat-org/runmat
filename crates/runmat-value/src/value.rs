@@ -1,3 +1,4 @@
+use crate::callable::CallableInstanceKind;
 use crate::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,19 +43,13 @@ pub enum Value {
     /// Multiple outputs captured as a list (internal destructuring helper)
     OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
-    FunctionHandle(String),
+    FunctionHandle(NamedFunctionHandle),
     // Function handle whose resolution must stay at the external boundary.
-    ExternalFunctionHandle(String),
+    ExternalFunctionHandle(NamedFunctionHandle),
     // Function handle preserving typed method identity.
-    MethodFunctionHandle(String),
+    MethodFunctionHandle(NamedFunctionHandle),
     // Function handle with compiler/session semantic identity.
-    BoundFunctionHandle {
-        name: String,
-        function: usize,
-        authority: BoundFunctionAuthority,
-        source_role: runmat_types::FunctionSourceRole,
-        source_file: Option<String>,
-    },
+    BoundFunctionHandle(BoundFunctionHandle),
     Closure(Closure),
     ClassRef(runmat_types::ClassIdentity),
     MException(MException),
@@ -74,4 +69,60 @@ pub enum Value {
     Composite(Box<runmat_execution::CompositeHandle>),
     /// Opaque resource owned by a foreign runtime host and fenced by generation.
     Foreign(ForeignRef),
+}
+
+impl Value {
+    pub fn function_handle(name: String) -> Self {
+        Self::FunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn external_function_handle(name: String) -> Self {
+        Self::ExternalFunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn method_function_handle(name: String) -> Self {
+        Self::MethodFunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn bound_function_handle(
+        name: String,
+        function: usize,
+        authority: BoundFunctionAuthority,
+        source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<String>,
+    ) -> Self {
+        Self::BoundFunctionHandle(BoundFunctionHandle::new(
+            name,
+            function,
+            authority,
+            source_role,
+            source_file,
+        ))
+    }
+
+    pub fn callable_instance_key(&self) -> Option<CallableInstanceKey> {
+        match self {
+            Self::FunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Workspace,
+                handle.instance_id(),
+            )),
+            Self::ExternalFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::External,
+                handle.instance_id(),
+            )),
+            Self::MethodFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Method,
+                handle.instance_id(),
+            )),
+            Self::BoundFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Bound,
+                handle.instance_id(),
+            )),
+            Self::Closure(closure) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Closure,
+                closure.instance_id(),
+            )),
+            _ => None,
+        }
+    }
 }

@@ -54,7 +54,7 @@ fn selected_dispatcher_admits_each_form_requested_output_count() {
             1,
         ))
         .expect("legacy result");
-        assert_eq!(matches!(one, Value::Struct(_)), expected_struct);
+        assert_eq!(matches!(one.value(), Value::Struct(_)), expected_struct);
         let discarded = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
             &runtime,
             NARGOUTCHK_BUILTIN_NAME,

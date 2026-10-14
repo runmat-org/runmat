@@ -11,6 +11,7 @@ pub(super) use inference::{
 };
 
 pub const EXTRACT_BEFORE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "extractBefore",

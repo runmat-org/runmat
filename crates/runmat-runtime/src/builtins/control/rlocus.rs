@@ -871,7 +871,7 @@ mod tests {
     }
     use runmat_value::IntegerStorage;
 
-    fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
+    fn tf(num: Vec<f64>, den: Vec<f64>) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async(
             "tf",
             &[
@@ -882,7 +882,11 @@ mod tests {
         .expect("tf")
     }
 
-    fn discrete_tf(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
+    fn discrete_tf(
+        num: Vec<f64>,
+        den: Vec<f64>,
+        sample_time: f64,
+    ) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async(
             "tf",
             &[
@@ -894,12 +898,12 @@ mod tests {
         .expect("tf")
     }
 
-    fn ss(a: Value, b: Value, c: Value, d: Value) -> Value {
+    fn ss(a: Value, b: Value, c: Value, d: Value) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async("ss", &[a, b, c, d])).expect("ss")
     }
 
-    fn run_rlocus(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(rlocus_builtin(sys, rest))
+    fn run_rlocus(sys: crate::execution::RootedValue, rest: Vec<Value>) -> BuiltinResult<Value> {
+        sys.with_owned(|sys| block_on(rlocus_builtin(sys, rest)))
     }
 
     fn tensor(value: &Value) -> &Tensor {
@@ -1035,7 +1039,11 @@ mod tests {
 
     #[test]
     fn non_model_input_uses_rlocus_invalid_model_identifier() {
-        let err = run_rlocus(Value::Num(1.0), Vec::new()).expect_err("should fail");
+        let err = run_rlocus(
+            crate::execution::RootedValue::new(Value::Num(1.0)).expect("scalar fixture"),
+            Vec::new(),
+        )
+        .expect_err("should fail");
         assert!(err.message().contains("dynamic system model"));
         assert_eq!(err.identifier(), RLOCUS_ERROR_INVALID_MODEL.identifier);
     }

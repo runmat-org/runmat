@@ -32,6 +32,7 @@ pub(super) struct HostStateInput {
     pub program_capture: Option<Vec<u8>>,
     pub functions: Arc<Vec<NativeFunction>>,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
@@ -113,6 +114,8 @@ pub(super) struct HostState {
     // The invocation's execution lease keeps runtime activation alive outside
     // this owner while its fields are destroyed.
     pub arena: ValueArena,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    pub(super) _lexical_roots: Vec<runmat_gc::ExplicitRoot>,
 }
 
 impl HostState {

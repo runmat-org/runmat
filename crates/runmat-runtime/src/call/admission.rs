@@ -51,7 +51,7 @@ pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
             }
             None
         }
-        Value::BoundFunctionHandle { .. } | Value::Closure(_) => None,
+        Value::BoundFunctionHandle(_) | Value::Closure(_) => None,
         Value::Object(_) | Value::HandleObject(_) => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FEVAL_OBJECT_RECEIVER_EXTENSION,

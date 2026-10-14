@@ -64,15 +64,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "or",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::logical::bit::or"
 )]
-async fn or_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    super::truth::binary(lhs, rhs, LogicalBinaryOperator::Or).await
+async fn or_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    super::truth::binary(runtime.as_ref(), lhs, rhs, LogicalBinaryOperator::Or).await
 }
 
 #[cfg(all(test, feature = "wgpu"))]
 async fn or_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    super::truth::binary(lhs, rhs, LogicalBinaryOperator::Or).await
+    // Terminal numerical test route: logical outputs contain no GC child.
+    super::truth::binary(None, lhs, rhs, LogicalBinaryOperator::Or)
+        .await
+        .map(|owned| owned.with_owned(|value| value))
 }
 
 #[cfg(test)]

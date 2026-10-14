@@ -12,22 +12,19 @@ use std::sync::Mutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ON_CLEANUP_ERROR_GC,
+    ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_INVALID_CALLBACK, ON_CLEANUP_ERROR_INVALID_OBJECT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{HandleRef, ObjectInstance, Value};
 
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) const ON_CLEANUP_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("onCleanup");
 const CALLBACK_PROPERTY: &str = "__oncleanup_callback";
 const ACTIVE_PROPERTY: &str = "__oncleanup_active";
-const ON_CLEANUP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "onCleanup accepts only a function handle or closure and returns a handle object; numeric values are rejected as callbacks.",
-};
 const CANCEL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
@@ -37,49 +34,6 @@ const CANCEL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditD
 #[cfg(test)]
 pub(crate) static ON_CLEANUP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-const ON_CLEANUP_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "cleanupObj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle object that invokes the cleanup function when deleted or cleared.",
-}];
-const ON_CLEANUP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "cleanupFun",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero-input function handle to invoke during cleanup.",
-}];
-const ON_CLEANUP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "cleanupObj = onCleanup(cleanupFun)",
-    inputs: &ON_CLEANUP_INPUTS,
-    outputs: &ON_CLEANUP_OUTPUTS,
-}];
-const ON_CLEANUP_ERROR_INVALID_CALLBACK: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ONCLEANUP.INVALID_CALLBACK",
-    identifier: Some("RunMat:onCleanup:InvalidCallback"),
-    when: "The cleanup function is not a function handle or closure.",
-    message: "onCleanup: cleanupFun must be a function handle",
-};
-const ON_CLEANUP_ERROR_INVALID_OBJECT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ONCLEANUP.INVALID_OBJECT",
-    identifier: Some("RunMat:onCleanup:InvalidObject"),
-    when: "A cleanup operation targets a value that is not an onCleanup object.",
-    message: "onCleanup: invalid cleanup object",
-};
-const ON_CLEANUP_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ONCLEANUP.GC",
-    identifier: Some("RunMat:onCleanup:GcFailure"),
-    when: "The cleanup object target cannot be allocated, rooted, or mutated.",
-    message: "onCleanup: internal object storage failed",
-};
-const ON_CLEANUP_ERROR_HOST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ONCLEANUP.LIFECYCLE_HOST_UNAVAILABLE",
-    identifier: Some("RunMat:onCleanup:LifecycleHostUnavailable"),
-    when: "No explicit session lifecycle host owns cleanup callback dispatch.",
-    message: "onCleanup: lifecycle host is unavailable",
-};
 const CANCEL_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CANCEL.RUNTIME_CONTEXT",
     identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
@@ -92,12 +46,6 @@ const CANCEL_ERROR_EXECUTION_SERVICE: BuiltinErrorDescriptor = BuiltinErrorDescr
     when: "The execution service rejects cancellation of a task, future, or job.",
     message: "cancel: execution service failed",
 };
-const ON_CLEANUP_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ON_CLEANUP_ERROR_INVALID_CALLBACK,
-    ON_CLEANUP_ERROR_INVALID_OBJECT,
-    ON_CLEANUP_ERROR_GC,
-    ON_CLEANUP_ERROR_HOST,
-];
 const CANCEL_ERRORS: [BuiltinErrorDescriptor; 6] = [
     ON_CLEANUP_ERROR_INVALID_CALLBACK,
     ON_CLEANUP_ERROR_INVALID_OBJECT,
@@ -106,13 +54,6 @@ const CANCEL_ERRORS: [BuiltinErrorDescriptor; 6] = [
     CANCEL_ERROR_RUNTIME_CONTEXT,
     CANCEL_ERROR_EXECUTION_SERVICE,
 ];
-pub const ON_CLEANUP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ON_CLEANUP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ON_CLEANUP_ERRORS,
-};
-
 const DELETE_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "status",
     ty: BuiltinParamType::NumericScalar,
@@ -143,7 +84,7 @@ pub const ON_CLEANUP_DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DELETE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &ON_CLEANUP_ERRORS,
+    errors: &runmat_builtins::ON_CLEANUP_ERRORS,
 };
 
 const CANCEL_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -167,14 +108,10 @@ pub const ON_CLEANUP_CANCEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 #[runtime_builtin(
     name = "onCleanup",
-    category = "introspection",
-    summary = "Create an object that runs a function when deleted or cleared.",
-    keywords = "onCleanup,cleanup,delete,clear,resource,RAII",
-    descriptor(crate::builtins::introspection::on_cleanup::ON_CLEANUP_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::on_cleanup::ON_CLEANUP_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
-pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> {
+pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<RootedValue> {
     let callback = canonicalize_cleanup_callback(callback)?;
     let registry = crate::context::legacy::active()
         .and_then(|runtime| runtime.cleanup_registry())
@@ -195,6 +132,15 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> 
     let target_root = runmat_gc::gc_allocate_rooted(Value::Object(object))
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
     let target = target_root.handle();
+    // This producer owns the returned lease before any root retirement can
+    // synchronously wake the lifecycle host. The registry's target pin is not
+    // an outside owner and cannot by itself make Active ineligible to queue.
+    let output = RootedValue::new(Value::HandleObject(HandleRef {
+        class_name: ON_CLEANUP_CLASS.into(),
+        target,
+        valid: true,
+    }))
+    .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
     registry
         .register(target, callback)
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
@@ -203,11 +149,7 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> 
         .unroot()
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
 
-    Ok(Value::HandleObject(HandleRef {
-        class_name: ON_CLEANUP_CLASS.into(),
-        target,
-        valid: true,
-    }))
+    Ok(output)
 }
 
 #[runtime_builtin(
@@ -329,6 +271,7 @@ fn ensure_on_cleanup_class_registered() {
             access: MemberAccess::Public,
             function_name: "__runmat_oncleanup_delete".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     methods.insert(
@@ -341,6 +284,7 @@ fn ensure_on_cleanup_class_registered() {
             access: MemberAccess::Public,
             function_name: "cancel".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -358,7 +302,7 @@ fn canonicalize_cleanup_callback(callback: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Ok(crate::canonicalize_callback_handle_for_semantic_resolution(
             callback,
         )),
@@ -398,8 +342,11 @@ async fn run_on_cleanup_handle(handle: &HandleRef) -> BuiltinResult<()> {
     })?;
     if entry.phase() == lifecycle::registry::CleanupPhase::Active {
         deactivate_handle(handle)?;
-        if registry.queue_explicit(&entry) {
+        if registry.queue_explicit(&entry, runtime.command_profiling()) {
             lifecycle::dispatch::start_queued(&runtime, &registry, entry.clone())?;
+            // A service may synchronously poll or destroy the submitted task
+            // before returning its lease; report that exact terminal receipt.
+            return lifecycle::dispatch::wait_queued(&registry, &entry).await;
         }
     }
     if matches!(
@@ -496,6 +443,10 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     #[cfg(not(target_arch = "wasm32"))]
+    use runmat_execution::profiling::{
+        current_command_profiling, CommandProfilingRoot, ProviderObservationTerminal,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
     use runmat_value::CellArray;
     #[cfg(not(target_arch = "wasm32"))]
     use std::future::Future;
@@ -529,16 +480,345 @@ mod tests {
         block_on(supervisor.drive_until(future)).expect("local task driver")
     }
 
-    fn callback_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[derive(Clone, Copy)]
+    enum SynchronousSubmitRetirement {
+        Accept,
+        Reject,
+        PollReadyThenReject,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct SynchronousRetirementPort {
+        delegate: Rc<dyn crate::context::RuntimeLocalTaskService>,
+        behavior: SynchronousSubmitRetirement,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl crate::context::RuntimeLocalTaskService for SynchronousRetirementPort {
+        fn owner_token(&self) -> Option<crate::context::LocalTaskOwnerToken> {
+            self.delegate.owner_token()
+        }
+
+        fn spawn_local(
+            &self,
+            owner: crate::context::RuntimeContextLocalId,
+            future: crate::context::RuntimeLocalTaskFuture,
+        ) -> Result<crate::context::RuntimeLocalTaskLease, crate::RuntimeError> {
+            match self.behavior {
+                SynchronousSubmitRetirement::Accept => {
+                    drop(future);
+                    self.delegate.spawn_local(owner, Box::pin(async {}))
+                }
+                SynchronousSubmitRetirement::Reject => {
+                    drop(future);
+                    Err(
+                        crate::build_runtime_error("exact fixture rejected cleanup submission")
+                            .with_identifier("RunMat:onCleanup:ExactRejectedPort")
+                            .build(),
+                    )
+                }
+                SynchronousSubmitRetirement::PollReadyThenReject => {
+                    block_on(future);
+                    Err(
+                        crate::build_runtime_error("exact fixture rejected after polling callback")
+                            .with_identifier("RunMat:onCleanup:PolledThenRejected")
+                            .build(),
+                    )
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn synchronous_retirement_runtime(
+        behavior: SynchronousSubmitRetirement,
+    ) -> (
+        crate::context::RuntimeContext,
+        Rc<crate::context::RuntimeLocalTaskSupervisor>,
+        crate::context::RuntimeLifecycleHost,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let supervisor = Rc::new(crate::context::RuntimeLocalTaskSupervisor::new());
+        let delegate = supervisor.submission_port(runtime.local_identity());
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_local_tasks(Rc::new(SynchronousRetirementPort { delegate, behavior }));
+        let runtime = runtime.with_service_ports(ports);
+        let host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone())
+            .expect("exact lifecycle host");
+        (runtime, supervisor, host)
+    }
+
+    fn callback_invoker(
+        counter: Arc<Mutex<usize>>,
+    ) -> Arc<crate::user_functions::UnscopedFunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {
             assert!(args.is_empty(), "cleanup callbacks receive no arguments");
             assert_eq!(requested_outputs, 0);
             let counter = Arc::clone(&counter);
-            crate::sequence::single_value_future(async move {
+            Box::pin(async move {
                 *counter.lock().unwrap() += 1;
-                Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Tensor(
+                    runmat_value::Tensor::zeros(vec![0, 0]),
+                ))
             })
         })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn profiled_callback_invoker(
+        observed: Arc<Mutex<Vec<bool>>>,
+    ) -> Arc<crate::user_functions::UnscopedFunctionInvoker> {
+        Arc::new(move |_function, args, requested_outputs| {
+            assert!(args.is_empty());
+            assert_eq!(requested_outputs, 0);
+            let observed = Arc::clone(&observed);
+            Box::pin(async move {
+                let admitted = current_command_profiling()
+                    .and_then(|command| command.begin_provider_operation());
+                observed.lock().unwrap().push(admitted.is_some());
+                if let Some(admitted) = admitted {
+                    admitted.complete(ProviderObservationTerminal::Missing);
+                }
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
+            })
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cleanup_create_a_explicit_delete_b_uses_only_queue_admission_command() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            profiled_callback_invoker(Arc::clone(&observed)),
+        ));
+        let create = CommandProfilingRoot::new();
+        let created_context = runtime.clone().with_command_profiling(create.receipt());
+        let cleanup = {
+            let _selected = created_context.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("create under command A")
+        };
+        let delete = CommandProfilingRoot::new();
+        let delete_context = runtime.clone().with_command_profiling(delete.receipt());
+        {
+            let _selected = delete_context.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("delete under B");
+        }
+        assert_eq!(*observed.lock().unwrap(), [true]);
+        let created = create.seal();
+        let deleted = delete.seal();
+        assert_eq!(created.observations.expect("A valid").missing, 0);
+        assert_eq!(created.deferred_work.expect("A valid deferred").admitted, 0);
+        assert_eq!(deleted.observations.expect("B valid").missing, 1);
+        let work = deleted.deferred_work.expect("B valid deferred");
+        assert_eq!((work.admitted, work.pending, work.completed), (1, 0, 1));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn queued_b_drained_c_keeps_b_not_the_drain_command() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            profiled_callback_invoker(Arc::clone(&observed)),
+        ));
+        let cleanup = {
+            let _selected = runtime.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("create cleanup")
+        };
+        let Value::HandleObject(handle) = cleanup.value() else {
+            panic!("expected cleanup handle");
+        };
+        let registry = runtime.cleanup_registry().expect("host registry");
+        let entry = registry.find(handle.target).expect("registered cleanup");
+        let b = CommandProfilingRoot::new();
+        assert!(registry.queue_explicit(&entry, Some(&b.receipt())));
+        let c = CommandProfilingRoot::new();
+        let c_runtime = runtime.clone().with_command_profiling(c.receipt());
+        lifecycle::dispatch::start_queued(&c_runtime, &registry, entry.clone())
+            .expect("dispatch queued callback");
+        drive(
+            &supervisor,
+            lifecycle::dispatch::drain_eligible(&c_runtime, &registry, &[]),
+        )
+        .expect("drain under C");
+        assert_eq!(*observed.lock().unwrap(), [true]);
+        let queued = b.seal();
+        let drained = c.seal();
+        assert_eq!(queued.observations.expect("B valid").missing, 1);
+        assert_eq!(drained.observations.expect("C valid").missing, 0);
+        let work = queued.deferred_work.expect("B valid deferred");
+        assert_eq!((work.admitted, work.pending, work.completed), (1, 0, 1));
+        assert_eq!(drained.deferred_work.expect("C valid deferred").admitted, 0);
+        drop(cleanup);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn synchronous_accepted_future_drop_reports_abandonment_after_owned_retirement() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) =
+            synchronous_retirement_runtime(SynchronousSubmitRetirement::Accept);
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let cleanup = {
+            let _selected = runtime.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("register cleanup")
+        };
+        let command = CommandProfilingRoot::new();
+        let selected = runtime.clone().with_command_profiling(command.receipt());
+        let error = {
+            let _selected = selected.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
+                .expect_err("synchronously dropped callback is abandoned")
+        };
+        assert_eq!(error.identifier(), Some("RunMat:onCleanup:Abandoned"));
+        let work = command.seal().deferred_work.expect("valid deferred work");
+        assert_eq!((work.admitted, work.pending, work.missing), (1, 0, 1));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn synchronous_rejection_preserves_original_error_and_failed_attribution() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) =
+            synchronous_retirement_runtime(SynchronousSubmitRetirement::Reject);
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let cleanup = {
+            let _selected = runtime.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("register cleanup")
+        };
+        let command = CommandProfilingRoot::new();
+        let selected = runtime.clone().with_command_profiling(command.receipt());
+        let error = {
+            let _selected = selected.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
+                .expect_err("exact rejection must retain original diagnostic")
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:onCleanup:ExactRejectedPort")
+        );
+        let work = command.seal().deferred_work.expect("valid deferred work");
+        assert_eq!((work.admitted, work.pending, work.failed), (1, 0, 1));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn synchronous_ready_then_rejected_port_reports_error_without_callback_replay() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) =
+            synchronous_retirement_runtime(SynchronousSubmitRetirement::PollReadyThenReject);
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let counter = Arc::new(Mutex::new(0usize));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            callback_invoker(Arc::clone(&counter)),
+        ));
+        let cleanup = {
+            let _selected = runtime.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("register cleanup")
+        };
+        let command = CommandProfilingRoot::new();
+        let selected = runtime.clone().with_command_profiling(command.receipt());
+        let error = {
+            let _selected = selected.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
+                .expect_err("late port rejection remains the caller's exact error")
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:onCleanup:PolledThenRejected")
+        );
+        assert_eq!(*counter.lock().unwrap(), 1);
+        {
+            let _selected = selected.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
+                .expect("terminal cleanup object cannot replay callback");
+        }
+        assert_eq!(*counter.lock().unwrap(), 1);
+        let work = command.seal().deferred_work.expect("valid deferred work");
+        assert_eq!((work.admitted, work.pending, work.completed), (1, 0, 1));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn same_poll_task_cancellation_wins_over_ready_callback_without_early_root_retirement() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let cleanup = {
+            let _selected = runtime.enter();
+            block_on(on_cleanup_builtin(
+                crate::user_functions::test_support::exact_local_value("cleanup", binding),
+            ))
+            .expect("register cleanup")
+        };
+        let Value::HandleObject(handle) = cleanup.value() else {
+            panic!("expected cleanup handle");
+        };
+        let registry = runtime.cleanup_registry().expect("host registry");
+        let entry = registry.find(handle.target).expect("registered cleanup");
+        let counter = Arc::new(Mutex::new(0usize));
+        let _invoker = crate::user_functions::install_local_semantic_function_invoker(Rc::new({
+            let entry = Rc::clone(&entry);
+            let counter = Arc::clone(&counter);
+            move |_runtime, _function, args, requested_outputs| {
+                assert!(args.is_empty());
+                assert_eq!(requested_outputs, 0);
+                let entry = Rc::clone(&entry);
+                let counter = Arc::clone(&counter);
+                Box::pin(async move {
+                    entry
+                        .lease()
+                        .expect("task lease attached before poll")
+                        .cancel();
+                    *counter.lock().unwrap() += 1;
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        0.0,
+                    ))
+                })
+            }
+        }));
+        let command = CommandProfilingRoot::new();
+        let selected = runtime.clone().with_command_profiling(command.receipt());
+        let error = {
+            let _selected = selected.enter();
+            drive(&supervisor, run_on_cleanup_value(cleanup.value()))
+                .expect_err("same-poll cancellation must not complete successfully")
+        };
+        assert_eq!(error.identifier(), Some("RunMat:onCleanup:Abandoned"));
+        assert_eq!(*counter.lock().unwrap(), 1);
+        assert_eq!(entry.phase(), lifecycle::registry::CleanupPhase::Abandoned);
+        assert!(!entry.test_has_callback_roots_and_deferred_admission());
+        let work = command.seal().deferred_work.expect("valid deferred work");
+        assert_eq!((work.admitted, work.pending, work.missing), (1, 0, 1));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -558,8 +838,8 @@ mod tests {
         ))
         .expect("create cleanup");
 
-        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("first cleanup");
-        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("second cleanup is no-op");
+        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("first cleanup");
+        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("second cleanup is no-op");
 
         assert_eq!(*counter.lock().unwrap(), 1);
     }
@@ -580,11 +860,15 @@ mod tests {
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
         .expect("create cleanup");
-        let Value::HandleObject(handle) = cleanup.clone() else {
+        let Value::HandleObject(handle) = cleanup.value().clone() else {
             panic!("expected cleanup handle");
         };
 
-        drive(&supervisor, on_cleanup_delete_builtin(cleanup)).expect("delete cleanup");
+        drive(
+            &supervisor,
+            on_cleanup_delete_builtin(cleanup.value().clone()),
+        )
+        .expect("delete cleanup");
 
         assert_eq!(*counter.lock().unwrap(), 1);
         assert!(
@@ -610,8 +894,8 @@ mod tests {
         ))
         .expect("create cleanup");
 
-        cancel_on_cleanup_value(&cleanup).expect("cancel cleanup");
-        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("cleanup remains no-op");
+        cancel_on_cleanup_value(cleanup.value()).expect("cancel cleanup");
+        drive(&supervisor, run_on_cleanup_value(cleanup.value())).expect("cleanup remains no-op");
 
         assert_eq!(*counter.lock().unwrap(), 0);
     }
@@ -663,11 +947,30 @@ mod tests {
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
         .expect("create cleanup");
-        let cell = Value::Cell(CellArray::new(vec![cleanup], 1, 1).expect("cell"));
+        let cell = cleanup
+            .try_map_owned(
+                |value| {
+                    Ok::<_, RuntimeError>(Value::Cell(
+                        CellArray::new(vec![value], 1, 1).expect("cell"),
+                    ))
+                },
+                |error| error.into_runtime_error(),
+            )
+            .expect("root cell before producer lease retires");
 
-        drive(&supervisor, run_cleanup_for_workspace_value(&cell)).expect("cleanup");
-
-        assert_eq!(*counter.lock().unwrap(), 1);
+        drive(&supervisor, run_cleanup_for_workspace_value(cell.value()))
+            .expect("retained cell is not yet eligible");
+        assert_eq!(*counter.lock().unwrap(), 0);
+        drop(cell);
+        drive(&supervisor, async {
+            for _ in 0..16 {
+                if *counter.lock().unwrap() == 1 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+            panic!("nested cell release did not drive cleanup");
+        });
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -702,18 +1005,35 @@ mod tests {
         .expect("create cleanup c");
 
         let mut struct_value = runmat_value::StructValue::new();
-        struct_value.insert("cleanup", cleanup_a);
+        struct_value.insert("cleanup", cleanup_a.value().clone());
         let mut object = ObjectInstance::new("CleanupHolder".to_string());
-        object.properties.insert("cleanup".to_string(), cleanup_b);
-        let composite = Value::OutputList(vec![
+        object
+            .properties
+            .insert("cleanup".to_string(), cleanup_b.value().clone());
+        let composite = RootedValue::new(Value::OutputList(vec![
             Value::Struct(struct_value),
             Value::Object(object),
-            cleanup_c,
-        ]);
+            cleanup_c.value().clone(),
+        ]))
+        .expect("root composite before producer leases retire");
+        drop((cleanup_a, cleanup_b, cleanup_c));
 
-        drive(&supervisor, run_cleanup_for_workspace_value(&composite)).expect("cleanup");
-
-        assert_eq!(*counter.lock().unwrap(), 3);
+        drive(
+            &supervisor,
+            run_cleanup_for_workspace_value(composite.value()),
+        )
+        .expect("retained composite is not yet eligible");
+        assert_eq!(*counter.lock().unwrap(), 0);
+        drop(composite);
+        drive(&supervisor, async {
+            for _ in 0..16 {
+                if *counter.lock().unwrap() == 3 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+            panic!("nested composite release did not drive all cleanups");
+        });
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -721,35 +1041,83 @@ mod tests {
     fn last_returned_root_retirement_wakes_idle_host_once() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
         let (runtime, supervisor, _host) = hosted_fixture_runtime();
-        let _entry = runtime.enter();
+        let creation = CommandProfilingRoot::new();
+        let creation_runtime = runtime.clone().with_command_profiling(creation.receipt());
+        let _entry = creation_runtime.enter();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
-        let counter = Arc::new(Mutex::new(0usize));
+        let callback_origins = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
-            callback_invoker(Arc::clone(&counter)),
+            profiled_callback_invoker(Arc::clone(&callback_origins)),
         ));
+        let retired_roots = Arc::new(Mutex::new(Vec::new()));
+        let retirement_observer_roots = Arc::clone(&retired_roots);
+        let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+            if let runmat_gc::RootRetirement::Explicit(handle) = event {
+                let _nested = runmat_gc::RootRetirementObserver::register(Arc::new(|_| {}))
+                    .expect("retirement observer may reenter registration");
+                retirement_observer_roots
+                    .lock()
+                    .unwrap()
+                    .push(format!("{handle:?}"));
+            }
+        }))
+        .expect("observe synchronous producer allocation-root retirement");
         let cleanup = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
         .expect("create cleanup");
-        let returned = crate::execution::RootedValueSequence::new(
-            runmat_value::ValueSequence::single(cleanup).expect("single cleanup"),
-        )
-        .expect("root caller-held result");
+        let Value::HandleObject(handle) = cleanup.value() else {
+            panic!("producer must return an onCleanup handle");
+        };
+        assert!(
+            retired_roots
+                .lock()
+                .unwrap()
+                .contains(&format!("{:?}", handle.target)),
+            "allocation-root retirement must notify observers before publication"
+        );
+        assert_eq!(
+            runtime
+                .cleanup_registry()
+                .expect("host registry")
+                .find(handle.target)
+                .expect("registered cleanup")
+                .phase(),
+            lifecycle::registry::CleanupPhase::Active,
+            "the registry pin alone is not an outside owner; the producer lease prevents early queuing"
+        );
+        let returned = cleanup;
         drive(&supervisor, async { tokio::task::yield_now().await });
-        assert_eq!(*counter.lock().unwrap(), 0, "caller still owns result");
+        assert!(
+            callback_origins.lock().unwrap().is_empty(),
+            "caller still owns result"
+        );
 
         drop(returned);
         drive(&supervisor, async {
             for _ in 0..16 {
-                if *counter.lock().unwrap() == 1 {
+                if callback_origins.lock().unwrap().len() == 1 {
                     return;
                 }
                 tokio::task::yield_now().await;
             }
             panic!("idle root retirement did not drive cleanup");
         });
-        assert_eq!(*counter.lock().unwrap(), 1, "cleanup must not replay");
+        assert_eq!(
+            *callback_origins.lock().unwrap(),
+            [false],
+            "idle cleanup has no command origin and must not replay"
+        );
+        let created = creation.seal();
+        assert_eq!(created.observations.expect("creation valid").missing, 0);
+        assert_eq!(
+            created
+                .deferred_work
+                .expect("creation deferred valid")
+                .admitted,
+            0
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -779,7 +1147,7 @@ mod tests {
                 )
                 .await
                 .expect("create browser cleanup");
-                on_cleanup_delete_builtin(cleanup)
+                on_cleanup_delete_builtin(cleanup.value().clone())
                     .await
                     .expect("browser delete");
             })

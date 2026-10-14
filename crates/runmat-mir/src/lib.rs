@@ -14,6 +14,7 @@ mod expression_region;
 mod function;
 mod ids;
 mod indexing;
+mod lexical_environment;
 mod operand;
 mod place;
 mod remap;
@@ -32,12 +33,13 @@ pub use expression_region::*;
 pub use function::*;
 pub use ids::*;
 pub use indexing::*;
+pub use lexical_environment::*;
 pub use operand::*;
 pub use place::*;
-pub use remap::remap_function_ids;
+pub use remap::{remap_closed_function_ids, remap_function_ids};
 pub use rvalue::*;
 pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-pub const MIR_SCHEMA_VERSION: u16 = 6;
+pub const MIR_SCHEMA_VERSION: u16 = 10;

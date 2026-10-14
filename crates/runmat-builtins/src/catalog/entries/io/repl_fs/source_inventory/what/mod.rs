@@ -18,6 +18,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const WHAT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "what" },
     category: "io/repl_fs",

@@ -10,9 +10,10 @@ use super::{
     undefined_identity_error, CallableMetadata,
 };
 use crate::context::RuntimeContext;
+use crate::execution::RootedValueSequence;
 use crate::RuntimeError;
 use runmat_types::{BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId};
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -25,7 +26,7 @@ pub(super) fn execute(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     match identity {
         CallableIdentity::Builtin(id) => builtin(runtime, id, args, requested_outputs, metadata),
         CallableIdentity::BoundFunction(function) => {
@@ -60,7 +61,7 @@ pub(super) fn try_execute(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     match identity {
         CallableIdentity::Builtin(id) => {
             try_builtin(runtime, id, args, requested_outputs, metadata)
@@ -97,7 +98,7 @@ fn builtin(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(invoke_builtin(
         runtime,
         id,
@@ -114,7 +115,7 @@ fn try_builtin(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     Box::pin(async move {
         invoke_builtin(
             runtime,
@@ -134,7 +135,7 @@ async fn invoke_builtin(
     args: Vec<Value>,
     requested_outputs: usize,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_builtin_with_requested_outputs(runtime, &id.0, &args, requested_outputs, input_callsite)
         .await
 }
@@ -146,7 +147,7 @@ fn semantic(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(async move {
         match invoke_semantic(
             runtime,
@@ -170,7 +171,7 @@ fn try_semantic(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     Box::pin(invoke_semantic(
         runtime,
         function,
@@ -181,15 +182,20 @@ fn try_semantic(
 }
 
 async fn invoke_semantic(
-    _runtime: Option<&RuntimeContext>,
+    runtime: Option<&RuntimeContext>,
     function: FunctionId,
     args: Vec<Value>,
     requested_outputs: usize,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<Option<ValueSequence>, RuntimeError> {
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     match crate::callsite::with_function_input_callsite(
         input_callsite,
-        crate::user_functions::try_call_semantic_function(function.0, &args, requested_outputs),
+        crate::user_functions::try_call_semantic_function_in_context(
+            runtime,
+            function.0,
+            &args,
+            requested_outputs,
+        ),
     )
     .await
     {
@@ -206,7 +212,7 @@ fn external(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(async move {
         match invoke_external(
             runtime,
@@ -232,7 +238,7 @@ fn try_external(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     Box::pin(invoke_external(
         runtime,
         function,
@@ -244,16 +250,17 @@ fn try_external(
 }
 
 async fn invoke_external(
-    _runtime: Option<&RuntimeContext>,
+    runtime: Option<&RuntimeContext>,
     function: FunctionId,
     display_name: String,
     args: Vec<Value>,
     requested_outputs: usize,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<Option<ValueSequence>, RuntimeError> {
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     if let Some(result) = crate::callsite::with_function_input_callsite(
         input_callsite.clone(),
-        crate::user_functions::try_call_external_function(
+        crate::user_functions::try_call_external_function_in_context(
+            runtime,
             crate::user_functions::ExternalFunctionCall {
                 function: function.0,
                 display_name,
@@ -268,7 +275,12 @@ async fn invoke_external(
     }
     match crate::callsite::with_function_input_callsite(
         input_callsite,
-        crate::user_functions::try_call_semantic_function(function.0, &args, requested_outputs),
+        crate::user_functions::try_call_semantic_function_in_context(
+            runtime,
+            function.0,
+            &args,
+            requested_outputs,
+        ),
     )
     .await
     {
@@ -285,7 +297,7 @@ fn descriptor(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(invoke_descriptor_required(
         runtime,
         identity,
@@ -304,7 +316,7 @@ fn try_descriptor(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     Box::pin(invoke_descriptor_optional(
         runtime,
         identity,
@@ -322,14 +334,15 @@ async fn invoke_descriptor_required(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let request = crate::user_functions::CallableRequest::resolved(
         identity.clone(),
         fallback_policy,
         args.clone(),
         requested_outputs,
     )
-    .with_function_input_callsite(metadata.function_input_callsite.clone());
+    .with_function_input_callsite(metadata.function_input_callsite.clone())
+    .with_selected_runtime(runtime);
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
         return result;
     }
@@ -353,14 +366,15 @@ async fn invoke_descriptor_optional(
     requested_outputs: usize,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<Option<ValueSequence>, RuntimeError> {
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     let request = crate::user_functions::CallableRequest::resolved(
         identity.clone(),
         fallback_policy,
         args.clone(),
         requested_outputs,
     )
-    .with_function_input_callsite(input_callsite.clone());
+    .with_function_input_callsite(input_callsite.clone())
+    .with_selected_runtime(runtime);
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
         return result.map(Some);
     }
@@ -376,8 +390,9 @@ async fn invoke_descriptor_optional(
             runtime,
         ),
     );
-    match runtime {
+    let result = match runtime {
         Some(runtime) => runtime.scope(invoke).await,
         None => invoke.await,
-    }
+    }?;
+    Ok(result)
 }

@@ -3,8 +3,8 @@ use sha2::{Digest, Sha256};
 use crate::{
     builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
     builtin_functions, canonical_catalog_fingerprint, AccelTag, BuiltinCompletionPolicy,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamType, Type, TypeResolverKind,
-    BUILTIN_CATALOG_SCHEMA_VERSION,
+    BuiltinConstantLiteral, BuiltinOutputMode, BuiltinParamArity, BuiltinParamType, Type,
+    TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
 };
 
 /// Bump when execution-relevant builtin behavior changes in a way the
@@ -51,6 +51,13 @@ fn compute_builtin_catalog_fingerprint() -> [u8; 32] {
             &mut hash,
             &serde_json::to_vec(&constant.kind).expect("static constant kind must serialize"),
         );
+        match constant.literal {
+            None => field(&mut hash, b"no-scalar-literal"),
+            Some(BuiltinConstantLiteral::Logical(value)) => {
+                field(&mut hash, b"logical-scalar-literal");
+                boolean(&mut hash, value);
+            }
+        }
     }
     number(&mut hash, functions.len() as u64);
     for function in functions {

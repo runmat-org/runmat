@@ -1,16 +1,14 @@
 use runmat_runtime::RuntimeError;
 
 pub(super) fn finish_dynamic_invocation<T>(
-    result: Result<runmat_value::ValueSequence, RuntimeError>,
+    result: Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>,
     retirement: T,
     preserve_error: impl FnOnce(&mut RuntimeError),
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     match result {
-        Ok(values) => {
-            let rooted = runmat_runtime::execution::RootedValueSequence::new(values)
-                .map_err(|error| error.into_runtime_error())?;
+        Ok(rooted) => {
             drop(retirement);
-            Ok(rooted.into_sequence())
+            Ok(rooted)
         }
         Err(mut error) => {
             preserve_error(&mut error);
@@ -53,11 +51,15 @@ mod tests {
                     valid: true,
                 }))
                 .expect("valid output");
-            let completed =
-                finish_dynamic_invocation(Ok(sequence), CollectOnDrop(Some(initial)), |_| {
-                    panic!("successful output has no diagnostic")
-                })
-                .expect("retirement preserves output");
+            let completed = finish_dynamic_invocation(
+                Ok(
+                    runmat_runtime::execution::RootedValueSequence::new(sequence)
+                        .expect("root output before retirement"),
+                ),
+                CollectOnDrop(Some(initial)),
+                |_| panic!("successful output has no diagnostic"),
+            )
+            .expect("retirement preserves output");
             assert_eq!(
                 runmat_gc::gc_clone_value(&handle).expect("output remains live at handoff"),
                 Value::String("dynamic output".into())

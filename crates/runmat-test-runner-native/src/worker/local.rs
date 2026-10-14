@@ -334,14 +334,6 @@ fn worker_loop(
             return;
         }
     };
-    if let Some(project) = project {
-        if let Err(error) = session.install_project_handoff(project) {
-            let _ = ready.send(Err(rejected(format!(
-                "failed to install frozen project in local session: {error}"
-            ))));
-            return;
-        }
-    }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -354,6 +346,14 @@ fn worker_loop(
             return;
         }
     };
+    if let Some(project) = project {
+        if let Err(error) = runtime.block_on(session.install_project_handoff(project)) {
+            let _ = ready.send(Err(rejected(format!(
+                "failed to install frozen project in local session: {error}"
+            ))));
+            return;
+        }
+    }
     if ready.send(Ok(())).is_err() {
         return;
     }

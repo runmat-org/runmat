@@ -1,8 +1,16 @@
 use runmat_execution::cancellation::CancellationToken;
-use runmat_mex::{MexCancellationScope, MexDiagnostic, MexEngineCompletion, MexHostServices};
+use runmat_mex::{
+    MexCallOutput, MexCancellationScope, MexDiagnostic, MexEngineCompletion, MexHostServices,
+};
 use runmat_value::Value;
 
 use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease, RootedValueSequence};
+mod origin;
+pub(super) use origin::{
+    OriginMexBoundaryAdapter, OriginMexBoundaryServices, OriginMexCompletionFuture,
+    OriginMexOperation,
+};
 
 /// Runtime-owned callback authority for one active MEX invocation.
 ///
@@ -17,6 +25,195 @@ impl RuntimeMexHostServices {
     pub fn new(runtime: RuntimeContext) -> Self {
         Self { runtime }
     }
+
+    pub(crate) async fn call_rooted(
+        &self,
+        function: &str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    ) -> Result<RootedValueSequence, crate::RuntimeError> {
+        let input_roots = RootedValueLease::for_values(arguments.iter())
+            .map_err(|error| error.into_runtime_error())?;
+        let result = crate::call_feval_sequence_async_with_outputs_in_context(
+            &self.runtime,
+            Value::from(function),
+            &arguments,
+            requested_outputs,
+        )
+        .await;
+        drop(input_roots);
+        result
+    }
+
+    pub(crate) fn with_request_cancellation(&self, cancellation: CancellationToken) -> Self {
+        let combined = self.runtime.cancellation().or(&cancellation);
+        Self::new(self.runtime.clone().with_cancellation_token(combined))
+    }
+
+    pub(crate) async fn eval_rooted(&self, command: String) -> Result<(), crate::RuntimeError> {
+        crate::call_builtin_async_with_outputs_in_context(
+            &self.runtime,
+            "eval",
+            &[Value::String(command)],
+            0,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn get_object_property_rooted(
+        &self,
+        object: Value,
+        index: usize,
+        name: String,
+    ) -> Result<RootedValue, MexDiagnostic> {
+        let object = RootedValue::new(object)
+            .map_err(|error| runtime_diagnostic(error.into_runtime_error()))?
+            .try_map_owned(select_object_element_at(index), |error| {
+                runtime_diagnostic(error.into_runtime_error())
+            })?;
+        object
+            .with_owned_async(|object| {
+                self.runtime
+                    .scope(crate::object::resolve::load_member_with_context(
+                        Some(&self.runtime),
+                        object,
+                        name,
+                        false,
+                        None,
+                    ))
+            })
+            .await
+            .map_err(runtime_diagnostic)
+    }
+
+    pub(crate) async fn set_object_property_rooted(
+        &self,
+        object: Value,
+        index: usize,
+        name: String,
+        value: Value,
+    ) -> Result<RootedValue, MexDiagnostic> {
+        let object = RootedValue::new(object)
+            .map_err(|error| runtime_diagnostic(error.into_runtime_error()))?;
+        let value = RootedValue::new(value)
+            .map_err(|error| runtime_diagnostic(error.into_runtime_error()))?;
+        object
+            .with_owned_async(|object| async {
+                match object {
+                    Value::ObjectArray(array) => {
+                        let class_name = array.class_name().to_string();
+                        let shape = array.shape().to_vec();
+                        let mut elements = array.into_data();
+                        let selected = elements
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| object_index_diagnostic(index, elements.len()))?;
+                        let selected = RootedValue::new(selected)
+                            .map_err(|error| runtime_diagnostic(error.into_runtime_error()))?;
+                        let updated = selected
+                            .with_owned_async(|selected| {
+                                value.with_owned_async(|value| {
+                                    self.runtime.scope(
+                                        crate::object::resolve::store_member_in_context(
+                                            &self.runtime,
+                                            selected,
+                                            name,
+                                            value,
+                                            false,
+                                            None,
+                                            |_, _| {},
+                                        ),
+                                    )
+                                })
+                            })
+                            .await
+                            .map_err(runtime_diagnostic)?;
+                        updated.try_map_owned(
+                            |updated| {
+                                elements[index] = updated;
+                                runmat_value::ObjectArray::new(class_name, elements, shape)
+                                    .map(Value::ObjectArray)
+                                    .map_err(|message| MexDiagnostic {
+                                        identifier: Some("RunMat:MEX:ObjectArray".into()),
+                                        message,
+                                    })
+                            },
+                            |error| runtime_diagnostic(error.into_runtime_error()),
+                        )
+                    }
+                    object if index == 0 => value
+                        .with_owned_async(|value| {
+                            self.runtime
+                                .scope(crate::object::resolve::store_member_in_context(
+                                    &self.runtime,
+                                    object,
+                                    name,
+                                    value,
+                                    false,
+                                    None,
+                                    |_, _| {},
+                                ))
+                        })
+                        .await
+                        .map_err(runtime_diagnostic),
+                    _ => Err(object_index_diagnostic(index, 1)),
+                }
+            })
+            .await
+    }
+}
+
+fn select_object_element_at(index: usize) -> impl FnOnce(Value) -> Result<Value, MexDiagnostic> {
+    move |object| select_object_element(object, index)
+}
+
+struct RuntimeMexCallOutput {
+    sequence: RootedValueSequence,
+    requested_outputs: usize,
+}
+
+struct RuntimeMexValueOutput(RootedValue);
+
+impl MexCallOutput for RuntimeMexValueOutput {
+    fn publish(
+        self: Box<Self>,
+        sink: &mut dyn FnMut(Value) -> Result<(), MexDiagnostic>,
+    ) -> Result<(), MexDiagnostic> {
+        self.0.with_owned(sink)
+    }
+}
+
+fn rooted_output(value: Value) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+    Ok(Box::new(RuntimeMexValueOutput(
+        RootedValue::new(value).map_err(|error| runtime_diagnostic(error.into_runtime_error()))?,
+    )))
+}
+
+impl MexCallOutput for RuntimeMexCallOutput {
+    fn publish(
+        self: Box<Self>,
+        sink: &mut dyn FnMut(Value) -> Result<(), MexDiagnostic>,
+    ) -> Result<(), MexDiagnostic> {
+        let Self {
+            sequence,
+            requested_outputs,
+        } = *self;
+        sequence.with_owned_sequence(|sequence| {
+            let values = crate::sequence::ResolveValueSequence::resolve(
+                sequence,
+                runmat_types::SequenceUse::SelectPrefix {
+                    count: requested_outputs,
+                },
+                crate::sequence::SequenceResolutionContext::default(),
+            )
+            .map_err(runtime_diagnostic)?;
+            for value in values {
+                sink(value)?;
+            }
+            Ok(())
+        })
+    }
 }
 
 impl MexHostServices for RuntimeMexHostServices {
@@ -30,14 +227,7 @@ impl MexHostServices for RuntimeMexHostServices {
     }
 
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
-        pollster::block_on(crate::call_builtin_async_with_outputs_in_context(
-            &self.runtime,
-            "eval",
-            &[Value::String(command.to_string())],
-            0,
-        ))
-        .map(|_| ())
-        .map_err(runtime_diagnostic)
+        pollster::block_on(self.eval_rooted(command.to_string())).map_err(runtime_diagnostic)
     }
 
     fn eval_captured(&self, command: &str) -> MexEngineCompletion<()> {
@@ -49,24 +239,13 @@ impl MexHostServices for RuntimeMexHostServices {
         function: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic> {
-        let value = pollster::block_on(crate::call_feval_async_with_outputs_in_context(
-            &self.runtime,
-            Value::from(function),
-            &arguments,
-            requested_outputs,
-        ))
-        .map_err(runtime_diagnostic)?;
-        let sequence = crate::call::arguments::adapt_legacy_builtin_result(value)
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+        let sequence = pollster::block_on(self.call_rooted(function, arguments, requested_outputs))
             .map_err(runtime_diagnostic)?;
-        crate::sequence::ResolveValueSequence::resolve(
+        Ok(Box::new(RuntimeMexCallOutput {
             sequence,
-            runmat_types::SequenceUse::SelectPrefix {
-                count: requested_outputs,
-            },
-            crate::sequence::SequenceResolutionContext::default(),
-        )
-        .map_err(runtime_diagnostic)
+            requested_outputs,
+        }))
     }
 
     fn call_captured(
@@ -74,14 +253,18 @@ impl MexHostServices for RuntimeMexHostServices {
         function: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> MexEngineCompletion<Vec<Value>> {
+    ) -> MexEngineCompletion<Box<dyn MexCallOutput>> {
         captured_completion(|| self.call(function, arguments, requested_outputs))
     }
 
-    fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic> {
+    fn get_variable(
+        &self,
+        workspace: &str,
+        name: &str,
+    ) -> Result<Option<Box<dyn MexCallOutput>>, MexDiagnostic> {
         let workspace = MexWorkspace::parse(workspace)?;
         let _scope = self.runtime.enter();
-        match workspace {
+        let value = match workspace {
             MexWorkspace::Caller => self
                 .runtime
                 .service_ports()
@@ -108,7 +291,8 @@ impl MexHostServices for RuntimeMexHostServices {
                 .session_variable_authority()
                 .global_value(name)
                 .map_err(runtime_diagnostic),
-        }
+        }?;
+        value.map(rooted_output).transpose()
     }
 
     fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic> {
@@ -147,18 +331,13 @@ impl MexHostServices for RuntimeMexHostServices {
         }
     }
 
-    fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {
-        pollster::block_on(
-            self.runtime
-                .scope(crate::object::resolve::load_member_with_context(
-                    Some(&self.runtime),
-                    object,
-                    name.to_string(),
-                    false,
-                    None,
-                )),
-        )
-        .map_err(runtime_diagnostic)
+    fn get_object_property(
+        &self,
+        object: Value,
+        name: &str,
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+        let value = pollster::block_on(self.get_object_property_rooted(object, 0, name.into()))?;
+        Ok(Box::new(RuntimeMexValueOutput(value)))
     }
 
     fn get_object_property_at(
@@ -166,9 +345,10 @@ impl MexHostServices for RuntimeMexHostServices {
         object: Value,
         index: usize,
         name: &str,
-    ) -> Result<Value, MexDiagnostic> {
-        let object = select_object_element(object, index)?;
-        self.get_object_property(object, name)
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+        let value =
+            pollster::block_on(self.get_object_property_rooted(object, index, name.into()))?;
+        Ok(Box::new(RuntimeMexValueOutput(value)))
     }
 
     fn set_object_property(
@@ -176,20 +356,10 @@ impl MexHostServices for RuntimeMexHostServices {
         object: Value,
         name: &str,
         value: Value,
-    ) -> Result<Value, MexDiagnostic> {
-        pollster::block_on(
-            self.runtime
-                .scope(crate::object::resolve::store_member_in_context(
-                    &self.runtime,
-                    object,
-                    name.to_string(),
-                    value,
-                    false,
-                    None,
-                    |_, _| {},
-                )),
-        )
-        .map_err(runtime_diagnostic)
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+        let value =
+            pollster::block_on(self.set_object_property_rooted(object, 0, name.into(), value))?;
+        Ok(Box::new(RuntimeMexValueOutput(value)))
     }
 
     fn set_object_property_at(
@@ -198,27 +368,10 @@ impl MexHostServices for RuntimeMexHostServices {
         index: usize,
         name: &str,
         value: Value,
-    ) -> Result<Value, MexDiagnostic> {
-        match object {
-            Value::ObjectArray(array) => {
-                let class_name = array.class_name().to_string();
-                let shape = array.shape().to_vec();
-                let mut elements = array.into_data();
-                let selected = elements
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| object_index_diagnostic(index, elements.len()))?;
-                elements[index] = self.set_object_property(selected, name, value)?;
-                runmat_value::ObjectArray::new(class_name, elements, shape)
-                    .map(Value::ObjectArray)
-                    .map_err(|message| MexDiagnostic {
-                        identifier: Some("RunMat:MEX:ObjectArray".into()),
-                        message,
-                    })
-            }
-            object if index == 0 => self.set_object_property(object, name, value),
-            _ => Err(object_index_diagnostic(index, 1)),
-        }
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
+        let object =
+            pollster::block_on(self.set_object_property_rooted(object, index, name.into(), value))?;
+        Ok(Box::new(RuntimeMexValueOutput(object)))
     }
 }
 
@@ -304,7 +457,7 @@ fn capability_diagnostic(error: crate::context::RuntimeCapabilityError) -> MexDi
     runtime_diagnostic(error.into_runtime_error())
 }
 
-fn runtime_diagnostic(error: crate::RuntimeError) -> MexDiagnostic {
+pub(crate) fn runtime_diagnostic(error: crate::RuntimeError) -> MexDiagnostic {
     MexDiagnostic {
         identifier: error.identifier().map(str::to_string),
         message: error.message().to_string(),
@@ -321,6 +474,133 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn published_root(output: Box<dyn MexCallOutput>) -> Result<RootedValue, MexDiagnostic> {
+        let mut rooted = None;
+        output.publish(&mut |value| {
+            rooted = Some(RootedValue::new(value).map_err(|error| MexDiagnostic {
+                identifier: Some("RunMat:MEX:ValueRoot".into()),
+                message: error.to_string(),
+            })?);
+            Ok(())
+        })?;
+        rooted.ok_or_else(|| MexDiagnostic {
+            identifier: Some("RunMat:MEX:CallbackProtocol".into()),
+            message: "expected one published value".into(),
+        })
+    }
+
+    impl RuntimeMexHostServices {
+        fn get_variable_rooted(
+            &self,
+            workspace: &str,
+            name: &str,
+        ) -> Result<Option<RootedValue>, MexDiagnostic> {
+            self.get_variable(workspace, name)?
+                .map(published_root)
+                .transpose()
+        }
+    }
+
+    #[test]
+    fn mex_output_publication_precedes_collecting_root_retirement() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("mex output".into()))
+                .expect("allocate managed output");
+            let handle = initial.handle();
+            let sequence = RootedValueSequence::new(
+                runmat_value::ValueSequence::single(Value::HandleObject(HandleRef {
+                    class_name: "MexOutput".into(),
+                    target: handle,
+                    valid: true,
+                }))
+                .expect("single output"),
+            )
+            .expect("root callback output");
+            initial.unroot().expect("transfer original root");
+
+            let collected_during_transfer = Arc::new(AtomicBool::new(false));
+            let observed = Arc::clone(&collected_during_transfer);
+            let identity = (handle.addr(), handle.epoch());
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                let runmat_gc::RootRetirement::Explicit(retired) = event else {
+                    return;
+                };
+                if (retired.addr(), retired.epoch()) == identity
+                    && !observed.swap(true, Ordering::SeqCst)
+                {
+                    runmat_gc::gc_collect_major().expect("collect during output retirement");
+                    assert!(runmat_gc::gc_clone_value(&retired).is_ok());
+                }
+            }))
+            .expect("register collecting observer");
+
+            let output = Box::new(RuntimeMexCallOutput {
+                sequence,
+                requested_outputs: 1,
+            });
+            let mut sink_root = None;
+            let mut sink_value = None;
+            output
+                .publish(&mut |value| {
+                    sink_root = Some(
+                        RootedValueLease::for_values(std::iter::once(&value))
+                            .expect("register sink before source retirement"),
+                    );
+                    sink_value = Some(value);
+                    Ok(())
+                })
+                .expect("publish managed output");
+            assert!(collected_during_transfer.load(Ordering::SeqCst));
+            assert!(matches!(sink_value, Some(Value::HandleObject(_))));
+            drop(sink_root);
+            runmat_gc::gc_collect_major().expect("collect after sink retirement");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn mex_property_output_registers_sink_root_before_source_retirement() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("property".into()))
+                .expect("allocate managed property");
+            let handle = initial.handle();
+            let value = Value::HandleObject(HandleRef {
+                class_name: "MexProperty".into(),
+                target: handle,
+                valid: true,
+            });
+            let output = Box::new(RuntimeMexValueOutput(
+                RootedValue::new(value).expect("root producer property"),
+            ));
+            initial.unroot().expect("transfer original root");
+
+            let observed = Arc::new(AtomicBool::new(false));
+            let collected = Arc::clone(&observed);
+            let identity = (handle.addr(), handle.epoch());
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                let runmat_gc::RootRetirement::Explicit(retired) = event else {
+                    return;
+                };
+                if (retired.addr(), retired.epoch()) == identity
+                    && !collected.swap(true, Ordering::SeqCst)
+                {
+                    runmat_gc::gc_collect_major().expect("collect at property source retirement");
+                    assert!(runmat_gc::gc_clone_value(&retired).is_ok());
+                }
+            }))
+            .expect("register collecting observer");
+
+            let sink = published_root(output).expect("publish rooted property");
+            assert!(observed.load(Ordering::SeqCst));
+            assert!(matches!(sink.value(), Value::HandleObject(_)));
+            drop(sink);
+            runmat_gc::gc_collect_major().expect("collect after sink retirement");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
 
     #[derive(Default)]
     struct ScopedWorkspace {
@@ -395,21 +675,27 @@ mod tests {
             .expect("write session global workspace");
         assert_eq!(
             services
-                .get_variable("base", "answer")
-                .expect("read scoped base workspace"),
-            Some(Value::Num(7.0))
+                .get_variable_rooted("base", "answer")
+                .expect("read scoped base workspace")
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(7.0))
         );
         assert_eq!(
             services
-                .get_variable("caller", "answer")
-                .expect("read scoped caller workspace"),
-            Some(Value::Num(42.0))
+                .get_variable_rooted("caller", "answer")
+                .expect("read scoped caller workspace")
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(42.0))
         );
         assert_eq!(
             services
-                .get_variable("global", "answer")
-                .expect("read scoped global workspace"),
-            Some(Value::Num(3.0))
+                .get_variable_rooted("global", "answer")
+                .expect("read scoped global workspace")
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(3.0))
         );
         assert_eq!(caller.lookup("answer"), Some(Value::Num(42.0)));
         assert_eq!(base_owner.lookup("answer").unwrap(), Some(Value::Num(7.0)));
@@ -433,9 +719,11 @@ mod tests {
             .expect("initialize session-global value");
         assert_eq!(
             services
-                .get_variable("base", "answer")
-                .expect("base binding resolves through session-global storage"),
-            Some(Value::Num(3.0))
+                .get_variable_rooted("base", "answer")
+                .expect("base binding resolves through session-global storage")
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(3.0))
         );
 
         services
@@ -443,9 +731,11 @@ mod tests {
             .expect("base write updates its bound global");
         assert_eq!(
             services
-                .get_variable("global", "answer")
-                .expect("read updated session-global value"),
-            Some(Value::Num(11.0))
+                .get_variable_rooted("global", "answer")
+                .expect("read updated session-global value")
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(11.0))
         );
         assert!(base_owner.is_global("answer").unwrap());
         assert_eq!(base_owner.lookup("answer").unwrap(), None);
@@ -462,7 +752,7 @@ mod tests {
             .put_variable("caller", "answer", Value::Num(42.0))
             .expect("caller workspace remains available");
         let error = services
-            .get_variable("base", "answer")
+            .get_variable_rooted("base", "answer")
             .expect_err("missing base authority must not read the caller");
         assert_eq!(
             error.identifier.as_deref(),
@@ -511,7 +801,7 @@ mod tests {
             .put_variable("base", "answer", Value::Num(7.0))
             .expect("explicit base authority remains available");
         let error = services
-            .get_variable("caller", "answer")
+            .get_variable_rooted("caller", "answer")
             .expect_err("missing caller authority must not fall back to base");
         assert_eq!(
             error.identifier.as_deref(),
@@ -533,10 +823,21 @@ mod tests {
             .put_variable("global", "answer", Value::Num(3.0))
             .unwrap();
         assert_eq!(
-            first.get_variable("global", "answer").unwrap(),
-            Some(Value::Num(3.0))
+            first
+                .get_variable_rooted("global", "answer")
+                .unwrap()
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            Some(&Value::Num(3.0))
         );
-        assert_eq!(second.get_variable("global", "answer").unwrap(), None);
+        assert_eq!(
+            second
+                .get_variable_rooted("global", "answer")
+                .unwrap()
+                .as_ref()
+                .map(|rooted| rooted.value()),
+            None
+        );
     }
 
     #[test]
@@ -544,7 +845,7 @@ mod tests {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let services = RuntimeMexHostServices::new(runtime);
         let error = services
-            .get_variable("workspace-typo", "answer")
+            .get_variable_rooted("workspace-typo", "answer")
             .expect_err("unknown workspace must fail");
 
         assert_eq!(error.identifier.as_deref(), Some("RunMat:MEX:Workspace"));
@@ -647,27 +948,35 @@ mod tests {
         let services = RuntimeMexHostServices::new(runtime);
 
         assert_eq!(
-            services
-                .get_object_property(Value::HandleObject(handle.clone()), "Value")
-                .expect("read handle property"),
-            Value::Num(4.0)
-        );
-        let updated = services
-            .set_object_property(
+            pollster::block_on(services.get_object_property_rooted(
                 Value::HandleObject(handle.clone()),
-                "Value",
-                Value::Num(9.0),
-            )
-            .expect("write handle property");
-        let Value::HandleObject(updated) = updated else {
+                0,
+                "Value".into(),
+            ))
+            .expect("read handle property")
+            .value(),
+            &Value::Num(4.0)
+        );
+        let updated = pollster::block_on(services.set_object_property_rooted(
+            Value::HandleObject(handle.clone()),
+            0,
+            "Value".into(),
+            Value::Num(9.0),
+        ))
+        .expect("write handle property");
+        let Value::HandleObject(updated) = updated.value() else {
             panic!("handle property assignment must return the same handle kind");
         };
-        assert_eq!(updated, handle);
+        assert_eq!(updated, &handle);
         assert_eq!(
-            services
-                .get_object_property(Value::HandleObject(handle), "Value")
-                .expect("read updated handle property"),
-            Value::Num(9.0)
+            pollster::block_on(services.get_object_property_rooted(
+                Value::HandleObject(handle),
+                0,
+                "Value".into(),
+            ))
+            .expect("read updated handle property")
+            .value(),
+            &Value::Num(9.0)
         );
     }
 
@@ -697,15 +1006,23 @@ mod tests {
         let services = RuntimeMexHostServices::new(runtime);
 
         assert_eq!(
-            services
-                .get_object_property_at(Value::ObjectArray(array.clone()), 1, "Value")
-                .expect("read indexed property"),
-            Value::Num(4.0)
+            pollster::block_on(services.get_object_property_rooted(
+                Value::ObjectArray(array.clone()),
+                1,
+                "Value".into(),
+            ))
+            .expect("read indexed property")
+            .value(),
+            &Value::Num(4.0)
         );
-        let updated = services
-            .set_object_property_at(Value::ObjectArray(array), 1, "Value", Value::Num(9.0))
-            .expect("write indexed property");
-        let Value::ObjectArray(updated) = updated else {
+        let updated = pollster::block_on(services.set_object_property_rooted(
+            Value::ObjectArray(array),
+            1,
+            "Value".into(),
+            Value::Num(9.0),
+        ))
+        .expect("write indexed property");
+        let Value::ObjectArray(updated) = updated.value() else {
             panic!("indexed property write must preserve the object array");
         };
         assert_eq!(updated.shape(), &[1, 2]);

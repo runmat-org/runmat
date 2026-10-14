@@ -12,15 +12,29 @@ use crate::{ProcessHostError, ProcessHostResult};
 enum StoreRoot {
     Owned(tempfile::TempDir),
     Borrowed(PathBuf),
+    Persisted(PathBuf),
 }
 
 /// Private file-backed snapshots shared by a driver and its local child host.
 ///
-/// Descriptors contain only a relative, nonce-derived name. The driver keeps
-/// the owning store alive for the complete child session, so abandoned files
-/// are removed even when the child exits unexpectedly.
+/// Descriptors contain only a relative, nonce-derived name. Owned bytes are
+/// removed after verified child retirement; an unverified child instead keeps
+/// its exact private root for recovery. Joined-child stores are borrowed from
+/// an outer process owner and never delete that owner's scratch on drop.
 pub struct SharedSnapshotStore {
     root: StoreRoot,
+}
+
+/// Exact parent-owned private directory for snapshots of a joined child.
+/// The enclosing process owner, not a member's shutdown, retires these bytes.
+#[derive(Clone, Debug)]
+pub struct SharedSnapshotParent(PathBuf);
+
+impl SharedSnapshotParent {
+    pub fn admit(path: &Path) -> ProcessHostResult<Self> {
+        validate_store_root(path)?;
+        Ok(Self(path.to_path_buf()))
+    }
 }
 
 impl std::fmt::Debug for SharedSnapshotStore {
@@ -43,6 +57,17 @@ impl SharedSnapshotStore {
         })
     }
 
+    pub fn create_in_parent(parent: &SharedSnapshotParent) -> ProcessHostResult<Self> {
+        validate_store_root(&parent.0)?;
+        let child = tempfile::Builder::new()
+            .prefix("runmat-extension-")
+            .tempdir_in(&parent.0)?;
+        restrict_store_root(child.path())?;
+        Ok(Self {
+            root: StoreRoot::Borrowed(child.keep()),
+        })
+    }
+
     pub fn open_existing(path: impl Into<PathBuf>) -> ProcessHostResult<Self> {
         let path = path.into();
         validate_store_root(&path)?;
@@ -54,7 +79,7 @@ impl SharedSnapshotStore {
     pub fn root_path(&self) -> &Path {
         match &self.root {
             StoreRoot::Owned(root) => root.path(),
-            StoreRoot::Borrowed(root) => root,
+            StoreRoot::Borrowed(root) | StoreRoot::Persisted(root) => root,
         }
     }
 
@@ -107,6 +132,48 @@ impl SharedSnapshotStore {
         let outcome = consume_file(&path, descriptor);
         let _ = fs::remove_file(path);
         outcome
+    }
+}
+
+impl crate::child::ProcessRetirementLease for SharedSnapshotStore {
+    fn persist_unverified(&mut self, process_id: Option<u32>, reason: &str) -> Result<(), String> {
+        let StoreRoot::Owned(_) = &self.root else {
+            return Ok(());
+        };
+        let old_root = std::mem::replace(&mut self.root, StoreRoot::Borrowed(PathBuf::new()));
+        let StoreRoot::Owned(root) = old_root else {
+            unreachable!("checked owned root")
+        };
+        let retained = root.keep();
+        self.root = StoreRoot::Persisted(retained.clone());
+        let marker = retained.join(".retirement-unverified");
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&marker).map_err(|error| {
+            format!(
+                "snapshot bytes retained at {} but marker creation failed: {error}",
+                retained.display()
+            )
+        })?;
+        if reason.len() > 1024 || reason.chars().any(char::is_control) {
+            return Err(format!(
+                "snapshot bytes retained at {} but retirement reason was invalid",
+                retained.display()
+            ));
+        }
+        write!(file, "process_id={process_id:?}\nreason={reason}\n")
+            .and_then(|()| file.sync_all())
+            .map_err(|error| {
+                format!(
+                    "snapshot bytes retained at {} but marker write failed: {error}",
+                    retained.display()
+                )
+            })
     }
 }
 

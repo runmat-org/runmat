@@ -8,7 +8,16 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 7;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 8;
+
+/// Whether a callable is part of public builtin discovery or is an executable
+/// runtime fixture. Both audiences share one catalog and one binding registry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum BuiltinCatalogAudience {
+    #[default]
+    Public,
+    Fixture,
+}
 
 /// Physical ownership of a catalog declaration.
 ///
@@ -83,6 +92,7 @@ pub const REQUIRED_DEFAULT_BINDING: [BuiltinBindingDeclaration; 1] = [BuiltinBin
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltinCatalogEntry {
+    pub audience: BuiltinCatalogAudience,
     #[serde(skip)]
     pub provenance: BuiltinCatalogProvenance,
     pub identity: BuiltinCatalogIdentity,

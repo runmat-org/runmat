@@ -3,7 +3,7 @@ use crate::builtins::deep_learning::{layers::*, model::forward_builtin, object};
 use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
 use runmat_value::{ComplexElement, ComplexTensor, NumericDType};
 
-fn pooling_network() -> Value {
+fn pooling_network() -> crate::execution::RootedValue {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
@@ -24,8 +24,9 @@ fn formatted(data: Value) -> Value {
 }
 
 fn predict(input: Value) -> Result<Value, crate::RuntimeError> {
+    let network = pooling_network();
     block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-        pooling_network(),
+        network.value().clone(),
         input,
         vec![],
     ))
@@ -141,7 +142,8 @@ fn public_complex_device_input_rejects_before_effects_even_for_host_compatible_t
                 provider.reset_telemetry();
                 let result = match caller {
                     super::super::NetworkCaller::Forward => {
-                        block_on(forward_builtin(pooling_network(), input, vec![]))
+                        let network = pooling_network();
+                        block_on(forward_builtin(network.value().clone(), input, vec![]))
                     }
                     super::super::NetworkCaller::Predict => predict(input),
                 };

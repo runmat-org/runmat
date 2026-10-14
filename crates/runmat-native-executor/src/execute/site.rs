@@ -12,6 +12,10 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::operand::evaluate_rvalue;
 use super::state::HostState;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "site/terminator_tests.rs"]
+mod terminator_tests;
+
 pub(super) fn execute(
     state: &mut HostState,
     call: &mut NativeCall,
@@ -423,14 +427,23 @@ fn execute_terminator(
             then_edge,
             else_edge,
         } => {
-            let condition = value_for(state, *condition)?;
-            let value = state.arena.get(condition)?;
-            let truth = super::sync::complete(
-                &state.runtime,
-                runmat_runtime::condition::logical_truth_from_value(value, "branch condition"),
-                "branch condition",
-            )
-            .finish(state)?;
+            let truth = match super::call_suspension::take_completed_terminator(state)?
+                .map(super::call_suspension::TerminatorReady::into_parts)
+            {
+                Some((super::call_suspension::TerminatorReadyStage::BranchTruth(truth), None)) => {
+                    truth
+                }
+                Some(_) => {
+                    return Err(NativeExecutorError::Host(
+                        "native branch resumed with another terminator stage".into(),
+                    ));
+                }
+                None => {
+                    let condition = value_for(state, *condition)?;
+                    let value = state.arena.get(condition)?.clone();
+                    return super::call_suspension::begin_branch_truth(state, value);
+                }
+            };
             if truth {
                 take_edge(state, then_edge, 0, None, None)
             } else {
@@ -442,31 +455,71 @@ fn execute_terminator(
             cases,
             otherwise,
         } => {
-            let discriminant = state.arena.get(value_for(state, *discriminant)?)?.clone();
-            for (index, (case, edge)) in cases.iter().enumerate() {
-                let case = state.arena.get(value_for(state, *case)?)?.clone();
-                let equal = super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::call_builtin_async_in_context(
-                        &state.runtime,
-                        "eq",
-                        &[discriminant.clone(), case],
-                    ),
-                    "switch comparison",
-                )
-                .finish(state)?;
-                if super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::condition::logical_truth_from_value(
-                        &equal,
-                        "switch case comparison",
-                    ),
-                    "switch truth evaluation",
-                )
-                .finish(state)?
+            use super::call_suspension::TerminatorReadyStage;
+            let (index, discriminant) =
+                match super::call_suspension::take_completed_terminator(state)?
+                    .map(super::call_suspension::TerminatorReady::into_parts)
                 {
-                    return take_edge(state, edge, index as u32, None, None);
-                }
+                    Some((
+                        TerminatorReadyStage::SwitchEquality {
+                            index,
+                            discriminant,
+                        },
+                        Some(equality),
+                    )) => {
+                        if index >= cases.len() {
+                            return Err(NativeExecutorError::Host(
+                                "resumed switch case index is unavailable".into(),
+                            ));
+                        }
+                        return super::call_suspension::begin_switch_truth(
+                            state,
+                            index,
+                            discriminant,
+                            equality,
+                        );
+                    }
+                    Some((
+                        TerminatorReadyStage::SwitchTruth {
+                            index,
+                            discriminant,
+                            truth,
+                        },
+                        None,
+                    )) => {
+                        if index >= cases.len() {
+                            return Err(NativeExecutorError::Host(
+                                "resumed switch truth index is unavailable".into(),
+                            ));
+                        }
+                        if truth {
+                            return take_edge(state, &cases[index].1, index as u32, None, None);
+                        }
+                        (index + 1, discriminant)
+                    }
+                    Some(_) => {
+                        return Err(NativeExecutorError::Host(
+                            "native switch resumed with another terminator stage".into(),
+                        ));
+                    }
+                    None => {
+                        let value = state.arena.get(value_for(state, *discriminant)?)?.clone();
+                        let rooted = runmat_runtime::execution::RootedValue::new(value).map_err(
+                            |error| NativeExecutorError::from(error.into_runtime_error()),
+                        )?;
+                        (0, rooted)
+                    }
+                };
+            if let Some((case, _)) = cases.get(index) {
+                // Read this case only after the previous equality and truth
+                // completions reconciled workspace effects.
+                let case = state.arena.get(value_for(state, *case)?)?.clone();
+                return super::call_suspension::begin_switch_equality(
+                    state,
+                    index,
+                    discriminant,
+                    case,
+                );
             }
             take_edge(state, otherwise, cases.len() as u32, None, None)
         }
@@ -476,29 +529,34 @@ fn execute_terminator(
             body,
             exit,
         } => {
-            if !state.has_for_loop(block) {
-                let source = state.arena.get(value_for(state, *iterable)?)?.clone();
-                let iterator = super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::iteration::ForColumnIterator::new(source),
-                    "for iterable capture",
-                )
-                .finish(state)?;
-                state.start_for_loop(block, body.target, iterator);
+            match super::call_suspension::take_completed_terminator(state)?
+                .map(super::call_suspension::TerminatorReady::into_parts)
+            {
+                Some((
+                    super::call_suspension::TerminatorReadyStage::ForCapture(iterator),
+                    None,
+                )) => {
+                    state.start_for_loop(block, body.target, *iterator);
+                }
+                Some((super::call_suspension::TerminatorReadyStage::ForNext(next), None)) => {
+                    if let Some(reference) = next {
+                        state.observe_loop_backedge(terminator.site.point);
+                        return take_edge(state, body, 0, Some((*binding, reference)), None);
+                    }
+                    return take_edge(state, exit, 1, None, None);
+                }
+                Some(_) => {
+                    return Err(NativeExecutorError::Host(
+                        "native for-loop resumed with another terminator stage".into(),
+                    ));
+                }
+                None if !state.has_for_loop(block) => {
+                    let source = state.arena.get(value_for(state, *iterable)?)?.clone();
+                    return super::call_suspension::begin_for_capture(state, source);
+                }
+                None => {}
             }
-            let runtime = state.runtime.clone();
-            let next = {
-                let active = state.for_loop_mut(block)?;
-                super::sync::complete(&runtime, active.iterator.next(), "for iteration")
-            }
-            .finish(state)?;
-            if let Some(value) = next {
-                state.observe_loop_backedge(terminator.site.point);
-                let reference = state.arena.insert(value);
-                take_edge(state, body, 0, Some((*binding, reference)), None)
-            } else {
-                take_edge(state, exit, 1, None, None)
-            }
+            super::call_suspension::begin_for_next(state, block)
         }
         NativeTerminatorKind::TryCatch {
             try_edge,
@@ -557,7 +615,7 @@ fn execute_terminator(
             let value = state.arena.get(value_for(state, *future)?)?.clone();
             match super::awaiting::begin(state, value, resume.clone())? {
                 super::awaiting::AwaitStart::Ready(value) => {
-                    let value = state.arena.insert(value);
+                    let value = value.with_owned(|value| state.arena.insert(value));
                     take_edge(state, resume, 0, None, Some(value))
                 }
                 super::awaiting::AwaitStart::Suspended {
@@ -702,7 +760,9 @@ pub(super) fn resume_await(
     state: &mut HostState,
     completion: super::awaiting::AwaitCompletion,
 ) -> NativeExecutorResult<runmat_runtime::native::NativeSiteRequest> {
-    let value = state.arena.insert(completion.value);
+    let value = completion
+        .value
+        .with_owned(|value| state.arena.insert(value));
     let target = completion.edge.target;
     let _ = take_edge(state, &completion.edge, 0, None, Some(value))?;
     state.resume_request_for_block(target)

@@ -17,7 +17,10 @@ fn args(name: &str, source: &GpuTensorHandle) -> Vec<Value> {
     }
 }
 
-fn call(name: &str, args: &[Value]) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn call(
+    name: &str,
+    args: &[Value],
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async_with_outputs(
         name,
         args,
@@ -223,10 +226,10 @@ fn valid_native_spectral_outputs_preserve_caller_intent_and_signal_precision() {
                 let _scope = ThreadProviderGuard::set(Some(provider));
                 let source = input(provider, element, explicit);
                 let output = call(name, &args(name, &source.handle)).unwrap();
-                let Value::OutputList(values) = output else {
+                let Value::OutputList(values) = output.value() else {
                     panic!("spectral output list")
                 };
-                for value in &values {
+                for value in values {
                     let Value::GpuTensor(handle) = value else {
                         panic!("resident output")
                     };
@@ -244,7 +247,7 @@ fn valid_native_spectral_outputs_preserve_caller_intent_and_signal_precision() {
                 }
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
                 assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
-                drop(values);
+                drop(output);
                 provider.assert_retired();
                 assert_eq!(source.probe.retirements(), 0);
             }

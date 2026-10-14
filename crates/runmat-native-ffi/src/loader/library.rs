@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use runmat_process_host::private_bytes::PrivateByteLease;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,11 +18,17 @@ pub enum LoaderError {
         #[source]
         source: libloading::Error,
     },
+    #[error("native library {path} does not belong to private byte root {root}")]
+    PrivateByteRoot { path: PathBuf, root: PathBuf },
+    #[error("native library {path} already has a private byte owner")]
+    PrivateByteOwnerAlreadySet { path: PathBuf },
 }
 
 pub struct LoadedLibrary {
     path: PathBuf,
     library: libloading::Library,
+    // Drop the loaded handle before releasing its private on-disk bytes.
+    _private_byte_lease: Option<PrivateByteLease>,
 }
 
 #[derive(Debug)]
@@ -50,7 +57,36 @@ impl LoadedLibrary {
                 path: path.clone(),
                 source,
             })?;
-        Ok(Self { path, library })
+        Ok(Self {
+            path,
+            library,
+            _private_byte_lease: None,
+        })
+    }
+
+    /// Bind exact private bytes before this library can escape into a pointer.
+    /// Raw user libraries outside a private root remain caller-owned.
+    pub fn attach_private_byte_lease(
+        &mut self,
+        lease: PrivateByteLease,
+    ) -> Result<(), LoaderError> {
+        if !self.path.starts_with(lease.path()) {
+            return Err(LoaderError::PrivateByteRoot {
+                path: self.path.clone(),
+                root: lease.path().to_path_buf(),
+            });
+        }
+        if let Some(existing) = self._private_byte_lease.as_ref() {
+            return if existing.path() == lease.path() {
+                Ok(())
+            } else {
+                Err(LoaderError::PrivateByteOwnerAlreadySet {
+                    path: self.path.clone(),
+                })
+            };
+        }
+        self._private_byte_lease = Some(lease);
+        Ok(())
     }
 
     pub fn path(&self) -> &Path {

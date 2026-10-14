@@ -5,7 +5,7 @@ use runmat_value::{IntegerStorage, Value};
 use runmat_vm::Instr;
 use test_helpers::{compile_source, interpret};
 
-fn execute_program(source: &str) -> Vec<Value> {
+fn execute_program(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }

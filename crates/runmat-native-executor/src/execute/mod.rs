@@ -26,5 +26,6 @@ pub use workspace::{NativeWorkspaceBinding, NativeWorkspaceInput, NativeWorkspac
 
 pub use executor::{
     NativeExecution, NativeExecutor, NativeExecutorOptions, NativeInvocationRequest,
+    RootedNativeExecution,
 };
 pub use invocation::{NativeInvocation, NativeInvocationStep};

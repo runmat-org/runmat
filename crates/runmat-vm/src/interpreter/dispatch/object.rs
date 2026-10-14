@@ -1,3 +1,4 @@
+use runmat_runtime::execution::RootedValues;
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -23,6 +24,14 @@ pub(super) fn write_sequence_register(
     stack.extend(values);
     register.assignment = Some(super::SequenceRegister { start, len });
     Ok(())
+}
+
+pub(super) fn write_rooted_sequence_register(
+    stack: &mut Vec<Value>,
+    register: &mut super::SequenceState,
+    values: RootedValues,
+) -> Result<(), RuntimeError> {
+    values.with_owned_values(|values| write_sequence_register(stack, register, values))
 }
 
 pub(super) fn take_sequence_register(
@@ -109,8 +118,23 @@ pub async fn dispatch_object(
 
 fn frame_access(
     bytecode: &crate::bytecode::Bytecode,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::object::protocol::ObjectAccessContext, RuntimeError> {
     match bytecode.active_function {
+        Some(_)
+            if runtime.selected_object_class().is_some()
+                && bytecode.active_class_method_owner.is_some() =>
+        {
+            runmat_runtime::object::protocol::ObjectAccessContext::from_selected_method_frame(
+                bytecode
+                    .active_class_method_owner
+                    .as_ref()
+                    .expect("selected method owner checked"),
+                runtime
+                    .selected_object_class()
+                    .expect("selected class facts checked"),
+            )
+        }
         Some(function) => runmat_runtime::object::protocol::ObjectAccessContext::from_method_frame(
             bytecode.active_class_method_owner.as_ref(),
             &runmat_types::CallableIdentity::BoundFunction(function),
@@ -132,7 +156,7 @@ async fn execute_subscript_path(
     steps: &[crate::bytecode::BytecodeSubscriptStep],
     read: SubscriptPathReadContext,
     state: &mut super::SequenceState,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<RootedValues, RuntimeError> {
     let mut argument_roots = Vec::new();
     let (root, path, _roots) = if let [crate::bytecode::BytecodeSubscriptStep::DottedInvoke {
         member,
@@ -156,13 +180,16 @@ async fn execute_subscript_path(
                         runtime,
                     )
                     .await?;
-                    argument_roots.push(crate::call::root_values(&values)?);
-                    groups.push(
-                        values
-                            .into_iter()
-                            .map(ObjectIndexComponent::Value)
-                            .collect(),
-                    );
+                    values.with_owned_values(|values| {
+                        argument_roots.push(crate::call::root_values(&values)?);
+                        groups.push(
+                            values
+                                .into_iter()
+                                .map(ObjectIndexComponent::Value)
+                                .collect(),
+                        );
+                        Ok::<_, RuntimeError>(())
+                    })?;
                 }
             }
         }
@@ -226,7 +253,10 @@ async fn execute_subscript_path(
             runtime, root, path, request,
         )
         .await?;
-    sequence.resolve(read.selection, sequence_context)
+    sequence.with_owned_sequence(|sequence| {
+        RootedValues::new(sequence.resolve(read.selection, sequence_context)?)
+            .map_err(|error| error.into_runtime_error())
+    })
 }
 
 fn materialize_subscript_path(

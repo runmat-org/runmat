@@ -3859,6 +3859,7 @@ impl AccelProvider for InProcessProvider {
             requested_peak_buffer_bytes: 0,
             clear_commands: 0,
             map_callbacks: 0,
+            wgpu_compute_query: None,
         })
     }
 

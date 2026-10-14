@@ -3,6 +3,7 @@ mod inference;
 use super::super::decomposition::{integer_capabilities::*, integer_inputs::*, signatures::*};
 use crate::*;
 pub const DECOMPOSITION_SUBSREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "decomposition.subsref",

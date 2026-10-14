@@ -235,8 +235,8 @@ fn callback_name(value: &Value) -> Option<String> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.clone()),
-        Value::BoundFunctionHandle { name, .. } => Some(name.clone()),
+        | Value::MethodFunctionHandle(name) => Some(name.name().to_owned()),
+        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
         Value::Closure(closure) => Some(closure.function_name.clone()),
         _ => None,
     }

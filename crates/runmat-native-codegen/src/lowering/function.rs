@@ -7,12 +7,15 @@ use runmat_types::{CapabilitySet, EffectSet, ProgramFunctionId, RegionContract};
 
 pub(super) fn lower_function(
     function: ProgramFunctionId,
+    input: &super::assembly::NativeLoweringInput<'_>,
     metadata: &runmat_mir::MirFunctionMetadata,
+    retained_callable_parent: Option<runmat_hir::FunctionId>,
     body: &runmat_mir::MirBody,
-    analysis: &runmat_mir::analysis::AnalysisStore,
-    binding_names: Option<&BTreeMap<runmat_types::BindingId, String>>,
-    regions: &[RegionContract],
 ) -> NativeCodegenResult<NativeFunction> {
+    let assembly = input.mir;
+    let analysis = input.analysis;
+    let binding_names = input.binding_names;
+    let regions = &input.manifest.regions;
     body.validate_expression_regions().map_err(|error| {
         NativeCodegenError::new(
             "native.lowering.expression_region",
@@ -53,6 +56,96 @@ pub(super) fn lower_function(
                 binding: local.binding,
                 name,
                 kind: NativeLocalKind::from(&local.kind),
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
+    let projection = assembly
+        .lexical_environment_projection(runmat_hir::FunctionId(function.0 as usize))
+        .map_err(|error| {
+            NativeCodegenError::new("native.lowering.lexical_environment", error)
+                .at_function(function)
+        })?;
+    let mut lexical_bindings = locals
+        .iter()
+        .filter_map(|local| {
+            let binding = local.binding?;
+            let kind = if projection.owned.contains(&binding) {
+                NativeLexicalBindingKind::Owned
+            } else if projection.inherited.contains(&binding) {
+                NativeLexicalBindingKind::Inherited
+            } else if projection.transit.contains(&binding) {
+                NativeLexicalBindingKind::Transit
+            } else {
+                return None;
+            };
+            Some(NativeLexicalBinding {
+                binding,
+                local: local.id,
+                kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    lexical_bindings.sort_by_key(|entry| entry.binding);
+    if lexical_bindings.len()
+        != projection.owned.len() + projection.inherited.len() + projection.transit.len()
+    {
+        return Err(NativeCodegenError::new(
+            "native.lowering.lexical_environment",
+            "shared lexical binding has no unique Native IR local",
+        )
+        .at_function(function));
+    }
+    let inherited_storage_bindings = projection
+        .inherited_storage
+        .iter()
+        .map(|entry| {
+            let local = locals
+                .iter()
+                .find(|local| local.binding == Some(entry.binding))
+                .ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "inherited canonical storage has no Native IR local",
+                    )
+                    .at_function(function)
+                })?;
+            let name = local.name.clone().ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.lowering.inherited_storage",
+                    "inherited canonical storage has no semantic name",
+                )
+                .at_function(function)
+            })?;
+            let owner_function = assembly
+                .functions
+                .get(&entry.owner)
+                .map(|metadata| metadata.name.0.clone())
+                .ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "inherited canonical storage owner is absent",
+                    )
+                    .at_function(function)
+                })?;
+            let kind = match entry.kind {
+                runmat_mir::MirInheritedStorageKind::Global => NativeInheritedStorageKind::Global,
+                runmat_mir::MirInheritedStorageKind::Persistent => {
+                    NativeInheritedStorageKind::Persistent
+                }
+            };
+            Ok(NativeInheritedStorageBinding {
+                binding: entry.binding,
+                local: local.id,
+                owner: ProgramFunctionId(u32::try_from(entry.owner.0).map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "canonical storage owner exceeds portable function identity",
+                    )
+                    .at_function(function)
+                })?),
+                name,
+                owner_function,
+                kind,
             })
         })
         .collect::<NativeCodegenResult<Vec<_>>>()?;
@@ -241,11 +334,25 @@ pub(super) fn lower_function(
         source: metadata.source,
         name: metadata.name.0.clone(),
         source_role: metadata.source_role,
+        lexical_parent: retained_callable_parent
+            .map(|parent| {
+                u32::try_from(parent.0).map(ProgramFunctionId).map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.lowering.lexical_parent",
+                        "lexical parent exceeds portable function identity",
+                    )
+                    .at_function(function)
+                })
+            })
+            .transpose()?,
         class_method_owner: metadata.class_method_owner.clone(),
         capabilities,
         abi,
         argument_validations,
         locals,
+        lexical_bindings,
+        inherited_storage_bindings,
+        creates_lexical_environment: projection.creates_activation,
         entry: checked_block(entry.id, function)?,
         blocks,
         expected_sites,

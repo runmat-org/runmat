@@ -4,7 +4,10 @@
 
 use super::{derive_semantic_fusion_instruction_windows, derive_semantic_fusion_metadata};
 use crate::bytecode::{
-    program::{FunctionFusionCertificateIndex, FunctionFusionScaffold, FunctionPrivateSlotLayout},
+    program::{
+        selected_function_windows, FunctionFusionCertificateIndex, FunctionFusionScaffold,
+        FunctionPrivateSlotLayout,
+    },
     FunctionBytecode, FusionCandidateGroup, Instr,
 };
 use runmat_mir::analysis::FusionStageFactStatus;
@@ -39,9 +42,9 @@ pub(super) fn derive_function_scaffold(
             projection.portable_origin,
         ),
     };
-    scaffold
-        .valid_for(function, instructions, instr_spans)
-        .then_some(scaffold)
+    (scaffold.valid_for(function, instructions, instr_spans)
+        && scaffold.source_windows_match(instructions, instr_spans))
+    .then_some(scaffold)
 }
 
 /// The MIR run finder intentionally sees structural signals before selected
@@ -182,7 +185,7 @@ pub(super) fn certify_compiled_function_scaffold(
         }
         accepted
     };
-    body.fusion_scaffold = assemble_scaffold(body, accepted, &original);
+    body.fusion_scaffold = assemble_scaffold(body, accepted, &original)?;
     body.validate_fusion_scaffold()
 }
 
@@ -267,20 +270,17 @@ fn assemble_scaffold(
     body: &FunctionBytecode,
     mut candidates: Vec<FusionCandidateGroup>,
     original: &FunctionFusionScaffold,
-) -> Option<FunctionFusionScaffold> {
+) -> Result<Option<FunctionFusionScaffold>, String> {
     if candidates.is_empty() {
-        return None;
+        return Ok(None);
     }
     for (id, candidate) in candidates.iter_mut().enumerate() {
         candidate.id = id;
     }
-    let mut windows = derive_semantic_fusion_instruction_windows(
-        &body.instructions,
-        &body.instr_spans,
-        &candidates,
-    );
-    windows.sort_by_key(|window| (window.span.start, window.span.end));
-    Some(FunctionFusionScaffold {
+    let index = FunctionFusionCertificateIndex::new(body)?;
+    let windows =
+        selected_function_windows(body, &index, &candidates, original.private_layout.as_ref())?;
+    Ok(Some(FunctionFusionScaffold {
         signal_count: candidates
             .iter()
             .map(|candidate| candidate.signal_count)
@@ -288,7 +288,7 @@ fn assemble_scaffold(
         candidates,
         windows,
         private_layout: original.private_layout.clone(),
-    })
+    }))
 }
 
 #[cfg(test)]

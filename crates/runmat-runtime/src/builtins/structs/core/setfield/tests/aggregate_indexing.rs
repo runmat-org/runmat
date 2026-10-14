@@ -64,7 +64,7 @@ fn setfield_cell_parentheses_assignment_uses_column_major_subscripts() {
         ],
     )
     .expect("cell parenthesis assignment");
-    let Value::Struct(root) = updated else {
+    let Value::Struct(root) = updated.value() else {
         panic!("expected structure result");
     };
     let Value::Cell(cell) = root.fields.get("samples").expect("samples field") else {

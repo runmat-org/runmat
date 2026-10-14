@@ -4,7 +4,7 @@ use crate::interaction::{push_queued_response, InteractionResponse};
 #[path = "tests/retry.rs"]
 mod retry;
 
-fn input_with_empty_prompt() -> BuiltinResult<Value> {
+fn input_with_empty_prompt() -> BuiltinResult<crate::execution::RootedValue> {
     futures::executor::block_on(input_builtin(vec![Value::String(String::new())]))
 }
 
@@ -44,7 +44,7 @@ fn string_mode_returns_char_row() {
 fn empty_response_returns_empty_tensor() {
     push_queued_response(Ok(InteractionResponse::Line("   ".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
         other => panic!("expected empty tensor, got {other:?}"),
     }
@@ -57,7 +57,7 @@ fn matrix_literal_parses_without_eval_hook() {
     // therefore no recursive interpret() call) is needed.
     push_queued_response(Ok(InteractionResponse::Line("[1 2 3]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::Tensor(t) => {
             assert_eq!(t.rows(), 1);
             assert_eq!(t.cols(), 3);
@@ -121,7 +121,7 @@ fn bool_input_is_case_insensitive() {
 fn column_vector_parses_without_eval_hook() {
     push_queued_response(Ok(InteractionResponse::Line("[1;2;3]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::Tensor(t) => {
             assert_eq!(t.rows(), 3);
             assert_eq!(t.cols(), 1);
@@ -136,7 +136,7 @@ fn column_vector_parses_without_eval_hook() {
 fn logical_row_vector_parses_as_logical_array() {
     push_queued_response(Ok(InteractionResponse::Line("[true false]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::LogicalArray(la) => {
             assert_eq!(la.shape, vec![1, 2]);
             assert_eq!(la.data, vec![1, 0]);
@@ -150,7 +150,7 @@ fn logical_row_vector_parses_as_logical_array() {
 fn logical_column_vector_parses_as_logical_array() {
     push_queued_response(Ok(InteractionResponse::Line("[true; false]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::LogicalArray(la) => {
             assert_eq!(la.shape, vec![2, 1]);
             assert_eq!(la.data, vec![1, 0]);
@@ -164,7 +164,7 @@ fn logical_column_vector_parses_as_logical_array() {
 fn mixed_logical_and_numeric_coerces_to_double_tensor() {
     push_queued_response(Ok(InteractionResponse::Line("[true 2.0]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::Tensor(t) => {
             assert_eq!(t.rows(), 1);
             assert_eq!(t.cols(), 2);
@@ -181,7 +181,7 @@ fn matrix_2x2_column_major_layout() {
     // Column-major storage: data = [1, 3, 2, 4] (not the row-major [1, 2, 3, 4]).
     push_queued_response(Ok(InteractionResponse::Line("[1 2; 3 4]".into())));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::Tensor(t) => {
             assert_eq!(t.rows(), 2);
             assert_eq!(t.cols(), 2);
@@ -202,7 +202,7 @@ fn logical_matrix_2x2_column_major_layout() {
         "[true false; false true]".into(),
     )));
     let value = input_with_empty_prompt().expect("input");
-    match value {
+    match value.value() {
         Value::LogicalArray(la) => {
             assert_eq!(la.shape, vec![2, 2]);
             // column-major: col 0 first ([true, false]), then col 1 ([false, true])

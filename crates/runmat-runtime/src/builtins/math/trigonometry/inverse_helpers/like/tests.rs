@@ -53,8 +53,8 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                 ],
             ))
             .unwrap();
-            let expected_values = match expected {
-                Value::Complex(real, imag) => vec![(real, imag)],
+            let expected_values = match expected.value() {
+                Value::Complex(real, imag) => vec![(*real, *imag)],
                 Value::ComplexTensor(tensor) => tensor.materialize_f64(),
                 other => panic!("complex host oracle: {other:?}"),
             };
@@ -83,7 +83,7 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                 ];
                 let result =
                     block_on(crate::dispatcher::call_builtin_async("atan", &arguments)).unwrap();
-                let Value::GpuTensor(output) = result else {
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("resident complex result")
                 };
                 assert_eq!(output.device_id(), prototype.device_id());
@@ -93,7 +93,7 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                     Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
                 );
                 assert_eq!(
-                    runmat_accelerate_api::handle_precision(&output),
+                    runmat_accelerate_api::handle_precision(output),
                     Some(if single {
                         runmat_accelerate_api::ProviderPrecision::F32
                     } else {
@@ -110,7 +110,12 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                     other => panic!("complex device result: {other:?}"),
                 };
                 assert_eq!(actual_values, expected_values);
-                output.release().unwrap();
+                result.with_owned(|value| {
+                    let Value::GpuTensor(output) = value else {
+                        unreachable!()
+                    };
+                    output.release().unwrap();
+                });
                 if let Some(source) = source {
                     assert!(block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
                         source.clone()
@@ -437,7 +442,7 @@ fn trigonometric_like_actual_calls_free_replaced_intermediates_and_retain_publis
                 usize::from(!resident)
             );
             drop(state);
-            let gathered = block_on(gpu_helpers::gather_value_async(&result)).unwrap();
+            let gathered = block_on(gpu_helpers::gather_value_async(result.value())).unwrap();
             let Value::Tensor(tensor) = gathered else {
                 panic!("numeric result")
             };
@@ -451,9 +456,11 @@ fn trigonometric_like_actual_calls_free_replaced_intermediates_and_retain_publis
                 };
                 assert!((value - expected).abs() < 1e-12);
             }
-            if let Value::GpuTensor(result) = result {
-                result.release().unwrap();
-            }
+            result.with_owned(|value| {
+                if let Value::GpuTensor(result) = value {
+                    result.release().unwrap();
+                }
+            });
             borrowed_live(provider, &source, &prototype);
         }
     }

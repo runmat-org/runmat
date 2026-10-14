@@ -16,7 +16,7 @@ fn getfield_vector_index_selector_reads_typed_integer_storage_exactly() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
-    match result {
+    match result.value() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![20.0, 10.0]);
@@ -46,7 +46,7 @@ fn getfield_vector_index_preserves_typed_integer_target_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
-    match result {
+    match result.value() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(
@@ -79,7 +79,7 @@ fn getfield_vector_index_preserves_single_target_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
-    match result {
+    result.with_owned(|value| match value {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(
@@ -88,7 +88,7 @@ fn getfield_vector_index_preserves_single_target_storage() {
             );
         }
         other => panic!("expected tensor result, got {other:?}"),
-    }
+    });
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("logical index");
-    let Value::Tensor(tensor) = result else {
+    let Value::Tensor(tensor) = result.value() else {
         panic!("expected tensor result");
     };
     assert_eq!(tensor.shape(), &[1, 2]);
@@ -134,7 +134,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("short logical index");
-    assert_eq!(result, Value::Int(IntValue::U64(u64::MAX - 2)));
+    assert_eq!(result.value(), &Value::Int(IntValue::U64(u64::MAX - 2)));
 
     let values = Tensor::new_integer(
         IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX]),
@@ -151,7 +151,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("false logical index");
-    let Value::Tensor(tensor) = result else {
+    let Value::Tensor(tensor) = result.value() else {
         panic!("expected empty typed tensor");
     };
     assert_eq!(tensor.shape(), &[1, 0]);

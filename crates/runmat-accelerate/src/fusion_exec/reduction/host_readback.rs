@@ -3,14 +3,14 @@
 use super::super::FusionExecutionRequest;
 use super::super::ResolvedReductionProgram;
 use runmat_accelerate_api::{
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, NumericElementType,
     checked_numeric_download_host_payload_bytes, handle_provenance, same_provider_instance,
+    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, NumericElementType,
 };
 use runmat_execution::{
     CandidateOutputPresentation, CandidateResourceDemand, ProviderReadbackDemand,
     ProviderReadbackDemands, ResourceByteBound,
 };
-use runmat_runtime::{RuntimeError, build_runtime_error};
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_types::{FusionReductionOperation, NumericClass};
 use runmat_value::Value;
 use std::collections::HashSet;

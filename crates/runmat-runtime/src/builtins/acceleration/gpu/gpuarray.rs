@@ -1426,7 +1426,7 @@ pub(crate) mod tests {
             .expect("explicit gpuArray");
             let output =
                 crate::call_builtin("plus", &[input.clone(), input]).expect("direct provider plus");
-            let Value::GpuTensor(handle) = &output else {
+            let Value::GpuTensor(handle) = output.value() else {
                 panic!("expected resident plus output");
             };
             assert!(runmat_accelerate_api::handle_is_explicit(handle));
@@ -1434,10 +1434,10 @@ pub(crate) mod tests {
                 handle.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
-            assert_eq!(
-                crate::call_builtin("isgpuarray", &[output]).expect("isgpuarray"),
-                Value::Bool(true)
-            );
+            let is_resident = output.with_owned(|output| {
+                crate::call_builtin("isgpuarray", &[output]).expect("isgpuarray")
+            });
+            assert_eq!(is_resident.value(), &Value::Bool(true));
         });
     }
 

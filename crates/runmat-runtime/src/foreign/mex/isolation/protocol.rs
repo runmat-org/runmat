@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 pub const MEX_HOST_PROTOCOL: &str = "runmat.mex-host";
 pub const MEX_HOST_SECRET_ENV: &str = "RUNMAT_EXTENSION_HOST_SECRET";
 pub const MEX_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_EXTENSION_SNAPSHOT_ROOT";
-pub const MEX_HOST_SCHEMA_VERSION: u16 = 3;
+pub const MEX_HOST_SCHEMA_VERSION: u16 = 6;
 pub const MEX_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const MEX_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const MEX_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
 pub const MEX_HOST_MAX_ARGUMENTS: usize = 4096;
 pub const MEX_HOST_MAX_OUTPUTS: usize = 4096;
-pub const MEX_HOST_MAX_CALLBACK_DEPTH: u16 = 64;
+pub const MEX_HOST_MAX_CALLBACK_DEPTH: u16 = super::super::ancestry::MAX_CALLBACK_DEPTH;
 pub const MEX_HOST_MAX_TEXT_BYTES: usize = MEX_HOST_MAX_MESSAGE_BYTES as usize;
 pub const MEX_HOST_MAX_DIAGNOSTICS: usize = 4096;
 
@@ -58,6 +58,8 @@ impl MexValueTransfer {
 #[serde(deny_unknown_fields)]
 pub struct MexInvocationRequest {
     pub request_id: u64,
+    /// Logical callback ancestors already active in the issuing invocation.
+    pub callback_ancestry_depth: u16,
     pub module_path: String,
     pub tier: MexBinaryTier,
     pub api: Option<MexApi>,
@@ -70,6 +72,7 @@ impl MexInvocationRequest {
         if self.request_id == 0 {
             return Err(MexProtocolError::new("request id must be nonzero"));
         }
+        validate_callback_ancestry(self.callback_ancestry_depth)?;
         validate_path(&self.module_path)?;
         if self.arguments.len() > MEX_HOST_MAX_ARGUMENTS {
             return Err(MexProtocolError::new(
@@ -95,6 +98,7 @@ pub enum DriverMessage {
     Clear {
         request_id: u64,
         module_path: String,
+        callback_ancestry_depth: u16,
     },
     Shutdown {
         request_id: u64,
@@ -109,8 +113,10 @@ impl DriverMessage {
             Self::Clear {
                 request_id,
                 module_path,
+                callback_ancestry_depth,
             } => {
                 validate_identity(*request_id, "request")?;
+                validate_callback_ancestry(*callback_ancestry_depth)?;
                 validate_path(module_path)
             }
             Self::Shutdown { request_id } => validate_identity(*request_id, "request"),
@@ -125,6 +131,7 @@ pub enum HostMessage {
     Invocation(MexInvocationResult),
     Lifecycle(MexLifecycleResult),
     Callback(MexCallbackRequest),
+    CallbackCancelled(MexCallbackCancellation),
     OriginReleased { request_id: u64 },
 }
 
@@ -134,6 +141,7 @@ impl HostMessage {
             Self::Invocation(result) => result.validate(),
             Self::Lifecycle(result) => result.validate(),
             Self::Callback(request) => request.validate(),
+            Self::CallbackCancelled(cancelled) => cancelled.validate(),
             Self::OriginReleased { request_id } => validate_identity(*request_id, "request"),
         }
     }
@@ -196,19 +204,23 @@ pub struct MexLifecycleResult {
 impl MexLifecycleResult {
     fn validate(&self) -> Result<(), MexProtocolError> {
         validate_identity(self.request_id, "request")?;
-        if let Err(error) = &self.outcome {
-            error.validate()?;
+        match &self.outcome {
+            Ok(MexLifecycleOutcome::Retired {
+                diagnostic: Some(error),
+            })
+            | Err(error) => error.validate()?,
+            Ok(_) => {}
         }
         Ok(())
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MexLifecycleOutcome {
     Cleared,
     Retained,
-    Shutdown,
+    Retired { diagnostic: Option<MexWireError> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,17 +232,37 @@ pub struct MexCallbackRequest {
     pub operation: MexCallbackOperation,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MexCallbackCancellation {
+    pub request_id: u64,
+    pub callback_id: u64,
+}
+
+impl MexCallbackCancellation {
+    pub fn validate(&self) -> Result<(), MexProtocolError> {
+        validate_identity(self.request_id, "request")?;
+        validate_identity(self.callback_id, "callback")
+    }
+}
+
 impl MexCallbackRequest {
     pub fn validate(&self) -> Result<(), MexProtocolError> {
         validate_identity(self.request_id, "request")?;
         validate_identity(self.callback_id, "callback")?;
-        if self.depth == 0 || self.depth > MEX_HOST_MAX_CALLBACK_DEPTH {
+        if self.depth == 0 || validate_callback_ancestry(self.depth).is_err() {
             return Err(MexProtocolError::new(
                 "callback depth exceeds the protocol limit",
             ));
         }
         self.operation.validate()
     }
+}
+
+fn validate_callback_ancestry(depth: u16) -> Result<(), MexProtocolError> {
+    super::super::MexCallbackAncestry::from_wire(depth)
+        .ok_or_else(|| MexProtocolError::new("callback ancestry exceeds the protocol limit"))
+        .map(|_| ())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -472,9 +504,42 @@ mod tests {
     use runmat_process_host::shared_memory::SharedMemoryKind;
 
     #[test]
+    fn retired_shutdown_diagnostic_is_validated_and_old_schema_is_refused() {
+        let diagnostic = MexWireError {
+            identifier: "RunMat:MEX:AtExit".into(),
+            message: "at-exit callback reported failure after unload".into(),
+            dependency: None,
+        };
+        let record = HostMessage::Lifecycle(MexLifecycleResult {
+            request_id: 3,
+            outcome: Ok(MexLifecycleOutcome::Retired {
+                diagnostic: Some(diagnostic),
+            }),
+        });
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let decoded: HostMessage = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, record);
+        decoded.validate().unwrap();
+
+        let current = runmat_process_host::ipc::HostHandshake::new(
+            MEX_HOST_PROTOCOL,
+            MEX_HOST_SCHEMA_VERSION,
+            MEX_HOST_MAX_MESSAGE_BYTES,
+        );
+        let old = runmat_process_host::ipc::HostHandshake::new(
+            MEX_HOST_PROTOCOL,
+            MEX_HOST_SCHEMA_VERSION - 1,
+            MEX_HOST_MAX_MESSAGE_BYTES,
+        );
+        assert!(runmat_process_host::ipc::negotiate_handshake(&current, &old).is_err());
+        assert!(serde_json::from_slice::<MexLifecycleOutcome>(br#""shutdown""#).is_err());
+    }
+
+    #[test]
     fn invocation_contract_round_trips_canonically() {
         let message = DriverMessage::Invoke(MexInvocationRequest {
             request_id: 7,
+            callback_ancestry_depth: 0,
             module_path: "/tmp/add.mex".into(),
             tier: MexBinaryTier::RunMatExact,
             api: Some(MexApi::R2018a),
@@ -490,6 +555,22 @@ mod tests {
             panic!("expected invocation");
         };
         request.validate().unwrap();
+
+        let nested = MexInvocationRequest {
+            callback_ancestry_depth: 63,
+            ..request.clone()
+        };
+        let nested_wire = serde_json::to_vec(&DriverMessage::Invoke(nested.clone())).unwrap();
+        let nested_decoded: DriverMessage = serde_json::from_slice(&nested_wire).unwrap();
+        assert_eq!(nested_decoded, DriverMessage::Invoke(nested));
+        nested_decoded.validate().unwrap();
+        DriverMessage::Clear {
+            request_id: 8,
+            module_path: "/tmp/add.mex".into(),
+            callback_ancestry_depth: 63,
+        }
+        .validate()
+        .unwrap();
 
         let value =
             MexValueTransfer::Inline(ValuePayload::Inline(Box::new(InlineValue::U64(u64::MAX))));
@@ -517,12 +598,29 @@ mod tests {
             assert_eq!(decoded, HostMessage::Callback(callback));
             decoded.validate().unwrap();
         }
+
+        let cancelled = MexCallbackCancellation {
+            request_id: 7,
+            callback_id: 2,
+        };
+        let message = HostMessage::CallbackCancelled(cancelled.clone());
+        let bytes = serde_json::to_vec(&message).unwrap();
+        let decoded: HostMessage = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, message);
+        decoded.validate().unwrap();
+        assert!(MexCallbackCancellation {
+            request_id: 7,
+            callback_id: 0,
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
     fn protocol_rejects_unbounded_or_ambiguous_records() {
         let request = MexInvocationRequest {
             request_id: 0,
+            callback_ancestry_depth: 0,
             module_path: String::new(),
             tier: MexBinaryTier::RunMatCompatibleIsolated,
             api: None,
@@ -530,6 +628,14 @@ mod tests {
             requested_outputs: 0,
         };
         assert!(request.validate().is_err());
+
+        let over_limit = MexInvocationRequest {
+            request_id: 1,
+            callback_ancestry_depth: MEX_HOST_MAX_CALLBACK_DEPTH + 1,
+            module_path: "/tmp/a.mex".into(),
+            ..request.clone()
+        };
+        assert!(over_limit.validate().is_err());
 
         let callback = MexCallbackRequest {
             request_id: 1,
@@ -544,8 +650,16 @@ mod tests {
         let clear = DriverMessage::Clear {
             request_id: 0,
             module_path: "/tmp/a.mex".into(),
+            callback_ancestry_depth: 0,
         };
         assert!(clear.validate().is_err());
+        assert!(DriverMessage::Clear {
+            request_id: 1,
+            module_path: "/tmp/a.mex".into(),
+            callback_ancestry_depth: MEX_HOST_MAX_CALLBACK_DEPTH + 1,
+        }
+        .validate()
+        .is_err());
 
         let invalid_snapshot = MexValueTransfer::Snapshot(SharedMemoryDescriptor {
             kind: SharedMemoryKind::FileBacked,

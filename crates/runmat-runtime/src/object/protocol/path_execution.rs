@@ -4,8 +4,9 @@ use std::pin::Pin;
 
 use runmat_value::Value;
 
-use super::{resolve_object_protocol, ObjectProtocol, ProtocolResolution};
+use super::{resolve_object_protocol, ObjectProtocol};
 use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
 use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
@@ -26,7 +27,7 @@ pub fn read_subscript_path<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
     Box::pin(async move {
         let request = SubscriptReadRequest::require_single(access);
@@ -41,7 +42,7 @@ pub fn read_subscript_path_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
     Box::pin(async move {
         let request = SubscriptReadRequest::require_single(access);
@@ -56,7 +57,7 @@ pub fn read_subscript_path_with_access(
     base: Value,
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>>>> {
     Box::pin(async move {
         let sequence = read_subscript_path_sequence(
             None,
@@ -75,7 +76,7 @@ pub fn read_subscript_path_with_access_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let sequence = read_subscript_path_sequence(
             Some(runtime),
@@ -93,7 +94,7 @@ pub fn read_subscript_path_sequence_with_access(
     base: Value,
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
-) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>>>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>>>> {
     read_subscript_path_sequence(None, base, path, request, None)
 }
 
@@ -102,7 +103,7 @@ pub fn read_subscript_path_sequence_with_access_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
-) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
     read_subscript_path_sequence(Some(runtime), base, path, request, None)
 }
 
@@ -112,13 +113,13 @@ fn read_subscript_path_sequence<'a>(
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
     Box::pin(async move {
+        let _base_root = crate::execution::RootedValueLease::for_values(std::iter::once(&base))
+            .map_err(|error| error.into_runtime_error())?;
         match resolve_object_protocol(&base, ObjectProtocol::Subsref, &request.access)? {
-            ProtocolResolution::Method(method) => {
-                invoke_prepared_subsref(runtime, base, path, method, &request).await
-            }
-            ProtocolResolution::DefaultIndexing => {
+            Some(method) => invoke_prepared_subsref(runtime, base, path, method, &request).await,
+            None => {
                 read_default_steps(
                     runtime,
                     base,
@@ -137,7 +138,7 @@ pub fn assign_subscript_path<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     assign_subscript_path_with_context(None, base, path, values, caller_function_name)
 }
 
@@ -147,7 +148,7 @@ pub fn assign_subscript_path_in_context<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     assign_subscript_path_with_context(Some(runtime), base, path, values, caller_function_name)
 }
 
@@ -157,11 +158,15 @@ fn assign_subscript_path_with_context<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
+        let _inputs_root = crate::execution::RootedValueLease::for_values(
+            std::iter::once(&base).chain(values.iter()),
+        )
+        .map_err(|error| error.into_runtime_error())?;
         let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
         match resolve_object_protocol(&base, ObjectProtocol::Subsasgn, &access)? {
-            ProtocolResolution::Method(method) => match runtime {
+            Some(method) => match runtime {
                 Some(runtime) => {
                     super::invoke_resolved_object_assignment_in_context(
                         runtime, &method, base, path, values,
@@ -170,7 +175,7 @@ fn assign_subscript_path_with_context<'a>(
                 }
                 None => super::invoke_resolved_object_assignment(&method, base, path, values).await,
             },
-            ProtocolResolution::DefaultIndexing => {
+            None => {
                 assign_default_steps(
                     runtime,
                     base,
@@ -186,22 +191,30 @@ fn assign_subscript_path_with_context<'a>(
 
 fn read_default_steps<'a>(
     runtime: Option<&'a RuntimeContext>,
-    mut base: Value,
+    base: Value,
     mut steps: VecDeque<ObjectSubscript>,
     request: SubscriptReadRequest,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
     Box::pin(async move {
+        let mut base = RootedValue::new(base).map_err(|error| error.into_runtime_error())?;
         while !steps.is_empty() {
-            if let ProtocolResolution::Method(method) =
-                resolve_object_protocol(&base, ObjectProtocol::Subsref, &request.access)?
+            if let Some(method) =
+                resolve_object_protocol(base.value(), ObjectProtocol::Subsref, &request.access)?
             {
                 let remaining = ObjectSubscriptPath::new(steps.into_iter().collect())?;
-                return invoke_prepared_subsref(runtime, base, remaining, method, &request).await;
+                return invoke_prepared_subsref(
+                    runtime,
+                    base.value().clone(),
+                    remaining,
+                    method,
+                    &request,
+                )
+                .await;
             }
             if let Some(sequence) = dotted_invoke::try_execute(
                 runtime,
-                base.clone(),
+                base.value().clone(),
                 &mut steps,
                 &request,
                 caller_function_name,
@@ -221,12 +234,21 @@ fn read_default_steps<'a>(
                 )
             })?;
             if steps.is_empty() {
-                return read_default_step_sequence(runtime, base, &step, caller_function_name)
-                    .await;
+                return read_default_step_sequence(
+                    runtime,
+                    base.value().clone(),
+                    &step,
+                    caller_function_name,
+                )
+                .await;
             }
-            base = read_default_step(runtime, base, &step, caller_function_name).await?;
+            base = read_default_step(runtime, base.value().clone(), &step, caller_function_name)
+                .await?;
         }
-        ValueSequence::single(base).map_err(crate::sequence::sequence_error_to_runtime)
+        base.try_map_owned(
+            |base| ValueSequence::single(base).map_err(crate::sequence::sequence_error_to_runtime),
+            |error| error.into_runtime_error(),
+        )
     })
 }
 
@@ -236,7 +258,7 @@ async fn invoke_prepared_subsref(
     path: ObjectSubscriptPath,
     method: super::ResolvedObjectMethod,
     request: &SubscriptReadRequest,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let requested_outputs = match request.known_requested_outputs()? {
         Some(count) => count,
         None => match runtime {
@@ -263,7 +285,7 @@ async fn invoke_prepared_subsref(
             }
         },
     };
-    let resolution = ProtocolResolution::Method(method);
+    let resolution = Some(method);
     match runtime {
         Some(runtime) => {
             super::invoke_resolved_object_protocol_in_context(
@@ -281,15 +303,20 @@ async fn invoke_prepared_subsref(
     }
 }
 
-fn resolve_single(sequence: ValueSequence) -> Result<Value, RuntimeError> {
-    let mut values = sequence.resolve(
-        runmat_types::SequenceUse::RequireSingle,
-        SequenceResolutionContext::default(),
-    )?;
-    values.pop().ok_or_else(|| {
-        semantic_error(
-            "CommaSeparatedListRequiresSingleValue",
-            "subscript read requires one value",
-        )
-    })
+fn resolve_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeError> {
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values = sequence.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                SequenceResolutionContext::default(),
+            )?;
+            values.pop().ok_or_else(|| {
+                semantic_error(
+                    "CommaSeparatedListRequiresSingleValue",
+                    "subscript read requires one value",
+                )
+            })
+        },
+        |error| error.into_runtime_error(),
+    )
 }

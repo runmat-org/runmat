@@ -562,23 +562,28 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
                 )
             };
             let value = call_function(self.function, vec![arg]).await?;
-            let value = crate::builtins::math::optim::common::prepare_floating_value(
-                NAME,
-                value,
-                &FSOLVE_CALLBACK_NUMERIC_EXTENSION,
-                &FSOLVE_RESIDENT_EXTENSION,
-                "function residual",
-            )
-            .await?;
-            let (shape, scalar) = match &value {
-                Value::Num(_) | Value::Int(_) | Value::Bool(_) => (vec![1, 1], true),
-                Value::Tensor(tensor) => (tensor.shape().to_vec(), false),
-                Value::LogicalArray(array) => (array.shape.clone(), false),
-                _ => (vec![1, 1], false),
-            };
+            let (shape, scalar, residual) = value
+                .with_owned_async(|value| async move {
+                    let value = crate::builtins::math::optim::common::prepare_floating_value(
+                        NAME,
+                        value,
+                        &FSOLVE_CALLBACK_NUMERIC_EXTENSION,
+                        &FSOLVE_RESIDENT_EXTENSION,
+                        "function residual",
+                    )
+                    .await?;
+                    let (shape, scalar) = match &value {
+                        Value::Num(_) | Value::Int(_) | Value::Bool(_) => (vec![1, 1], true),
+                        Value::Tensor(tensor) => (tensor.shape().to_vec(), false),
+                        Value::LogicalArray(array) => (array.shape.clone(), false),
+                        _ => (vec![1, 1], false),
+                    };
+                    let residual = value_to_real_vector(NAME, value).await?;
+                    Ok::<_, crate::RuntimeError>((shape, scalar, residual))
+                })
+                .await?;
             self.residual_shape = Some(shape);
             self.residual_scalar = scalar;
-            let residual = value_to_real_vector(NAME, value).await?;
             if residual.is_empty() {
                 Err(fsolve_error_with_detail(
                     &FSOLVE_ERROR_INVALID_INPUT,
@@ -703,9 +708,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(x * x + 1.0)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x * x + 1.0,
+                    ))
+                })
             },
         )));
         let _outputs = crate::output_count::push_output_count(Some(3));
@@ -738,14 +745,16 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     _ => panic!("expected tensor input"),
                 };
-                crate::sequence::single_value_future(async move {
-                    Ok(Value::Tensor(
-                        Tensor::new(
-                            vec![x[0] * x[0] + x[1] * x[1] - 4.0, x[0] * x[1] - 1.0],
-                            vec![2, 1],
-                        )
-                        .unwrap(),
-                    ))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::Tensor(
+                            Tensor::new(
+                                vec![x[0] * x[0] + x[1] * x[1] - 4.0, x[0] * x[1] - 1.0],
+                                vec![2, 1],
+                            )
+                            .unwrap(),
+                        ),
+                    )
                 })
             }),
         ));
@@ -792,10 +801,10 @@ mod tests {
                 };
                 assert_eq!(shape, vec![1, 2]);
                 seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
-                crate::sequence::single_value_future(async move {
-                    Ok(Value::Tensor(
-                        Tensor::new(vec![x[0] - 3.0, x[1] - 4.0], shape).unwrap(),
-                    ))
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::Tensor(Tensor::new(vec![x[0] - 3.0, x[1] - 4.0], shape).unwrap()),
+                    )
                 })
             },
         )));
@@ -838,11 +847,16 @@ mod tests {
                 };
                 assert_eq!(shape, vec![2, 2]);
                 seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
-                crate::sequence::single_value_future(async move {
-                    Ok(Value::Tensor(
-                        Tensor::new(vec![x[0] - 1.0, x[1] - 2.0, x[2] - 3.0, x[3] - 4.0], shape)
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::Tensor(
+                            Tensor::new(
+                                vec![x[0] - 1.0, x[1] - 2.0, x[2] - 3.0, x[3] - 4.0],
+                                shape,
+                            )
                             .unwrap(),
-                    ))
+                        ),
+                    )
                 })
             },
         )));
@@ -881,7 +895,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 3.0)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x - 3.0,
+                    ))
+                })
             },
         )));
         drop(entry);

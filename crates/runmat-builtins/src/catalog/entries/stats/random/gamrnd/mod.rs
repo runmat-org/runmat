@@ -194,6 +194,7 @@ const EFFECTS: [EffectKind; 3] = [
     EffectKind::MayThrow,
 ];
 pub const GAMRND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "gamrnd" },
     category: "stats/random",

@@ -9,6 +9,62 @@ pub(crate) fn elementwise_chunk_capacity(workgroup_size: u32) -> Option<u64> {
     })
 }
 
+/// Physical queue shape of the shared permutation kernel. Nonempty work
+/// submits a no-op compute warmup, a noncompute flush, then one compute pass
+/// per chunk; empty work submits nothing. QuerySets belong only to compute
+/// encoders, whereas the existing fence tracks every queue submission.
+#[cfg(feature = "wgpu")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PermutationSubmissionGeometry {
+    pub chunk_capacity: u64,
+    pub dispatches: u32,
+    pub compute_encoders: u32,
+    pub queue_submissions: u32,
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn permutation_submission_geometry(
+    storage_elements: u64,
+    workgroup_size: u32,
+) -> Option<PermutationSubmissionGeometry> {
+    if storage_elements > u64::from(u32::MAX) {
+        return None;
+    }
+    let chunk_capacity = elementwise_chunk_capacity(workgroup_size)?;
+    let dispatches = u32::try_from(storage_elements.div_ceil(chunk_capacity)).ok()?;
+    let (compute_encoders, queue_submissions) = if dispatches == 0 {
+        (0, 0)
+    } else {
+        (dispatches.checked_add(1)?, dispatches.checked_add(2)?)
+    };
+    Some(PermutationSubmissionGeometry {
+        chunk_capacity,
+        dispatches,
+        compute_encoders,
+        queue_submissions,
+    })
+}
+
+#[cfg(all(test, feature = "wgpu"))]
+#[test]
+fn permutation_geometry_separates_empty_warmup_flush_and_chunks() {
+    let capacity = elementwise_chunk_capacity(512).unwrap();
+    for (elements, expected) in [(0, (0, 0, 0)), (1, (1, 2, 3)), (capacity + 1, (2, 3, 4))] {
+        let geometry = permutation_submission_geometry(elements, 512).unwrap();
+        assert_eq!(
+            (
+                geometry.dispatches,
+                geometry.compute_encoders,
+                geometry.queue_submissions
+            ),
+            expected
+        );
+        assert_eq!(geometry.chunk_capacity, capacity);
+    }
+    assert!(permutation_submission_geometry(1, 0).is_none());
+    assert!(permutation_submission_geometry(u64::from(u32::MAX) + 1, 512).is_none());
+}
+
 /// The native fill kernel uses the scalar workgroup and the same per-dispatch
 /// workgroup limit as other WGPU elementwise constructors.
 #[cfg(feature = "wgpu")]

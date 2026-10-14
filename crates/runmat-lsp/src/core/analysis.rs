@@ -395,7 +395,7 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
 
     // Canonical catalog entries are executor-neutral and remain available even
     // when no runtime implementation is linked into the language server.
-    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&ident) {
+    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(&ident) {
         return Some(Hover {
             contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
                 kind: lsp_types::MarkupKind::Markdown,
@@ -696,7 +696,7 @@ pub fn signature_help_at(
 ) -> Option<SignatureHelp> {
     let offset = position_to_offset(_text, _position);
     let name = qualified_call_name_at_offset(&_analysis.tokens, offset)?;
-    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
+    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(&name) {
         if let Some(labels) = docs::catalog_signature_labels(entry) {
             let signatures = labels
                 .into_iter()
@@ -1356,7 +1356,7 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
         }
         items.push(function_completion(func));
     }
-    for entry in runmat_builtins::builtin_catalog_entries() {
+    for entry in runmat_builtins::public_builtin_catalog_entries() {
         if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal {
             continue;
         }
@@ -1365,7 +1365,7 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
     }
     for alias in runmat_builtins::builtin_catalog_aliases() {
         let Some(entry) =
-            runmat_builtins::builtin_catalog_primary_entry_by_name(alias.canonical.name)
+            runmat_builtins::public_builtin_catalog_entry_by_name(alias.canonical.name)
         else {
             continue;
         };

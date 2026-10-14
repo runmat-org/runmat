@@ -1,11 +1,12 @@
 use super::{
     ContainersMapStorage, DynamicPropertyDef, GraphicsReceiverRef, MemmapReceiverAuthority,
-    MemmapReceiverState,
+    MemmapReceiverState, SelectedObjectClassFacts,
 };
 use crate::{ForeignRef, Value};
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 // Clone and structural equality include native payloads. Public handle
 // equality remains identity-based through HandleRef, not this comparison.
@@ -14,6 +15,7 @@ pub struct ObjectInstance {
     pub class_name: ClassIdentity,
     pub properties: HashMap<String, Value>,
     pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
+    selected_class: Option<Rc<SelectedObjectClassFacts>>,
     native_payload: Option<Box<NativeObjectPayload>>,
 }
 
@@ -33,6 +35,8 @@ enum NativeObjectPayload {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectPersistencePayloadKind {
     PlainValue,
+    SelectedClass,
+    MixedSelectedNative,
     ContainersMap,
     ForeignHostControl,
     DatasetAuthority,
@@ -62,6 +66,12 @@ impl Trace for NativeObjectPayload {
 
 impl ObjectInstance {
     pub fn persistence_payload_kind(&self) -> ObjectPersistencePayloadKind {
+        if self.selected_class.is_some() && self.native_payload.is_some() {
+            return ObjectPersistencePayloadKind::MixedSelectedNative;
+        }
+        if self.selected_class.is_some() {
+            return ObjectPersistencePayloadKind::SelectedClass;
+        }
         match self.native_payload.as_deref() {
             None => ObjectPersistencePayloadKind::PlainValue,
             Some(NativeObjectPayload::ContainersMap(_)) => {
@@ -101,8 +111,27 @@ impl ObjectInstance {
             class_name: class_name.into(),
             properties: HashMap::new(),
             dynamic_properties: None,
+            selected_class: None,
             native_payload: None,
         }
+    }
+
+    /// Preserve a selected constructor's receiver facts with value copies and
+    /// handle-object GC targets. This is storage, not issuance authority:
+    /// method invocation must still validate its exact typed binding/owner.
+    pub fn with_selected_class(mut self, selected: Rc<SelectedObjectClassFacts>) -> Option<Self> {
+        if self.class_name != *selected.class()
+            || self.selected_class.is_some()
+            || self.native_payload.is_some()
+        {
+            return None;
+        }
+        self.selected_class = Some(selected);
+        Some(self)
+    }
+
+    pub fn selected_class(&self) -> Option<&Rc<SelectedObjectClassFacts>> {
+        self.selected_class.as_ref()
     }
 
     pub fn with_containers_map_payload(mut self, storage: ContainersMapStorage) -> Self {
@@ -261,7 +290,7 @@ impl ObjectInstance {
         self.native_payload.is_some()
     }
 
-    pub fn for_each_native_value(&self, mut visitor: impl FnMut(&Value)) {
+    pub fn for_each_native_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
         match self.native_payload.as_deref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.for_each_value(&mut visitor);

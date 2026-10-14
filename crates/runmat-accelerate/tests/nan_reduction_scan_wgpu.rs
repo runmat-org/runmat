@@ -133,11 +133,143 @@ fn retire(handle: GpuTensorHandle) {
     assert!(weak.acquire().is_none());
 }
 
+async fn verify_logical_nan_mask_global_any_all_ranks(
+    provider: &WgpuProvider,
+    precision: ProviderPrecision,
+) {
+    for (shape, values, expected_any, expected_all) in [
+        (vec![], vec![0.0], 0.0, 0.0),
+        (vec![], vec![f64::NAN], 1.0, 1.0),
+        (vec![4], vec![0.0, 1.0, f64::NAN, 2.0], 1.0, 0.0),
+        (vec![2, 1, 2], vec![0.0, 1.0, 2.0, 3.0], 0.0, 0.0),
+        (vec![2, 1, 2], vec![1.0, 2.0, 3.0, 4.0], 0.0, 1.0),
+        (vec![2, 1, 2], vec![0.0, 1.0, f64::NAN, 3.0], 1.0, 0.0),
+        (vec![0, 2, 3], vec![], 0.0, 1.0),
+    ] {
+        let input = match precision {
+            ProviderPrecision::F32 => {
+                let values = values.iter().map(|value| *value as f32).collect::<Vec<_>>();
+                provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data: HostNumericDataView::F32(&values),
+                        shape: &shape,
+                        storage: GpuTensorStorage::Real,
+                    })
+                    .unwrap()
+            }
+            ProviderPrecision::F64 => provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F64(&values),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap(),
+        };
+        let mask = provider.logical_isnan(&input).unwrap();
+        assert!(mask.view().is_logical());
+        assert_eq!(mask.shape(), shape);
+        let any = provider.reduce_any(&mask, false).await.unwrap();
+        assert_eq!(any.shape(), [1, 1]);
+        assert!(any.view().is_logical());
+        assert!(!any.shares_allocation_with(&mask));
+        assert!(!any.shares_allocation_with(&input));
+        assert_series(&read_values(provider, &any).await, &[expected_any]);
+        let all_include = provider.reduce_all(&input, false).await.unwrap();
+        let all_omit = provider.reduce_all(&input, true).await.unwrap();
+        for all in [&all_include, &all_omit] {
+            assert_eq!(all.shape(), [1, 1]);
+            assert!(all.view().is_logical());
+            assert!(!all.shares_allocation_with(&input));
+            assert_series(&read_values(provider, all).await, &[expected_all]);
+        }
+        retire(any);
+        retire(all_include);
+        retire(all_omit);
+        retire(mask);
+        input.allocation_lease().validate_live().unwrap();
+        retire(input);
+    }
+    let nan_and_zero = match precision {
+        ProviderPrecision::F32 => provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[f32::NAN, 0.0]),
+                shape: &[2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap(),
+        ProviderPrecision::F64 => provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&[f64::NAN, 0.0]),
+                shape: &[2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap(),
+    };
+    let include = provider.reduce_any(&nan_and_zero, false).await.unwrap();
+    let omit = provider.reduce_any(&nan_and_zero, true).await.unwrap();
+    assert!(include.view().is_logical());
+    assert!(omit.view().is_logical());
+    assert_series(&read_values(provider, &include).await, &[1.0]);
+    assert_series(&read_values(provider, &omit).await, &[0.0]);
+    retire(include);
+    retire(omit);
+    retire(nan_and_zero);
+
+    let input = match precision {
+        ProviderPrecision::F32 => provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[0.0_f32, 1.0, 2.0, 3.0]),
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap(),
+        ProviderPrecision::F64 => provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&[0.0_f64, 1.0, 2.0, 3.0]),
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap(),
+    };
+    let any = provider.reduce_any_dim(&input, 0, false).await.unwrap();
+    let all = provider.reduce_all_dim(&input, 0, false).await.unwrap();
+    let product = provider.reduce_prod_dim(&input, 0).await.unwrap();
+    assert_eq!(any.shape(), [1, 2]);
+    assert_eq!(all.shape(), [1, 2]);
+    assert!(any.view().is_logical());
+    assert!(all.view().is_logical());
+    assert!(!product.view().is_logical());
+    assert_series(&read_values(provider, &product).await, &[0.0, 6.0]);
+    // Sum has a double-accumulation contract even for Single inputs. Its
+    // unsupported F32-owner route must remain a pre-effect refusal; product
+    // independently exercises numeric registration on both owner precisions.
+    match precision {
+        ProviderPrecision::F32 => {
+            let error = provider.reduce_sum_dim(&input, 0).await.unwrap_err();
+            assert!(error.is_unsupported());
+            assert!(!error.is_after_effect());
+        }
+        ProviderPrecision::F64 => {
+            let sum = provider.reduce_sum_dim(&input, 0).await.unwrap();
+            assert!(!sum.view().is_logical());
+            assert_series(&read_values(provider, &sum).await, &[1.0, 5.0]);
+            retire(sum);
+        }
+    }
+    assert_series(&read_values(provider, &any).await, &[1.0, 1.0]);
+    assert_series(&read_values(provider, &all).await, &[0.0, 1.0]);
+    retire(any);
+    retire(all);
+    retire(product);
+    retire(input);
+}
+
 async fn verify_reduction_and_scan_nan_policy(
     provider: &WgpuProvider,
     precision: ProviderPrecision,
 ) {
     assert_eq!(provider.precision(), precision);
+    verify_logical_nan_mask_global_any_all_ranks(provider, precision).await;
     let input = upload_edge_values(provider, precision);
     let direction = ProviderScanDirection::Forward;
     let include = ProviderNanMode::Include;

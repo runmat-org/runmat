@@ -160,4 +160,11 @@ impl StructArray {
         let shape = self.shape.clone();
         (self.into_elements(), shape)
     }
+
+    /// Consume the validated column storage in its visible field-major order.
+    /// This is the traversal order of `try_map_values_async` and preserves
+    /// effect order when a caller owns an iterative transformation.
+    pub fn into_field_major_parts(self) -> (Vec<(String, Vec<Value>)>, Vec<usize>) {
+        (self.fields.into_iter().collect(), self.shape)
+    }
 }

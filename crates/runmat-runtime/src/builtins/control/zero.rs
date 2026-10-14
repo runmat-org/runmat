@@ -111,7 +111,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::Tensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected real zeros");
         };
         assert_eq!(zeros.shape(), &[2, 1]);
@@ -135,7 +138,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::ComplexTensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::ComplexTensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected complex zeros");
         };
         assert_eq!(zeros.shape(), &[2, 1]);
@@ -160,7 +166,10 @@ mod tests {
             &[Value::Num(5.0), Value::Num(2.0)],
         ))
         .expect("tf");
-        let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::Tensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected real empty column");
         };
         assert_eq!(zeros.shape(), &[0, 1]);

@@ -14,7 +14,8 @@ pub const FFTSHIFT_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All integer classes are reordered exactly with class, shape, and complexity preserved.",
+        notes:
+            "All integer classes are reordered exactly with class, shape, and complexity preserved.",
     },
 ];
 pub const FFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [

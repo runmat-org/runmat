@@ -72,6 +72,7 @@ const fn entry(
     extensions: &'static [BuiltinExtensionDescriptor],
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "datetime/business-days",

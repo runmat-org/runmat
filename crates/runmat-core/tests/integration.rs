@@ -645,7 +645,7 @@ fn test_trnd_integer_arguments_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts typed-integer trnd arguments");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value.as_ref() else {
             panic!("expected size vector");
         };
         assert_eq!(shape.materialize_f64(), vec![2.0, 3.0]);
@@ -679,7 +679,7 @@ fn test_db_nonfloating_inputs_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts nonfloating db inputs");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value.as_ref() else {
             panic!("expected size vector");
         };
         assert_eq!(shape.materialize_f64(), vec![1.0, 4.0]);
@@ -717,7 +717,7 @@ fn test_delaunaytri_integer_extensions_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts typed-integer DelaunayTri coordinates");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(indices)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(indices)) = outcome.value.as_ref() else {
             panic!("expected nearest-neighbor index tensor");
         };
         assert_eq!(indices.materialize_f64(), vec![1.0]);
@@ -749,7 +749,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         )
         .expect("fractional linspace count executes");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value.as_ref() else {
             panic!("expected linspace tensor")
         };
         assert_eq!(values.shape(), &[1, 3]);
@@ -761,7 +761,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         )
         .expect("NaN linspace count executes");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value.as_ref() else {
             panic!("expected scalar NaN tensor")
         };
         assert_eq!(values.shape(), &[1, 1]);
@@ -788,7 +788,7 @@ fn test_number_theory_and_remainder_real_domain_match_documented_forms() {
         )
         .expect("gcd integer array and scalar double execute");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value.as_ref() else {
             panic!("expected gcd tensor")
         };
         assert_eq!(
@@ -919,7 +919,7 @@ fn test_spawn_handle_is_consumed_after_await() {
             }
             Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
             Ok(exec) => {
-                if let Some(err) = exec.error {
+                if let Some(err) = &exec.error {
                     assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
                 } else {
                     let second =

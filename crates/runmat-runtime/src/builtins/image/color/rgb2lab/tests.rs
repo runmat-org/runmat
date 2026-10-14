@@ -1,4 +1,16 @@
 use super::*;
+
+// Terminal test projection: the color result is numerical or resident GPU,
+// with no GC-managed child that could outlive the owning completion.
+async fn rgb2lab_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rgb: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::rgb2lab_builtin(runtime, rgb, rest)
+        .await
+        .map(|owned| owned.with_owned(|value| value))
+}
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;
 use runmat_builtins::BuiltinIntegerOutputClassRule;

@@ -1,8 +1,10 @@
 use runmat_execution::identity::WorkerId;
+use runmat_execution::resource::Capability;
 use runmat_execution::state::PoolState;
 use runmat_execution::value::ValueRef;
 use runmat_execution::{CancellationReason, ExecutionScopeId, GangHandle, PoolId, TaskId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use crate::cancellation::EscalationPolicy;
 use crate::pool::{PoolSpec, ResizeRequest, WorkerSpec};
@@ -34,6 +36,11 @@ pub enum DriverCommand {
         parent: Option<ExecutionScopeId>,
     },
     CreatePool(PoolSpec),
+    /// Recompute the pool's software capability ceiling from its registered,
+    /// ready worker records. Callers may not provide capability bits here.
+    RefreshPoolCapabilities {
+        pool_id: PoolId,
+    },
     SetPoolState {
         pool_id: PoolId,
         state: PoolState,
@@ -43,6 +50,11 @@ pub enum DriverCommand {
         request: ResizeRequest,
     },
     RegisterWorker(WorkerSpec),
+    /// The backend has checked a binary-issued, session-bound readiness frame.
+    AdmitWorkerSoftwareCapabilities {
+        worker_id: WorkerId,
+        capabilities: BTreeSet<Capability>,
+    },
     ActivateWorker(WorkerId),
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
@@ -52,6 +64,11 @@ pub enum DriverCommand {
     /// partially registered task set.
     SubmitBatch(Vec<TaskSubmission>),
     BackendReport(BackendReport),
+    /// Cancel one accepted task without affecting sibling tasks in its scope.
+    CancelTask {
+        task_id: TaskId,
+        now_millis: u64,
+    },
     CancelScope {
         scope_id: ExecutionScopeId,
         reason: CancellationReason,

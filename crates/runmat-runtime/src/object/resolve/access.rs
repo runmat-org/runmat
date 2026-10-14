@@ -1,17 +1,22 @@
 use super::*;
 
-pub(super) fn mex(identifier: &str, message: &str) -> RuntimeError {
-    crate::runtime_error::semantic_error(identifier, message)
+pub(super) fn require_single_rooted_sequence(
+    sequence: RootedValueSequence,
+) -> Result<RootedValue, RuntimeError> {
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values = sequence.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                crate::sequence::SequenceResolutionContext::default(),
+            )?;
+            Ok(values.remove(0))
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
-pub(super) fn require_single_sequence(
-    sequence: runmat_value::ValueSequence,
-) -> Result<Value, RuntimeError> {
-    let mut values = sequence.resolve(
-        runmat_types::SequenceUse::RequireSingle,
-        crate::sequence::SequenceResolutionContext::default(),
-    )?;
-    Ok(values.remove(0))
+pub(super) fn mex(identifier: &str, message: &str) -> RuntimeError {
+    crate::runtime_error::semantic_error(identifier, message)
 }
 
 pub(super) fn caller_class_for_function(

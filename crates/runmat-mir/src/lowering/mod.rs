@@ -5,6 +5,8 @@ mod ctx;
 mod evaluation_order;
 mod expr;
 mod function;
+mod class_defaults;
+mod lexical_captures;
 mod place;
 mod stmt;
 

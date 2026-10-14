@@ -20,10 +20,16 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
         .context
         .expect("callback retains the invoking runtime");
     let outputs = invocation.requested_outputs;
-    let first = invocation.args.first().cloned();
+    let first = invocation
+        .args
+        .first()
+        .cloned()
+        .map(runmat_runtime::execution::RootedValue::new)
+        .transpose();
     Box::pin(async move {
+        let first = first.map_err(|error| error.into_runtime_error())?;
         CALLBACKS.with(|calls| calls.borrow_mut().push((runtime.local_identity(), outputs)));
-        if let Some(Value::Tensor(shape)) = first {
+        if let Some(Value::Tensor(shape)) = first.as_ref().map(|owner| owner.value()) {
             let dimensions: Vec<usize> = shape
                 .host_buffer()
                 .materialize_f64()
@@ -31,17 +37,21 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
                 .map(|size| size as usize)
                 .collect();
             let count = dimensions.iter().product();
-            return ValueSequence::single(Value::Tensor(
+            let sequence = ValueSequence::single(Value::Tensor(
                 Tensor::new(vec![0.25; count], dimensions).expect("fixture initializer shape"),
             ))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime);
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+            return runmat_runtime::execution::RootedValueSequence::new(sequence)
+                .map_err(|error| error.into_runtime_error());
         }
-        match outputs {
+        let sequence = match outputs {
             Some(2) => ValueSequence::comma_separated(vec![Value::Num(23.0), Value::Num(29.0)])
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
             _ => ValueSequence::single(Value::Num(23.0))
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
-        }
+        }?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -66,7 +76,7 @@ fn runtime() -> RuntimeContext {
     .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(SelectedCallback)))
 }
 
-fn training_layers(regression_output: bool) -> Value {
+fn training_layers(regression_output: bool) -> runmat_runtime::execution::RootedValue {
     let input = block_on(call_builtin_async("featureInputLayer", &[Value::Num(1.0)]))
         .expect("feature input");
     let dense = block_on(call_builtin_async(
@@ -78,15 +88,24 @@ fn training_layers(regression_output: bool) -> Value {
         ],
     ))
     .expect("dense layer with callback initializer");
-    let mut layers = vec![input, dense];
+    let mut layers = runmat_runtime::execution::RootedValuesBuilder::with_capacity(3);
+    layers.push_owned(input);
+    layers.push_owned(dense);
     if regression_output {
-        layers.push(block_on(call_builtin_async("regressionLayer", &[])).expect("regression"));
+        layers
+            .push_owned(block_on(call_builtin_async("regressionLayer", &[])).expect("regression"));
     }
-    let count = layers.len();
-    Value::Cell(CellArray::new(layers, count, 1).expect("layer column"))
+    let layers = layers.finish().expect("rooted layer batch");
+    let count = layers.values().len();
+    layers.with_owned_values(|layers| {
+        runmat_runtime::execution::RootedValue::new(Value::Cell(
+            CellArray::new(layers, count, 1).expect("layer column"),
+        ))
+        .expect("rooted layer column")
+    })
 }
 
-fn training_options() -> Value {
+fn training_options() -> runmat_runtime::execution::RootedValue {
     block_on(call_builtin_async(
         "trainingOptions",
         &[
@@ -196,7 +215,7 @@ fn dlupdate_nested_containers_reuse_one_scoped_runtime() {
         1,
     ))
     .expect("nested callback tree");
-    let Value::Cell(cell) = output else {
+    let Value::Cell(cell) = output.value() else {
         panic!("expected cell tree");
     };
     let Value::Struct(structure) = &cell.data[0] else {
@@ -253,14 +272,12 @@ fn unpolled_dlfeval_releases_its_runtime_and_callback_service() {
 fn dlnetwork_initializer_uses_selected_runtime_callback_once() {
     CALLBACKS.with(|calls| calls.borrow_mut().clear());
     let runtime = runtime();
-    let output = block_on(call_builtin_async_with_outputs_in_context(
-        &runtime,
-        "dlnetwork",
-        &[training_layers(false)],
-        1,
-    ))
+    let layers = training_layers(false);
+    let output = block_on(layers.with_owned_async(|layers| async {
+        call_builtin_async_with_outputs_in_context(&runtime, "dlnetwork", &[layers], 1).await
+    }))
     .expect("initialized network");
-    assert!(matches!(output, Value::Object(_)));
+    assert!(matches!(output.value(), Value::Object(_)));
     CALLBACKS.with(|calls| {
         assert_eq!(
             calls.borrow().as_slice(),
@@ -278,15 +295,24 @@ fn cancelled_runtime_rejects_both_trainers_before_initializer_effects() {
         let source = CancellationSource::new();
         let runtime = runtime().with_cancellation_token(source.token());
         source.cancel(CancellationReason::User);
-        let mut args = vec![
+        let layers = training_layers(name == "trainNetwork");
+        let options = training_options();
+        let mut owned_args = runmat_runtime::execution::RootedValuesBuilder::with_capacity(5);
+        let args = vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
-            training_layers(name == "trainNetwork"),
         ];
-        if name == "trainnet" {
-            args.push(Value::String("mse".into()));
+        for arg in args {
+            owned_args.push(arg).expect("root training input");
         }
-        args.push(training_options());
+        owned_args.push_owned(layers);
+        if name == "trainnet" {
+            owned_args
+                .push(Value::String("mse".into()))
+                .expect("root loss name");
+        }
+        owned_args.push_owned(options);
+        let args = owned_args.finish().expect("root training arguments");
         let bindings = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
         let [binding] = bindings.as_slice() else {
             panic!("{name} must have one canonical binding");
@@ -294,11 +320,10 @@ fn cancelled_runtime_rejects_both_trainers_before_initializer_effects() {
         // This invokes the registered implementation without entering a
         // thread-local runtime scope. Cancellation must come from the
         // invocation, before either callback or built-in RNG initializer.
-        let error = block_on((binding.implementation)(RuntimeBuiltinInvocation::new(
-            &args,
-            Some(runtime),
-            Some(1),
-        )))
+        let error = block_on(args.with_owned_values_async(|args| async move {
+            (binding.implementation)(RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(1)))
+                .await
+        }))
         .expect_err("cancelled training");
         assert_eq!(
             error.identifier(),

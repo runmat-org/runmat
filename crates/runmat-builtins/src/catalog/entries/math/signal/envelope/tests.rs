@@ -82,12 +82,10 @@ fn known_invalid_controls_and_shapes_cannot_claim_outputs() {
     ] {
         let result = infer(arguments, literals, outputs);
         assert!(!result.diagnostics.is_empty());
-        assert!(
-            result
-                .outputs
-                .iter()
-                .all(|output| output.kind == ValueKindFact::Unknown)
-        );
+        assert!(result
+            .outputs
+            .iter()
+            .all(|output| output.kind == ValueKindFact::Unknown));
     }
     let rank_three = infer(
         vec![numeric(
@@ -104,12 +102,10 @@ fn known_invalid_controls_and_shapes_cannot_claim_outputs() {
         1,
     );
     assert!(!symbolic_rank_three.diagnostics.is_empty());
-    assert!(
-        symbolic_rank_three
-            .outputs
-            .iter()
-            .all(|output| output.kind == ValueKindFact::Unknown)
-    );
+    assert!(symbolic_rank_three
+        .outputs
+        .iter()
+        .all(|output| output.kind == ValueKindFact::Unknown));
     let unknown_rank = infer(
         vec![numeric(NumericClass::Double, ShapeFact::Unknown)],
         vec![LiteralValue::Unknown],

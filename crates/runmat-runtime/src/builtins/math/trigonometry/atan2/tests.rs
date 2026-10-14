@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 const EPS: f64 = 1e-12;
 
 fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
-    block_on(super::atan2_builtin(y, x))
+    block_on(super::atan2_builtin(None, y, x)).map(|owned| owned.value().clone())
 }
 
 fn error_message(err: RuntimeError) -> String {

@@ -117,7 +117,15 @@ use runmat_value::{
 };
 
 fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(super::logical_builtin(value, rest))
+    // This test-only terminal projection is confined to logical's scalar,
+    // array, sparse-numeric, and external GPU outputs; it cannot export a
+    // managed GC child after the canonical owner retires.
+    block_on(super::logical_builtin(
+        crate::context::legacy::active(),
+        value,
+        rest,
+    ))
+    .map(|output| output.with_owned(|value| value))
 }
 
 fn assert_error_message(err: &crate::RuntimeError, expected: &str) {

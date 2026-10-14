@@ -65,8 +65,10 @@ fn pending_output_fixture(
             Some(control.presentation_outputs)
         );
         control.completed.set(control.completed.get() + 1);
-        ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
-            .map_err(crate::sequence::sequence_error_to_runtime)
+        let sequence = ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
+            .map_err(crate::sequence::sequence_error_to_runtime)?;
+        crate::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -98,7 +100,8 @@ fn controlled_call(
     requested_outputs: Option<usize>,
     presentation_outputs: usize,
     completed: Rc<Cell<usize>>,
-) -> ControlledCall<impl Future<Output = Result<Value, crate::RuntimeError>>> {
+) -> ControlledCall<impl Future<Output = Result<crate::execution::RootedValue, crate::RuntimeError>>>
+{
     let (reached_tx, reached_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     CONTROLS.with(|controls| {
@@ -166,7 +169,7 @@ fn pending_sibling_builtin_calls_keep_exact_output_projections() {
     second_release.send(()).unwrap();
     assert!(matches!(
         poll_once(second.as_mut()),
-        Poll::Ready(Ok(Value::Num(2.0)))
+        Poll::Ready(Ok(value)) if matches!(&*value, Value::Num(2.0))
     ));
     assert_eq!(completed.get(), 1);
     assert_eq!(crate::output_count::current_output_count(), None);
@@ -186,7 +189,7 @@ fn pending_sibling_builtin_calls_keep_exact_output_projections() {
     next_release.send(()).unwrap();
     assert!(matches!(
         poll_once(next.as_mut()),
-        Poll::Ready(Ok(Value::Num(1.0)))
+        Poll::Ready(Ok(value)) if matches!(&*value, Value::Num(1.0))
     ));
     assert_eq!(completed.get(), 2);
     assert_eq!(crate::output_count::current_output_count(), None);
@@ -228,7 +231,7 @@ fn pending_implicit_output_scope_stays_distinct_from_sibling_and_unscoped_calls(
     implicit_release.send(()).unwrap();
     assert!(matches!(
         poll_once(implicit.as_mut()),
-        Poll::Ready(Ok(Value::Num(0.0)))
+        Poll::Ready(Ok(value)) if matches!(&*value, Value::Num(0.0))
     ));
     assert_eq!(completed.get(), 1);
     assert_eq!(

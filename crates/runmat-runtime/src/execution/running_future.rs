@@ -1,7 +1,7 @@
 use crate::context::RuntimeContext;
-use crate::execution::ExecutionServiceError;
+use crate::execution::{ExecutionServiceError, RootedValueSequence};
 use runmat_execution::{CancellationReason, FutureHandle};
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 
 /// Owns exactly the service handle transitioned to Running by begin_await.
 /// Cancellation/abandonment never drains unrelated futures or sibling scopes.
@@ -24,7 +24,7 @@ impl RunningFutureLease {
 
     pub fn complete(
         &mut self,
-        result: Result<ValueSequence, ExecutionServiceError>,
+        result: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.runtime
             .execution()
@@ -77,7 +77,7 @@ mod tests {
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
             capabilities: Default::default(),
-            program: None,
+            program: crate::execution::DeferredProgram::Local,
         }
     }
 
@@ -102,7 +102,12 @@ mod tests {
             AwaitAction::ExecuteFuture { .. }
         ));
         let mut sibling = RunningFutureLease::new(runtime, sibling);
-        sibling.complete(Ok(ValueSequence::empty())).unwrap();
+        sibling
+            .complete(Ok(RootedValueSequence::new(
+                runmat_value::ValueSequence::empty(),
+            )
+            .unwrap()))
+            .unwrap();
         let handle = sibling.handle.clone();
         drop(sibling);
         assert!(matches!(

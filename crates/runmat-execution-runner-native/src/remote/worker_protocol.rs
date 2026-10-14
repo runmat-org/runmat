@@ -1,5 +1,7 @@
 use runmat_execution::identity::AttemptId;
+use runmat_execution::resource::Capability;
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
+use std::collections::BTreeSet;
 use tokio::sync::Mutex;
 
 use super::protocol::{
@@ -7,6 +9,12 @@ use super::protocol::{
 };
 use super::route::RemoteFrameRoute;
 use crate::{NativeExecutionError, NativeExecutionResult, ProgramProgress};
+
+/// Compiled support of this worker executable. Allocation requests and node
+/// inventory must never issue software capabilities on its behalf.
+pub(super) fn software_capabilities() -> BTreeSet<Capability> {
+    BTreeSet::from([Capability::GraphSelectedValuesV11])
+}
 
 pub(super) async fn reply(
     connection: &dyn RemoteFrameRoute,

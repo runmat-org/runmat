@@ -11,7 +11,34 @@ fn assert_nested_read(state: &mut HostState, expected: f64) {
         right_temps: vec![],
         right: MirOperand::Local(MirLocalId(0)),
     };
+    let request = runmat_runtime::native::NativeSiteRequest {
+        function: 0,
+        block: 0,
+        position: 0,
+        phase: runmat_runtime::native::NativeSitePhase::RVALUE,
+        ordinal: 0,
+        reserved: 0,
+    };
+    state.current_request = Some(request);
+    for _ in 0..2 {
+        state.begin_contextual_site(request).unwrap();
+        assert!(matches!(
+            operand::evaluate_rvalue(state, &nested, 1, None),
+            Err(NativeExecutorError::CallSuspended)
+        ));
+        let pending = state.pending_call.as_ref().unwrap();
+        let (continuation, generation) = (pending.continuation, pending.generation);
+        assert_eq!(
+            futures::executor::block_on(
+                call_suspension::complete(state, continuation, generation,)
+            )
+            .unwrap(),
+            request
+        );
+    }
+    state.begin_contextual_site(request).unwrap();
     let output = operand::evaluate_rvalue(state, &nested, 1, None).unwrap();
+    state.finish_contextual_site();
     assert_eq!(
         state.arena.get(output[0]).unwrap(),
         &Value::Bool(expected != 0.0)
@@ -60,7 +87,16 @@ fn ready_call_completion_reconciles_partial_writes_for_both_outcomes() {
         for fail in [false, true] {
             let mut state = omitted_input_state();
             let service = state.workspace.as_ref().unwrap().service();
-            let outcome = call_suspension::begin(
+            let request = runmat_runtime::native::NativeSiteRequest {
+                function: 0,
+                block: 0,
+                position: 0,
+                phase: runmat_runtime::native::NativeSitePhase::RVALUE,
+                ordinal: 0,
+                reserved: 0,
+            };
+            state.current_request = Some(request);
+            let outcome = call_suspension::begin_rooted_arguments(
                 &mut state,
                 None,
                 Box::pin(async move {
@@ -69,19 +105,32 @@ fn ready_call_completion_reconciles_partial_writes_for_both_outcomes() {
                         Err(runmat_runtime::runtime_error::semantic_error(
                             "ExpectedReadyMutationFailure",
                             "partial write then error",
-                        )
-                        .into())
+                        ))
                     } else {
-                        Ok(vec![Value::Bool(true)])
+                        runmat_runtime::execution::RootedValues::new(vec![Value::Bool(true)])
+                            .map_err(|error| error.into_runtime_error())
                     }
                 }),
             );
+            assert!(matches!(outcome, Err(NativeExecutorError::CallSuspended)));
+            missing_error(&mut state);
+            let pending = state.pending_call.as_ref().unwrap();
+            let (continuation, generation) = (pending.continuation, pending.generation);
+            let outcome = futures::executor::block_on(call_suspension::complete(
+                &mut state,
+                continuation,
+                generation,
+            ));
             if fail {
                 assert!(
                     matches!(outcome, Err(NativeExecutorError::Runtime(error)) if error.identifier() == Some("RunMat:ExpectedReadyMutationFailure"))
                 );
             } else {
-                assert_eq!(outcome.unwrap(), vec![Value::Bool(true)]);
+                assert_eq!(outcome.unwrap(), request);
+                assert_eq!(
+                    call_suspension::take_completed(&mut state, None).unwrap(),
+                    Some(vec![Value::Bool(true)])
+                );
             }
             assert_nested_read(&mut state, 9.0);
         }

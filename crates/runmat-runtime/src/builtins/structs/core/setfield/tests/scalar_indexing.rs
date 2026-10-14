@@ -23,7 +23,7 @@ fn setfield_index_selector_reads_typed_integer_storage_exactly() {
         ],
     )
     .expect("setfield");
-    match updated {
+    match updated.value() {
         Value::StructArray(array) => assert_eq!(
             array.get_linear(1).unwrap().fields.get("id"),
             Some(&Value::Int(IntValue::I32(42)))
@@ -65,7 +65,7 @@ fn setfield_scalar_assignment_reads_typed_integer_storage_exactly() {
     let logical_rhs =
         Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("logical rhs");
     let updated = run_setfield(
-        updated,
+        updated.value().clone(),
         vec![
             Value::from("mask"),
             Value::Cell(logical_index),
@@ -74,7 +74,7 @@ fn setfield_scalar_assignment_reads_typed_integer_storage_exactly() {
     )
     .expect("logical setfield");
 
-    match updated {
+    match updated.value() {
         Value::Struct(st) => {
             match st.fields.get("values").expect("values") {
                 Value::Tensor(tensor) => {
@@ -112,7 +112,7 @@ fn setfield_preserves_exact_integer_destination_storage() {
     )
     .expect("exact integer setfield");
 
-    let Value::Struct(root) = updated else {
+    let Value::Struct(root) = updated.value() else {
         panic!("expected struct");
     };
     let Value::Tensor(tensor) = root.fields.get("wide").expect("wide field") else {

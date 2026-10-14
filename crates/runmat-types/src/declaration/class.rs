@@ -44,6 +44,7 @@ pub struct MethodDeclaration {
     pub function: FunctionId,
     pub name: MethodName,
     pub is_static: bool,
+    pub role: crate::ClassMethodRole,
     pub attributes: MethodAttributes,
     pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,

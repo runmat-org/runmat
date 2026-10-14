@@ -4,7 +4,7 @@ use futures::executor::block_on;
 
 #[test]
 fn colon_cannot_define_an_undefined_member_destination_shape() {
-    let mut builder = SequenceDestinationBuilder::new(&Value::Num(0.0));
+    let mut builder = SequenceDestinationBuilder::new(&Value::Num(0.0)).expect("root destination");
     block_on(builder.push_step(
         AssignmentStepSpec::Parentheses {
             selectors: vec![ObjectIndexComponent::Colon],

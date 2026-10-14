@@ -108,11 +108,12 @@ pub(crate) fn noop_after_create(
     pending: &mut super::dispatch::observation::PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("warmup-noop-precompiled-enc"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("warmup-noop-precompiled-pass"),

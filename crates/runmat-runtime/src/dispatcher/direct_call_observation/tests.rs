@@ -5,7 +5,7 @@ use runmat_execution::{
     PlacementDecision, PlacementFeedback, PlacementInvalidation, PlacementPlanRequest,
     PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
 };
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
@@ -151,7 +151,7 @@ fn run(
     left: Value,
     right: Value,
     outputs: usize,
-) -> Result<ValueSequence, crate::RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     futures::executor::block_on(crate::call_builtin_sequence_async_with_outputs_in_context(
         runtime,
         "strcmp",
@@ -345,7 +345,7 @@ fn pending_after_admission(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeB
                 },
             );
         }
-        futures::future::pending::<Result<ValueSequence, crate::RuntimeError>>().await
+        futures::future::pending::<Result<crate::execution::RootedValueSequence, crate::RuntimeError>>().await
     })
 }
 

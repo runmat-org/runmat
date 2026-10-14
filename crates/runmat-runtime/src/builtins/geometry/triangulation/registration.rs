@@ -46,6 +46,7 @@ pub(super) fn ensure_registered() {
                     access: MemberAccess::Public,
                     function_name: format!("{DELAUNAY_TRI_CLASS}.{name}"),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }

@@ -5,44 +5,63 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use runmat_mex::{
-    DirectMexBoundaryHostServices, MexApi, MexInvocation, MexNativeInvocation, MxValueContext,
-};
+use runmat_mex::{MexApi, MexNativeInvocation, MxBoundaryCodec, MxValueContext};
+use runmat_process_host::ProcessGroupPlacement;
 use runmat_types::{CapabilityRequirement, ForeignCapability};
 use runmat_value::Value;
 
+use super::isolation::{in_isolated_callback, IsolatedMexRetirement};
+use super::RootedMexInvocation;
 use super::{
     native_lane::{NativeMexLane, NativeModuleLoadError},
     IsolatedMexClient, MexBinaryTier, MexIsolationPolicy, MexLifecycleOutcome, MexWireError,
     RuntimeMexHostServices, UnmanifestedMexPolicy,
 };
 use crate::context::ForeignCall;
-use crate::context::RuntimeContext;
+use crate::context::{LocalTaskCommandOrigin, RuntimeContext};
 use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
+mod isolated_client_slot;
+mod artifact_catalog;
 mod retained;
+mod token_root;
+
+pub use artifact_catalog::{MexArtifactExpectation, PreparedMexArtifactCatalog};
+use isolated_client_slot::IsolatedClientSlot;
+use token_root::RegisteredMxValueContext;
 
 #[derive(Clone)]
 struct InstalledMexArtifact {
     path: PathBuf,
-    identity: String,
+    identity: runmat_types::ForeignArtifactIdentity,
+    interop: runmat_types::InteropManifest,
 }
 
 /// Read-only name selection performed by the same owner that invokes MEX.
 /// An installed artifact precedes path discovery; no binary is loaded here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MexNameSelection {
-    Installed(PathBuf),
+    Installed {
+        path: PathBuf,
+        identity: runmat_types::ForeignArtifactIdentity,
+        interop: runmat_types::InteropManifest,
+    },
     SearchPath(crate::builtins::common::path_search::FileCandidate),
 }
 
 impl MexNameSelection {
     pub fn path(&self) -> &Path {
         match self {
-            Self::Installed(path) => path,
+            Self::Installed { path, .. } => path,
             Self::SearchPath(candidate) => candidate.path(),
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum MexResolutionScope {
+    SearchPath,
+    InstalledOnly,
 }
 
 /// Session-scoped owner of dynamically loaded MEX modules.
@@ -55,59 +74,186 @@ pub struct MexRuntimeSession {
     installed_modules: RefCell<HashMap<String, InstalledMexArtifact>>,
     native_lane: RefCell<Option<Rc<NativeMexLane>>>,
     native_modules: RefCell<HashSet<PathBuf>>,
-    native_values: RefCell<HashMap<PathBuf, Rc<MxValueContext>>>,
-    isolated: RefCell<HashMap<PathBuf, IsolatedMexClient>>,
+    native_values: RefCell<HashMap<PathBuf, Rc<RegisteredMxValueContext>>>,
+    isolated: RefCell<HashMap<PathBuf, Rc<IsolatedClientSlot>>>,
     active_isolated: RefCell<HashSet<PathBuf>>,
     isolated_ready: Arc<tokio::sync::Notify>,
     isolation_policy: RefCell<MexIsolationPolicy>,
-    shutdown_in_progress: Cell<bool>,
+    installed_byte_lease: RefCell<Option<runmat_process_host::private_bytes::PrivateByteLease>>,
+    shutdown_in_progress: Rc<Cell<bool>>,
+    abandoned: Cell<bool>,
+    inflight_operations: RefCell<Vec<crate::context::RuntimeLocalTaskLease>>,
+    process_group_placement: ProcessGroupPlacement,
+}
+
+/// Holds the MEX policy cell through a synchronous selected-owner publication.
+pub struct ReadyMexIsolationPolicy<'a> {
+    policy: std::cell::RefMut<'a, MexIsolationPolicy>,
+    next: MexIsolationPolicy,
+}
+
+pub struct ReadyMexArtifactCatalog<'a> {
+    catalog: std::cell::RefMut<'a, HashMap<String, InstalledMexArtifact>>,
+    lease: std::cell::RefMut<'a, Option<runmat_process_host::private_bytes::PrivateByteLease>>,
+    next: PreparedMexArtifactCatalog,
+}
+
+impl ReadyMexArtifactCatalog<'_> {
+    pub fn commit(mut self) {
+        *self.catalog = self.next.modules;
+        *self.lease = self.next.byte_lease;
+    }
+}
+
+impl ReadyMexIsolationPolicy<'_> {
+    pub fn commit(mut self) {
+        *self.policy = self.next;
+    }
+}
+
+pub enum MexSessionRetirement {
+    Retained(RuntimeError),
+    Retired(Result<(), RuntimeError>),
+}
+
+struct IsolatedActivity<'a> {
+    active: &'a RefCell<HashSet<PathBuf>>,
+    path: PathBuf,
+}
+
+impl Drop for IsolatedActivity<'_> {
+    fn drop(&mut self) {
+        self.active.borrow_mut().remove(&self.path);
+    }
+}
+
+impl MexSessionRetirement {
+    pub fn into_result(self) -> Result<(), RuntimeError> {
+        match self {
+            Self::Retained(error) => Err(error),
+            Self::Retired(result) => result,
+        }
+    }
 }
 
 impl MexRuntimeSession {
+    pub fn has_unretired_work(&self) -> bool {
+        self.native_modules
+            .try_borrow()
+            .map_or(true, |modules| !modules.is_empty())
+            || self
+                .native_values
+                .try_borrow()
+                .map_or(true, |values| !values.is_empty())
+            || self
+                .isolated
+                .try_borrow()
+                .map_or(true, |clients| !clients.is_empty())
+            || self.native_lane.try_borrow().map_or(true, |lane| {
+                lane.as_ref()
+                    .is_some_and(|lane| lane.has_pending_services())
+            })
+    }
+
+    /// Forced host disposal revokes origin callback authority before token
+    /// registrations retire. This is Abandoned, not acknowledged mexAtExit.
+    pub fn force_abandon(&self) {
+        if self.abandoned.replace(true) {
+            return;
+        }
+        self.shutdown_in_progress.set(true);
+        if let Some(lane) = self.native_lane.borrow().as_ref() {
+            lane.force_abandon();
+        }
+        let clients = std::mem::take(&mut *self.isolated.borrow_mut());
+        drop(clients);
+        self.native_modules.borrow_mut().clear();
+        let registrations = std::mem::take(&mut *self.native_values.borrow_mut());
+        drop(registrations);
+    }
     pub fn new() -> Self {
         Self::default()
     }
 
+    pub fn new_in_process_group(placement: ProcessGroupPlacement) -> Self {
+        Self {
+            process_group_placement: placement,
+            ..Self::default()
+        }
+    }
+
     /// Adapt this executable owner to the runtime's read-only name port.
     pub fn name_observer(self: &Rc<Self>) -> Rc<crate::user_functions::NativeNameObserver> {
+        self.name_observer_with_scope(MexResolutionScope::SearchPath)
+    }
+
+    /// Selected units observe only modules installed by their checked receipt.
+    /// In particular, a missing installed name cannot consult the process path.
+    pub fn installed_name_observer(
+        self: &Rc<Self>,
+    ) -> Rc<crate::user_functions::NativeNameObserver> {
+        self.name_observer_with_scope(MexResolutionScope::InstalledOnly)
+    }
+
+    fn name_observer_with_scope(
+        self: &Rc<Self>,
+        resolution: MexResolutionScope,
+    ) -> Rc<crate::user_functions::NativeNameObserver> {
         let owner = Rc::clone(self);
         Rc::new(move |name| {
             let owner = Rc::clone(&owner);
             Box::pin(async move {
-                Ok(owner
-                    .observe_name(&name)
-                    .await?
-                    .map(|selection| match selection {
-                        MexNameSelection::Installed(path) => {
-                            crate::user_functions::NativeNameFact {
-                                path,
-                                origin: None,
-                                installed: true,
-                            }
+                let selection = match resolution {
+                    MexResolutionScope::SearchPath => owner.observe_name(&name).await?,
+                    MexResolutionScope::InstalledOnly => owner.observe_installed_name(&name),
+                };
+                Ok(selection.map(|selection| match selection {
+                    MexNameSelection::Installed {
+                        path,
+                        identity,
+                        interop,
+                    } => crate::user_functions::NativeNameFact {
+                        path,
+                        origin: None,
+                        installed: true,
+                        installed_artifact: Some(
+                            crate::user_functions::InstalledNativeArtifactFact {
+                                identity,
+                                interop,
+                            },
+                        ),
+                    },
+                    MexNameSelection::SearchPath(candidate) => {
+                        let (path, origin) = candidate.into_parts();
+                        crate::user_functions::NativeNameFact {
+                            path,
+                            origin: Some(origin),
+                            installed: false,
+                            installed_artifact: None,
                         }
-                        MexNameSelection::SearchPath(candidate) => {
-                            let (path, origin) = candidate.into_parts();
-                            crate::user_functions::NativeNameFact {
-                                path,
-                                origin: Some(origin),
-                                installed: false,
-                            }
-                        }
-                    }))
+                    }
+                }))
             })
         })
+    }
+
+    fn observe_installed_name(&self, name: &str) -> Option<MexNameSelection> {
+        self.installed_modules
+            .borrow()
+            .get(name)
+            .cloned()
+            .map(|artifact| MexNameSelection::Installed {
+                path: artifact.path,
+                identity: artifact.identity,
+                interop: artifact.interop,
+            })
     }
 
     /// Observe the exact installed-or-current-platform path selected by
     /// `load_and_call`, without loading, validating, or executing the module.
     pub async fn observe_name(&self, name: &str) -> Result<Option<MexNameSelection>, String> {
-        let installed = self
-            .installed_modules
-            .borrow()
-            .get(name)
-            .map(|artifact| artifact.path.clone());
-        if let Some(path) = installed {
-            return Ok(Some(MexNameSelection::Installed(path)));
+        if let Some(installed) = self.observe_installed_name(name) {
+            return Ok(Some(installed));
         }
         let Some(suffix) = runmat_mex::mex_suffix() else {
             return Ok(None);
@@ -126,8 +272,57 @@ impl MexRuntimeSession {
         *self.isolation_policy.borrow_mut() = policy;
     }
 
+    pub fn admit_isolation_policy(
+        &self,
+        next: MexIsolationPolicy,
+    ) -> Result<ReadyMexIsolationPolicy<'_>, RuntimeError> {
+        let policy = self.isolation_policy.try_borrow_mut().map_err(|_| {
+            runtime_error(
+                "MEX:Policy",
+                "MEX isolation policy is busy during publication",
+            )
+        })?;
+        Ok(ReadyMexIsolationPolicy { policy, next })
+    }
+
     pub fn clear_installed_artifacts(&self) {
         self.installed_modules.borrow_mut().clear();
+    }
+
+    /// Forced disposal cannot prove a retained MEX child has stopped using
+    /// installed bytes; leave its exact private root for recovery instead.
+    pub fn persist_installed_bytes_unverified(&self, reason: &str) -> Result<(), String> {
+        if let Some(lease) = self.installed_byte_lease.borrow().as_ref() {
+            lease.persist_unverified(None, reason)?;
+        }
+        Ok(())
+    }
+
+    /// Publish validated metadata after the host has retired old modules.
+    /// Publication performs no filesystem access or fallible validation.
+    pub fn replace_installed_artifacts(&self, catalog: PreparedMexArtifactCatalog) {
+        let mut modules = self.installed_modules.borrow_mut();
+        let mut lease = self.installed_byte_lease.borrow_mut();
+        *modules = catalog.modules;
+        *lease = catalog.byte_lease;
+    }
+
+    pub fn admit_artifact_catalog(
+        &self,
+        next: PreparedMexArtifactCatalog,
+    ) -> Result<ReadyMexArtifactCatalog<'_>, RuntimeError> {
+        let catalog = self
+            .installed_modules
+            .try_borrow_mut()
+            .map_err(|_| runtime_error("MEX:Artifact", "MEX catalog is busy during publication"))?;
+        let lease = self.installed_byte_lease.try_borrow_mut().map_err(|_| {
+            runtime_error("MEX:Artifact", "MEX byte owner is busy during publication")
+        })?;
+        Ok(ReadyMexArtifactCatalog {
+            catalog,
+            lease,
+            next,
+        })
     }
 
     /// Register an exact, already-materialized MEX artifact with this session.
@@ -135,74 +330,23 @@ impl MexRuntimeSession {
     /// The module remains owned by its caller. Its canonical sidecar manifest
     /// is verified before the name becomes visible to dynamic resolution.
     pub fn install_artifact(&self, module: &Path) -> Result<String, RuntimeError> {
-        let module = std::fs::canonicalize(module).map_err(|error| {
-            runtime_error(
-                "MEX:Artifact",
-                format!(
-                    "could not resolve MEX artifact '{}': {error}",
-                    module.display()
-                ),
-            )
-        })?;
-        let bytes = std::fs::read(&module).map_err(|error| {
-            runtime_error(
-                "MEX:Artifact",
-                format!(
-                    "could not read MEX artifact '{}': {error}",
-                    module.display()
-                ),
-            )
-        })?;
-        let manifest_path = runmat_mex::MexArtifactManifest::path_for_module(&module);
-        let manifest_bytes = std::fs::read(&manifest_path).map_err(|error| {
-            runtime_error(
-                "MEX:Artifact",
-                format!(
-                    "could not read MEX artifact manifest '{}': {error}",
-                    manifest_path.display()
-                ),
-            )
-        })?;
-        let manifest = runmat_mex::MexArtifactManifest::from_canonical_bytes(&manifest_bytes)
-            .and_then(|manifest| {
-                manifest.validate_current_module(&bytes)?;
-                Ok(manifest)
-            })
-            .map_err(|error| {
-                runtime_error(
-                    "MEX:Artifact",
-                    format!("MEX artifact '{}' is invalid: {error}", module.display()),
-                )
-            })?;
-        if module.file_stem().and_then(|stem| stem.to_str()) != Some(&manifest.module_name) {
-            return Err(runtime_error(
-                "MEX:Artifact",
-                format!(
-                    "MEX artifact '{}' does not match module name '{}'",
-                    module.display(),
-                    manifest.module_name
-                ),
-            ));
-        }
-        let installed = InstalledMexArtifact {
-            path: module,
-            identity: manifest.identity.to_string(),
-        };
+        let (name, installed) = artifact_catalog::prepare_artifact(module, None)?;
         let mut modules = self.installed_modules.borrow_mut();
-        if let Some(existing) = modules.get(&manifest.module_name) {
+        if let Some(existing) = modules.get(&name) {
             if existing.path != installed.path || existing.identity != installed.identity {
                 return Err(runtime_error(
                     "MEX:ArtifactConflict",
                     format!(
                         "MEX module '{}' is already installed with a different artifact",
-                        manifest.module_name
+                        name
                     ),
                 ));
             }
-            return Ok(existing.identity.clone());
+            return Ok(existing.identity.to_string());
         }
-        modules.insert(manifest.module_name, installed.clone());
-        Ok(installed.identity)
+        let identity = installed.identity.to_string();
+        modules.insert(name, installed);
+        Ok(identity)
     }
 
     /// Service one callback submitted by native MEX work after its gateway
@@ -231,18 +375,19 @@ impl MexRuntimeSession {
                 return futures::future::pending().await;
             }
             for path in paths {
-                let Some(mut client) = self.isolated.borrow_mut().remove(&path) else {
+                let Some(client) = self.isolated.borrow().get(&path).cloned() else {
                     continue;
                 };
-                if !self.active_isolated.borrow_mut().insert(path.clone()) {
-                    self.isolated.borrow_mut().insert(path, client);
+                let Ok(_activity) = self.enter_isolated(&path) else {
                     continue;
-                }
-                let result = client.service_ready_background().await;
-                self.active_isolated.borrow_mut().remove(&path);
+                };
+                let Ok(mut operation) = client.acquire() else {
+                    tracing::warn!(module = %path.display(), "isolated MEX transport is busy after activity admission");
+                    return true;
+                };
+                let result = operation.client().service_ready_background().await;
                 match result {
                     Ok(serviced) => {
-                        self.isolated.borrow_mut().insert(path, client);
                         if serviced {
                             return true;
                         }
@@ -262,14 +407,57 @@ impl MexRuntimeSession {
         }
     }
 
-    pub async fn load_and_call(
-        &self,
+    pub fn load_and_call<'a>(
+        self: &'a Rc<Self>,
+        name: &'a str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> impl std::future::Future<
+        Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
+    > + 'a {
+        self.load_with_resolution(
+            name,
+            arguments,
+            requested_outputs,
+            runtime,
+            MexResolutionScope::SearchPath,
+        )
+    }
+
+    /// Selected units may invoke only a module already installed by their
+    /// authenticated private receipt. They never rediscover a host path.
+    pub fn load_installed_and_call<'a>(
+        self: &'a Rc<Self>,
+        name: &'a str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> impl std::future::Future<
+        Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
+    > + 'a {
+        self.load_with_resolution(
+            name,
+            arguments,
+            requested_outputs,
+            runtime,
+            MexResolutionScope::InstalledOnly,
+        )
+    }
+
+    async fn load_with_resolution(
+        self: &Rc<Self>,
         name: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
-        if self.shutdown_in_progress.get() {
+        resolution: MexResolutionScope,
+    ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
+            Ok(roots) => roots,
+            Err(error) => return Some(Err(error.into_runtime_error())),
+        };
+        if self.abandoned.get() || self.shutdown_in_progress.get() {
             return Some(Err(runtime_error(
                 "MEX:Lifecycle",
                 "MEX modules cannot be invoked while the session is shutting down",
@@ -282,14 +470,78 @@ impl MexRuntimeSession {
             )));
         }
 
-        let path = match self.observe_name(name).await {
-            Ok(Some(selection)) => selection.path().to_path_buf(),
-            Ok(None) => return None,
-            Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+        let path = match resolution {
+            MexResolutionScope::InstalledOnly => self
+                .installed_modules
+                .borrow()
+                .get(name)
+                .map(|artifact| artifact.path.clone()),
+            MexResolutionScope::SearchPath => match self.observe_name(name).await {
+                Ok(Some(selection)) => Some(selection.path().to_path_buf()),
+                Ok(None) => None,
+                Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+            },
         };
+        let path = path?;
         let canonical = runmat_filesystem::canonicalize_async(&path)
             .await
             .unwrap_or(path);
+        let Some(tasks) = runtime.service_ports().local_tasks().cloned() else {
+            return Some(Err(runtime_error(
+                "MEX:LifecycleHostUnavailable",
+                "MEX invocation requires a scoped native lifecycle host",
+            )));
+        };
+        if tasks.owner_token().is_none() {
+            return Some(Err(runtime_error(
+                "MEX:LifecycleHostUnavailable",
+                "MEX invocation requires a host-owned local task supervisor",
+            )));
+        }
+        let owner = Rc::clone(self);
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let lease = match runtime.spawn_local_with_command_origin(
+            "MEX invocation",
+            LocalTaskCommandOrigin::CurrentSelected,
+            move |task_runtime| {
+                let scoped_runtime = task_runtime.clone();
+                Box::pin(scoped_runtime.scope(async move {
+                    let _input_roots = input_roots;
+                    let result = owner
+                        .load_selected_and_call(
+                            canonical,
+                            arguments,
+                            requested_outputs,
+                            task_runtime,
+                        )
+                        .await;
+                    let _ = sender.send(result);
+                }))
+            },
+        ) {
+            Ok(lease) => lease,
+            Err(error) => return Some(Err(error)),
+        };
+        self.inflight_operations
+            .borrow_mut()
+            .retain(|pending| pending.outcome().is_none());
+        self.inflight_operations.borrow_mut().push(lease);
+        match receiver.await {
+            Ok(result) => result,
+            Err(_) => Some(Err(runtime_error(
+                "MEX:Lifecycle",
+                "host stopped before MEX invocation completed",
+            ))),
+        }
+    }
+
+    async fn load_selected_and_call(
+        &self,
+        canonical: PathBuf,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         if !runmat_mex::MexArtifactManifest::path_for_module(&canonical).is_file() {
             let policy = *self.isolation_policy.borrow();
             if policy.unmanifested == UnmanifestedMexPolicy::Deny {
@@ -351,13 +603,12 @@ impl MexRuntimeSession {
                 )))
             }
         };
+        let registration = match self.native_value_registration(&canonical) {
+            Ok(registration) => registration,
+            Err(error) => return Some(Err(error)),
+        };
+        let values = registration.context();
         self.native_modules.borrow_mut().insert(canonical.clone());
-        let values = self
-            .native_values
-            .borrow_mut()
-            .entry(canonical.clone())
-            .or_insert_with(|| Rc::new(MxValueContext::new()))
-            .clone();
         let mut inputs = Vec::with_capacity(arguments.len());
         for argument in &arguments {
             let argument = match crate::gather_if_needed_async(argument).await {
@@ -369,12 +620,14 @@ impl MexRuntimeSession {
                 Err(error) => return Some(Err(runtime_error("MEX:Conversion", error.to_string()))),
             }
         }
-        let services = Rc::new(DirectMexBoundaryHostServices::new(
-            Rc::new(RuntimeMexHostServices::new(runtime)),
+        let host = Rc::new(RuntimeMexHostServices::new(runtime));
+        let codec = Rc::new(MxBoundaryCodec::new_with_origin_lease(
             values.clone(),
             metadata.mode,
             metadata.interface,
+            registration,
         ));
+        let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
         let result = lane
             .invoke(&canonical, inputs, requested_outputs, services)
             .await;
@@ -389,23 +642,82 @@ impl MexRuntimeSession {
         })
     }
 
-    /// Clear selected modules and execute their registered `mexAtExit` hooks.
-    pub fn clear(
+    /// Await selected native modules and their registered `mexAtExit` hooks.
+    pub async fn clear(
         &self,
         request: &DynamicFunctionClearRequest,
         runtime: RuntimeContext,
     ) -> Result<(), RuntimeError> {
-        self.isolated.borrow_mut().retain(|path, _| match request {
-            DynamicFunctionClearRequest::All | DynamicFunctionClearRequest::NativeExtensions => {
-                false
-            }
-            DynamicFunctionClearRequest::Named(name) => !path_matches_name(path, name),
-        });
-        self.clear_in_process(request, runtime)
+        if self
+            .isolated
+            .borrow()
+            .keys()
+            .any(|path| selected_by_request(path, request))
+        {
+            return Err(runtime_error(
+                "MEX:Lifecycle",
+                "isolated MEX modules require clear_gracefully while their host is active",
+            ));
+        }
+        self.clear_in_process(request, runtime).await
     }
 
     /// Clear selected modules after completing isolated-host lifecycle RPC.
     pub async fn clear_gracefully(
+        self: &Rc<Self>,
+        request: &DynamicFunctionClearRequest,
+        runtime: RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        if self.abandoned.get() || self.shutdown_in_progress.get() {
+            return Err(runtime_error(
+                "MEX:Lifecycle",
+                "MEX clear cannot start after session shutdown or abandonment",
+            ));
+        }
+        let tasks = runtime
+            .service_ports()
+            .local_tasks()
+            .cloned()
+            .ok_or_else(|| {
+                runtime_error(
+                    "MEX:LifecycleHostUnavailable",
+                    "MEX clear requires a scoped native lifecycle host",
+                )
+            })?;
+        if tasks.owner_token().is_none() {
+            return Err(runtime_error(
+                "MEX:LifecycleHostUnavailable",
+                "MEX clear requires a host-owned local task supervisor",
+            ));
+        }
+        let owner = Rc::clone(self);
+        let request = request.clone();
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let lease = runtime.spawn_local_with_command_origin(
+            "MEX clear",
+            LocalTaskCommandOrigin::CurrentSelected,
+            move |task_runtime| {
+                let scoped_runtime = task_runtime.clone();
+                Box::pin(scoped_runtime.scope(async move {
+                    let result = owner.clear_gracefully_inner(&request, task_runtime).await;
+                    let _ = sender.send(result);
+                }))
+            },
+        )?;
+        let result = receiver.await;
+        let outcome = lease.join().await;
+        if outcome == crate::context::RuntimeLocalTaskOutcome::Cancelled {
+            return Err(runtime_error(
+                "MEX:Lifecycle",
+                "host cancelled MEX clear before its lifecycle reply was settled",
+            ));
+        }
+        result.map_err(|_| {
+            runtime_error("MEX:Lifecycle", "host stopped before MEX clear completed")
+        })?
+    }
+
+    async fn clear_gracefully_inner(
         &self,
         request: &DynamicFunctionClearRequest,
         runtime: RuntimeContext,
@@ -419,11 +731,13 @@ impl MexRuntimeSession {
             .cloned()
             .collect::<Vec<_>>();
         let mut first_error = None;
+        let mut isolated_retained = false;
         for path in selected {
-            let Some(mut client) = self.isolated.borrow_mut().remove(&path) else {
+            let Some(client) = self.isolated.borrow().get(&path).cloned() else {
                 continue;
             };
-            if !self.active_isolated.borrow_mut().insert(path.clone()) {
+            let Ok(_activity) = self.enter_isolated(&path) else {
+                isolated_retained = true;
                 first_error.get_or_insert_with(|| {
                     runtime_error(
                         "MEX:Lifecycle",
@@ -433,59 +747,336 @@ impl MexRuntimeSession {
                         ),
                     )
                 });
-                self.isolated.borrow_mut().insert(path, client);
                 continue;
-            }
-            match client
+            };
+            let Ok(mut operation) = client.acquire() else {
+                isolated_retained = true;
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MEX:Lifecycle",
+                        format!(
+                            "isolated MEX transport '{}' is busy during clear",
+                            path.display()
+                        ),
+                    )
+                });
+                continue;
+            };
+            let clear = operation
+                .client()
                 .clear(runtime.clone(), policy.invocation_timeout)
-                .await
-            {
-                Ok(MexLifecycleOutcome::Retained) => {
-                    self.isolated.borrow_mut().insert(path.clone(), client);
+                .await;
+            match clear {
+                Ok(MexLifecycleOutcome::Retained) => {}
+                Ok(MexLifecycleOutcome::Cleared) => {
+                    // Clear unloads the module but leaves the isolated host
+                    // alive. Retire that host and await its exit before the
+                    // session releases the client and its callback authority.
+                    let retirement = operation
+                        .client()
+                        .shutdown(runtime.clone(), policy.invocation_timeout)
+                        .await;
+                    match retirement {
+                        IsolatedMexRetirement::Retired(result) => {
+                            self.isolated.borrow_mut().remove(&path);
+                            if let Err(error) = result {
+                                first_error.get_or_insert_with(|| wire_runtime_error(error));
+                            }
+                        }
+                        IsolatedMexRetirement::Retained(error) => {
+                            isolated_retained = true;
+                            first_error.get_or_insert_with(|| wire_runtime_error(error));
+                        }
+                    }
                 }
-                Ok(MexLifecycleOutcome::Cleared | MexLifecycleOutcome::Shutdown) => {}
+                Ok(MexLifecycleOutcome::Retired { .. }) => {
+                    isolated_retained = true;
+                    first_error.get_or_insert_with(|| {
+                        runtime_error("MEX:Lifecycle", "host returned a shutdown result for clear")
+                    });
+                }
                 Err(error) => {
+                    isolated_retained = true;
                     first_error.get_or_insert_with(|| wire_runtime_error(error));
                 }
             }
-            self.active_isolated.borrow_mut().remove(&path);
         }
-        if let Err(error) = self.clear_in_process(request, runtime) {
+        if isolated_retained {
+            return Err(first_error.unwrap_or_else(|| {
+                runtime_error("MEX:Lifecycle", "an isolated MEX host remains active")
+            }));
+        }
+        if let Err(error) = self.clear_in_process(request, runtime).await {
+            first_error.get_or_insert(error);
+        }
+        if let Err(error) = self.settle_native_commands().await {
             first_error.get_or_insert(error);
         }
         first_error.map_or(Ok(()), Err)
     }
 
-    /// Force final teardown of every module owned by this runtime session.
-    pub fn shutdown(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
-        self.isolated.borrow_mut().clear();
-        self.shutdown_native(runtime)
+    /// Await final teardown of every module owned by this runtime session.
+    pub async fn shutdown(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
+        if !self.isolated.borrow().is_empty() {
+            return Err(runtime_error(
+                "MEX:Lifecycle",
+                "isolated MEX hosts require graceful shutdown before session disposal",
+            ));
+        }
+        if self
+            .native_lane
+            .borrow()
+            .as_ref()
+            .is_some_and(|lane| lane.has_pending_services())
+        {
+            return Err(runtime_error(
+                "MEX:Lifecycle",
+                "native MEX work requires graceful settlement before session disposal",
+            ));
+        }
+        self.shutdown_native(runtime).await.into_result()
     }
 
     /// Complete isolated and in-process final lifecycle before session exit.
-    pub async fn shutdown_gracefully(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
+    pub async fn shutdown_gracefully(
+        self: &Rc<Self>,
+        runtime: RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.shutdown_gracefully_retirement(runtime)
+            .await
+            .into_result()
+    }
+
+    /// Return actual session retirement separately from a post-unload
+    /// diagnostic. Hosts may close dependent callback services only after
+    /// `Retired`, regardless of whether mexAtExit reported an error.
+    pub async fn shutdown_gracefully_retirement(
+        self: &Rc<Self>,
+        runtime: RuntimeContext,
+    ) -> MexSessionRetirement {
+        if self.abandoned.get() {
+            return MexSessionRetirement::Retained(runtime_error(
+                "MEX:Lifecycle",
+                "MEX session was already abandoned by its host",
+            ));
+        }
+        if in_isolated_callback() {
+            return MexSessionRetirement::Retained(runtime_error(
+                "MEX:Lifecycle",
+                "cannot shut down the MEX session from its active host callback",
+            ));
+        }
+        if self
+            .native_lane
+            .borrow()
+            .as_ref()
+            .is_some_and(|lane| lane.in_callback())
+        {
+            return MexSessionRetirement::Retained(runtime_error(
+                "MEX:Lifecycle",
+                "cannot shut down the MEX session from its active native callback",
+            ));
+        }
         if self.shutdown_in_progress.replace(true) {
-            return Err(runtime_error(
+            return MexSessionRetirement::Retained(runtime_error(
                 "MEX:Lifecycle",
                 "foreign runtime shutdown is already in progress",
             ));
         }
-        let _lifecycle = ShutdownGuard(&self.shutdown_in_progress);
+        let _admission = ShutdownGuard(Rc::clone(&self.shutdown_in_progress));
+        let Some(tasks) = runtime.service_ports().local_tasks().cloned() else {
+            return MexSessionRetirement::Retained(runtime_error(
+                "MEX:LifecycleHostUnavailable",
+                "MEX shutdown requires a scoped native lifecycle host",
+            ));
+        };
+        if tasks.owner_token().is_none() {
+            return MexSessionRetirement::Retained(runtime_error(
+                "MEX:LifecycleHostUnavailable",
+                "MEX shutdown requires a host-owned local task supervisor",
+            ));
+        }
+        let owner = Rc::clone(self);
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let lease = match runtime.spawn_local_with_command_origin(
+            "MEX shutdown",
+            LocalTaskCommandOrigin::CurrentSelected,
+            move |task_runtime| {
+                let scoped_runtime = task_runtime.clone();
+                Box::pin(scoped_runtime.scope(async move {
+                    let _admission = _admission;
+                    let result = owner.shutdown_gracefully_inner(task_runtime).await;
+                    let _ = sender.send(result);
+                }))
+            },
+        ) {
+            Ok(lease) => lease,
+            Err(error) => return MexSessionRetirement::Retained(error),
+        };
+        let response = receiver.await;
+        let task_outcome = lease.join().await;
+        match response {
+            Ok(retirement) => {
+                if task_outcome == crate::context::RuntimeLocalTaskOutcome::Cancelled {
+                    MexSessionRetirement::Retained(runtime_error(
+                        "MEX:Lifecycle",
+                        "host cancelled MEX shutdown before command retirement",
+                    ))
+                } else {
+                    retirement
+                }
+            }
+            Err(_) => MexSessionRetirement::Retained(runtime_error(
+                "MEX:Lifecycle",
+                "host stopped before MEX shutdown completed",
+            )),
+        }
+    }
+
+    async fn shutdown_gracefully_inner(&self, runtime: RuntimeContext) -> MexSessionRetirement {
+        let abandoned_operation = self.join_inflight_operations().await;
+        if let Err(error) = self.settle_native_commands().await {
+            return MexSessionRetirement::Retained(error);
+        }
         let policy = *self.isolation_policy.borrow();
-        let clients = self.isolated.borrow_mut().drain().collect::<Vec<_>>();
-        let mut first_error = None;
-        for (_, mut client) in clients {
-            if let Err(error) = client
+        let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+        let mut first_error = abandoned_operation;
+        let mut retained = false;
+        for path in paths {
+            let Some(client) = self.isolated.borrow().get(&path).cloned() else {
+                continue;
+            };
+            let Ok(_activity) = self.enter_isolated(&path) else {
+                retained = true;
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MEX:Lifecycle",
+                        format!(
+                            "MEX function '{}' is active during shutdown",
+                            path.display()
+                        ),
+                    )
+                });
+                continue;
+            };
+            let Ok(mut operation) = client.acquire() else {
+                retained = true;
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MEX:Lifecycle",
+                        format!(
+                            "isolated MEX transport '{}' is busy during shutdown",
+                            path.display()
+                        ),
+                    )
+                });
+                continue;
+            };
+            let retirement = operation
+                .client()
                 .shutdown(runtime.clone(), policy.invocation_timeout)
-                .await
-            {
-                first_error.get_or_insert_with(|| wire_runtime_error(error));
+                .await;
+            match retirement {
+                IsolatedMexRetirement::Retired(result) => {
+                    self.isolated.borrow_mut().remove(&path);
+                    if let Err(error) = result {
+                        first_error.get_or_insert_with(|| wire_runtime_error(error));
+                    }
+                }
+                IsolatedMexRetirement::Retained(error) => {
+                    retained = true;
+                    first_error.get_or_insert_with(|| wire_runtime_error(error));
+                }
             }
         }
-        if let Err(error) = self.shutdown(runtime) {
+        if retained {
+            // A live isolated host may still call back into native MEX. Keep
+            // both callback dependencies and their token registrations until
+            // the isolated command reaches an actual retirement boundary.
+            return MexSessionRetirement::Retained(first_error.unwrap_or_else(|| {
+                runtime_error("MEX:Lifecycle", "an isolated MEX host remains active")
+            }));
+        }
+        match self.shutdown_native(runtime).await {
+            MexSessionRetirement::Retained(error) => {
+                retained = true;
+                first_error.get_or_insert(error);
+            }
+            MexSessionRetirement::Retired(Err(error)) => {
+                first_error.get_or_insert(error);
+            }
+            MexSessionRetirement::Retired(Ok(())) => {}
+        }
+        if retained {
+            // A rejected native unload may still retain async-result handles.
+            // Waiting for their Drop here would wait on the very unload that
+            // was rejected. Keep the host authority for a later retry.
+            return MexSessionRetirement::Retained(first_error.unwrap_or_else(|| {
+                runtime_error("MEX:Lifecycle", "MEX shutdown has live native work")
+            }));
+        }
+        if let Err(error) = self.settle_native_pending().await {
+            retained = true;
             first_error.get_or_insert(error);
         }
-        first_error.map_or(Ok(()), Err)
+        if self.abandoned.get() {
+            retained = true;
+            first_error.get_or_insert_with(|| {
+                runtime_error("MEX:Lifecycle", "MEX host was abandoned during shutdown")
+            });
+        }
+        if retained {
+            MexSessionRetirement::Retained(first_error.unwrap_or_else(|| {
+                runtime_error("MEX:Lifecycle", "MEX shutdown has live native work")
+            }))
+        } else {
+            MexSessionRetirement::Retired(first_error.map_or(Ok(()), Err))
+        }
+    }
+
+    async fn settle_native_pending(&self) -> Result<(), RuntimeError> {
+        let lane = self.native_lane.borrow().as_ref().cloned();
+        if let Some(lane) = lane {
+            lane.settle_pending().await.map_err(|error| {
+                native_runtime_error(
+                    "MexShutdown",
+                    format!("could not finish pending MEX native work: {error}"),
+                    error,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn settle_native_commands(&self) -> Result<(), RuntimeError> {
+        let lane = self.native_lane.borrow().as_ref().cloned();
+        if let Some(lane) = lane {
+            lane.settle_commands().await.map_err(|error| {
+                native_runtime_error(
+                    "MexShutdown",
+                    format!("could not finish pending MEX native command: {error}"),
+                    error,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn join_inflight_operations(&self) -> Option<RuntimeError> {
+        let leases = self.inflight_operations.borrow().clone();
+        let mut first_error = None;
+        for lease in leases {
+            if lease.join().await == crate::context::RuntimeLocalTaskOutcome::Cancelled {
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MEX:Lifecycle",
+                        "MEX host cancelled an admitted invocation before its reply was settled",
+                    )
+                });
+            }
+        }
+        self.inflight_operations.borrow_mut().clear();
+        first_error
     }
 
     fn native_lane(&self) -> Result<Rc<NativeMexLane>, RuntimeError> {
@@ -499,23 +1090,62 @@ impl MexRuntimeSession {
         Ok(lane)
     }
 
-    async fn take_isolated_module(&self, path: &Path) -> Result<IsolatedMexClient, RuntimeError> {
-        if self.active_isolated.borrow().contains(path) {
+    /// Publish the token-table root before any input can create a token.
+    #[cfg(test)]
+    fn native_value_context(&self, path: &Path) -> Result<Rc<MxValueContext>, RuntimeError> {
+        self.native_value_registration(path)
+            .map(|value| value.context())
+    }
+
+    fn native_value_registration(
+        &self,
+        path: &Path,
+    ) -> Result<Rc<RegisteredMxValueContext>, RuntimeError> {
+        if let Some(values) = self.native_values.borrow().get(path) {
+            return Ok(Rc::clone(values));
+        }
+        let values = Rc::new(
+            RegisteredMxValueContext::new(Rc::new(MxValueContext::new()))
+                .map_err(|error| runtime_error("MEX:Conversion", error.to_string()))?,
+        );
+        self.native_values
+            .borrow_mut()
+            .insert(path.to_path_buf(), Rc::clone(&values));
+        Ok(values)
+    }
+
+    fn enter_isolated(&self, path: &Path) -> Result<IsolatedActivity<'_>, RuntimeError> {
+        if !self.active_isolated.borrow_mut().insert(path.to_path_buf()) {
             return Err(runtime_error(
                 "MEX:ReentrantInvocation",
                 "recursive invocation of the same isolated MEX module is not supported",
             ));
         }
-        self.active_isolated.borrow_mut().insert(path.to_path_buf());
-        if let Some(client) = self.isolated.borrow_mut().remove(path) {
-            return Ok(client);
+        Ok(IsolatedActivity {
+            active: &self.active_isolated,
+            path: path.to_path_buf(),
+        })
+    }
+
+    async fn isolated_module(&self, path: &Path) -> Result<Rc<IsolatedClientSlot>, RuntimeError> {
+        if let Some(client) = self.isolated.borrow().get(path) {
+            return Ok(Rc::clone(client));
         }
-        match IsolatedMexClient::spawn(path.to_path_buf(), Arc::clone(&self.isolated_ready)).await {
-            Ok(client) => Ok(client),
-            Err(error) => {
-                self.active_isolated.borrow_mut().remove(path);
-                Err(wire_runtime_error(error))
+        match IsolatedMexClient::spawn(
+            path.to_path_buf(),
+            Arc::clone(&self.isolated_ready),
+            self.process_group_placement,
+        )
+        .await
+        {
+            Ok(client) => {
+                let owner = IsolatedClientSlot::new(client);
+                self.isolated
+                    .borrow_mut()
+                    .insert(path.to_path_buf(), Rc::clone(&owner));
+                Ok(owner)
             }
+            Err(error) => Err(wire_runtime_error(error)),
         }
     }
 
@@ -528,24 +1158,29 @@ impl MexRuntimeSession {
         tier: MexBinaryTier,
         runtime: RuntimeContext,
         timeout: Option<std::time::Duration>,
-    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
-        let mut client = self.take_isolated_module(path).await?;
-        let result = client
+    ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+        let _activity = self.enter_isolated(path)?;
+        let client = self.isolated_module(path).await?;
+        let mut operation = client.acquire().map_err(|_| {
+            runtime_error(
+                "MEX:Lifecycle",
+                format!(
+                    "isolated MEX transport '{}' is busy during invocation",
+                    path.display()
+                ),
+            )
+        })?;
+        let result = operation
+            .client()
             .invoke(arguments, requested_outputs, api, tier, runtime, timeout)
             .await;
-        self.active_isolated.borrow_mut().remove(path);
-        if result.is_ok() {
-            self.isolated
-                .borrow_mut()
-                .insert(path.to_path_buf(), client);
-        }
         match result {
             Ok(invocation) => finish_invocation(invocation, requested_outputs),
             Err(error) => Err(wire_runtime_error(error)),
         }
     }
 
-    fn clear_in_process(
+    async fn clear_in_process(
         &self,
         request: &DynamicFunctionClearRequest,
         runtime: RuntimeContext,
@@ -562,26 +1197,28 @@ impl MexRuntimeSession {
             .collect::<Vec<_>>();
         let mut first_error = None;
         for path in paths {
-            let Some(values) = self.native_values.borrow().get(&path).cloned() else {
+            let Some(registration) = self.native_values.borrow().get(&path).cloned() else {
                 continue;
             };
-            let metadata = match futures::executor::block_on(lane.load(&path)) {
+            let metadata = match lane.load(&path).await {
                 Ok(metadata) => metadata,
                 Err(error) => {
                     first_error.get_or_insert_with(|| runtime_error("MexClear", error.to_string()));
                     continue;
                 }
             };
-            let services = Rc::new(DirectMexBoundaryHostServices::new(
-                Rc::new(RuntimeMexHostServices::new(runtime.clone())),
-                values,
+            let host = Rc::new(RuntimeMexHostServices::new(runtime.clone()));
+            let codec = Rc::new(MxBoundaryCodec::new_with_origin_lease(
+                registration.context(),
                 metadata.mode,
                 metadata.interface,
+                registration,
             ));
-            match futures::executor::block_on(lane.clear(&path, services)) {
+            let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
+            match lane.clear(&path, services).await {
                 Ok(true) => {
                     self.native_modules.borrow_mut().remove(&path);
-                    self.native_values.borrow_mut().remove(&path);
+                    self.release_native_value_context(&path);
                 }
                 Ok(false) => {}
                 Err(error) => {
@@ -598,9 +1235,10 @@ impl MexRuntimeSession {
         first_error.map_or(Ok(()), Err)
     }
 
-    fn shutdown_native(&self, runtime: RuntimeContext) -> Result<(), RuntimeError> {
+    async fn shutdown_native(&self, runtime: RuntimeContext) -> MexSessionRetirement {
         let Some(lane) = self.native_lane.borrow().as_ref().cloned() else {
-            return Ok(());
+            self.release_all_native_value_contexts();
+            return MexSessionRetirement::Retired(Ok(()));
         };
         let paths = self
             .native_modules
@@ -609,40 +1247,90 @@ impl MexRuntimeSession {
             .cloned()
             .collect::<Vec<_>>();
         let mut first_error = None;
+        let mut retained = false;
         for path in paths {
-            let Some(values) = self.native_values.borrow().get(&path).cloned() else {
+            let Some(registration) = self.native_values.borrow().get(&path).cloned() else {
+                retained = true;
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MexShutdown",
+                        format!(
+                            "MEX function '{}' has no registered token context",
+                            path.display()
+                        ),
+                    )
+                });
                 continue;
             };
-            let metadata = match futures::executor::block_on(lane.load(&path)) {
+            let metadata = match lane.load(&path).await {
                 Ok(metadata) => metadata,
                 Err(error) => {
+                    retained = true;
                     first_error
                         .get_or_insert_with(|| runtime_error("MexShutdown", error.to_string()));
                     continue;
                 }
             };
-            let services = Rc::new(DirectMexBoundaryHostServices::new(
-                Rc::new(RuntimeMexHostServices::new(runtime.clone())),
-                values,
+            let host = Rc::new(RuntimeMexHostServices::new(runtime.clone()));
+            let codec = Rc::new(MxBoundaryCodec::new_with_origin_lease(
+                registration.context(),
                 metadata.mode,
                 metadata.interface,
+                registration,
             ));
-            if let Err(error) = futures::executor::block_on(lane.shutdown_module(&path, services)) {
-                first_error.get_or_insert_with(|| {
-                    native_runtime_error(
-                        "MexShutdown",
-                        format!(
-                            "could not shut down MEX function '{}': {error}",
-                            path.display()
-                        ),
-                        error,
-                    )
-                });
+            let services = Rc::new(super::services::OriginMexBoundaryAdapter::new(host, codec));
+            match lane.shutdown_module(&path, services).await {
+                Ok(runmat_mex::MexModuleRetirement::Retired(result)) => {
+                    self.native_modules.borrow_mut().remove(&path);
+                    self.release_native_value_context(&path);
+                    if let Err(error) = result {
+                        first_error.get_or_insert_with(|| {
+                            native_runtime_error(
+                                "MexShutdown",
+                                format!(
+                                    "could not shut down MEX function '{}': {error}",
+                                    path.display()
+                                ),
+                                error,
+                            )
+                        });
+                    }
+                }
+                Ok(runmat_mex::MexModuleRetirement::Retained(error)) | Err(error) => {
+                    retained = true;
+                    first_error.get_or_insert_with(|| {
+                        native_runtime_error(
+                            "MexShutdown",
+                            format!(
+                                "could not shut down MEX function '{}': {error}",
+                                path.display()
+                            ),
+                            error,
+                        )
+                    });
+                }
             }
         }
-        self.native_modules.borrow_mut().clear();
-        self.native_values.borrow_mut().clear();
-        first_error.map_or(Ok(()), Err)
+        if retained {
+            MexSessionRetirement::Retained(first_error.unwrap_or_else(|| {
+                runtime_error("MexShutdown", "MEX native module remains active")
+            }))
+        } else {
+            MexSessionRetirement::Retired(first_error.map_or(Ok(()), Err))
+        }
+    }
+
+    fn release_native_value_context(&self, path: &Path) {
+        // The native lane has completed mexAtExit/clear before this registration
+        // retires. Drop outside the map borrow: retirement observers can reenter.
+        let retired = self.native_values.borrow_mut().remove(path);
+        drop(retired);
+    }
+
+    fn release_all_native_value_contexts(&self) {
+        // Likewise, all native shutdown callbacks have finished first.
+        let retired = std::mem::take(&mut *self.native_values.borrow_mut());
+        drop(retired);
     }
 }
 
@@ -677,10 +1365,7 @@ impl super::super::ForeignAdapter for MexRuntimeSession {
                 .installed_modules
                 .borrow()
                 .values()
-                .map(|artifact| {
-                    runmat_types::ForeignArtifactIdentity::new(artifact.identity.clone())
-                        .expect("installed MEX artifact identities are canonical")
-                })
+                .map(|artifact| artifact.identity.clone())
                 .collect(),
             supports_wasm: false,
             supports_host_bridge: false,
@@ -702,9 +1387,9 @@ impl super::super::ForeignAdapter for MexRuntimeSession {
     }
 }
 
-struct ShutdownGuard<'a>(&'a Cell<bool>);
+struct ShutdownGuard(Rc<Cell<bool>>);
 
-impl Drop for ShutdownGuard<'_> {
+impl Drop for ShutdownGuard {
     fn drop(&mut self) {
         self.0.set(false);
     }
@@ -718,16 +1403,18 @@ fn selected_by_request(path: &Path, request: &DynamicFunctionClearRequest) -> bo
 }
 
 fn finish_invocation(
-    invocation: MexInvocation,
+    invocation: RootedMexInvocation,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    if !invocation.console.is_empty() {
-        crate::console::record_console_output(
-            crate::console::ConsoleStream::Stdout,
-            invocation.console,
-        );
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let RootedMexInvocation {
+        outputs,
+        warnings,
+        console,
+    } = invocation;
+    if !console.is_empty() {
+        crate::console::record_console_output(crate::console::ConsoleStream::Stdout, console);
     }
-    for warning in invocation.warnings {
+    for warning in warnings {
         crate::warning_store::push(
             warning
                 .identifier
@@ -736,43 +1423,51 @@ fn finish_invocation(
             &warning.message,
         );
     }
-    if invocation.outputs.len() < requested_outputs {
+    if outputs.values().len() < requested_outputs {
         return Err(runtime_error(
             "MEX:OutputCount",
             format!(
                 "MEX invocation produced {} outputs, but {requested_outputs} were requested",
-                invocation.outputs.len()
+                outputs.values().len()
             ),
         ));
     }
-    let mut outputs = invocation
-        .outputs
-        .into_iter()
-        .take(requested_outputs)
-        .collect::<Vec<_>>();
-    match requested_outputs {
-        0 => Ok(runmat_value::ValueSequence::empty()),
-        1 => super::super::single_output_sequence(outputs.pop().expect("validated one MEX output")),
-        _ => runmat_value::ValueSequence::comma_separated(outputs)
-            .map_err(crate::sequence::sequence_error_to_runtime),
-    }
+    outputs.with_owned_values(|outputs| {
+        let mut selected = outputs
+            .into_iter()
+            .take(requested_outputs)
+            .collect::<Vec<_>>();
+        let sequence = match requested_outputs {
+            0 => Ok(runmat_value::ValueSequence::empty()),
+            1 => super::super::single_output_sequence(
+                selected.pop().expect("validated one MEX output"),
+            ),
+            _ => runmat_value::ValueSequence::comma_separated(selected)
+                .map_err(crate::sequence::sequence_error_to_runtime),
+        }?;
+        crate::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
+    })
 }
 
 fn decode_native_invocation(
     invocation: MexNativeInvocation,
     values: &MxValueContext,
-) -> Result<MexInvocation, RuntimeError> {
-    let outputs = invocation
-        .outputs
-        .iter()
-        .map(|output| {
-            values
-                .decode(output)
-                .map_err(|error| runtime_error("MEX:Conversion", error.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(MexInvocation {
-        outputs,
+) -> Result<RootedMexInvocation, RuntimeError> {
+    let mut outputs =
+        crate::execution::RootedValuesBuilder::with_capacity(invocation.outputs.len());
+    for output in &invocation.outputs {
+        let decoded = values
+            .decode(output)
+            .map_err(|error| runtime_error("MEX:Conversion", error.to_string()))?;
+        outputs
+            .push(decoded)
+            .map_err(|error| error.into_runtime_error())?;
+    }
+    Ok(RootedMexInvocation {
+        outputs: outputs
+            .finish()
+            .map_err(|error| error.into_runtime_error())?,
         warnings: invocation.warnings,
         console: invocation.console,
     })
@@ -816,6 +1511,64 @@ fn native_runtime_error(
 mod tests {
     use super::*;
     use crate::execution::RuntimeExecutionService;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn selected_mex_outputs_are_rooted_before_decoded_batch_retires() {
+        runmat_gc::gc_test_context(|| {
+            let first = runmat_gc::gc_allocate_rooted(Value::String("first".into()))
+                .expect("allocate first output");
+            let second = runmat_gc::gc_allocate_rooted(Value::String("second".into()))
+                .expect("allocate second output");
+            let handles = [first.handle(), second.handle()];
+            let outputs = crate::execution::RootedValues::new(
+                handles
+                    .iter()
+                    .map(|handle| {
+                        Value::HandleObject(runmat_value::HandleRef {
+                            class_name: "MexOutput".into(),
+                            target: *handle,
+                            valid: true,
+                        })
+                    })
+                    .collect(),
+            )
+            .expect("root decoded outputs");
+            first.unroot().expect("transfer first allocation root");
+            second.unroot().expect("transfer second allocation root");
+
+            let expected_addresses = handles.map(|handle| runmat_gc::gc_handle_addr(&handle));
+            let observed = Arc::new(AtomicBool::new(false));
+            let witness = Arc::clone(&observed);
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                if let runmat_gc::RootRetirement::Explicit(handle) = event {
+                    if expected_addresses.contains(&runmat_gc::gc_handle_addr(&handle))
+                        && !witness.swap(true, Ordering::SeqCst)
+                    {
+                        runmat_gc::gc_collect_major()
+                            .expect("collect during decoded-root retirement");
+                        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                    }
+                }
+            }))
+            .expect("register retirement witness");
+
+            let sequence = finish_invocation(
+                RootedMexInvocation {
+                    outputs,
+                    warnings: Vec::new(),
+                    console: String::new(),
+                },
+                2,
+            )
+            .expect("finish rooted MEX result");
+            assert!(observed.load(Ordering::SeqCst));
+            for handle in handles {
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            }
+            drop(sequence);
+        });
+    }
 
     #[test]
     fn native_name_observation_selects_path_without_loading_module() {
@@ -852,7 +1605,7 @@ mod tests {
             cancellation.token(),
         );
         cancellation.cancel(runmat_execution::CancellationReason::User);
-        let result = futures::executor::block_on(MexRuntimeSession::new().load_and_call(
+        let result = futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_and_call(
             "module_that_must_not_be_resolved",
             Vec::new(),
             0,

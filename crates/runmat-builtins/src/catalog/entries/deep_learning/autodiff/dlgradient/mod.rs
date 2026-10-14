@@ -12,6 +12,7 @@ mod tests;
 pub use contract::{DLGRADIENT_DESCRIPTOR, DLGRADIENT_INVALID_INPUT, DLGRADIENT_UNSUPPORTED};
 
 pub const DLGRADIENT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlgradient" },
     category: "deep_learning",

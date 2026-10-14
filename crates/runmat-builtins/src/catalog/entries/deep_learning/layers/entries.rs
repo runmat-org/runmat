@@ -4,6 +4,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 macro_rules! layer_entry {
     ($constant:ident, $name:literal, $documentation:ident, $descriptor:ident, $inference:ident, $extensions:expr, $integer_capabilities:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "deep_learning",

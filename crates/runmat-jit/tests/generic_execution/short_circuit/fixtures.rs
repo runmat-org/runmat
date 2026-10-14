@@ -201,6 +201,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
         .into_iter()
         .collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
@@ -212,7 +213,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
         entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
             &mir,
             *mir.entrypoints.first().expect("fixture entrypoint"),
-            manifest.identity.entrypoint_function,
+            manifest.identity.entrypoint_function.unwrap(),
         )
         .unwrap(),
         binding_names: None,

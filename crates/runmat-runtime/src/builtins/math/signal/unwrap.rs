@@ -19,8 +19,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::common::default_dimension;
-use crate::builtins::math::signal::common::{SIGNAL_WORK_CHUNK, SignalCooperation};
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::builtins::math::signal::common::{SignalCooperation, SIGNAL_WORK_CHUNK};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "unwrap";
 const TWO_PI: f64 = 2.0 * PI;
@@ -526,8 +526,8 @@ pub(crate) mod tests {
     #[test]
     fn host_phase_loop_observes_invocation_cancellation_before_publication() {
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-        use runmat_execution::CancellationReason;
         use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
         use std::num::NonZeroU64;
 
         let source = CancellationSource::new();

@@ -1,7 +1,7 @@
 use runmat_mir::MirOperand;
 use runmat_runtime::native::NativeValueRef;
 use runmat_types::OperatorKind;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 use crate::NativeExecutorResult;
 
@@ -67,8 +67,7 @@ fn evaluate_inner(
                 return Err(runmat_runtime::runtime_error::semantic_error(
                     "NativeUnaryArity",
                     "unary arithmetic requires one operand",
-                )
-                .into());
+                ));
             };
             let value = runmat_runtime::unary_arithmetic::evaluate_in_context(
                 Some(&runtime),
@@ -76,7 +75,7 @@ fn evaluate_inner(
                 argument.clone(),
             )
             .await?;
-            return Ok(vec![value]);
+            return single_rooted_sequence(value).map_err(|error| *error);
         }
         if arguments.len() == 2
             && !matches!(arguments[0], Value::Object(_) | Value::HandleObject(_))
@@ -89,7 +88,7 @@ fn evaluate_inner(
                 name.display_name(),
             )
             .await?;
-            return Ok(vec![value]);
+            return single_rooted_sequence(value).map_err(|error| *error);
         }
         let result = runmat_runtime::call_builtin_sequence_async_with_outputs_in_context(
             &runtime,
@@ -98,23 +97,31 @@ fn evaluate_inner(
             1,
         )
         .await?;
-        let outputs = result.into_values();
-        let [value] = <[Value; 1]>::try_from(outputs).map_err(|_| {
-            crate::NativeExecutorError::Host(
-                "operator evaluation requires exactly one output".into(),
-            )
-        })?;
-        Ok(vec![value])
+        Ok(result)
     };
     let scoped_runtime = state.runtime.clone();
-    let values = super::call_suspension::begin_with_roots(
+    let values = super::call_suspension::begin_rooted_sequence_with_roots(
         state,
         embedded.cloned(),
         retained_roots,
         Box::pin(async move { scoped_runtime.scope(future).await }),
+        1,
     )?;
     let [value] = <[Value; 1]>::try_from(values).map_err(|_| {
         crate::NativeExecutorError::Host("native operator did not produce exactly one value".into())
     })?;
     Ok(state.arena.insert(value))
+}
+
+fn single_rooted_sequence(
+    value: runmat_runtime::execution::RootedValue,
+) -> Result<runmat_runtime::execution::RootedValueSequence, Box<runmat_runtime::RuntimeError>> {
+    value.try_map_owned(
+        |value| {
+            ValueSequence::single(value)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                .map_err(Box::new)
+        },
+        |error| Box::new(error.into_runtime_error()),
+    )
 }

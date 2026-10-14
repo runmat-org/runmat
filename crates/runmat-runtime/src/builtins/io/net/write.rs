@@ -1,6 +1,6 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
-use crate::context::RuntimeTcpIssuer;
+use crate::context::RuntimeTcpInvocation;
 use crate::tcp::{TcpTransportError, TcpTransportErrorKind, TcpWriteProgress};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetDataType as DataType, WRITE_ERROR_CONNECTION_CLOSED,
@@ -134,9 +134,11 @@ pub(super) async fn write_builtin(
         )?),
     };
 
-    let issuer = RuntimeTcpIssuer::from_context(runtime.as_ref());
     let status = work
-        .await_service(service.describe_client(issuer.clone(), authority.clone()))
+        .await_service(service.describe_client(
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
+            authority.clone(),
+        ))
         .await
         .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
         .map_err(|err| {
@@ -167,7 +169,11 @@ pub(super) async fn write_builtin(
     work.completed(0).await?;
     let expected_bytes = payload.bytes.len();
     let accepted_bytes = work
-        .await_service(service.write(issuer, authority, payload.bytes))
+        .await_service(service.write(
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
+            authority,
+            payload.bytes,
+        ))
         .await
         .map_err(map_write_await_failure)?
         .map_err(|err| {

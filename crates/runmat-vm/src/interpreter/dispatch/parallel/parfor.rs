@@ -14,6 +14,7 @@ struct ParforExecution<'a> {
 
 struct ParforTaskPayload {
     inputs: Vec<Value>,
+    input_roots: Option<runmat_runtime::execution::RootedValueLease>,
     iterations: Vec<Value>,
     randomness: runmat_execution::ParallelRandomnessContext,
 }
@@ -28,10 +29,16 @@ pub(super) async fn execute(
     current_function_name: &str,
 ) -> Result<(), RuntimeError> {
     let mut iterations = runmat_runtime::iteration::ForColumnIterator::new(iterable).await?;
-    let mut iteration_values = Vec::new();
+    let mut iteration_values = runmat_runtime::execution::RootedValuesBuilder::default();
     while let Some(iteration) = iterations.next().await? {
-        iteration_values.push(iteration);
+        iteration
+            .with_owned(|iteration| iteration_values.push(iteration))
+            .map_err(|error| error.into_runtime_error())?;
     }
+    let iteration_values = iteration_values
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+    iteration_values.with_owned_values_async(|iteration_values| async move {
     validate_parfor_iterations(&iteration_values).await?;
     let randomness = parallel_randomness_context(
         executable.contract.randomness,
@@ -60,6 +67,7 @@ pub(super) async fn execute(
             execution,
             ParforTaskPayload {
                 inputs,
+                input_roots: None,
                 iterations: iteration_values,
                 randomness,
             },
@@ -99,6 +107,7 @@ pub(super) async fn execute(
                 execution,
                 ParforTaskPayload {
                     inputs: scheduled_inputs.task_inputs,
+                    input_roots: Some(scheduled_inputs.task_roots),
                     iterations: iteration_values,
                     randomness,
                 },
@@ -108,6 +117,11 @@ pub(super) async fn execute(
             )
             .await;
         }
+        Err(crate::interpreter::parallel_placement::ParallelPlacementRejection::InputRootingFailed {
+            error,
+        }) => {
+            return Err(error.into_runtime_error());
+        }
         Err(reason) => {
             tracing::debug!(reason = %reason, effects = ?executable.contract.effects, "using serial parfor correctness backend");
         }
@@ -116,12 +130,14 @@ pub(super) async fn execute(
         execution,
         ParforTaskPayload {
             inputs,
+            input_roots: None,
             iterations: iteration_values,
             randomness,
         },
         vars,
     )
     .await
+    }).await
 }
 
 async fn execute_parfor_serial(
@@ -129,30 +145,40 @@ async fn execute_parfor_serial(
     task: ParforTaskPayload,
     vars: &mut [Value],
 ) -> Result<(), RuntimeError> {
+    let ParforTaskPayload {
+        inputs,
+        input_roots,
+        iterations,
+        randomness,
+    } = task;
     let outputs = crate::interpreter::runner::interpret_parfor_task_in_context(
         crate::interpreter::runner::ParforTaskExecution {
             bytecode: execution.bytecode,
             region: execution.executable,
-            inputs: task.inputs,
-            iterations: task.iterations,
-            randomness: task.randomness,
+            inputs,
+            iterations,
+            randomness,
             mode: crate::interpreter::runner::ParforTaskMode::Sequential,
             current_function_name: execution.current_function_name,
             runtime: execution.context.runtime.clone(),
         },
     )
     .await?;
-    for (variable, output) in execution.executable.output_variables().zip(outputs) {
-        if vars.get(variable.slot).is_none() {
-            return Err(crate::interpreter::errors::mex(
-                "ParallelFrame",
-                "parallel task output is outside its compiled VM frame",
-            ));
+    outputs.with_owned_values(|outputs| {
+        for (variable, output) in execution.executable.output_variables().zip(outputs) {
+            if vars.get(variable.slot).is_none() {
+                return Err(crate::interpreter::errors::mex(
+                    "ParallelFrame",
+                    "parallel task output is outside its compiled VM frame",
+                ));
+            }
+            crate::runtime::workspace::admit_workspace_slot_write(variable.slot, &output)?;
+            let slot = &mut vars[variable.slot];
+            *slot = output;
         }
-        crate::runtime::workspace::admit_workspace_slot_write(variable.slot, &output)?;
-        let slot = &mut vars[variable.slot];
-        *slot = output;
-    }
+        Ok::<(), RuntimeError>(())
+    })?;
+    drop(input_roots);
     Ok(())
 }
 
@@ -201,6 +227,7 @@ async fn execute_parfor_tasks(
 ) -> Result<(), RuntimeError> {
     let ParforTaskPayload {
         inputs,
+        input_roots,
         iterations,
         randomness,
     } = task;
@@ -223,14 +250,25 @@ async fn execute_parfor_tasks(
         workers = graph.worker_limit,
         "scheduled compiler-bound parfor task graph"
     );
-    let program =
-        crate::program_execution::capture_region_sources(execution.bytecode, &context.runtime)
-            .map_err(|error| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    &format!("failed to encode the exact parallel program: {error}"),
-                )
-            })?;
+    let program = if context.runtime.execution().requires_program_capture() {
+        let selected = context.graph_program.as_ref().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "parallel worker execution has no selected V3 executable authority",
+            )
+        })?;
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
+    } else {
+        runmat_runtime::execution::DeferredProgram::Local
+    };
+    let program_revision = if matches!(
+        &program,
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+    ) {
+        None
+    } else {
+        context.runtime.program_revision().cloned()
+    };
     let mut tasks = Vec::with_capacity(graph.chunks.len());
     for chunk in &graph.chunks {
         let values = iterations[chunk.start..chunk.start + chunk.len].to_vec();
@@ -262,9 +300,9 @@ async fn execute_parfor_tasks(
                     requested_outputs: 1,
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
-                program_revision: context.runtime.program_revision().cloned(),
+                program_revision: program_revision.clone(),
                 capabilities: executable.contract.capabilities.clone(),
-                program: Some(program.clone()),
+                program: program.clone(),
             })
             .map_err(execution_error)?;
         tasks.push(
@@ -285,13 +323,15 @@ async fn execute_parfor_tasks(
         results,
         vars,
     )
-    .await
+    .await?;
+    drop(input_roots);
+    Ok(())
 }
 
 async fn await_parallel_tasks(
     context: &ExecutionContext,
     tasks: &[runmat_execution::TaskHandle],
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     use runmat_execution::TaskResultClaim;
 
     let mut results = vec![None; tasks.len()];
@@ -374,17 +414,19 @@ async fn await_parallel_tasks(
             }
         }
     }
-    results
-        .into_iter()
-        .map(|result| {
-            result.ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "ParallelTaskState",
-                    "parallel scheduler omitted a task result",
-                )
-            })
-        })
-        .collect()
+    let mut rooted = runmat_runtime::execution::RootedValuesBuilder::with_capacity(results.len());
+    for result in results {
+        let result = result.ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "ParallelTaskState",
+                "parallel scheduler omitted a task result",
+            )
+        })?;
+        result
+            .with_owned(|value| rooted.push(value))
+            .map_err(|error| error.into_runtime_error())?;
+    }
+    rooted.finish().map_err(|error| error.into_runtime_error())
 }
 
 fn cancel_parallel_tasks(
@@ -459,11 +501,11 @@ async fn assemble_sliced_results(
     executable: &crate::BytecodeParforRegion,
     graph: &runmat_execution::ParallelTaskGraph,
     iterations: &[Value],
-    results: Vec<Value>,
+    results: runmat_runtime::execution::RootedValues,
     vars: &mut [Value],
 ) -> Result<(), RuntimeError> {
     let output_variables = executable.output_variables().collect::<Vec<_>>();
-    for (chunk, result) in graph.chunks.iter().zip(results) {
+    for (chunk, result) in graph.chunks.iter().zip(results.iter()) {
         let Value::Cell(result) = result else {
             return Err(crate::interpreter::errors::mex(
                 "ParallelTaskOutput",
@@ -516,12 +558,14 @@ async fn assemble_sliced_results(
                             "parallel reduction task returned the wrong contribution count",
                         ));
                     }
-                    let Some(mut accumulator) = vars.get(variable.slot).cloned() else {
+                    let Some(accumulator) = vars.get(variable.slot).cloned() else {
                         return Err(crate::interpreter::errors::mex(
                             "ParallelFrame",
                             "parallel reduction output is outside its compiled VM frame",
                         ));
                     };
+                    let mut accumulator = runmat_runtime::execution::RootedValue::new(accumulator)
+                        .map_err(|error| error.into_runtime_error())?;
                     for contribution in &contributions.data {
                         accumulator = runmat_runtime::parallel::reduction::combine_in_context(
                             Some(runtime),
@@ -533,9 +577,9 @@ async fn assemble_sliced_results(
                     }
                     crate::runtime::workspace::admit_workspace_slot_write(
                         variable.slot,
-                        &accumulator,
+                        accumulator.value(),
                     )?;
-                    vars[variable.slot] = accumulator;
+                    accumulator.with_owned(|value| vars[variable.slot] = value);
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(

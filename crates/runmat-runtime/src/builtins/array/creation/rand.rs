@@ -1322,9 +1322,12 @@ pub(crate) mod tests {
         );
         let r = rand_double(&[2, 2]).expect("rand");
         let s = block_on(crate::call_builtin_async("sin", &[r])).expect("sin");
-        let summed =
-            block_on(crate::call_builtin_async("sum", &[s, Value::Num(1.0)])).expect("sum");
-        let gathered = test_support::gather(summed).expect("gather");
+        let summed = block_on(crate::call_builtin_async(
+            "sum",
+            &[s.value().clone(), Value::Num(1.0)],
+        ))
+        .expect("sum");
+        let gathered = test_support::gather_rooted(summed).expect("gather");
         assert_eq!(gathered.shape(), &[1, 2]);
     }
 

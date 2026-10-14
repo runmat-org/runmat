@@ -15,7 +15,7 @@ fn padded_names_and_first_duplicate_control_collection() {
         ],
     )
     .unwrap();
-    let Value::Cell(output) = output else {
+    let Value::Cell(output) = output.value() else {
         panic!("first option must select cell collection")
     };
     assert_eq!(output.to_column_major(), vec![Value::Num(1.0)]);
@@ -42,7 +42,7 @@ fn uniform_output_accepts_logical_and_legacy_double_controls() {
             ],
         )
         .unwrap();
-        assert_eq!(matches!(output, Value::Cell(_)), expected_cell);
+        assert_eq!(matches!(output.value(), Value::Cell(_)), expected_cell);
     }
 }
 

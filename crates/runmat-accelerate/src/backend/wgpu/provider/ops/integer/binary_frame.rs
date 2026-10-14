@@ -3,6 +3,12 @@ use super::*;
 use crate::backend::wgpu::pipelines::FrozenLinearLaunch;
 use runmat_accelerate_api::unsupported_provider_operation;
 
+#[path = "binary_frame/geometry.rs"]
+mod geometry;
+#[path = "binary_frame/feasibility.rs"]
+mod feasibility;
+pub(super) use feasibility::integer_division_feasibility;
+
 #[derive(Clone, Copy)]
 pub(super) enum IntegerBinaryOperation {
     Ordinary(crate::backend::wgpu::types::BinaryOpCode),
@@ -92,13 +98,6 @@ impl IntegerBinaryFrame {
                 && rhs_entry.storage == GpuTensorStorage::Real,
             "{operation_name}: complex integer gpuArray binary operation is not supported"
         );
-        let broadcast = integer_broadcast_plan(
-            operation_name,
-            &lhs_entry.shape,
-            lhs_entry.len,
-            &rhs_entry.shape,
-            rhs_entry.len,
-        )?;
         let required_words = |len| {
             integer_word_count(integer_type, len)?
                 .checked_mul(std::mem::size_of::<u32>())
@@ -113,37 +112,29 @@ impl IntegerBinaryFrame {
                 && rhs_entry.buffer.size() >= rhs_bytes,
             "{operation_name}: physical integer input extent is shorter than its words"
         );
-        let len = broadcast.len;
-        if len > u32::MAX as usize {
-            return Err(unsupported_provider_operation(
-                gpu_dispatch_length_limit_error(operation_name, len).to_string(),
-            ));
-        }
-        let output_words = integer_word_count(integer_type, len)?;
-        let output_bytes =
-            crate::backend::wgpu_storage::raw_word_requested_bytes(output_words as u64)
-                .ok_or_else(|| anyhow!("{operation_name}: output backing extent overflow"))?;
-        let launch = provider.linear_launch;
-        let chunk_capacity = if len == 0 {
-            // Empty output has no shader, bindings, or dispatch. Preserve the
-            // ordinary native-class empty route on minimal adapters.
-            1
-        } else {
-            super::super::elementwise::check_kernel_limits(
-                operation_name,
-                &provider.adapter_limits,
-                3,
-                4,
-                std::mem::size_of::<super::IntegerBinaryParams>() as u64,
-                &[
-                    lhs_entry.buffer.size(),
-                    rhs_entry.buffer.size(),
-                    output_bytes,
-                ],
-                launch,
-            )
-            .map_err(|error| unsupported_provider_operation(error.to_string()))?
-        };
+        let geometry = geometry::plan(
+            &provider.adapter_limits,
+            provider.linear_launch,
+            operation_name,
+            integer_type,
+            geometry::IntegerBinaryInputGeometry {
+                shape: &lhs_entry.shape,
+                len: lhs_entry.len,
+                binding_bytes: lhs_entry.buffer.size(),
+            },
+            geometry::IntegerBinaryInputGeometry {
+                shape: &rhs_entry.shape,
+                len: rhs_entry.len,
+                binding_bytes: rhs_entry.buffer.size(),
+            },
+        )?;
+        let geometry::IntegerBinaryGeometry {
+            broadcast,
+            output_words,
+            output_bytes,
+            launch,
+            chunk_capacity,
+        } = geometry;
         let recipe = super::super::pipeline_recipe::PipelineRecipe {
             shader: kind.shader(launch.workgroup()),
             layout: kind.layout_tag().into(),

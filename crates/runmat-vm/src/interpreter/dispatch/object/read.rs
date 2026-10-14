@@ -29,7 +29,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberOrInit(field) => {
@@ -46,7 +46,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamic => {
@@ -68,7 +68,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamicOrInit => {
@@ -90,7 +90,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberSequence { member, selection } => {
@@ -106,9 +106,11 @@ pub(super) async fn dispatch(
                 false,
                 caller_function_name,
             )
-            .await?
-            .resolve(*selection, Default::default())?;
-            stack.extend(values);
+            .await?;
+            values.with_owned_sequence(|values| {
+                stack.extend(values.resolve(*selection, Default::default())?);
+                Ok::<_, RuntimeError>(())
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamicSequence { selection } => {
@@ -129,9 +131,11 @@ pub(super) async fn dispatch(
                 false,
                 caller_function_name,
             )
-            .await?
-            .resolve(*selection, Default::default())?;
-            stack.extend(values);
+            .await?;
+            values.with_owned_sequence(|values| {
+                stack.extend(values.resolve(*selection, Default::default())?);
+                Ok::<_, RuntimeError>(())
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::MemberSequenceCardinality => {
@@ -162,11 +166,13 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::SelectPrefix { count },
-                Default::default(),
-            )?;
-            write_sequence_register(stack, sequence_register, values)?;
+            sequence.with_owned_sequence(|sequence| {
+                let values = sequence.resolve(
+                    runmat_types::SequenceUse::SelectPrefix { count },
+                    Default::default(),
+                )?;
+                write_sequence_register(stack, sequence_register, values)
+            })?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamicSequenceUsingOutputSlot { output_count_slot } => {
@@ -189,11 +195,13 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::SelectPrefix { count },
-                Default::default(),
-            )?;
-            write_sequence_register(stack, sequence_register, values)?;
+            sequence.with_owned_sequence(|sequence| {
+                let values = sequence.resolve(
+                    runmat_types::SequenceUse::SelectPrefix { count },
+                    Default::default(),
+                )?;
+                write_sequence_register(stack, sequence_register, values)
+            })?;
             Ok(true)
         }
         _ => Ok(false),

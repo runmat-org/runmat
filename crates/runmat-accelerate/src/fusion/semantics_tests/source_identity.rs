@@ -382,7 +382,7 @@ fn opaque_plan_constant_fails_before_source_admission() {
     );
     source
         .const_values
-        .insert(7, Value::FunctionHandle("opaque".into()));
+        .insert(7, Value::function_handle("opaque".into()));
     let error = resolve(&source, &[Value::Num(4.0), Value::Num(5.0)]).unwrap_err();
     assert!(
         error

@@ -18,9 +18,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    SignalCooperation, keyword, parse_nonnegative_integer,
+    keyword, parse_nonnegative_integer, SignalCooperation,
 };
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[path = "envelope/admission.rs"]
 mod admission;
@@ -52,7 +52,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Envelope extraction is a windowed/FFT interpolation boundary and terminates fusion plans.",
+    notes:
+        "Envelope extraction is a windowed/FFT interpolation boundary and terminates fusion plans.",
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -659,7 +660,7 @@ fn value_from_data(data: Vec<f64>, shape: Vec<usize>, single_output: bool) -> Bu
 
 #[path = "envelope/numerics.rs"]
 mod numerics;
-use numerics::{NumericalWork, analytic_envelope, peak_envelope, rms_envelope};
+use numerics::{analytic_envelope, peak_envelope, rms_envelope, NumericalWork};
 
 #[cfg(feature = "plot-core")]
 async fn render_envelope_plot(eval: &EnvelopeEvaluation) -> BuiltinResult<()> {

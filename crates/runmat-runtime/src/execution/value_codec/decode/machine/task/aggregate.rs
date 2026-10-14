@@ -194,27 +194,28 @@ impl<'a> CallableTask<'a> {
         let source_file = self.decoded_source_file.take();
         let captures = std::mem::take(&mut self.decoded_captures);
         let value = if self.source.form == runmat_execution::value::CallableForm::Closure {
-            Value::Closure(Closure {
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                lexical_environment: None,
                 function_name: name,
                 binding,
                 source_role: self.source.source_role,
-                source_file,
+                source_file: source_file.map(String::into_boxed_str),
                 captures,
-            })
+            }))
         } else {
             match self.source.owner {
-                CallableOwner::Workspace => Value::FunctionHandle(name),
-                CallableOwner::External => Value::ExternalFunctionHandle(name),
-                CallableOwner::Method => Value::MethodFunctionHandle(name),
+                CallableOwner::Workspace => Value::function_handle(name),
+                CallableOwner::External => Value::external_function_handle(name),
+                CallableOwner::Method => Value::method_function_handle(name),
                 CallableOwner::Bound(_) => {
                     let binding = binding.expect("resolved exact origin");
-                    Value::BoundFunctionHandle {
+                    Value::bound_function_handle(
                         name,
-                        function: binding.function,
-                        authority: binding.authority,
-                        source_role: self.source.source_role,
+                        binding.function,
+                        binding.authority,
+                        self.source.source_role,
                         source_file,
-                    }
+                    )
                 }
             }
         };

@@ -28,7 +28,7 @@ pub fn bind_portable_source_map_v2_with_records(
     map: &runmat_execution::ExecutableSourceMapV2,
     records: impl IntoIterator<Item = ProgramSourceRecord>,
 ) -> Result<crate::context::RuntimeContext, PortableSourceBindingError> {
-    map.validate()
+    let admitted = super::ValidatedPortableSourceMap::new(Arc::new(map.clone()))
         .map_err(PortableSourceBindingError::Contract)?;
     let records = records.into_iter().collect::<Vec<_>>();
     if records.len() != map.entries.len()
@@ -43,7 +43,35 @@ pub fn bind_portable_source_map_v2_with_records(
     let mut runtime = runtime
         .with_program_sources(records)
         .map_err(PortableSourceBindingError::Issue)?;
-    runtime.retain_portable_program_source_map(Arc::new(map.clone()));
+    runtime
+        .retain_portable_program_source_map(&admitted)
+        .map_err(PortableSourceBindingError::Provenance)?;
+    Ok(runtime)
+}
+
+/// Attach a one-source portable product to the exact source lease already
+/// issued for dynamic evaluation. Neither the source ID nor its text is
+/// reissued, and the validated record must match that lease before mutation.
+pub fn bind_portable_source_map_v2_with_existing_lease(
+    runtime: crate::context::RuntimeContext,
+    map: &runmat_execution::ExecutableSourceMapV2,
+    lease: super::RuntimeSourceLease,
+) -> Result<crate::context::RuntimeContext, PortableSourceBindingError> {
+    let admitted = super::ValidatedPortableSourceMap::new(Arc::new(map.clone()))
+        .map_err(PortableSourceBindingError::Contract)?;
+    let [record] = map.entries.as_slice() else {
+        return Err(PortableSourceBindingError::RecordMismatch);
+    };
+    let info = lease.source_info();
+    if info.name.as_ref() != record.display_name || info.text.as_ref() != record.text {
+        return Err(PortableSourceBindingError::RecordMismatch);
+    }
+    let mut runtime = runtime
+        .with_existing_program_source(record.source_id, lease)
+        .map_err(PortableSourceBindingError::Issue)?;
+    runtime
+        .retain_portable_program_source_map(&admitted)
+        .map_err(PortableSourceBindingError::Provenance)?;
     Ok(runtime)
 }
 
@@ -52,6 +80,7 @@ pub enum PortableSourceBindingError {
     Contract(runmat_execution::ContractError),
     RecordMismatch,
     Issue(ProgramSourceBindingError),
+    Provenance(super::PortableSourceIdentityError),
 }
 
 impl std::fmt::Display for PortableSourceBindingError {
@@ -62,6 +91,9 @@ impl std::fmt::Display for PortableSourceBindingError {
                 formatter.write_str("local source records differ from the validated portable map")
             }
             Self::Issue(error) => write!(formatter, "cannot bind source map: {error}"),
+            Self::Provenance(error) => {
+                write!(formatter, "cannot retain source provenance: {error}")
+            }
         }
     }
 }
@@ -72,6 +104,7 @@ impl std::error::Error for PortableSourceBindingError {
             Self::Contract(error) => Some(error),
             Self::RecordMismatch => None,
             Self::Issue(error) => Some(error),
+            Self::Provenance(error) => Some(error),
         }
     }
 }
@@ -184,6 +217,61 @@ mod tests {
             .fullpath_name
             .as_deref(),
             Some("/host/main.m")
+        );
+    }
+
+    #[test]
+    fn existing_eval_lease_binds_portable_product_without_reissuing_identity() {
+        let session = runtime();
+        let lease =
+            super::super::lease_source_context_in_context(&session, "main.m", None, "answer = 7;")
+                .expect("issue eval source once");
+        let selected = lease.source_ref();
+        let bound =
+            bind_portable_source_map_v2_with_existing_lease(session.clone(), &map(), lease.clone())
+                .expect("bind exact existing lease");
+        assert_eq!(
+            bound.program_source_id(ProgramSourceId(0)),
+            Some(lease.source_id())
+        );
+        assert_eq!(bound.program_source_ref(ProgramSourceId(0)), Some(selected));
+        assert_eq!(bound.portable_program_source_map(), Some(&map()));
+        assert!(super::super::portable_source_identity_in_context(&bound, selected).is_some());
+        assert_eq!(
+            crate::context::SourceEvaluationProvenance::runtime_source_lease(&lease)
+                .expect("typed source-evaluation lease")
+                .source_ref(),
+            selected
+        );
+    }
+
+    #[test]
+    fn existing_eval_lease_rejects_foreign_and_mismatched_source_before_binding() {
+        let session = runtime();
+        let foreign = runtime();
+        let lease =
+            super::super::lease_source_context_in_context(&session, "main.m", None, "answer = 7;")
+                .expect("issue eval source");
+        assert!(matches!(
+            bind_portable_source_map_v2_with_existing_lease(foreign, &map(), lease.clone()),
+            Err(PortableSourceBindingError::Issue(
+                ProgramSourceBindingError::ForeignOrRetired
+            ))
+        ));
+        let mut mismatched = map();
+        mismatched.entries[0].display_name = "other.m".into();
+        assert!(matches!(
+            bind_portable_source_map_v2_with_existing_lease(
+                session.clone(),
+                &mismatched,
+                lease.clone()
+            ),
+            Err(PortableSourceBindingError::RecordMismatch)
+        ));
+        assert!(lease.source_ref().resolve_in(&session).is_some());
+        assert!(
+            super::super::portable_source_identity_in_context(&session, lease.source_ref())
+                .is_none()
         );
     }
 }

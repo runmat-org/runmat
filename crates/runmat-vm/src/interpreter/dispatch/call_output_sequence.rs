@@ -36,6 +36,14 @@ impl SequenceState {
         )
     }
 
+    pub(super) fn stage_rooted_call_output_sequence(
+        &mut self,
+        stack: &mut Vec<Value>,
+        sequence: runmat_runtime::execution::RootedValueSequence,
+    ) -> Result<(), RuntimeError> {
+        sequence.with_owned_sequence(|sequence| self.stage_call_output_sequence(stack, sequence))
+    }
+
     pub(super) fn capture_call_outputs(&mut self) -> Result<(), RuntimeError> {
         if self.assignment.is_some() {
             return Err(state_error(

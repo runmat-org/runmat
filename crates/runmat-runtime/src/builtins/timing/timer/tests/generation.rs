@@ -8,7 +8,7 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
     let callback_calls = calls.clone();
     let callback_runtime = runtime.clone();
     let invoker: Rc<crate::user_functions::FunctionInvoker> =
-        Rc::new(move |_function, args, requested_outputs| {
+        Rc::new(move |_runtime, _function, args, requested_outputs| {
             assert_eq!(requested_outputs, 0);
             let handle = args[0].clone();
             let calls = callback_calls.clone();
@@ -21,7 +21,7 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
                         .await?;
                     super::super::timer_start_builtin(Some(runtime), None, handle).await?;
                 }
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         });
     let scope = runtime.enter();
@@ -58,7 +58,7 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
     let callback_runtime = runtime.clone();
     let callback_completion = restarted_completion.clone();
     let invoker: Rc<crate::user_functions::FunctionInvoker> =
-        Rc::new(move |function, args, _requested_outputs| {
+        Rc::new(move |_runtime, function, args, _requested_outputs| {
             let handle = args[0].clone();
             let runtime = callback_runtime.clone();
             let ticks = callback_ticks.clone();
@@ -92,7 +92,7 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
                     3 => stops.set(stops.get() + 1),
                     _ => panic!("unexpected timer callback"),
                 }
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         });
     let scope = runtime.enter();
@@ -141,7 +141,7 @@ fn deleting_a_pending_timer_cancels_its_child_without_late_callback() {
             let recorded = recorded.clone();
             Box::pin(async move {
                 *recorded.lock().unwrap() += 1;
-                Ok(crate::sequence::ValueSequence::empty())
+                rooted_empty_sequence()
             })
         },
     )));
@@ -207,11 +207,11 @@ fn failed_timer_callback_delivers_original_exception_then_stop_once() {
                     };
                     assert_eq!(exception.identifier, "RunMat:TimerTest:Tick");
                     assert_eq!(exception.message, "tick failed");
-                    Ok(crate::sequence::ValueSequence::empty())
+                    rooted_empty_sequence()
                 }
                 3 => {
                     recorded.lock().unwrap().push("stop");
-                    Ok(crate::sequence::ValueSequence::empty())
+                    rooted_empty_sequence()
                 }
                 _ => panic!("unexpected timer callback"),
             }

@@ -52,6 +52,39 @@ fn observation_accounts_for_complete_physical_chain_not_one_dispatch() {
         overhead.requested_peak_buffer_bytes,
         u64::from(work.queue_submissions) * 8
     );
+    assert_eq!(
+        overhead.wgpu_compute_query.unwrap().max_query_sets,
+        work.queue_submissions
+    );
+    assert_eq!(work.compute_encoders, work.estimate.dispatches.unwrap() + 1);
+    let mut strided = query.clone();
+    strided.inputs[0].layout = ProviderLayout::Strided;
+    let strided_work = physical_work(&provider, &strided).unwrap();
+    let ProviderObservationCapability::Supported(strided_overhead) =
+        observation_capability(&provider, &strided)
+    else {
+        panic!("audited strided route");
+    };
+    assert!(strided_work.queue_submissions > strided_work.estimate.dispatches.unwrap());
+    assert_eq!(strided_overhead.submissions, strided_work.queue_submissions);
+    assert_eq!(
+        strided_overhead.wgpu_compute_query.unwrap().max_query_sets,
+        strided_work.queue_submissions
+    );
+    assert_eq!(
+        strided_work.queue_submissions,
+        strided_work.compute_encoders + 1
+    );
+    let mut empty = query.clone();
+    empty.inputs[0].shape = vec![1, 0];
+    empty.outputs[0].shape = vec![1, 0];
+    let ProviderObservationCapability::Supported(empty_overhead) =
+        observation_capability(&provider, &empty)
+    else {
+        panic!("audited empty route");
+    };
+    assert_eq!(empty_overhead.submissions, 0);
+    assert!(empty_overhead.wgpu_compute_query.is_none());
     query.operation = ProviderOperationIdentity::new("zeros");
     assert_eq!(
         observation_capability(&provider, &query),

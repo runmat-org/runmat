@@ -8,6 +8,7 @@ pub use contract::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 pub const POL2CART_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pol2cart" },
     category: "math/trigonometry",

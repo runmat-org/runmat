@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod toeplitz;
+mod concatenation;
 
-pub use toeplitz::*;
+pub use self::concatenation::*;
+pub use self::toeplitz::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(toeplitz::ENTRIES.iter().copied());
+    values.extend(concatenation::ENTRIES.iter().copied());
 }

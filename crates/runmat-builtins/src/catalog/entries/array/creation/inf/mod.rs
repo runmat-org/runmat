@@ -216,6 +216,7 @@ pub const INF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 pub const INF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "inf" },
     category: "array/creation",

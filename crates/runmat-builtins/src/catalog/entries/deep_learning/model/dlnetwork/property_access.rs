@@ -207,6 +207,7 @@ fn network_receiver(
 }
 
 pub(super) const GET_LEARNABLES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "get.Learnables",
@@ -249,6 +250,7 @@ pub(super) const GET_LEARNABLES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCata
     suppress_auto_output: false,
 };
 pub(super) const SET_LEARNABLES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "set.Learnables",

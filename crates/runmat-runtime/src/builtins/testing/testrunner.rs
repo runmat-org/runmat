@@ -188,7 +188,7 @@ mod tests {
             None,
         ))
         .unwrap();
-        let Value::Cell(plugins) = plugins else {
+        let Value::Cell(plugins) = plugins.value() else {
             panic!("runner.Plugins should be a cell array");
         };
         assert_eq!(plugins.shape, [1, 1]);

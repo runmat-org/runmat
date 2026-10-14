@@ -128,7 +128,10 @@ impl RuntimeCollectiveService for StdioCollectiveService {
                 id: completed_id,
                 sequence: completed_sequence,
                 result,
-            } = completion;
+            } = completion
+            else {
+                return Err(error("collective received an unrelated driver control"));
+            };
             if completed_context != context || completed_id != id || completed_sequence != sequence
             {
                 return Err(error(

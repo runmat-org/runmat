@@ -224,7 +224,8 @@ fn empty_single_restoration_preserves_explicit_intent_and_terminal_failures() {
                 1,
             ));
             if !explicit && matches!(mode, Mode::RestoreUnsupported) {
-                let Value::Tensor(host) = result.unwrap() else {
+                let result = result.unwrap();
+                let Value::Tensor(host) = result.value() else {
                     panic!("automatic unsupported restoration retains exact host carrier")
                 };
                 assert_eq!(host.shape(), &[1, 3]);

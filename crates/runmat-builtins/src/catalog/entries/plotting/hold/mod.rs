@@ -6,6 +6,7 @@ mod inference;
 mod tests;
 pub use contract::*;
 pub const HOLD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "hold" },
     category: "plotting",

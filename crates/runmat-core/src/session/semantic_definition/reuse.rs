@@ -2,10 +2,12 @@ use runmat_hir::FunctionId;
 use runmat_vm::{Bytecode, FunctionRegistry};
 use std::collections::{HashMap, HashSet};
 
+/// A decorated product is a closed compilation: all its fresh-ID references,
+/// including external and dotted encodings, belong to this current group.
 /// Reuse published identities only after proving the complete incoming group
 /// equivalent under one bijective mapping. Recursive/mutual references are
 /// compared after all candidate identities are known, never one at a time.
-pub(in crate::session) fn unchanged_unit_remap(
+pub(in crate::session) fn unchanged_closed_product_remap(
     bytecode: &Bytecode,
     incoming: &FunctionRegistry,
     published: &FunctionRegistry,
@@ -65,17 +67,12 @@ pub(in crate::session) fn unchanged_unit_remap(
         let target = *remap.get(local)?;
         let mut normalized = function.clone();
         let source = normalized.source_id.or(bytecode.source_id);
-        runmat_vm::remap_session_function(
-            &mut normalized,
-            target,
-            runmat_types::ProgramFunctionId(u32::try_from(target.0).ok()?),
-            source,
-            &remap,
-        )
-        .ok()?;
-        if super::fingerprint(&normalized).ok()?
-            != super::fingerprint(published.get(target)?).ok()?
-        {
+        let portable = runmat_types::ProgramFunctionId(u32::try_from(target.0).ok()?);
+        runmat_vm::rebind_session_source(&mut normalized, source).ok()?;
+        runmat_vm::remap_closed_session_function(&mut normalized, target, portable, &remap).ok()?;
+        let incoming_fingerprint = super::fingerprint(&normalized);
+        let published_fingerprint = super::fingerprint(published.get(target)?);
+        if incoming_fingerprint.ok()? != published_fingerprint.ok()? {
             return None;
         }
     }

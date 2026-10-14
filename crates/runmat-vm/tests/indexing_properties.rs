@@ -223,7 +223,7 @@ fn multidim_empty_mixes() {
     let mut saw_b2 = false;
     let mut saw_b3 = false;
     let mut saw_b4 = false;
-    for v in &vars {
+    for v in vars.values() {
         if let runmat_value::Value::Tensor(t) = v {
             if t.shape() == vec![0, 4, 2] && t.materialize_f64().is_empty() {
                 saw_b1 = true;

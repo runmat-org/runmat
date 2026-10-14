@@ -1,6 +1,7 @@
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop2;
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -25,13 +26,14 @@ pub async fn add<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
@@ -48,7 +50,7 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -60,13 +62,14 @@ pub async fn sub<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
@@ -83,7 +86,7 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -95,13 +98,14 @@ pub async fn mul<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
@@ -118,7 +122,7 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -131,13 +135,14 @@ pub async fn binary_method_ordered<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
@@ -154,7 +159,7 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -164,11 +169,12 @@ pub async fn binary_fallback<F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
-    stack.push(fallback(a, b).await?);
+    fallback(a, b).await?.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -180,13 +186,14 @@ pub async fn power<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
-    FFut: Future<Output = Result<Value, RuntimeError>>,
+    FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
@@ -203,19 +210,20 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
 pub async fn unary<UF, UFut>(stack: &mut Vec<Value>, mut op: UF) -> Result<(), RuntimeError>
 where
     UF: FnMut(Value) -> UFut,
-    UFut: Future<Output = Result<Value, RuntimeError>>,
+    UFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let value = stack
         .pop()
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
-    stack.push(op(value).await?);
+    let _input_roots = crate::call::root_values([&value])?;
+    op(value).await?.with_owned(|result| stack.push(result));
     Ok(())
 }
 
@@ -225,13 +233,14 @@ pub async fn unary_arithmetic<UF, UFut>(
 ) -> Result<(), RuntimeError>
 where
     UF: FnMut(Value) -> UFut,
-    UFut: Future<Output = Result<Value, RuntimeError>>,
+    UFut: Future<Output = Result<runmat_runtime::execution::RootedValue, RuntimeError>>,
 {
     let value = stack
         .pop()
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
     reject_typed_complex_integer_arithmetic(&[&value])?;
-    stack.push(op(value).await?);
+    let _input_roots = crate::call::root_values([&value])?;
+    op(value).await?.with_owned(|result| stack.push(result));
     Ok(())
 }
 
@@ -258,16 +267,16 @@ pub async fn execute_right_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
     mut call_right_method: RM,
     mut scalarish_fallback: SF,
     mut matrix_fallback: MF,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
-    SFFut: Future<Output = Result<Value, RuntimeError>>,
+    SFFut: Future<Output = Result<RootedValue, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
-    MFFut: Future<Output = Result<Value, RuntimeError>>,
+    MFFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     match (lhs, rhs) {
         (Value::Object(obj), _) => {
@@ -311,16 +320,16 @@ pub async fn execute_left_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
     mut call_right_method: RM,
     mut scalarish_fallback: SF,
     mut matrix_fallback: MF,
-) -> Result<Value, RuntimeError>
+) -> Result<RootedValue, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<Value, RuntimeError>>,
+    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
-    SFFut: Future<Output = Result<Value, RuntimeError>>,
+    SFFut: Future<Output = Result<RootedValue, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
-    MFFut: Future<Output = Result<Value, RuntimeError>>,
+    MFFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     match (lhs, rhs) {
         (Value::Object(obj), _) => {

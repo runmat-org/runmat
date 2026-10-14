@@ -122,10 +122,10 @@ mod tests {
         assert_eq!(cell.data.len(), 1);
         assert!(matches!(
             &cell.data[0],
-            Value::BoundFunctionHandle { name, function, source_role, .. }
-                if name == "first"
-                    && *function == 10
-                    && *source_role == runmat_types::FunctionSourceRole::Local
+            Value::BoundFunctionHandle(handle)
+                if handle.name == "first"
+                    && handle.function == 10
+                    && handle.source_role == runmat_types::FunctionSourceRole::Local
         ));
     }
 
@@ -195,19 +195,12 @@ mod tests {
             panic!("cell result");
         };
         assert_eq!(cell.data.len(), 1);
-        let Value::BoundFunctionHandle {
-            name,
-            function,
-            source_file,
-            authority,
-            ..
-        } = &cell.data[0]
-        else {
+        let Value::BoundFunctionHandle(handle) = &cell.data[0] else {
             panic!("bound local");
         };
-        assert_eq!(name, "old_local");
-        assert_eq!(*function, 10);
-        assert_eq!(source_file.as_deref(), Some("/old/file.m"));
-        assert!(authority.admits_local(&runtime.session_lease()));
+        assert_eq!(handle.name, "old_local");
+        assert_eq!(handle.function, 10);
+        assert_eq!(handle.source_file.as_deref(), Some("/old/file.m"));
+        assert!(handle.authority.admits_local(&runtime.session_lease()));
     }
 }

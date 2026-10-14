@@ -69,6 +69,15 @@ fn managed_results_preserve_stored_intent_without_borrowing_or_mutating_referent
             enabled: true,
             valid: true,
         };
+        let closure = Value::Closure(runmat_value::Closure::new(
+            "managed_capture".into(),
+            None,
+            runmat_types::FunctionSourceRole::Anonymous,
+            None,
+            vec![Value::HandleObject(handle.clone())],
+            None,
+        ));
+        let closure_instance = closure.callable_instance_key();
         let mut results = [
             Value::HandleObject(handle.clone()),
             Value::ObjectArray(
@@ -80,6 +89,7 @@ fn managed_results_preserve_stored_intent_without_borrowing_or_mutating_referent
                 .unwrap(),
             ),
             Value::Listener(listener),
+            closure,
         ];
         let explicit = allocation
             .handle
@@ -99,6 +109,10 @@ fn managed_results_preserve_stored_intent_without_borrowing_or_mutating_referent
             assert!(stored.shares_allocation_with(&allocation.handle));
         })
         .unwrap();
+        assert_eq!(results[3].callable_instance_key(), closure_instance);
+        let gathered = futures::executor::block_on(gather_if_needed_async(&results[3]))
+            .expect("managed referent is not an owned capture to gather");
+        assert_eq!(gathered.callable_instance_key(), closure_instance);
         for result in &results {
             try_visit_gpu_handles(result, &mut |handle| {
                 assert_eq!(

@@ -95,6 +95,16 @@ pub(crate) fn observation_capability(
             * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
         clear_commands: work.queue_submissions,
         map_callbacks: work.queue_submissions,
+        wgpu_compute_query: (work.kernel != SumKernelRoute::Host)
+            .then(|| {
+                crate::backend::wgpu::dispatch::observation::prospective_encoder_query(
+                    // Omit-NaN adds a real no-op compute warmup encoder;
+                    // unlike a transfer/flush submission it admits a query.
+                    work.queue_submissions,
+                    work.queue_submissions,
+                )
+            })
+            .flatten(),
     })
 }
 

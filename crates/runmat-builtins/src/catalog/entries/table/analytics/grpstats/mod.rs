@@ -17,6 +17,7 @@ pub use extensions::{
 pub use integer::GRPSTATS_INTEGER_CAPABILITIES;
 
 pub(super) const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "grpstats" },
     category: "stats/summary",

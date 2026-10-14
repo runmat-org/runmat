@@ -18,7 +18,7 @@ use super::control::{
     canonicalize_byte_order, default_user_data, parse_port, parse_timeout_value, string_scalar,
     DEFAULT_TIMEOUT_SECONDS,
 };
-use crate::context::{RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpIssuer};
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpInvocation};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use std::net::SocketAddr;
@@ -126,7 +126,7 @@ pub(crate) async fn tcpclient_builtin(
     let endpoint = work
         .await_service(
             service.connect(
-                RuntimeTcpIssuer::from_context(runtime.as_ref()),
+                RuntimeTcpInvocation::from_context(runtime.as_ref()),
                 RuntimeTcpConnect {
                     host: host_text.clone(),
                     port: port_num,

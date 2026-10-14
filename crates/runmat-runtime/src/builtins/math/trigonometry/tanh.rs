@@ -17,6 +17,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tanh";
@@ -79,9 +81,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tanh",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
-async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn tanh_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -99,9 +104,13 @@ async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     super::inverse_helpers::preparation::unary(
+        runtime.as_ref(),
         runmat_builtins::TANH_CATALOG_ENTRY.identity,
         value,
-        tanh_admitted,
+        |value| async move {
+            let output = tanh_admitted(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
 }
@@ -247,7 +256,7 @@ pub(crate) mod tests {
     use runmat_value::{CharArray, IntValue, Tensor};
 
     fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
-        block_on(super::tanh_builtin(value))
+        block_on(super::tanh_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[test]
@@ -263,7 +272,8 @@ pub(crate) mod tests {
     #[test]
     fn tanh_extensions_integer_boundary_and_output_arity_are_gated() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::tanh_builtin(Value::Int(IntValue::I8(1))))
+        let integer = block_on(super::tanh_builtin(None, Value::Int(IntValue::I8(1))))
+            .map(|owned| owned.value().clone())
             .expect_err("integer extension must be gated");
         assert_eq!(
             integer.identifier(),
@@ -272,14 +282,22 @@ pub(crate) mod tests {
         drop(_strict);
 
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert!(block_on(super::tanh_builtin(Value::Int(IntValue::U64(
-            (1_u64 << 53) + 1
-        ))))
+        assert!(block_on(super::tanh_builtin(
+            None,
+            Value::Int(IntValue::U64((1_u64 << 53) + 1))
+        ))
+        .map(|owned| owned.value().clone())
         .is_err());
-        assert!(block_on(super::tanh_builtin(Value::Int(IntValue::U64(1_u64 << 54)))).is_ok());
+        assert!(block_on(super::tanh_builtin(
+            None,
+            Value::Int(IntValue::U64(1_u64 << 54))
+        ))
+        .map(|owned| owned.value().clone())
+        .is_ok());
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity =
-            block_on(super::tanh_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        let arity = block_on(super::tanh_builtin(None, Value::Num(0.0)))
+            .map(|owned| owned.value().clone())
+            .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), Some("RunMat:tanh:TooManyOutputs"));
     }
 
@@ -332,8 +350,9 @@ pub(crate) mod tests {
             IntValue::U32(1),
             IntValue::U64(1),
         ] {
-            let Value::Num(result) =
-                block_on(super::tanh_builtin(Value::Int(value))).expect("integer tanh")
+            let Value::Num(result) = block_on(super::tanh_builtin(None, Value::Int(value)))
+                .map(|owned| owned.value().clone())
+                .expect("integer tanh")
             else {
                 panic!("expected real double scalar")
             };
@@ -506,8 +525,9 @@ pub(crate) mod tests {
                 })
                 .expect("upload");
             let source_device = source.device_id();
-            let result =
-                block_on(super::tanh_builtin(Value::GpuTensor(source))).expect("tanh fallback");
+            let result = block_on(super::tanh_builtin(None, Value::GpuTensor(source)))
+                .map(|owned| owned.value().clone())
+                .expect("tanh fallback");
             let Value::GpuTensor(handle) = &result else {
                 panic!("expected resident result")
             };

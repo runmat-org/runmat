@@ -4,7 +4,7 @@ use super::*;
 fn timeit_external_function_handle_surfaces_undefined_function() {
     let err = block_on(timeit_builtin(
         Some(runtime()),
-        Value::ExternalFunctionHandle("pkg.missing_callback".to_string()),
+        Value::ExternalFunctionHandle("pkg.missing_callback".into()),
         Vec::new(),
     ))
     .expect_err("unresolved external callback should fail");

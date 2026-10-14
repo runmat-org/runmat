@@ -112,14 +112,15 @@ mod tests {
         ))
         .expect("tf");
         assert_eq!(
-            block_on(isstable_builtin(sys)).expect("isstable"),
+            sys.with_owned(|sys| block_on(isstable_builtin(sys)))
+                .expect("isstable"),
             Value::Bool(true)
         );
     }
 
     #[test]
     fn unstable_marginal_discrete_and_static_models_follow_pole_region() {
-        fn model(denominator: Vec<f64>, sample_time: Option<f64>) -> Value {
+        fn model(denominator: Vec<f64>, sample_time: Option<f64>) -> crate::execution::RootedValue {
             let mut arguments = vec![
                 Value::Num(1.0),
                 Value::Tensor(
@@ -140,7 +141,8 @@ mod tests {
             (model(vec![1.0], None), true),
         ] {
             assert_eq!(
-                block_on(isstable_builtin(sys)).unwrap(),
+                sys.with_owned(|sys| block_on(isstable_builtin(sys)))
+                    .unwrap(),
                 Value::Bool(expected)
             );
         }
@@ -156,7 +158,11 @@ mod tests {
             ],
         ))
         .expect("tf");
-        assert_eq!(block_on(isstable_builtin(sys)).unwrap(), Value::Bool(false));
+        assert_eq!(
+            sys.with_owned(|sys| block_on(isstable_builtin(sys)))
+                .unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[test]

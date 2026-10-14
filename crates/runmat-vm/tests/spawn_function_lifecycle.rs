@@ -101,7 +101,10 @@ mod tests {
         Ok((function_id, registry, input_slot))
     }
 
-    fn invoke_no_arg(source: &str, function_name: &str) -> Result<Value, RuntimeError> {
+    fn invoke_no_arg(
+        source: &str,
+        function_name: &str,
+    ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
         let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
         let hir = lower(&ast, &LoweringContext::empty())
             .map_err(|err| RuntimeError::new(err.to_string()))?;
@@ -126,12 +129,19 @@ mod tests {
         resolve_single_output(sequence)
     }
 
-    fn resolve_single_output(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
-        let mut values = sequence.resolve(
-            runmat_types::SequenceUse::RequireSingle,
-            runmat_runtime::sequence::SequenceResolutionContext::default(),
-        )?;
-        Ok(values.remove(0))
+    fn resolve_single_output(
+        sequence: runmat_runtime::execution::RootedValueSequence,
+    ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
+        sequence.try_map_owned(
+            |sequence| {
+                let mut values = sequence.resolve(
+                    runmat_types::SequenceUse::RequireSingle,
+                    runmat_runtime::sequence::SequenceResolutionContext::default(),
+                )?;
+                Ok(values.remove(0))
+            },
+            |error| error.into_runtime_error(),
+        )
     }
 
     #[test]

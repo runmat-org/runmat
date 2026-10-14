@@ -10,7 +10,9 @@ use runmat_value::{CharArray, LogicalArray, StringArray, Tensor};
 use runmat_value::{ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener};
 
 fn run_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(super::ne_builtin(lhs, rhs))
+    // Terminal fixture projection: comparison emits only logical, symbolic
+    // expression, or external GPU values, never a GC-managed child.
+    block_on(super::ne_builtin(None, lhs, rhs)).map(|owned| owned.with_owned(|value| value))
 }
 
 #[test]
@@ -158,8 +160,7 @@ fn ne_handle_difference() {
 #[test]
 fn ne_listener_identity_is_disjoint_from_target_identity() {
     let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc target");
-    let callback =
-        runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
+    let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".into())).expect("gc callback");
     let handle = HandleRef {
         class_name: "EventTarget".into(),
         target,

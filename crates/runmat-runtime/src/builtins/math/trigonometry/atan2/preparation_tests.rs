@@ -20,7 +20,7 @@ impl BuiltinPreparationObservation for Observation {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "failure" });
@@ -61,17 +61,18 @@ impl RuntimeAccelerationService for Service {
         assert_eq!(request.operands().len(), 2);
         self.0.borrow_mut().push("prepare");
         let mode = self.1;
-        let mut operands = request.into_operands();
-        if matches!(mode, Mode::Invalid) {
-            operands[1] = Value::String("invalid".into());
-        }
-        let prepared =
-            PreparedBuiltinOperands::new(operands, Some(Box::new(Observation(self.0.clone()))));
+        let observation = Some(Box::new(Observation(self.0.clone())) as Box<_>);
+        let prepared = request.into_operands().with_owned_values(|mut operands| {
+            if matches!(mode, Mode::Invalid) {
+                operands[1] = Value::String("invalid".into());
+            }
+            PreparedBuiltinOperands::new(operands, observation)
+        });
         Box::pin(async move {
             if matches!(mode, Mode::Pending) {
                 std::future::pending::<()>().await;
             }
-            Ok(prepared)
+            prepared
         })
     }
 }

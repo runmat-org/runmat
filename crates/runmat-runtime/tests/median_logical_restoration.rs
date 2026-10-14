@@ -68,7 +68,8 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                 );
                 match mode {
                     Mode::Supported => {
-                        let Value::GpuTensor(output) = result.unwrap() else {
+                        let result = result.unwrap();
+                        let Value::GpuTensor(output) = result.value() else {
                             panic!("resident logical output")
                         };
                         assert_eq!(output.shape(), &[1, 1, 1]);
@@ -80,8 +81,8 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                                 NumericElementType::F64
                             }
                         );
-                        assert!(handle_is_logical(&output));
-                        assert_eq!(handle_is_explicit(&output), explicit);
+                        assert!(handle_is_logical(output));
+                        assert_eq!(handle_is_explicit(output), explicit);
                         assert!(!output.shares_allocation_with(&input));
                         assert!(!output.shares_allocation_with(&weights));
                         let retired = output.allocation_lease().downgrade();
@@ -93,7 +94,7 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                             gathered,
                             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1, 1]).unwrap())
                         );
-                        drop(output);
+                        drop(result);
                         assert!(retired.acquire().is_none());
                     }
                     Mode::Unsupported => {
@@ -114,8 +115,8 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                             );
                         } else {
                             assert_eq!(
-                                result.unwrap(),
-                                Value::LogicalArray(
+                                result.unwrap().value(),
+                                &Value::LogicalArray(
                                     LogicalArray::new(vec![1], vec![1, 1, 1]).unwrap()
                                 )
                             );

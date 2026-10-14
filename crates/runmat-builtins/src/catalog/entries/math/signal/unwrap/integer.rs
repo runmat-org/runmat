@@ -65,7 +65,8 @@ pub const UNWRAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The tolerance is independently gated without changing the output class selected by P.",
+        notes:
+            "The tolerance is independently gated without changing the output class selected by P.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "Q = unwrap(P, tol, integer_dim)",

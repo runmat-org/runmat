@@ -15,12 +15,12 @@ fn unregistered_resident_handle() -> runmat_accelerate_api::GpuTensorHandle {
 fn setfield_direct_resident_replacement_preserves_handle_without_provider_access() {
     let handle = unregistered_resident_handle();
     let root = StructValue::new();
-    let updated = run_setfield(
+    let updated_owner = run_setfield(
         Value::Struct(root),
         vec![Value::from("values"), Value::GpuTensor(handle.clone())],
     )
     .expect("direct resident assignment");
-    let Value::Struct(updated) = updated else {
+    let Value::Struct(updated) = updated_owner.value() else {
         panic!("expected structure");
     };
     let weak = handle.downgrade();
@@ -29,7 +29,7 @@ fn setfield_direct_resident_replacement_preserves_handle_without_provider_access
         Some(&Value::GpuTensor(handle))
     );
     assert!(weak.acquire().is_ok(), "replacement retains its allocation");
-    drop(updated);
+    drop(updated_owner);
     assert!(weak.acquire().is_err());
 }
 
@@ -100,7 +100,7 @@ fn setfield_gpu_tensor_indexing_gathers_to_host() {
     )
     .expect("setfield gpu value");
 
-    match updated {
+    match updated.value() {
         Value::Struct(st) => {
             let values = st.fields.get("values").expect("values field");
             match values {

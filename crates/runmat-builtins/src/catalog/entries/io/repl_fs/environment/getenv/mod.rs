@@ -10,6 +10,7 @@ pub use contract::*;
 const EFFECTS: &[EffectKind] = &[EffectKind::EnvironmentRead, EffectKind::MayThrow];
 
 pub const GETENV_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "getenv" },
     category: "io/repl_fs",

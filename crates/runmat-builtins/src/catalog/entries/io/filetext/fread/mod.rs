@@ -12,6 +12,7 @@ pub use contract::*;
 pub use precision::{parse_fread_precision, FreadInputType, FreadOutputKind, FreadPrecisionSpec};
 
 pub const FREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "fread" },
     category: "io/filetext",

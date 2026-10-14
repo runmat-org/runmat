@@ -8,7 +8,7 @@ fn tensor_from_f32(data: &[f32], shape: &[usize]) -> Tensor {
     Tensor::from_f32(data.to_vec(), shape.to_vec()).expect("tensor")
 }
 
-fn expect_tensor(value: Value) -> Tensor {
+fn expect_tensor(value: &Value) -> &Tensor {
     if let Value::Tensor(t) = value {
         t
     } else {
@@ -53,7 +53,7 @@ fn mean_all_native_preserves_single_dtype_and_value() {
         Value::from("native"),
     ];
     let result = block_on(rt::call_builtin_async("mean", &args)).expect("mean");
-    let scalar = expect_tensor(result);
+    let scalar = expect_tensor(result.value());
     assert_eq!(
         scalar.shape(),
         vec![1, 1],
@@ -93,9 +93,9 @@ fn nlms_style_column_reductions_match_reference() {
         &[x_value.clone(), x_value.clone()],
     ))
     .expect("times");
-    let sum_xx_args = [xx, Value::Num(1.0), Value::from("native")];
+    let sum_xx_args = [xx.value().clone(), Value::Num(1.0), Value::from("native")];
     let sum_xx = block_on(rt::call_builtin_async("sum", &sum_xx_args)).expect("sum");
-    let sum_xx_tensor = expect_tensor(sum_xx);
+    let sum_xx_tensor = expect_tensor(sum_xx.value());
     assert_eq!(
         sum_xx_tensor.shape(),
         vec![1, cols],
@@ -115,9 +115,9 @@ fn nlms_style_column_reductions_match_reference() {
         &[x_value.clone(), w_value.clone()],
     ))
     .expect("times");
-    let sum_xw_args = [xw, Value::Num(1.0), Value::from("native")];
+    let sum_xw_args = [xw.value().clone(), Value::Num(1.0), Value::from("native")];
     let sum_xw = block_on(rt::call_builtin_async("sum", &sum_xw_args)).expect("sum");
-    let sum_xw_tensor = expect_tensor(sum_xw);
+    let sum_xw_tensor = expect_tensor(sum_xw.value());
     assert_eq!(sum_xw_tensor.shape(), &[1, cols]);
     assert_eq!(sum_xw_tensor.numeric_dtype(), NumericDType::F32);
     let expected_xw = column_sum_of_products(&x_vals, &w_vals, rows, cols);

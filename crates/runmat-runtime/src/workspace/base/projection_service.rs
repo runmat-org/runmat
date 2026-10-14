@@ -1,5 +1,4 @@
 use std::cell::{Ref, RefCell, RefMut};
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use runmat_value::Value;
@@ -10,9 +9,12 @@ use crate::RuntimeError;
 
 use super::{
     base_workspace_error_to_runtime, BaseWorkspaceCommit, BaseWorkspaceError,
-    BaseWorkspaceProjection, BaseWorkspaceReconciliation, WorkspaceChange, WorkspaceDelta,
-    WorkspaceRevision,
+    BaseWorkspaceProjection, BaseWorkspaceReconciliation, WorkspaceDelta, WorkspaceRevision,
 };
+
+mod publication;
+use publication::{PendingPublicationOrigins, PublishedWorkspaceEffect};
+pub use publication::{WorkspacePublicationObserver, WorkspacePublicationOrigin};
 
 /// Exact current-workspace authority for one admitted executor invocation.
 ///
@@ -23,52 +25,14 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceProjectionService {
     state: Rc<RefCell<ProjectionServiceState>>,
+    publication_observer: Option<WorkspacePublicationObserver>,
 }
 
 #[derive(Debug)]
 struct ProjectionServiceState {
     projection: BaseWorkspaceProjection,
     published_effect: PublishedWorkspaceEffect,
-}
-
-#[derive(Debug, Default)]
-struct PublishedWorkspaceEffect {
-    cleared: bool,
-    changes: BTreeMap<String, WorkspaceChange>,
-}
-
-impl PublishedWorkspaceEffect {
-    fn observe(&mut self, delta: &WorkspaceDelta) -> Vec<WorkspaceChange> {
-        let mut retired = Vec::new();
-        for change in delta.changes() {
-            match change.kind() {
-                super::WorkspaceChangeKind::Clear => {
-                    self.cleared = true;
-                    retired.extend(std::mem::take(&mut self.changes).into_values());
-                }
-                super::WorkspaceChangeKind::Assign | super::WorkspaceChangeKind::Remove => {
-                    if let Some(name) = change.name() {
-                        if let Some(previous) =
-                            self.changes.insert(name.to_string(), change.clone())
-                        {
-                            retired.push(previous);
-                        }
-                    }
-                }
-            }
-        }
-        retired
-    }
-
-    fn take(&mut self) -> WorkspaceDelta {
-        let mut changes = Vec::with_capacity(self.changes.len() + usize::from(self.cleared));
-        if self.cleared {
-            changes.push(WorkspaceChange::clear());
-        }
-        changes.extend(std::mem::take(&mut self.changes).into_values());
-        self.cleared = false;
-        WorkspaceDelta::from_changes(changes)
-    }
+    pending_origins: PendingPublicationOrigins,
 }
 
 impl BaseWorkspaceProjectionService {
@@ -77,8 +41,15 @@ impl BaseWorkspaceProjectionService {
             state: Rc::new(RefCell::new(ProjectionServiceState {
                 projection,
                 published_effect: PublishedWorkspaceEffect::default(),
+                pending_origins: PendingPublicationOrigins::default(),
             })),
+            publication_observer: None,
         }
+    }
+
+    pub fn with_publication_observer(mut self, observer: WorkspacePublicationObserver) -> Self {
+        self.publication_observer = Some(observer);
+        self
     }
 
     pub fn revision(&self) -> Result<WorkspaceRevision, RuntimeError> {
@@ -115,15 +86,17 @@ impl BaseWorkspaceProjectionService {
     }
 
     pub fn bind_global(&self, name: &str) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| {
+        self.with_live_publication_mut(|projection, origins| {
             projection.bind_global(name);
+            origins.retire(name);
             Ok(())
         })
     }
 
     pub fn unbind_global(&self, name: &str) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| {
+        self.with_live_publication_mut(|projection, origins| {
             projection.unbind_global(name);
+            origins.retire(name);
             Ok(())
         })
     }
@@ -138,9 +111,13 @@ impl BaseWorkspaceProjectionService {
             .projection
             .publish()
             .map_err(base_workspace_error_to_runtime)?;
+        let origins = state.pending_origins.committed(&commit);
         let retired = state.published_effect.observe(commit.changes());
         drop(state);
         drop(retired);
+        if let Some(observer) = &self.publication_observer {
+            observer.notify(&origins)?;
+        }
         Ok(commit)
     }
 
@@ -204,15 +181,27 @@ impl BaseWorkspaceProjectionService {
         Ok(operation(&projection))
     }
 
-    fn with_live_projection_mut<T>(
+    fn with_live_publication_mut<T>(
         &self,
-        operation: impl FnOnce(&mut BaseWorkspaceProjection) -> Result<T, BaseWorkspaceError>,
+        operation: impl FnOnce(
+            &mut BaseWorkspaceProjection,
+            &mut PendingPublicationOrigins,
+        ) -> Result<T, BaseWorkspaceError>,
     ) -> Result<T, RuntimeError> {
-        let mut projection = self.borrow_mut()?;
-        projection
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
+        state
+            .projection
             .ensure_effect_authority()
             .map_err(base_workspace_error_to_runtime)?;
-        operation(&mut projection).map_err(base_workspace_error_to_runtime)
+        let ProjectionServiceState {
+            projection,
+            pending_origins,
+            ..
+        } = &mut *state;
+        operation(projection, pending_origins).map_err(base_workspace_error_to_runtime)
     }
 }
 
@@ -230,9 +219,13 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
             .projection
             .detach_selected(selection)
             .map_err(base_workspace_error_to_runtime)?;
+        let origins = state.pending_origins.committed(&commit);
         let retired = state.published_effect.observe(commit.changes());
         drop(state);
         drop(retired);
+        if let Some(observer) = &self.publication_observer {
+            observer.notify(&origins)?;
+        }
         Ok(detached)
     }
 
@@ -328,26 +321,47 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     }
 
     fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| {
+        self.with_live_publication_mut(|projection, origins| {
             projection.unbind_global(name);
-            projection.assign(name, value)
+            projection.assign(name, value)?;
+            origins.dynamic_effect(name);
+            Ok(())
         })
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| projection.assign(name, value))
+        self.with_live_publication_mut(|projection, origins| {
+            projection.assign(name, value)?;
+            origins.dynamic_effect(name);
+            Ok(())
+        })
+    }
+
+    fn assign_executor_slot(
+        &self,
+        slot: usize,
+        name: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        self.with_live_publication_mut(|projection, origins| {
+            projection.assign(name, value)?;
+            origins.executor_slot(name, slot);
+            Ok(())
+        })
     }
 
     fn clear(&self) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| {
+        self.with_live_publication_mut(|projection, origins| {
             projection.clear();
+            origins.clear();
             Ok(())
         })
     }
 
     fn remove(&self, name: &str) -> Result<(), RuntimeError> {
-        self.with_live_projection_mut(|projection| {
+        self.with_live_publication_mut(|projection, origins| {
             projection.remove(name);
+            origins.retire(name);
             Ok(())
         })
     }

@@ -147,8 +147,8 @@ pub fn record_runtime_teardown(
         let callback_name = match &callback {
             runmat_value::Value::FunctionHandle(name)
             | runmat_value::Value::ExternalFunctionHandle(name)
-            | runmat_value::Value::MethodFunctionHandle(name) => name.clone(),
-            runmat_value::Value::BoundFunctionHandle { name, .. } => name.clone(),
+            | runmat_value::Value::MethodFunctionHandle(name) => name.name().to_owned(),
+            runmat_value::Value::BoundFunctionHandle(handle) => handle.name.clone(),
             runmat_value::Value::Closure(closure) => closure.function_name.clone(),
             _ => return Err("addTeardown callback must be a function handle"),
         };

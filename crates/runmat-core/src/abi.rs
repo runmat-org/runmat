@@ -1,3 +1,4 @@
+use runmat_gc::{Trace, Tracer};
 use runmat_hir::{BindingName, DefPath, Span};
 use runmat_parser::CompatMode;
 use runmat_value::Value;
@@ -76,36 +77,29 @@ impl ExecutionSourceContext {
 #[derive(Debug)]
 pub struct ExecutionResponse {
     pub source_context: ExecutionSourceContext,
-    pub result: std::result::Result<ExecutionOutcome, crate::RunError>,
-    /// The response itself owns every managed result/display/workspace handle
-    /// until the caller drops it. This is not a cloned output carrier.
-    pub(crate) _result_roots: Option<runmat_runtime::execution::RootedValueLease>,
+    pub result: std::result::Result<
+        runmat_runtime::execution::RootedResult<ExecutionOutcome>,
+        crate::RunError,
+    >,
 }
 
-impl ExecutionResponse {
-    pub(crate) fn root_result_values(
-        &mut self,
-    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
-        let Ok(outcome) = &self.result else {
-            return Ok(());
-        };
-        let flow: &[Value] = match &outcome.flow {
-            RuntimeFlow::NoValue | RuntimeFlow::DynamicList(_) => &[],
-            RuntimeFlow::Single(value) => std::slice::from_ref(value),
-            RuntimeFlow::OutputList(values) => values,
-        };
-        self._result_roots = Some(runmat_runtime::execution::RootedValueLease::for_values(
-            flow.iter()
-                .chain(
-                    outcome
-                        .workspace_delta
-                        .upserts
-                        .iter()
-                        .map(|item| &item.value),
-                )
-                .chain(outcome.display_events.iter().map(|item| &item.value)),
-        )?);
-        Ok(())
+impl Trace for ExecutionOutcome {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match &self.flow {
+            RuntimeFlow::Single(value) => value.trace(tracer),
+            RuntimeFlow::OutputList(values) => {
+                for value in values {
+                    value.trace(tracer);
+                }
+            }
+            RuntimeFlow::NoValue | RuntimeFlow::DynamicList(_) => {}
+        }
+        for update in &self.workspace_delta.upserts {
+            update.value.trace(tracer);
+        }
+        for event in &self.display_events {
+            event.value.trace(tracer);
+        }
     }
 }
 

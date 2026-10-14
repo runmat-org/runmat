@@ -27,10 +27,11 @@ pub use program_session::{NativeProgramFailure, NativeProgramSession, NativeProg
 pub use protocol::{ProgramProgress, WorkerResponse};
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
-    run_remote_worker_quic, run_remote_worker_relay, QuicRemoteWorkerChannel,
-    RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt,
-    RemotePoolDriver, RemoteSpmdGangCompletion, RemoteSpmdGangProgram, RemoteTaskCompletion,
-    RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerRelayRequest,
+    run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
+    QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
+    RemoteObjectReceipt, RemotePoolDriver, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
+    RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
+    RemoteWorkerRelayRequest,
 };
 pub use service::NativeExecutionService;
 pub use test_workload::execute_host_program_request;

@@ -27,41 +27,44 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     };
     let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
     let expected_binding = binding.clone();
-    let _invoker = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |_runtime, actual, args, requested| {
-            assert_eq!(actual, expected_binding, "wrong portable callback binding");
-            let observed = observed.clone();
-            let first = args.values().first().cloned().unwrap();
-            Box::pin(async move {
-                let _args = args;
-                *observed.lock().unwrap() += 1;
-                if requested == 2 {
-                    runmat_runtime::sequence::ValueSequence::comma_separated(vec![
-                        first,
-                        Value::Num(4.0),
-                    ])
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
-                } else {
-                    runmat_runtime::sequence::single_value_sequence(first)
-                }
-            })
-        }),
-    );
+    let _invoker =
+        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+            move |_runtime, actual, args, requested, _lexical_environment| {
+                assert_eq!(actual, expected_binding, "wrong portable callback binding");
+                let observed = observed.clone();
+                let first = args.values().first().cloned().unwrap();
+                Box::pin(async move {
+                    let _args = args;
+                    *observed.lock().unwrap() += 1;
+                    let sequence = if requested == 2 {
+                        runmat_runtime::sequence::ValueSequence::comma_separated(vec![
+                            first,
+                            Value::Num(4.0),
+                        ])
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                    } else {
+                        runmat_runtime::sequence::single_value_sequence(first)
+                    }?;
+                    runmat_runtime::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
+                })
+            },
+        ));
     let memoized = block_on(call_builtin_async_with_outputs(
         "memoize",
-        &[Value::BoundFunctionHandle {
-            name: "fixture".into(),
-            function: 42,
-            authority: binding.authority,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        }],
+        &[Value::bound_function_handle(
+            "fixture".into(),
+            42,
+            binding.authority,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+        )],
         1,
     ))
     .unwrap();
     let _caller = runmat_runtime::output_count::push_output_count(Some(7));
     let invalid = block_on(call_feval_async_with_outputs(
-        memoized.clone(),
+        memoized.value().clone(),
         &[Value::Num(2.0)],
         runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
     ))
@@ -73,7 +76,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     assert_eq!(*calls.lock().unwrap(), 0);
     for expected in 1..=2 {
         let error = block_on(call_feval_async_with_outputs(
-            memoized.clone(),
+            memoized.value().clone(),
             &[Value::Num(2.0)],
             3,
         ))
@@ -88,7 +91,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
             runmat_runtime::output_count::current_output_count(),
             Some(7)
         );
-        let Value::HandleObject(handle) = &memoized else {
+        let Value::HandleObject(handle) = memoized.value() else {
             panic!("memoized handle")
         };
         runmat_gc::gc_with_value(&handle.target, |target| {
@@ -113,7 +116,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
         ] {
             assert_eq!(
                 block_on(call_feval_async_with_outputs(
-                    memoized.clone(),
+                    memoized.value().clone(),
                     &[Value::Num(2.0)],
                     count
                 ))
@@ -128,11 +131,9 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
         assert_eq!(*calls.lock().unwrap(), 5);
     }
     assert_eq!(
-        block_on(call_feval_async_with_outputs(
-            memoized,
-            &[Value::String(":".into())],
-            1
-        ))
+        block_on(memoized.with_owned_async(|memoized| async move {
+            call_feval_async_with_outputs(memoized, &[Value::String(":".into())], 1).await
+        }))
         .unwrap(),
         Value::String(":".into())
     );

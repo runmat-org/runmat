@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use super::{ProgramRecipeId, ProgramTarget};
 use crate::{ArtifactError, ArtifactResult, ObjectDescriptor};
 
-pub const PROGRAM_BUILD_RECIPE_SCHEMA_VERSION: u16 = 4;
+pub const PROGRAM_BUILD_RECIPE_SCHEMA_VERSION: u16 = 5;
+pub const LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +28,10 @@ pub struct ProgramBuildRecipe {
     pub features: BTreeSet<String>,
     pub compile_options: BTreeSet<String>,
     pub source_objects: Vec<ObjectDescriptor>,
+    /// Exact authenticated policy for the selected foreign adapters. Core
+    /// interprets its opaque bytes after Artifact has checked the closure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreign_policy: Option<ObjectDescriptor>,
     pub expected_artifact_id: Option<super::ProgramArtifactId>,
 }
 
@@ -35,8 +40,10 @@ impl ProgramBuildRecipe {
         self.program_revision
             .validate()
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-        if self.schema_version != PROGRAM_BUILD_RECIPE_SCHEMA_VERSION
-            || !valid_token(&self.entrypoint, 512)
+        if !matches!(
+            self.schema_version,
+            LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION | PROGRAM_BUILD_RECIPE_SCHEMA_VERSION
+        ) || !valid_token(&self.entrypoint, 512)
             || !valid_token(&self.execution_mode, 64)
             || self.features.iter().any(|value| !valid_token(value, 128))
             || self
@@ -76,6 +83,19 @@ impl ProgramBuildRecipe {
         for source in &self.source_objects {
             source.validate()?;
         }
+        let has_foreign = self.interop != runmat_types::InteropManifest::empty();
+        match (self.schema_version, &self.foreign_policy) {
+            (LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, None) if !has_foreign => {}
+            (PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, Some(descriptor)) => {
+                crate::object::validate_foreign_policy_descriptor(descriptor)?;
+            }
+            (PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, None) if !has_foreign => {}
+            _ => {
+                return Err(ArtifactError::Invalid(
+                    "foreign-bearing recipe requires a versioned policy object".into(),
+                ))
+            }
+        }
         Ok(())
     }
 
@@ -89,10 +109,20 @@ impl ProgramBuildRecipe {
             .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
         let accelerators = serde_json::to_vec(&self.accelerators)
             .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
-        let mut bytes = b"runmat-program-build-recipe-v4\0".to_vec();
+        let mut bytes = if self.schema_version == LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+            b"runmat-program-build-recipe-v4\0".to_vec()
+        } else {
+            b"runmat-program-build-recipe-v5\0".to_vec()
+        };
         let mut encoder = Encoder::new(&mut bytes);
         encoder
-            .array(11)
+            .array(
+                if self.schema_version == LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+                    11
+                } else {
+                    12
+                },
+            )
             .and_then(|encoder| encoder.bytes(&revision))
             .and_then(|encoder| encoder.str(&self.entrypoint))
             .and_then(|encoder| encoder.u16(self.outputs.requested_outputs))
@@ -135,6 +165,23 @@ impl ProgramBuildRecipe {
             Some(id) => encoder.bytes(id.0.bytes()).map_err(encoding)?,
             None => encoder.null().map_err(encoding)?,
         };
+        if self.schema_version == PROGRAM_BUILD_RECIPE_SCHEMA_VERSION {
+            match &self.foreign_policy {
+                Some(policy) => {
+                    encoder
+                        .array(5)
+                        .and_then(|encoder| encoder.u8(policy.namespace as u8))
+                        .and_then(|encoder| encoder.str(&policy.logical_name))
+                        .and_then(|encoder| encoder.bytes(policy.digest.bytes()))
+                        .and_then(|encoder| encoder.u64(policy.encoded_length))
+                        .and_then(|encoder| encoder.str(&policy.media_type))
+                        .map_err(encoding)?;
+                }
+                None => {
+                    encoder.null().map_err(encoding)?;
+                }
+            }
+        }
         Ok(ProgramRecipeId(Digest::sha256(bytes)))
     }
 

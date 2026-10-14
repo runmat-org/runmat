@@ -186,7 +186,7 @@ fn image_native_class_and_accumulation_do_not_follow_provider_preference() {
                     &[Value::GpuTensor(image.clone()), kernel_value],
                 ))
                 .unwrap();
-                let Value::GpuTensor(output) = output else {
+                let Value::GpuTensor(output) = output.value() else {
                     panic!("supported native route must execute")
                 };
                 assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
@@ -202,7 +202,7 @@ fn image_native_class_and_accumulation_do_not_follow_provider_preference() {
                         NumericElementType::F64
                     }
                 );
-                assert_eq!(handle_provenance(&output), handle_provenance(&image));
+                assert_eq!(handle_provenance(output), handle_provenance(&image));
                 assert_eq!(output.shape(), &[3, 1]);
                 let expected_kernel = if single && explicit {
                     NumericElementType::F32
@@ -224,7 +224,7 @@ fn image_native_class_and_accumulation_do_not_follow_provider_preference() {
                     usize::from(!reused)
                 );
                 let host =
-                    futures::executor::block_on(provider.inner.download_numeric(&output)).unwrap();
+                    futures::executor::block_on(provider.inner.download_numeric(output)).unwrap();
                 let values = match host.data {
                     HostNumericDataOwned::F32(values) => {
                         values.into_iter().map(f64::from).collect::<Vec<_>>()

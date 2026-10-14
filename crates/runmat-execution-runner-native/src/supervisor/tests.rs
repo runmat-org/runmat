@@ -2,16 +2,18 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
 
 use runmat_execution::{
-    Digest, OutputContract, ProgramCallable, ProgramEnvironment, ProgramFunctionId, ProgramRevision,
+    value::PayloadGraph, Digest, OutputContract, ProgramCallable, ProgramEnvironment,
+    ProgramFunctionId, ProgramInvocationContext, ProgramRevision, ProgramRuntimeFailure,
 };
 use runmat_execution_artifact::{
-    ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionResponse,
+    ExecutableForm, GraphExecutionRequest, GraphInvocationRoots, ProgramArtifact,
+    ProgramBuildRecipe, ProgramExecutionResponse,
 };
 
 use super::auth::{constant_time_eq, read_token};
 use super::model::{
-    BatchDriverInvocation, BatchSubmission, DriverCompletion, LocalJobState,
-    ProgramBatchSubmission, MIN_RETENTION_MILLIS,
+    BatchDriverInvocation, BatchSubmission, DriverCompletion, GraphBatchSubmission, LocalJobState,
+    LocalJobWorkloadKind, ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
 use super::service::{LocalSupervisor, LocalSupervisorConfig};
 use super::store::{load_driver_invocation, write_completion, JobStore, SupervisorPaths};
@@ -197,6 +199,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -217,6 +220,27 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     };
     let (record, created) = store.create_program(submission.clone(), 1).unwrap();
     assert!(created);
+    assert_eq!(
+        store.record(record.handle.id).unwrap().workload_kind,
+        LocalJobWorkloadKind::Program
+    );
+    let record_path = store.job_dir(record.handle.id).join("record.json");
+    let mut legacy = serde_json::to_value(&record).unwrap();
+    legacy.as_object_mut().unwrap().remove("workload_kind");
+    std::fs::write(&record_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(
+        store.record(record.handle.id).unwrap().workload_kind,
+        LocalJobWorkloadKind::Program,
+        "legacy record kind is resolved from the exact stored request",
+    );
+    let mut mismatched = record.clone();
+    mismatched.workload_kind = LocalJobWorkloadKind::Graph;
+    store.write_record(&mismatched).unwrap();
+    assert!(
+        store.record(record.handle.id).is_err(),
+        "record cannot relabel a persisted Program as Graph"
+    );
+    store.write_record(&record).unwrap();
     let invocation = load_driver_invocation(&store.job_dir(record.handle.id)).unwrap();
     let BatchDriverInvocation::Program {
         submission: recovered,
@@ -248,4 +272,163 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     completion.success = true;
     write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
     assert!(store.completion(record.handle.id).is_err());
+}
+
+#[test]
+fn persisted_graph_failure_keeps_its_typed_workload_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = JobStore::open(SupervisorPaths::new(temp.path().join("state")).unwrap()).unwrap();
+    // This is a positive stored-Graph control, not a historical revision
+    // rejection. Keep the frozen fixture immutable and lift only its envelope
+    // schema in memory to the current transport schema.
+    let mut envelope: runmat_execution::ExecutableUnitEnvelope = serde_json::from_slice(
+        include_bytes!("../../../runmat-execution/tests/fixtures/executable-unit-current.json"),
+    )
+    .unwrap();
+    envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+    envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+    let bytes = envelope.canonical_bytes().unwrap();
+    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes)
+        .expect("frozen executable-unit fixture remains canonical");
+    assert_eq!(
+        envelope.manifest.interop,
+        runmat_types::InteropManifest::empty(),
+    );
+    let identity = &envelope.manifest.identity;
+    let recipe = ProgramBuildRecipe {
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: identity.program.clone(),
+        entrypoint: identity.entrypoint.clone(),
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: "interpreter".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-graph-test"),
+        interop: envelope.manifest.interop.clone(),
+        foreign_policy: None,
+        accelerators: Vec::new(),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact =
+        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes).unwrap();
+    let request = GraphExecutionRequest {
+        schema_version: runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
+        recipe,
+        artifact,
+        retained_units: Vec::new(),
+        class_dependencies: Vec::new(),
+        class_method_dependencies: Vec::new(),
+        static_dependencies: Vec::new(),
+        selected_bundle_archives: vec![None],
+        selected_foreign_policies: Vec::new(),
+        graph: PayloadGraph {
+            roots: Vec::new(),
+            nodes: Vec::new(),
+        },
+        roots: GraphInvocationRoots::Builtin {
+            name: runmat_types::BuiltinId("sum".into()),
+            arguments: Vec::new(),
+        },
+        context: ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
+        requested_outputs: 1,
+    };
+    let mut stale_graph = request.clone();
+    stale_graph.schema_version = 8;
+    assert!(
+        stale_graph.validate().is_err(),
+        "V8 lacks class dependency facts"
+    );
+    let mut missing_declaration = request.clone();
+    missing_declaration
+        .class_dependencies
+        .push(runmat_execution::value::GraphClassDependency {
+            caller: runmat_execution::value::GraphBoundOwner {
+                unit: runmat_execution::value::GraphProgramUnitId(0),
+                origin: runmat_execution::FunctionBindingOrigin::from_revision(
+                    &request.recipe.program_revision,
+                    runmat_types::ProgramFunctionId(0),
+                )
+                .expect("fixture origin"),
+            },
+            declaration_unit: runmat_execution::value::GraphProgramUnitId(1),
+            declaration_digest: Digest::sha256(b"absent class product"),
+        });
+    assert!(
+        missing_declaration.validate().is_err(),
+        "a class edge cannot select an absent admitted unit"
+    );
+    let submission = GraphBatchSubmission {
+        request,
+        idempotency_key: Some("graph-key".into()),
+        retention_millis: MIN_RETENTION_MILLIS,
+    };
+    let mut canonical_digest_submission = submission.clone();
+    canonical_digest_submission.idempotency_key = None;
+    let mut digest_bytes = b"runmat-local-graph-batch-request-v1\0".to_vec();
+    digest_bytes.extend(serde_json::to_vec(&canonical_digest_submission).unwrap());
+    let expected_digest = Digest::sha256(digest_bytes);
+    assert_eq!(submission.request_digest().unwrap(), expected_digest);
+    let (record, created) = store.create_graph(submission, 1).unwrap();
+    assert!(created);
+    assert_eq!(
+        store.record(record.handle.id).unwrap().workload_kind,
+        LocalJobWorkloadKind::Graph
+    );
+    let request_path = store.job_dir(record.handle.id).join("request.json");
+    let original_request = std::fs::read(&request_path).unwrap();
+    let mut changed_request: serde_json::Value = serde_json::from_slice(&original_request).unwrap();
+    changed_request["workload"]["submission"]["request"]["roots"]["name"] =
+        serde_json::Value::String("not_sum".into());
+    std::fs::write(&request_path, serde_json::to_vec(&changed_request).unwrap()).unwrap();
+    assert!(
+        store.record(record.handle.id).is_err(),
+        "the stored digest field cannot authenticate changed Graph request content",
+    );
+    std::fs::write(&request_path, original_request).unwrap();
+
+    let failure = ProgramRuntimeFailure {
+        message: "selected graph failed".into(),
+        identifier: Some("RunMat:GraphTest".into()),
+        span: None,
+        builtin: None,
+        task_id: None,
+        call_frames: Vec::new(),
+        call_frames_elided: 0,
+        call_stack: Vec::new(),
+        phase: None,
+    };
+    let completion = DriverCompletion {
+        schema_version: 2,
+        success: false,
+        exit_code: None,
+        message: Some(failure.message.clone()),
+        response: Some(ProgramExecutionResponse::RuntimeFailure { failure }),
+    };
+    write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
+    assert_eq!(
+        store.completion(record.handle.id).unwrap(),
+        Some(completion)
+    );
+
+    let record_path = store.job_dir(record.handle.id).join("record.json");
+    let mut legacy = serde_json::to_value(&record).unwrap();
+    legacy.as_object_mut().unwrap().remove("workload_kind");
+    std::fs::write(&record_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(
+        store.record(record.handle.id).unwrap().workload_kind,
+        LocalJobWorkloadKind::Graph,
+        "legacy metadata resolves from the persisted Graph request, not the failure response",
+    );
+    let mut mislabeled = record.clone();
+    mislabeled.workload_kind = LocalJobWorkloadKind::Program;
+    store.write_record(&mislabeled).unwrap();
+    assert!(
+        store.record(record.handle.id).is_err(),
+        "Graph failure cannot be relabeled as a Direct program response",
+    );
 }

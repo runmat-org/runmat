@@ -416,6 +416,9 @@ fn pending_second_rmse_operand_cancellation_retires_prior_stage_without_replay()
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
 
-async fn runmat_runtime_call(name: &str, values: &[Value]) -> crate::BuiltinResult<Value> {
+async fn runmat_runtime_call(
+    name: &str,
+    values: &[Value],
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::call_builtin_async(name, values).await
 }

@@ -29,10 +29,7 @@ impl RuntimeAccelerationService for Adapter {
             let prepared = super::super::admitted::prepare_with(&auto, &context, request)
                 .map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
-            Ok(PreparedBuiltinOperands::new(
-                operands,
-                Some(Box::new(guard)),
-            ))
+            PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
         })
     }
 }
@@ -61,14 +58,14 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
             runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
         }))
         .unwrap();
-    let Value::GpuTensor(output) = output else {
+    let Value::GpuTensor(resident_output) = output.value() else {
         panic!("actual resident output");
     };
     assert_eq!(
-        output.descriptor().element_type,
+        resident_output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
-    assert_eq!(output.shape(), &[1, 2, 2]);
+    assert_eq!(resident_output.shape(), &[1, 2, 2]);
     assert_eq!(probe.requests.borrow().len(), 1);
     let feedback = probe.feedback.borrow();
     assert_eq!(
@@ -79,7 +76,7 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
     assert!(feedback[0].succeeded);
     drop(feedback);
     let HostNumericDataOwned::F32(values) =
-        futures::executor::block_on(provider.download_numeric(&output))
+        futures::executor::block_on(provider.download_numeric(resident_output))
             .unwrap()
             .data
     else {
@@ -150,23 +147,23 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
             runmat_runtime::dispatcher::call_builtin_async("single", &args).await
         }))
         .unwrap();
-        let actual = match result {
+        let actual = match result.value() {
             Value::Tensor(value) if !device_like => {
                 assert_eq!(value.shape(), [1, 2, 2]);
                 value.as_f32_slice().unwrap().to_vec()
             }
             Value::GpuTensor(value) if device_like => {
                 let downloaded =
-                    futures::executor::block_on(provider.download_numeric(&value)).unwrap();
+                    futures::executor::block_on(provider.download_numeric(value)).unwrap();
                 assert_eq!(downloaded.shape, vec![1, 2, 2]);
                 let HostNumericDataOwned::F32(data) = downloaded.data else {
                     panic!("Single result")
                 };
-                drop(value);
                 data
             }
             other => panic!("wrong template residency: {other:?}"),
         };
+        drop(result);
         assert_eq!(
             actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
             data.map(f32::to_bits)
@@ -221,7 +218,7 @@ fn actual_double_host_like_keeps_domain_gather_without_plain_cast_feedback() {
         .await
     }))
     .expect("host-like double conversion");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("host prototype must select dense host double output: {output:?}");
     };
     assert_eq!(output.shape(), &[1, 2, 2]);

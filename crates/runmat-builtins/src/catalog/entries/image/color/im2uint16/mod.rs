@@ -13,6 +13,7 @@ fn infer(
 }
 
 pub const IM2UINT16_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "im2uint16" },
     category: "image/color",

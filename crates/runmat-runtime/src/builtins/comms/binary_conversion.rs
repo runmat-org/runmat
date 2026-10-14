@@ -1,9 +1,9 @@
 //! MATLAB-compatible binary and hexadecimal conversion helpers.
 
 use runmat_builtins::{
-    BI2DE_ERROR_BASE, BI2DE_ERROR_INPUT, BI2DE_ERROR_ORDER, BI2DE_ERROR_PROVIDER,
-    BI2DE_ERROR_RANGE, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
-    BuiltinErrorDescriptor, DE2BI_ERROR_BASE, DE2BI_ERROR_INPUT, DE2BI_ERROR_ORDER,
+    BuiltinErrorDescriptor, BI2DE_ERROR_BASE, BI2DE_ERROR_INPUT, BI2DE_ERROR_ORDER,
+    BI2DE_ERROR_PROVIDER, BI2DE_ERROR_RANGE, BI2DE_GPU_INPUT_EXTENSION,
+    BI2DE_INTEGER_BASE_EXTENSION, DE2BI_ERROR_BASE, DE2BI_ERROR_INPUT, DE2BI_ERROR_ORDER,
     DE2BI_ERROR_PROVIDER, DE2BI_ERROR_RESOURCE, DE2BI_ERROR_WIDTH, DE2BI_GPU_INPUT_EXTENSION,
     DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION, DE2BI_ND_INPUT_EXTENSION,
     DE2BI_WIDE_INTEGER_EXTENSION,
@@ -15,7 +15,7 @@ use runmat_value::{
 };
 
 use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod typed_output;
 use typed_output::{digit_decimal_result, digit_output_storage};
@@ -2012,10 +2012,9 @@ mod tests {
             vec![],
         ))
         .expect_err("2^64 should fail");
-        assert!(
-            err.to_string()
-                .contains("outside the supported integer range")
-        );
+        assert!(err
+            .to_string()
+            .contains("outside the supported integer range"));
     }
 
     #[test]
@@ -2063,14 +2062,12 @@ mod tests {
                 }
             }
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            assert!(
-                block_on(decimal_to_text_builtin(
-                    Value::GpuTensor(handle.clone()),
-                    vec![Value::Bool(true)],
-                    TextConversion::Dec2Bin,
-                ))
-                .is_ok()
-            );
+            assert!(block_on(decimal_to_text_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Bool(true)],
+                TextConversion::Dec2Bin,
+            ))
+            .is_ok());
             assert!(provider.telemetry_snapshot().download_bytes > 0);
             handle.release().expect("release fixture handle");
         });
@@ -2179,10 +2176,9 @@ mod tests {
             "100000000000000000000000000000000000000000000000000000",
         )))
         .expect_err("inexact binary value should fail");
-        assert!(
-            err.to_string()
-                .contains("maximum exact integer supported by RunMat")
-        );
+        assert!(err
+            .to_string()
+            .contains("maximum exact integer supported by RunMat"));
     }
 
     #[test]
@@ -2217,10 +2213,9 @@ mod tests {
 
         let err = block_on(super::hex2dec_builtin(Value::from("0x20000000000000")))
             .expect_err("inexact hex value should fail");
-        assert!(
-            err.to_string()
-                .contains("maximum exact integer supported by RunMat")
-        );
+        assert!(err
+            .to_string()
+            .contains("maximum exact integer supported by RunMat"));
     }
 
     #[test]
@@ -2260,11 +2255,9 @@ mod tests {
             for radix in [TextConversion::Bin2Dec, TextConversion::Hex2Dec] {
                 let error = block_on(text_to_decimal_builtin(Value::Cell(cell.clone()), radix))
                     .expect_err("nested non-scalar text must reject");
-                assert!(
-                    error
-                        .to_string()
-                        .contains("cell array elements must be text")
-                );
+                assert!(error
+                    .to_string()
+                    .contains("cell array elements must be text"));
             }
         }
     }

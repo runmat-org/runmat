@@ -18,7 +18,7 @@ fn gathers_provider_resident_cell_contents() {
             vec![cell(vec![Value::GpuTensor(handle)], &[1, 1])],
         )
         .unwrap();
-        assert!((tensor_values(result)[0] - 0.5f64.sin()).abs() < 1e-12);
+        assert!((tensor_values(result.value())[0] - 0.5f64.sin()).abs() < 1e-12);
     });
 }
 
@@ -43,10 +43,10 @@ fn nonuniform_output_preserves_callback_residency() {
             ],
         )
         .unwrap();
-        let Value::Cell(output) = result else {
+        let Value::Cell(output) = result.value() else {
             panic!("expected cell")
         };
-        assert!(matches!(output.data[0], Value::GpuTensor(_)));
+        assert!(matches!(&output.data[0], Value::GpuTensor(_)));
         drop(handle);
     });
 }
@@ -82,7 +82,7 @@ fn gathers_cell_contents_from_an_actual_wgpu_provider() {
         }
         runmat_accelerate_api::ProviderPrecision::F64 => (0.25f64.sin(), 1e-12),
     };
-    let values = tensor_values(result);
+    let values = tensor_values(result.value());
     assert_eq!(values.len(), 1);
     assert!(values[0] > 0.0);
     assert!((values[0] - expected).abs() <= tolerance);

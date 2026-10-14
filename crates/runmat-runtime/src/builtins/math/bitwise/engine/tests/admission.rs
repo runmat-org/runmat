@@ -202,9 +202,8 @@ fn dense_single_and_logical_result_classes_match_catalog_facts() {
             } else {
                 vec![source.clone(), Value::Num(1.0)]
             };
-            let Value::Tensor(output) =
-                block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap()
-            else {
+            let result = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
+            let Value::Tensor(output) = result.value() else {
                 panic!("{name}: dense double result")
             };
             assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);

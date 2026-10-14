@@ -12,6 +12,7 @@ pub struct NativeObjectOptions {
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub interop: runmat_types::InteropManifest,
+    pub foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
     pub native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle,
     pub mex_artifacts: runmat_mex::MexArtifactBundle,
     pub java_artifacts: runmat_java::JavaArtifactBundle,
@@ -26,6 +27,7 @@ impl Default for NativeObjectOptions {
             runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
             retained_builtin_bindings: Vec::new(),
             interop: runmat_types::InteropManifest::empty(),
+            foreign_policy: None,
             native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle::empty(),
             mex_artifacts: runmat_mex::MexArtifactBundle::empty(),
             java_artifacts: runmat_java::JavaArtifactBundle::empty(),
@@ -63,6 +65,7 @@ pub fn emit_native_object(
             runmat_core::AotObjectDataOptions {
                 runtime_binding_mode: options.runtime_binding_mode,
                 builtin_bindings: options.retained_builtin_bindings.clone(),
+                foreign_policy: options.foreign_policy,
                 native_interfaces: options.native_interfaces.canonical_bytes().map_err(
                     |error| AotError::contract("aot.compile.native_interfaces", error.to_string()),
                 )?,

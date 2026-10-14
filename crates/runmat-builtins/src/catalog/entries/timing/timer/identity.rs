@@ -79,6 +79,7 @@ macro_rules! timer_entry {
     ($id:ident, $name:literal, $doc:expr, $descriptor:expr, $infer:expr,
      $stack:expr, $extensions:expr, $integers:expr, $auto_output:expr) => {
         pub const $id: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "timing",

@@ -75,13 +75,13 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
             runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
         }))
         .unwrap();
-    let Value::GpuTensor(output) = output else {
+    let Value::GpuTensor(resident_output) = output.value() else {
         panic!("selected cross-precision device route")
     };
-    assert_eq!(output.device_id(), provider.device_id());
-    assert_eq!(output.shape(), &[1, 2, 2]);
+    assert_eq!(resident_output.device_id(), provider.device_id());
+    assert_eq!(resident_output.shape(), &[1, 2, 2]);
     assert_eq!(
-        output.descriptor().element_type,
+        resident_output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
     assert_eq!(provider.casts.load(Ordering::Relaxed), 1);
@@ -141,7 +141,8 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     assert_eq!(probe.decisions.feedback.borrow().len(), 1);
     assert!(!gate.has_submission());
 
-    let downloaded = futures::executor::block_on(provider.inner.download_numeric(&output)).unwrap();
+    let downloaded =
+        futures::executor::block_on(provider.inner.download_numeric(resident_output)).unwrap();
     assert_eq!(downloaded.shape, vec![1, 2, 2]);
     let HostNumericDataOwned::F32(actual) = downloaded.data else {
         panic!("physical F32 output")

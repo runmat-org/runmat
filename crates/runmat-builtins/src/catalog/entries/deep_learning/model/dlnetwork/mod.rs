@@ -27,6 +27,7 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
 ];
 
 pub const DLNETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlnetwork" },
     category: "deep_learning",

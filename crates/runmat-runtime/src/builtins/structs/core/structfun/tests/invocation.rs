@@ -12,12 +12,13 @@ fn maps_fields_in_order_into_a_column() {
         "beta",
         Value::Tensor(Tensor::new(vec![4.0, 5.0], vec![1, 2]).unwrap()),
     );
-    let Value::Tensor(output) = call(
+    let result = call(
         Value::FunctionHandle("length".into()),
         structure,
         Vec::new(),
     )
-    .unwrap() else {
+    .unwrap();
+    let Value::Tensor(output) = result.value() else {
         panic!("expected tensor")
     };
     assert_eq!(output.shape(), &[2, 1]);
@@ -29,12 +30,13 @@ fn nonuniform_output_preserves_names_and_values() {
     let mut structure = StructValue::new();
     structure.insert("name", Value::String("runmat".into()));
     structure.insert("flag", Value::Bool(true));
-    let Value::Struct(output) = call(
+    let result = call(
         Value::FunctionHandle("class".into()),
         structure,
         vec![Value::String("UniformOutput".into()), Value::Bool(false)],
     )
-    .unwrap() else {
+    .unwrap();
+    let Value::Struct(output) = result.value() else {
         panic!("expected structure")
     };
     assert_eq!(
@@ -49,21 +51,23 @@ fn nonuniform_output_preserves_names_and_values() {
 
 #[test]
 fn empty_structure_has_explicit_outputs() {
-    let Value::Tensor(output) = call(
+    let result = call(
         Value::FunctionHandle("length".into()),
         StructValue::new(),
         Vec::new(),
     )
-    .unwrap() else {
+    .unwrap();
+    let Value::Tensor(output) = result.value() else {
         panic!("expected tensor")
     };
     assert_eq!(output.shape(), &[0, 1]);
-    let Value::Struct(output) = call(
+    let result = call(
         Value::FunctionHandle("length".into()),
         StructValue::new(),
         vec![Value::String("UniformOutput".into()), Value::Bool(false)],
     )
-    .unwrap() else {
+    .unwrap();
+    let Value::Struct(output) = result.value() else {
         panic!("expected structure")
     };
     assert!(output.fields.is_empty());

@@ -150,7 +150,7 @@ fn consumed_resident_learnables_preserve_explicit_intent_across_later_stages() {
     }
 }
 
-fn normalization_then_relu() -> Value {
+fn normalization_then_relu() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
     let relu = block_on(relu_layer_builtin(vec![])).unwrap();
@@ -164,14 +164,15 @@ fn normalization_then_relu() -> Value {
 fn host_origin_uses_the_same_pure_physical_stage_lowering() {
     use runmat_accelerate_api::{DeepLearningForwardSource, NumericElementType};
 
-    let Value::Object(network) = normalization_then_relu() else {
+    let network_owner = normalization_then_relu();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network object expected")
     };
     let input = Value::Tensor(
         runmat_value::Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
     );
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
-    let lowered = plan::lower(&network, &host, host.output_axes(), "forward")
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
+    let lowered = plan::lower(network, &host, host.output_axes(), "forward")
         .unwrap()
         .expect("normalization plus activation has a mixed stage route")
         .expect("admitted host geometry must lower");
@@ -301,7 +302,8 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
         }
     }
 
-    let Value::Object(network) = normalization_then_relu() else {
+    let network_owner = normalization_then_relu();
+    let Value::Object(network) = network_owner.value() else {
         panic!("network object expected")
     };
     let _lock = crate::builtins::common::test_support::accel_test_lock();
@@ -331,8 +333,8 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
             ("Labels", Value::String("CB".into())),
         ],
     );
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
-    let result = plan::admit(&network, &host, host.output_axes(), "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
+    let result = plan::admit(network, &host, host.output_axes(), "forward").unwrap();
     assert!(matches!(
         result,
         Some(Err(GpuCapabilityReason::ProviderOperation))
@@ -341,7 +343,7 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
     assert_eq!(allocated.probe.retirements(), 0);
 
     provider.reject_relu.store(false, Ordering::SeqCst);
-    let ready = plan::admit(&network, &host, host.output_axes(), "forward").unwrap();
+    let ready = plan::admit(network, &host, host.output_axes(), "forward").unwrap();
     let Some(Ok(ready)) = ready else {
         panic!("the same fully admitted mixed route should be ready")
     };
@@ -352,7 +354,7 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
 
     provider.reject_route.store(true, Ordering::SeqCst);
     assert!(matches!(
-        plan::admit(&network, &host, host.output_axes(), "forward").unwrap(),
+        plan::admit(network, &host, host.output_axes(), "forward").unwrap(),
         Some(Err(GpuCapabilityReason::ProviderOperation))
     ));
     assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
@@ -361,7 +363,7 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
         .whole_route_available
         .store(false, Ordering::SeqCst);
     assert!(matches!(
-        plan::admit(&network, &host, host.output_axes(), "forward").unwrap(),
+        plan::admit(network, &host, host.output_axes(), "forward").unwrap(),
         Some(Ok(_))
     ));
     assert_eq!(provider.effects.load(Ordering::SeqCst), 0);

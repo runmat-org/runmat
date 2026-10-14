@@ -99,6 +99,7 @@ impl NodeControlPlane for Control {
             driver_lease_id: "driver-lease-1".into(),
             fencing_token: 1,
             credential: "driver-credential".into(),
+            ready_v1: false,
             expires_at_millis: allocation.expires_at_millis,
         })
     }

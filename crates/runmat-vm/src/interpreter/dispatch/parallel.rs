@@ -50,11 +50,14 @@ pub(super) async fn dispatch(
                 &execution.runtime,
             )
             .await?;
-            stack.push(Value::Future(tasks::create_future(
-                execution,
-                tasks::semantic_descriptor(*function, *out_count, arguments),
-                function_registry,
-            )?));
+            arguments.with_owned_values(|arguments| {
+                stack.push(Value::Future(tasks::create_future(
+                    execution,
+                    tasks::semantic_descriptor(*function, *out_count, arguments),
+                    function_registry,
+                )?));
+                Ok::<_, RuntimeError>(())
+            })?;
         }
         Instr::ScheduleFeval { arg_count, on_all } => {
             tasks::schedule_feval(stack, execution, function_registry, *arg_count, *on_all)?;
@@ -63,7 +66,9 @@ pub(super) async fn dispatch(
         Instr::SpawnOn => tasks::spawn(stack, execution, true)?,
         Instr::Await => {
             let value = pop(stack, "await instruction expected a value on the stack")?;
-            stack.push(tasks::await_value(execution, value).await?);
+            tasks::await_value(execution, value)
+                .await?
+                .with_owned(|value| stack.push(value));
         }
         Instr::FetchOutputs {
             arg_count,
@@ -72,7 +77,7 @@ pub(super) async fn dispatch(
             let mut arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let futures = arguments.remove(0);
             let uniform_output = tasks::fetch_outputs_options(&arguments)?;
-            super::calls::publish_fixed_outputs(
+            super::calls::publish_rooted_fixed_outputs(
                 stack,
                 tasks::fetch_outputs(execution, &futures, *requested_outputs, uniform_output)
                     .await?,
@@ -89,7 +94,7 @@ pub(super) async fn dispatch(
                 .map(tasks::timeout_seconds)
                 .transpose()?;
             let futures = pop(stack, "fetchNext expected a future array on the stack")?;
-            super::calls::publish_fixed_outputs(
+            super::calls::publish_rooted_fixed_outputs(
                 stack,
                 tasks::fetch_next(execution, &futures, timeout, *requested_outputs).await?,
                 *requested_outputs,
@@ -182,7 +187,7 @@ pub(super) async fn dispatch(
                 } => usize::from(*requested_outputs),
                 _ => 1,
             };
-            super::calls::publish_fixed_outputs(
+            super::calls::publish_rooted_fixed_outputs(
                 stack,
                 collective::execute(bytecode, *id, *operation, arguments, execution).await?,
                 requested_outputs,
@@ -197,7 +202,7 @@ pub(super) async fn dispatch(
                 } => usize::from(*requested_outputs),
                 _ => 1,
             };
-            super::calls::publish_fixed_outputs(
+            super::calls::publish_rooted_fixed_outputs(
                 stack,
                 distributed::execute(bytecode, operation, arguments, execution).await?,
                 requested_outputs,

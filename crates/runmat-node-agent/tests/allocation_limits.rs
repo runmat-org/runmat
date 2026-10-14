@@ -46,6 +46,7 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
         driver_lease_id: "driver-lease".into(),
         fencing_token: 1,
         credential: "credential".into(),
+        ready_v1: false,
         expires_at_millis: allocation.expires_at_millis,
     };
     processes
@@ -114,6 +115,7 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
         relay_path: "/v1/execution/workers/lease-worker/relay".into(),
         relay_protocol: "runmat-worker-relay-v1".into(),
         relay_ticket: "scoped-ticket".into(),
+        ready_v1: false,
     };
     let mut processes = AllocationProcesses::default();
     processes

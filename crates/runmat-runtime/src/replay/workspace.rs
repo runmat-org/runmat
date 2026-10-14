@@ -3,7 +3,7 @@ use chrono::Utc;
 use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
-use crate::builtins::io::mat::load::decode_workspace_from_mat_bytes;
+use crate::builtins::io::mat::load::{decode_workspace_from_mat_bytes, RootedMatEntries};
 use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
 use crate::replay::limits::ReplayLimits;
 use crate::runtime_error::{replay_error, replay_error_with_source, ReplayErrorKind};
@@ -122,18 +122,18 @@ pub async fn encode_workspace_payload_with_limits(
     Ok(encoded)
 }
 
-pub fn decode_workspace_payload(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
+pub fn decode_workspace_payload(bytes: &[u8]) -> BuiltinResult<RootedMatEntries> {
     decode_workspace_payload_with_limits(bytes, ReplayLimits::default())
 }
 
-pub fn import_workspace_state(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
+pub fn import_workspace_state(bytes: &[u8]) -> BuiltinResult<RootedMatEntries> {
     decode_workspace_payload(bytes)
 }
 
 pub fn decode_workspace_payload_with_limits(
     bytes: &[u8],
     limits: ReplayLimits,
-) -> BuiltinResult<Vec<(String, Value)>> {
+) -> BuiltinResult<RootedMatEntries> {
     if bytes.len() > limits.max_workspace_payload_bytes {
         return Err(replay_error(
             ReplayErrorKind::PayloadTooLarge,
@@ -198,15 +198,15 @@ pub fn decode_workspace_payload_with_limits(
             err,
         )
     })?;
-    for (_, value) in &entries {
+    for (_, value) in entries.as_slice() {
         crate::execution::validate_storable_value(value)?;
     }
-    if entries.len() > limits.max_workspace_variables {
+    if entries.as_slice().len() > limits.max_workspace_variables {
         return Err(replay_error(
             ReplayErrorKind::ImportRejected,
             format!(
                 "workspace payload includes {} variables, exceeding limit {}",
-                entries.len(),
+                entries.as_slice().len(),
                 limits.max_workspace_variables
             ),
         ));

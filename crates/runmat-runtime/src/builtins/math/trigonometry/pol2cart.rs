@@ -4,6 +4,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{broadcast, gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
@@ -40,12 +42,20 @@ const NAME: &str = "pol2cart";
 #[runtime_builtin(
     name = "pol2cart",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::pol2cart"
 )]
-async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pol2cart_builtin(
+    runtime: Option<RuntimeContext>,
+    theta: Value,
+    rho: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
     let requested_outputs = crate::output_count::current_output_count();
     let mut inputs = vec![theta, rho];
     inputs.extend(rest);
+    let _inputs =
+        RootedValueLease::for_values(inputs.iter()).map_err(|cause| cause.into_runtime_error())?;
     let shape = admission::admit(&inputs, requested_outputs)?;
     for ((value, extension), role) in inputs
         .iter()
@@ -68,7 +78,7 @@ async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> Builtin
             _ => None,
         })
         .collect();
-    let result = preparation::execute(inputs, &shape, requested_outputs).await?;
+    let result = preparation::execute(runtime.as_ref(), inputs, &shape, requested_outputs).await?;
     // A terminal coordinate transform ends fusion use only after successful
     // semantic work; this never frees inputs or changes explicit GPU intent.
     gpu_helpers::clear_input_residency(&sources, NAME)?;
@@ -79,7 +89,7 @@ async fn execute(
     inputs: Vec<Value>,
     shape: &[usize],
     requested_outputs: Option<usize>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let wants_z_output = matches!(requested_outputs, Some(count) if count >= 3);
     if let Some(output) = try_pol2cart_gpu(&inputs, shape, requested_outputs).await? {
         return Ok(output);
@@ -107,11 +117,12 @@ async fn execute(
         }
     };
 
-    match requested_outputs {
+    let published = match requested_outputs {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(count) => eval.output_list(count),
         None => eval.x_value(),
-    }
+    }?;
+    RootedValue::new(published).map_err(|cause| cause.into_runtime_error())
 }
 
 async fn gather_if_gpu(value: Value) -> BuiltinResult<Value> {

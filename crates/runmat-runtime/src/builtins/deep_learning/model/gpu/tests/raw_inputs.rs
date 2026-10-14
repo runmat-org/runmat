@@ -20,19 +20,20 @@ fn raw_single_forward_and_predict_keep_explicit_residency_without_download() {
             execution::NetworkCaller::Predict,
         ] {
             provider.reset_telemetry();
+            let network_owner = dense_network();
             let result = match caller {
                 execution::NetworkCaller::Forward => block_on(forward_builtin(
-                    dense_network(),
+                    network_owner.value().clone(),
                     Value::GpuTensor(input.clone()),
                     vec![],
                 ))
                 .unwrap(),
                 execution::NetworkCaller::Predict => {
-                    let Value::Object(network) = dense_network() else {
+                    let Value::Object(network) = network_owner.value() else {
                         panic!("network expected")
                     };
                     block_on(predict_deep_learning_object(
-                        network,
+                        network.clone(),
                         Value::GpuTensor(input.clone()),
                         vec![],
                     ))
@@ -72,7 +73,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
         let values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let shape = [2, 1, 3];
         let Value::Tensor(expected) = block_on(forward_builtin(
-            network.clone(),
+            network.value().clone(),
             Value::Tensor(Tensor::new(values.to_vec(), shape.to_vec()).unwrap()),
             vec![],
         ))
@@ -91,7 +92,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
             .unwrap();
         provider.reset_telemetry();
         let error = block_on(forward_builtin(
-            network.clone(),
+            network.value().clone(),
             Value::GpuTensor(explicit),
             vec![],
         ))
@@ -105,7 +106,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
             .with_provenance(GpuHandleProvenance::Automatic)
             .unwrap();
         let Value::Tensor(actual) = block_on(forward_builtin(
-            network,
+            network.value().clone(),
             Value::GpuTensor(automatic),
             vec![],
         ))

@@ -3,6 +3,7 @@ mod flow;
 mod interprocedural;
 mod state;
 
+pub(crate) use call_graph::lexical_reference_graph;
 pub(crate) use state::FlowState;
 
 use runmat_types::{CallableFact, CallableIdentity, DynamicReason, ProgramFunctionId, ValueFact};
@@ -54,6 +55,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             program_function,
             program.parameters.get(function).map_or(&[], Vec::as_slice),
             program.captures.get(function).map_or(&[], Vec::as_slice),
+            super::constructor_entry::instance_output_local(assembly, body),
             &program.summaries,
         );
         let convergence = if !flow.converged || program.nonconverged.contains(function) {

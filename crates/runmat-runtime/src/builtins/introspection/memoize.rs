@@ -124,35 +124,6 @@ const CLEAR_ALL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &STATUS_OUTPUTS,
 }];
 
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MemoizedFunction receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct indexing path.",
-    },
-];
-const SUBSREF_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargout",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Result of function invocation or property access.",
-}];
-const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "varargout = subsref(obj, S)",
-    inputs: &SUBSREF_INPUTS,
-    outputs: &SUBSREF_OUTPUTS,
-}];
-
 const MEMOIZE_ERROR_INVALID_FUNCTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MEMOIZE.INVALID_FUNCTION",
     identifier: Some("RunMat:memoize:InvalidFunction"),
@@ -191,12 +162,6 @@ const CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorD
 };
 const MEMOIZE_CREATE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [MEMOIZE_ERROR_INVALID_FUNCTION, MEMOIZE_ERROR_GC];
-const MEMOIZED_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    MEMOIZE_ERROR_INVALID_OBJECT,
-    MEMOIZE_ERROR_INVALID_CACHE_SIZE,
-    MEMOIZE_ERROR_INVALID_INDEX,
-    MEMOIZE_ERROR_GC,
-];
 const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 3] = [
     MEMOIZE_ERROR_INVALID_OBJECT,
     MEMOIZE_ERROR_GC,
@@ -215,12 +180,7 @@ pub const MEMOIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &MEMOIZE_CREATE_ERRORS,
 };
-pub const MEMOIZED_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &MEMOIZED_SUBSREF_ERRORS,
-};
+pub use runmat_builtins::MEMOIZED_SUBSREF_DESCRIPTOR;
 pub const CLEAR_CACHE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &CLEAR_CACHE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -311,17 +271,13 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "MemoizedFunction.subsref",
-    execution_stack = "process",
-    category = "introspection",
-    summary = "Dispatch MemoizedFunction indexing and invocation.",
-    keywords = "memoize,MemoizedFunction,subsref",
-    descriptor(crate::builtins::introspection::memoize::MEMOIZED_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn memoized_subsref_builtin(
     receiver: Value,
     subscript: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(receiver, path, memoized_read_step, None).await
 }
@@ -329,12 +285,15 @@ pub(crate) async fn memoized_subsref_builtin(
 async fn memoized_read_step(
     receiver: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
     let handle = memoized_handle(&receiver)?;
     match step.kind() {
         crate::object::indexing::ObjectIndexKind::Paren => call_memoized(handle, payload).await,
-        crate::object::indexing::ObjectIndexKind::Member => memoized_member(handle, payload),
+        crate::object::indexing::ObjectIndexKind::Member => {
+            crate::execution::RootedValue::new(memoized_member(handle, payload)?)
+                .map_err(|error| error.into_runtime_error())
+        }
         crate::object::indexing::ObjectIndexKind::Brace => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
             "memoize: brace indexing is not supported",
@@ -459,6 +418,7 @@ fn ensure_memoized_function_class_registered() {
                 access: MemberAccess::Public,
                 function_name: function_name.into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
@@ -477,7 +437,7 @@ fn canonicalize_memoized_function(function: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Ok(crate::canonicalize_callback_handle_for_semantic_resolution(
             function,
         )),
@@ -613,7 +573,10 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
     Ok(numeric as usize)
 }
 
-async fn call_memoized(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
+async fn call_memoized(
+    handle: &HandleRef,
+    payload: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let Value::Cell(cell) = payload else {
         return Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
@@ -626,7 +589,8 @@ async fn call_memoized(handle: &HandleRef, payload: Value) -> BuiltinResult<Valu
 
     if enabled {
         if let Some(output) = take_cache_hit(handle, &args, requested_outputs, cache_size)? {
-            return Ok(output);
+            return crate::execution::RootedValue::new(output)
+                .map_err(|error| error.into_runtime_error());
         }
     }
 
@@ -634,21 +598,27 @@ async fn call_memoized(handle: &HandleRef, payload: Value) -> BuiltinResult<Valu
     // Validate the requested prefix before publishing a cache entry. The
     // callable has already run exactly once; an output shortage is not cached.
     use crate::sequence::ResolveValueSequence;
-    let mut outputs = crate::call::arguments::adapt_legacy_builtin_result(output)?.resolve(
-        runmat_types::SequenceUse::SelectPrefix {
-            count: requested_outputs,
+    output.try_map_owned(
+        |output| {
+            let mut outputs = crate::call::arguments::adapt_legacy_builtin_result(output)?
+                .resolve(
+                    runmat_types::SequenceUse::SelectPrefix {
+                        count: requested_outputs,
+                    },
+                    crate::sequence::SequenceResolutionContext::default(),
+                )?;
+            let output = if requested_outputs == 1 {
+                outputs.remove(0)
+            } else {
+                Value::OutputList(outputs)
+            };
+            if enabled {
+                store_cache_miss(handle, args, requested_outputs, output.clone(), cache_size)?;
+            }
+            Ok(output)
         },
-        crate::sequence::SequenceResolutionContext::default(),
-    )?;
-    let output = if requested_outputs == 1 {
-        outputs.remove(0)
-    } else {
-        Value::OutputList(outputs)
-    };
-    if enabled {
-        store_cache_miss(handle, args, requested_outputs, output.clone(), cache_size)?;
-    }
-    Ok(output)
+        |error| error.into_runtime_error(),
+    )
 }
 
 fn take_cache_hit(
@@ -1028,22 +998,7 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
         | (Value::MethodFunctionHandle(a), Value::MethodFunctionHandle(b)) => a == b,
         (Value::ClassRef(a), Value::ClassRef(b)) => a == b,
         (Value::Symbolic(a), Value::Symbolic(b)) => a == b,
-        (
-            Value::BoundFunctionHandle {
-                name: an,
-                function: af,
-                authority: aa,
-                source_role: ar,
-                source_file: ap,
-            },
-            Value::BoundFunctionHandle {
-                name: bn,
-                function: bf,
-                authority: ba,
-                source_role: br,
-                source_file: bp,
-            },
-        ) => an == bn && af == bf && aa == ba && ar == br && ap == bp,
+        (Value::BoundFunctionHandle(a), Value::BoundFunctionHandle(b)) => a == b,
         (Value::Closure(a), Value::Closure(b)) => {
             a.function_name == b.function_name
                 && a.binding == b.binding
@@ -1179,7 +1134,9 @@ fn function_key(function: &Value) -> String {
         Value::FunctionHandle(name) => format!("fh:{name}"),
         Value::ExternalFunctionHandle(name) => format!("external:{name}"),
         Value::MethodFunctionHandle(name) => format!("method:{name}"),
-        Value::BoundFunctionHandle { name, function, .. } => format!("bound:{function}:{name}"),
+        Value::BoundFunctionHandle(handle) => {
+            format!("bound:{}:{}", handle.function, handle.name)
+        }
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
@@ -1329,7 +1286,7 @@ mod tests {
         receiver: Value,
         kind: String,
         payload: Value,
-    ) -> crate::BuiltinResult<Value> {
+    ) -> crate::BuiltinResult<crate::execution::RootedValue> {
         let subscript =
             crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
         super::memoized_subsref_builtin(receiver, subscript).await
@@ -1349,7 +1306,9 @@ mod tests {
         assert!(MEMOIZE_INTEGER_AUDIT.canonical_builtin.is_none());
     }
 
-    fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
+    fn counting_invoker(
+        counter: Arc<Mutex<usize>>,
+    ) -> Arc<crate::user_functions::UnscopedFunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {
             let counter = Arc::clone(&counter);
             let args = args.to_vec();
@@ -1362,7 +1321,7 @@ mod tests {
                     }
                     _ => 0.0,
                 };
-                if requested_outputs == 2 {
+                let sequence = if requested_outputs == 2 {
                     crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(base + 1.0),
                         Value::Num(base + 2.0),
@@ -1370,7 +1329,9 @@ mod tests {
                     .map_err(crate::sequence::sequence_error_to_runtime)
                 } else {
                     crate::sequence::single_value_sequence(Value::Num(base + 1.0))
-                }
+                }?;
+                crate::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())
             })
         })
     }
@@ -1392,10 +1353,11 @@ mod tests {
         }
     }
 
-    fn echo_first_invoker() -> Arc<crate::user_functions::FunctionInvoker> {
+    fn echo_first_invoker() -> Arc<crate::user_functions::UnscopedFunctionInvoker> {
         Arc::new(move |_function, args, _requested_outputs| {
             let first = args.first().cloned().unwrap_or(Value::Num(0.0));
-            crate::sequence::single_value_future(async move { Ok(first) })
+            let result = crate::user_functions::test_support::rooted_single_value_sequence(first);
+            Box::pin(async move { result })
         })
     }
 
@@ -1407,24 +1369,26 @@ mod tests {
         let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
         let expected = binding.clone();
         let guard = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
-            move |_runtime, actual, arguments, outputs| {
+            move |runtime, actual, arguments, outputs, _lexical_environment| {
                 assert_eq!(actual, expected, "wrong memoized callback binding");
                 let invoker = crate::user_functions::current_semantic_function_invoker()
                     .expect("numeric unit callback fixture");
-                let future = invoker(actual.function, arguments.values(), outputs);
+                let future = invoker(Some(runtime), actual.function, arguments.values(), outputs);
                 Box::pin(async move {
                     let _arguments = arguments;
                     future.await
                 })
             },
         ));
-        let value = block_on(memoize_builtin(Value::BoundFunctionHandle {
-            name: "step".into(),
-            function: 42,
-            authority: binding.authority,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        }))
+        let value = block_on(memoize_builtin(Value::BoundFunctionHandle(
+            runmat_value::BoundFunctionHandle::from_data(runmat_value::BoundFunctionHandleData {
+                name: "step".into(),
+                function: 42,
+                authority: binding.authority,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            }),
+        )))
         .expect("memoized function");
         (value, guard)
     }
@@ -1460,13 +1424,15 @@ mod tests {
 
     #[test]
     fn memoized_state_reads_enabled_from_typed_integer_tensor_storage() {
-        let function = Value::BoundFunctionHandle {
-            name: "step".into(),
-            function: 42,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(42),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "step".into(),
+                function: 42,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(42),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
 
@@ -2050,8 +2016,8 @@ mod tests {
         ))
         .expect("stats");
 
-        assert_eq!(enabled, Value::Bool(true));
-        assert!(matches!(stats, Value::Struct(_)));
+        assert_eq!(enabled.value(), &Value::Bool(true));
+        assert!(matches!(stats.value(), Value::Struct(_)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

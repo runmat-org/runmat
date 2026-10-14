@@ -77,7 +77,7 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Ok(value),
         Value::Cell(ref cell)
             if cell.data.is_empty() || cell.data.first().is_some_and(is_callback_function) =>
@@ -99,7 +99,7 @@ fn is_callback_function(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }

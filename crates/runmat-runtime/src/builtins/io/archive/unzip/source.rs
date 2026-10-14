@@ -12,6 +12,7 @@ pub(super) async fn extract_local_archive(
     path: &Path,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
     resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
@@ -20,6 +21,7 @@ pub(super) async fn extract_local_archive(
         temp,
         output_folder.to_path_buf(),
         runtime.map(crate::context::RuntimeContext::cancellation),
+        command_origin,
         provider,
         resource_lease.clone(),
     )
@@ -31,6 +33,7 @@ pub(super) async fn extract_local_archive(
     path: &Path,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
     resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
@@ -47,6 +50,7 @@ pub(super) async fn extract_local_archive(
         file,
         output_folder,
         runtime,
+        command_origin,
         provider,
         resource_lease.clone(),
     )

@@ -1036,7 +1036,9 @@ impl RunMatWasm {
                         }
                     }
                 }
-                ExecutionPayload::from_outcome(outcome, &exec_response.source_context)
+                outcome.with_owned(|outcome| {
+                    ExecutionPayload::from_outcome(outcome, &exec_response.source_context)
+                })
             }
             Err(err) => ExecutionPayload {
                 flow: serde_json::json!({ "kind": "no-value" }),
@@ -1368,7 +1370,10 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = clearProjectHandoff)]
     pub fn clear_project_handoff_js(&self) -> Result<(), JsValue> {
         self.ensure_not_disposed()?;
-        self.session.borrow_mut().clear_project_handoff();
+        self.session
+            .borrow_mut()
+            .clear_project_handoff()
+            .map_err(|err| js_error(&format!("Project handoff clear failed: {err}")))?;
         Ok(())
     }
 

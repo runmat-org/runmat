@@ -4,6 +4,7 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 const EFFECTS: &[EffectKind] = &[EffectKind::EnvironmentWrite, EffectKind::MayThrow];
 
 pub const RESTOREDEFAULTPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "restoredefaultpath",

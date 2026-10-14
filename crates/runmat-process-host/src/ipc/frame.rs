@@ -2,6 +2,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{ProcessHostError, ProcessHostResult};
 
+mod pending;
+pub use pending::PendingFrameWrite;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FrameLimits {
     pub max_message_bytes: u32,
@@ -49,17 +52,8 @@ pub async fn write_payload(
     payload: &[u8],
     limits: FrameLimits,
 ) -> ProcessHostResult<()> {
-    limits.validate()?;
-    if payload.len() > limits.max_message_bytes as usize {
-        return Err(ProcessHostError::Protocol(format!(
-            "frame is {} bytes; negotiated maximum is {}",
-            payload.len(),
-            limits.max_message_bytes
-        )));
-    }
-    let length = u32::try_from(payload.len())
-        .map_err(|_| ProcessHostError::Protocol("frame length exceeds u32".into()))?;
-    writer.write_all(&length.to_be_bytes()).await?;
+    let header = frame_header(payload.len(), limits)?;
+    writer.write_all(&header).await?;
     writer.write_all(payload).await?;
     writer.flush().await?;
     Ok(())
@@ -90,6 +84,7 @@ pub async fn write_frame(
 }
 
 fn checked_length(header: [u8; 4], limits: FrameLimits) -> ProcessHostResult<usize> {
+    limits.validate()?;
     let length = u32::from_be_bytes(header) as usize;
     if length > limits.max_message_bytes as usize {
         return Err(ProcessHostError::Protocol(format!(
@@ -98,6 +93,19 @@ fn checked_length(header: [u8; 4], limits: FrameLimits) -> ProcessHostResult<usi
         )));
     }
     Ok(length)
+}
+
+fn frame_header(length: usize, limits: FrameLimits) -> ProcessHostResult<[u8; 4]> {
+    limits.validate()?;
+    if length > limits.max_message_bytes as usize {
+        return Err(ProcessHostError::Protocol(format!(
+            "frame is {length} bytes; negotiated maximum is {}",
+            limits.max_message_bytes
+        )));
+    }
+    u32::try_from(length)
+        .map(u32::to_be_bytes)
+        .map_err(|_| ProcessHostError::Protocol("frame length exceeds u32".into()))
 }
 
 pub fn read_payload_blocking(
@@ -118,17 +126,8 @@ pub fn write_payload_blocking(
     payload: &[u8],
     limits: FrameLimits,
 ) -> ProcessHostResult<()> {
-    limits.validate()?;
-    if payload.len() > limits.max_message_bytes as usize {
-        return Err(ProcessHostError::Protocol(format!(
-            "frame is {} bytes; negotiated maximum is {}",
-            payload.len(),
-            limits.max_message_bytes
-        )));
-    }
-    let length = u32::try_from(payload.len())
-        .map_err(|_| ProcessHostError::Protocol("frame length exceeds u32".into()))?;
-    writer.write_all(&length.to_be_bytes())?;
+    let header = frame_header(payload.len(), limits)?;
+    writer.write_all(&header)?;
     writer.write_all(payload)?;
     writer.flush()?;
     Ok(())

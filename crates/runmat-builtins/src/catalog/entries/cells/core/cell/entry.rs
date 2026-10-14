@@ -6,6 +6,7 @@ use super::{documentation, CELL_DESCRIPTOR, CELL_EXTENSIONS, CELL_INTEGER_CAPABI
 const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const CELL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cell" },
     category: "cells/core",

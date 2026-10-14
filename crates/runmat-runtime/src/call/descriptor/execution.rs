@@ -9,9 +9,10 @@ use super::{
     CallableTarget,
 };
 use crate::context::RuntimeContext;
+use crate::execution::RootedValueSequence;
 use crate::RuntimeError;
 use futures::TryFutureExt;
-use runmat_value::{BoundFunctionBinding, Value, ValueSequence};
+use runmat_value::{BoundFunctionBinding, Closure, Value};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -20,7 +21,7 @@ type ExecutionFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, RuntimeError
 pub(super) fn execute(
     runtime: Option<&RuntimeContext>,
     descriptor: CallableDescriptor,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     let CallableDescriptor {
         target,
         args,
@@ -31,6 +32,14 @@ pub(super) fn execute(
         CallableTarget::Bound(binding) => {
             bound(runtime, binding, args, requested_outputs, metadata)
         }
+        CallableTarget::BoundLexical { binding, closure } => bound_lexical(
+            runtime,
+            binding,
+            closure.into_closure(),
+            args,
+            requested_outputs,
+            metadata,
+        ),
         CallableTarget::Resolved {
             identity,
             fallback_policy,
@@ -49,7 +58,7 @@ pub(super) fn execute(
 pub(super) fn try_execute(
     runtime: Option<&RuntimeContext>,
     descriptor: CallableDescriptor,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     let CallableDescriptor {
         target,
         args,
@@ -60,6 +69,17 @@ pub(super) fn try_execute(
         CallableTarget::Bound(binding) => {
             try_bound(runtime, binding, args, requested_outputs, metadata)
         }
+        CallableTarget::BoundLexical { binding, closure } => Box::pin(
+            bound_lexical(
+                runtime,
+                binding,
+                closure.into_closure(),
+                args,
+                requested_outputs,
+                metadata,
+            )
+            .map_ok(Some),
+        ),
         CallableTarget::Resolved {
             identity,
             fallback_policy,
@@ -84,14 +104,51 @@ fn bound(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(invoke_bound(
         runtime,
         binding,
         args,
         requested_outputs,
         metadata,
+        None,
     ))
+}
+
+#[inline(never)]
+fn bound_lexical(
+    runtime: Option<&RuntimeContext>,
+    binding: BoundFunctionBinding,
+    closure: Closure,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+) -> ExecutionFuture<'_, RootedValueSequence> {
+    // Admission can return a future that remains unpolled. Root the complete
+    // closure and arguments before exposing it to a queue or callback owner.
+    let closure_roots = match crate::execution::RootedValueLease::for_traced(&closure) {
+        Ok(roots) => roots,
+        Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+    };
+    let argument_roots = match crate::execution::RootedValueLease::for_values(args.iter()) {
+        Ok(roots) => roots,
+        Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+    };
+    let environment = closure.lexical_environment.clone();
+    Box::pin(async move {
+        let _closure_roots = closure_roots;
+        let _argument_roots = argument_roots;
+        let _closure = closure;
+        invoke_bound(
+            runtime,
+            binding,
+            args,
+            requested_outputs,
+            metadata,
+            environment,
+        )
+        .await
+    })
 }
 
 #[inline(never)]
@@ -101,8 +158,8 @@ fn try_bound(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
-    Box::pin(invoke_bound(runtime, binding, args, requested_outputs, metadata).map_ok(Some))
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
+    Box::pin(invoke_bound(runtime, binding, args, requested_outputs, metadata, None).map_ok(Some))
 }
 
 async fn invoke_bound(
@@ -111,20 +168,28 @@ async fn invoke_bound(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-) -> Result<ValueSequence, RuntimeError> {
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<RootedValueSequence, RuntimeError> {
     let function = binding.function;
     crate::callsite::with_function_input_callsite(metadata.function_input_callsite.clone(), async {
         match runtime {
             Some(runtime) => {
-                crate::user_functions::try_call_bound_function_in_context(
+                crate::user_functions::try_call_bound_function_with_environment_in_context(
                     runtime,
                     binding,
                     &args,
                     requested_outputs,
+                    lexical_environment,
                 )
                 .await
             }
             None => {
+                if lexical_environment.is_some() {
+                    return Some(Err(crate::runtime_error::semantic_error(
+                        "LexicalEnvironment",
+                        "nested closure requires an explicit runtime context",
+                    )));
+                }
                 crate::user_functions::try_call_bound_function(binding, &args, requested_outputs)
                     .await
             }
@@ -142,7 +207,7 @@ fn resolved(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     resolved_execution::execute(
         runtime,
         identity,
@@ -161,7 +226,7 @@ fn try_resolved(
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     resolved_execution::try_execute(
         runtime,
         identity,
@@ -178,7 +243,7 @@ fn forwarded(
     value: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> ExecutionFuture<'_, ValueSequence> {
+) -> ExecutionFuture<'_, RootedValueSequence> {
     Box::pin(invoke_forwarded(runtime, value, args, requested_outputs))
 }
 
@@ -188,7 +253,7 @@ fn try_forwarded(
     value: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> ExecutionFuture<'_, Option<ValueSequence>> {
+) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     Box::pin(invoke_forwarded(runtime, value, args, requested_outputs).map_ok(Some))
 }
 
@@ -197,7 +262,7 @@ async fn invoke_forwarded(
     value: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     match runtime {
         Some(runtime) => {
             crate::call_feval_sequence_async_with_outputs_in_context(

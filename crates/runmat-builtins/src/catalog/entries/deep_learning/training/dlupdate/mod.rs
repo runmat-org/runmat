@@ -12,6 +12,7 @@ mod tests;
 pub use contract::{DLUPDATE_DESCRIPTOR, DLUPDATE_INVALID_INPUT, DLUPDATE_UNSUPPORTED};
 
 pub const DLUPDATE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlupdate" },
     category: "deep_learning",

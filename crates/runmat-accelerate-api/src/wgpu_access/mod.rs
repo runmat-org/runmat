@@ -13,13 +13,16 @@ use std::rc::Rc as Shared;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc as Shared;
 use std::{error::Error, fmt, future::Future, pin::Pin};
+use wgpu::util::DeviceExt;
 
 mod gate;
 mod errors;
+mod provenance;
 mod scopes;
 pub use errors::{WgpuScopeErrorKind, WgpuScopeErrors};
 #[cfg(test)]
 mod tests;
+use provenance::DeviceEffectProvenance;
 use scopes::{ActiveScopes, DetachedScopes, ScopeDriver};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +61,7 @@ struct Inner {
     device: wgpu::Device,
     queue: wgpu::Queue,
     gate: gate::Gate,
+    effects: DeviceEffectProvenance,
 }
 impl ScopeDriver for Inner {
     type Pending = PendingError;
@@ -76,9 +80,16 @@ impl ScopeDriver for Inner {
 pub struct WgpuDeviceAccess {
     inner: Shared<Inner>,
 }
+
+/// Fresh-device authority retained privately by the canonical provider. It
+/// cannot be reissued from a previously cloned `WgpuDeviceAccess`.
+pub struct CanonicalWgpuEmissionAuthority {
+    inner: Shared<Inner>,
+}
 fn same_authority<T>(left: &Shared<T>, right: &Shared<T>) -> bool {
     Shared::ptr_eq(left, right)
 }
+
 impl fmt::Debug for WgpuDeviceAccess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WgpuDeviceAccess").finish_non_exhaustive()
@@ -108,8 +119,39 @@ impl WgpuDeviceAccess {
                 device,
                 queue,
                 gate: gate::Gate::default(),
+                effects: DeviceEffectProvenance::default(),
             }),
         }
+    }
+
+    /// Construct from a genuinely fresh device/queue pair and return the one
+    /// access-bound authority used by its canonical provider. Ordinary access
+    /// clones cannot mint or recover this authority.
+    pub fn new_profiled(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> (Self, CanonicalWgpuEmissionAuthority) {
+        let access = Self::new(device, queue);
+        let authority = CanonicalWgpuEmissionAuthority {
+            inner: access.inner.clone(),
+        };
+        (access, authority)
+    }
+
+    pub fn has_raw_export(&self) -> bool {
+        self.inner.effects.has_raw_export()
+    }
+
+    /// A mapped initializer or queue write may have enqueued device work
+    /// before this command selected its receipt. No empty completion fence
+    /// proves that earlier work is inside a later encoder timestamp interval.
+    pub fn has_unmeasured_implicit_transfer(&self) -> bool {
+        self.inner.effects.has_implicit_transfer()
+    }
+
+    /// Copy-only feature metadata; no raw clonable device reference escapes.
+    pub fn enabled_features(&self) -> wgpu::Features {
+        self.inner.device.features()
     }
 
     pub fn same_device(&self, other: &Self) -> bool {
@@ -134,6 +176,26 @@ impl WgpuDeviceAccess {
             operation(&WgpuEmission {
                 access: self,
                 mode: WgpuEmissionMode::Shared,
+                canonical: false,
+            })
+        })
+    }
+
+    /// The canonical provider's lexical emission; the same device-local gate
+    /// and error scopes apply. A wrong authority cannot enter the closure.
+    pub fn with_profiled_shared<T>(
+        &self,
+        authority: &CanonicalWgpuEmissionAuthority,
+        operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
+    ) -> Result<T, WgpuAccessError> {
+        if !same_authority(&self.inner, &authority.inner) {
+            return Err(WgpuAccessError::WrongDevice);
+        }
+        self.inner.gate.shared(|| {
+            operation(&WgpuEmission {
+                access: self,
+                mode: WgpuEmissionMode::Shared,
+                canonical: true,
             })
         })
     }
@@ -152,6 +214,30 @@ impl WgpuDeviceAccess {
             let value = operation(&WgpuEmission {
                 access: self,
                 mode: WgpuEmissionMode::Scoped,
+                canonical: false,
+            });
+            scopes.detach(value)
+        })?;
+        Ok(WgpuScopeReceipt {
+            detached,
+            access: self.clone(),
+        })
+    }
+
+    pub fn with_profiled_scoped<T>(
+        &self,
+        authority: &CanonicalWgpuEmissionAuthority,
+        operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
+    ) -> Result<WgpuScopeReceipt<T>, WgpuAccessError> {
+        if !same_authority(&self.inner, &authority.inner) {
+            return Err(WgpuAccessError::WrongDevice);
+        }
+        let detached = self.inner.gate.exclusive(|| {
+            let scopes = ActiveScopes::push(self.inner.as_ref());
+            let value = operation(&WgpuEmission {
+                access: self,
+                mode: WgpuEmissionMode::Scoped,
+                canonical: true,
             });
             scopes.detach(value)
         })?;
@@ -175,6 +261,7 @@ impl WgpuDeviceAccess {
 pub struct WgpuEmission<'a> {
     access: &'a WgpuDeviceAccess,
     mode: WgpuEmissionMode,
+    canonical: bool,
 }
 
 /// An immutable fact about the owning access transaction, not cache policy.
@@ -204,10 +291,47 @@ impl WgpuEmission<'_> {
         self.access
     }
     pub fn device(&self) -> &wgpu::Device {
+        if !self.canonical {
+            self.access.inner.effects.mark_raw_export();
+            crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::RawWgpuExport);
+        }
         &self.access.inner.device
     }
     pub fn queue(&self) -> &wgpu::Queue {
+        self.access.inner.effects.mark_raw_export();
+        crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::RawWgpuExport);
         &self.access.inner.queue
+    }
+
+    pub fn create_initialized_buffer(
+        &self,
+        descriptor: &wgpu::util::BufferInitDescriptor<'_>,
+    ) -> wgpu::Buffer {
+        self.access.inner.effects.mark_implicit_transfer();
+        crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::ImplicitQueueTransfer);
+        self.access.inner.device.create_buffer_init(descriptor)
+    }
+
+    pub fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
+        self.access.inner.effects.mark_implicit_transfer();
+        crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::ImplicitQueueTransfer);
+        self.access.inner.queue.write_buffer(buffer, offset, data);
+    }
+
+    /// The one queue-submit path with an access-bound canonical authority.
+    /// The Runtime authorizer independently checks the selected Core command
+    /// and exact admitted singleton access before any effect is emitted.
+    pub fn submit_profiled(
+        &self,
+        commands: impl IntoIterator<Item = wgpu::CommandBuffer>,
+    ) -> wgpu::SubmissionIndex {
+        if self.canonical {
+            crate::observe_canonical_wgpu_submit(self.access);
+        } else {
+            self.access.inner.effects.mark_raw_export();
+            crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::RawWgpuExport);
+        }
+        self.access.inner.queue.submit(commands)
     }
     pub fn same_device(&self, other: &WgpuDeviceAccess) -> bool {
         self.access.same_device(other)

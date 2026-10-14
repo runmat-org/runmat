@@ -30,7 +30,7 @@ fn setfield_vector_and_logical_assignment_preserve_typed_storage() {
     let rhs =
         Tensor::new_integer(IntegerStorage::U64(vec![10, 30]), vec![1, 2]).expect("replacement");
     let updated = run_setfield(
-        updated,
+        updated.value().clone(),
         vec![
             Value::from("values"),
             Value::Cell(selector),
@@ -39,7 +39,7 @@ fn setfield_vector_and_logical_assignment_preserve_typed_storage() {
     )
     .expect("logical assignment");
 
-    let Value::Struct(root) = updated else {
+    let Value::Struct(root) = updated.value() else {
         panic!("expected structure result");
     };
     let Value::Tensor(values) = root.fields.get("values").expect("values field") else {
@@ -79,7 +79,7 @@ fn setfield_nd_assignment_uses_column_major_coordinates() {
         ],
     )
     .expect("N-D assignment");
-    let Value::Struct(root) = updated else {
+    let Value::Struct(root) = updated.value() else {
         panic!("expected structure result");
     };
     let Value::Tensor(values) = root.fields.get("values").expect("values field") else {

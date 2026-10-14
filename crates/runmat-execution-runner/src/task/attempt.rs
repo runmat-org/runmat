@@ -1,7 +1,7 @@
 use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::state::AttemptState;
 use runmat_execution::task::TaskRequest;
-use runmat_execution::value::{ValuePayload, ValueRef};
+use runmat_execution::value::{GraphNode, PayloadGraph, ValuePayload, ValueRef};
 use runmat_execution::{ExecutionScopeId, TaskId};
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +54,9 @@ pub enum AttemptSuccess {
         outputs: Vec<ValuePayload>,
         result_objects: Vec<ValueRef>,
     },
+    Graph {
+        graph: PayloadGraph,
+    },
     Spmd {
         outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
     },
@@ -97,6 +100,26 @@ impl AttemptSuccess {
                         .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
                 }
             }
+            Self::Graph { graph } => {
+                let limits = ValueLimits::default();
+                if graph.nodes.len() as u64 > limits.max_nodes
+                    || graph
+                        .roots
+                        .iter()
+                        .any(|root| root.0 as usize >= graph.nodes.len())
+                {
+                    return Err(crate::RunnerError::Invalid(
+                        "graph result exceeds its node bound or has an invalid root".into(),
+                    ));
+                }
+                for node in &graph.nodes {
+                    if let GraphNode::Leaf { value } = node {
+                        value
+                            .validate_for_transport(limits, ValueTransportContext::Portable)
+                            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -107,7 +130,7 @@ impl AttemptSuccess {
                 outputs,
                 result_objects,
             } => Some((outputs, result_objects)),
-            Self::Spmd { .. } => None,
+            Self::Graph { .. } | Self::Spmd { .. } => None,
         }
     }
 
@@ -117,21 +140,28 @@ impl AttemptSuccess {
                 outputs,
                 result_objects,
             } => Some((outputs, result_objects)),
-            Self::Spmd { .. } => None,
+            Self::Graph { .. } | Self::Spmd { .. } => None,
         }
     }
 
     pub fn spmd_outputs(&self) -> Option<&[Option<runmat_execution::SpmdOutputValue>]> {
         match self {
             Self::Spmd { outputs } => Some(outputs),
-            Self::Values { .. } => None,
+            Self::Values { .. } | Self::Graph { .. } => None,
+        }
+    }
+
+    pub fn graph(&self) -> Option<&PayloadGraph> {
+        match self {
+            Self::Graph { graph } => Some(graph),
+            Self::Values { .. } | Self::Spmd { .. } => None,
         }
     }
 
     pub fn result_objects(&self) -> &[ValueRef] {
         match self {
             Self::Values { result_objects, .. } => result_objects,
-            Self::Spmd { .. } => &[],
+            Self::Graph { .. } | Self::Spmd { .. } => &[],
         }
     }
 }
@@ -161,6 +191,15 @@ pub enum AttemptReport {
     Lost {
         message: String,
     },
+    /// A worker tree or its foreign resources could not be proven retired.
+    /// This is terminal and non-retryable, but not ordinary cancellation.
+    RetirementUnverified {
+        message: String,
+    },
+    /// The backend that owns an active Graph worker has verified its process
+    /// tree and foreign resources retired after cancellation. Ordinary Lost
+    /// or Cancelled reports do not carry that cleanup proof.
+    GraphRetiredCancelled,
     Cancelled,
 }
 

@@ -20,8 +20,13 @@ use runmat_value::{
 };
 use std::sync::Arc;
 
-fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
     block_on(arrayfun_builtin(None, func, rest))
+}
+
+fn rooted_single(value: Value) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
+    let sequence = crate::sequence::single_value_sequence(value)?;
+    crate::execution::RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
 }
 
 fn values(tensor: &Tensor) -> Vec<f64> {

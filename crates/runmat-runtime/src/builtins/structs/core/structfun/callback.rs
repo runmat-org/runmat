@@ -1,6 +1,7 @@
 use crate::builtins::common::mapped_callable::{
     CallableCallError, CallableParseError, MappedCallable,
 };
+use crate::execution::RootedValue;
 use runmat_value::Value;
 use std::borrow::Cow;
 
@@ -17,7 +18,7 @@ impl Callable {
         &self,
         arguments: &[Value],
         outputs: usize,
-    ) -> Result<Value, CallbackFailure> {
+    ) -> Result<RootedValue, CallbackFailure> {
         self.0
             .invoke_with_outputs(arguments, outputs)
             .await

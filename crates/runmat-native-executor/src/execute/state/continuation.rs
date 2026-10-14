@@ -481,13 +481,25 @@ impl HostState {
                 let start = span.offset();
                 (start, start + span.len())
             });
+            let source = self.runtime.program_source_id(self.function.source);
             error.context.call_frames.push(runmat_runtime::CallFrame {
                 function: self.function.name.clone(),
-                source_id: self
-                    .runtime
-                    .program_source_id(self.function.source)
-                    .map(|source| source.0),
+                source_id: source.map(|source| source.0),
                 span,
+                source_owner: source.and_then(|_| {
+                    self.runtime
+                        .call_frame_source_owner_for_program_source(self.function.source)
+                }),
+                diagnostic_source: source
+                    .and_then(|source| {
+                        runmat_runtime::source_context::source_info_in_context(
+                            &self.runtime,
+                            source,
+                        )
+                    })
+                    .map(|info| {
+                        runmat_runtime::CallFrameDiagnosticSource::new(info.name, info.text)
+                    }),
             });
         }
         error

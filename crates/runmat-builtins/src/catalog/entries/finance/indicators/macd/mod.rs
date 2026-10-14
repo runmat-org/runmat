@@ -14,6 +14,7 @@ pub use contract::{
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&MACD_CATALOG_ENTRY];
 
 pub const MACD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "macd" },
     category: "finance/indicators",

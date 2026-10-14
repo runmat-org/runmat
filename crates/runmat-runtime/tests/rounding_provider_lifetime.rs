@@ -401,12 +401,13 @@ fn rounding_characters_retain_pages_and_semantic_element_order() {
         CharArray::new_with_shape(vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], vec![2, 2, 2])
             .unwrap();
     for name in ["ceil", "floor", "fix", "round"] {
-        let Value::Tensor(output) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
             &[Value::CharArray(input.clone())],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Tensor(output) = result.value() else {
             panic!("{name}: numeric character output")
         };
         assert_eq!(output.shape(), input.shape);
@@ -436,22 +437,24 @@ fn round_scalar_ties_integral_extremes_and_signed_zero_have_independent_oracles(
         (f64::INFINITY, f64::INFINITY),
         (f64::NEG_INFINITY, f64::NEG_INFINITY),
     ] {
-        let Value::Num(actual) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             "round",
             &[Value::Num(input)],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Num(actual) = result.value() else {
             panic!("round scalar")
         };
         assert_eq!(actual.to_bits(), expected.to_bits());
     }
-    let Value::Num(actual) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+    let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
         "round",
         &[Value::Num(f64::NAN)],
         1,
     ))
-    .unwrap() else {
+    .unwrap();
+    let Value::Num(actual) = result.value() else {
         panic!("round NaN")
     };
     assert!(actual.is_nan());
@@ -469,12 +472,13 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
         )
         .unwrap();
         for name in ["mod", "rem"] {
-            let Value::Tensor(output) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
                 name,
                 &[Value::CharArray(input.clone()), Value::Num(7.0)],
                 1,
             ))
-            .unwrap() else {
+            .unwrap();
+            let Value::Tensor(output) = result.value() else {
                 panic!("{name}: pages")
             };
             assert_eq!(output.shape(), shape);
@@ -493,26 +497,28 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
 #[test]
 fn finite_remainders_survive_overflowing_quotients() {
     for name in ["mod", "rem"] {
-        let Value::Num(cancelled) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
             &[Value::Num(2.0), Value::Num(0.1)],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Num(cancelled) = result.value() else {
             panic!("scalar remainder")
         };
         assert_eq!(
-            cancelled, 0.0,
+            *cancelled, 0.0,
             "{name}: preserve rounded-quotient compensation"
         );
         for left in [f64::MAX, -f64::MAX] {
             for right in [0.5, -0.5, f64::MIN_POSITIVE] {
-                let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
                     name,
                     &[Value::Num(left), Value::Num(right)],
                     1,
                 ))
-                .unwrap() else {
+                .unwrap();
+                let Value::Num(result) = result.value() else {
                     panic!("scalar remainder")
                 };
                 // MAX has no fractional bits and is a multiple of every
@@ -523,12 +529,13 @@ fn finite_remainders_survive_overflowing_quotients() {
         let left =
             runmat_value::Tensor::from_f32(vec![f32::MAX, -f32::MAX], vec![1, 1, 2]).unwrap();
         let right = runmat_value::Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap();
-        let Value::Tensor(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
             &[Value::Tensor(left), Value::Tensor(right)],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Tensor(result) = result.value() else {
             panic!("single pages")
         };
         assert_eq!(result.shape(), &[1, 1, 2]);
@@ -540,15 +547,16 @@ fn finite_remainders_survive_overflowing_quotients() {
         ("rem", -5.5, 2.0, -1.5),
         ("rem", 5.5, -2.0, 1.5),
     ] {
-        let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
             &[Value::Num(left), Value::Num(right)],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Num(result) = result.value() else {
             panic!("scalar remainder")
         };
-        assert_eq!(result, expected);
+        assert_eq!(*result, expected);
     }
 }
 
@@ -559,7 +567,7 @@ fn round_extreme_digit_controls_have_finite_semantics() {
         (f64::MAX, 2, "decimals", f64::MAX),
         (123.0, i32::MIN, "decimals", 0.0),
     ] {
-        let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
             "round",
             &[
                 Value::Num(input),
@@ -568,9 +576,10 @@ fn round_extreme_digit_controls_have_finite_semantics() {
             ],
             1,
         ))
-        .unwrap() else {
+        .unwrap();
+        let Value::Num(result) = result.value() else {
             panic!("round scalar")
         };
-        assert_eq!(result, expected);
+        assert_eq!(*result, expected);
     }
 }

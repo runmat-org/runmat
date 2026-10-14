@@ -49,7 +49,7 @@ fn selected_context_without_host_returns_cancellation_without_ambient_fallback()
             requested_outputs,
         ))
         .expect("headless dialog cancellation");
-        let Value::OutputList(outputs) = result else {
+        let Value::OutputList(outputs) = result.value() else {
             panic!("{} must return its requested output list", case.name)
         };
         assert_eq!(outputs.len(), requested_outputs, "{} arity", case.name);

@@ -109,27 +109,93 @@ pub(super) fn create_future(
     function_registry: &FunctionRegistry,
 ) -> Result<runmat_execution::FutureHandle, RuntimeError> {
     runmat_runtime::execution::validate_spawn_captures(&descriptor.args)?;
-    let program = context
-        .runtime
-        .execution()
-        .requires_program_capture()
-        .then(|| {
-            crate::encode_interpreter_program_v2(function_registry).map_err(|error| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    &format!("failed to capture the exact async program: {error}"),
-                )
-            })
-        })
-        .transpose()?;
     let capabilities = callable_capabilities(&descriptor, function_registry)?;
+    let mut invocation = runmat_runtime::execution::DeferredInvocation::Callable(descriptor);
+    let graph_required =
+        runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(&invocation);
+    let builtin = matches!(
+        &invocation,
+        runmat_runtime::execution::DeferredInvocation::Callable(
+            runmat_runtime::call::descriptor::CallableDescriptor {
+                target: runmat_runtime::call::descriptor::CallableTarget::Resolved {
+                    identity: runmat_hir::CallableIdentity::Builtin(_),
+                    ..
+                },
+                ..
+            }
+        )
+    );
+    let program = if !context.runtime.execution().requires_program_capture() {
+        runmat_runtime::execution::DeferredProgram::Local
+    } else if builtin && !graph_required {
+        // A builtin has typed catalog authority but no V3 function body. Keep
+        // its existing direct V2 worker route instead of inventing a graph
+        // callable owner or rejecting previously supported async builtins.
+        let bytes = crate::encode_interpreter_program_v2(function_registry).map_err(|error| {
+            crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                &format!("failed to capture the exact async builtin program: {error}"),
+            )
+        })?;
+        runmat_runtime::execution::DeferredProgram::InterpreterV2(std::sync::Arc::from(bytes))
+    } else {
+        let selected = context.graph_program.as_ref().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "async worker execution has no selected V3 executable authority",
+            )
+        })?;
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
+    };
+    if matches!(
+        &program,
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+    ) {
+        if builtin {
+            let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) = invocation
+            else {
+                unreachable!("future admission created a callable invocation")
+            };
+            let runmat_runtime::call::descriptor::CallableTarget::Resolved {
+                identity: runmat_hir::CallableIdentity::Builtin(name),
+                fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+            } = descriptor.target
+            else {
+                return Err(crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    "graph builtin requires an exact selected catalog target",
+                ));
+            };
+            invocation = runmat_runtime::execution::DeferredInvocation::Program {
+                callable: runmat_execution::ProgramCallable::Builtin { name },
+                context: runmat_execution::ProgramInvocationContext::Direct,
+                arguments: descriptor.args,
+                requested_outputs: descriptor.requested_outputs,
+            };
+        } else {
+            let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
+                &mut invocation
+            else {
+                unreachable!("future admission created a callable invocation")
+            };
+            bind_selected_semantic_target(descriptor, function_registry)?;
+        }
+    }
+    let program_revision = if matches!(
+        &program,
+        runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+    ) {
+        None
+    } else {
+        context.runtime.program_revision().cloned()
+    };
     context
         .runtime
         .execution()
         .create_future(runmat_runtime::execution::DeferredCall {
-            invocation: runmat_runtime::execution::DeferredInvocation::Callable(descriptor),
+            invocation,
             retry: runmat_execution::RetryPolicy::Never,
-            program_revision: context.runtime.program_revision().cloned(),
+            program_revision,
             capabilities,
             program,
         })
@@ -142,12 +208,27 @@ fn callable_capabilities(
 ) -> Result<runmat_types::CapabilitySet, RuntimeError> {
     use runmat_hir::CallableIdentity;
 
-    let runmat_runtime::call::descriptor::CallableTarget::Resolved { identity, .. } =
+    use runmat_runtime::call::descriptor::CallableTarget;
+
+    if let CallableTarget::Bound(binding) | CallableTarget::BoundLexical { binding, .. } =
         &descriptor.target
-    else {
+    {
+        let function = runmat_hir::FunctionId(binding.function);
+        let selected = registry
+            .owned_view(function, &binding.authority)
+            .and_then(|view| view.get(function).map(|body| body.capabilities.clone()))
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    "async bound callable has no exact selected definition",
+                )
+            })?;
+        return Ok(selected);
+    }
+    let CallableTarget::Resolved { identity, .. } = &descriptor.target else {
         return Err(crate::interpreter::errors::mex(
             "ExecutionProgram",
-            "async execution requires an exact resolved callable before capability binding",
+            "async execution requires an exact selected callable before capability binding",
         ));
     };
     match identity {
@@ -174,6 +255,37 @@ fn callable_capabilities(
             "async callable kind has no portable execution identity",
         )),
     }
+}
+
+/// A semantic name is resolved only at Future admission, while its selected
+/// registry and source owner are still present. The resulting local authority
+/// retains the exact body/dependency leases; the worker snapshot never
+/// resolves the name or a reused numeric function ID.
+fn bind_selected_semantic_target(
+    descriptor: &mut runmat_runtime::call::descriptor::CallableDescriptor,
+    registry: &FunctionRegistry,
+) -> Result<(), RuntimeError> {
+    use runmat_hir::CallableIdentity;
+    use runmat_runtime::call::descriptor::CallableTarget;
+
+    let CallableTarget::Resolved {
+        identity:
+            CallableIdentity::BoundFunction(function)
+            | CallableIdentity::AnonymousFunction(function)
+            | CallableIdentity::ExternalFunction { function, .. },
+        ..
+    } = &descriptor.target
+    else {
+        return Ok(());
+    };
+    let binding = registry.exact_bound_binding(*function).ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "ExecutionProgram",
+            "async semantic callable has no exact selected definition and source graph",
+        )
+    })?;
+    descriptor.target = CallableTarget::Bound(binding);
+    Ok(())
 }
 
 pub(super) fn semantic_descriptor(
@@ -240,20 +352,25 @@ fn requested_outputs(value: Value) -> Result<usize, RuntimeError> {
 pub(super) async fn await_value(
     context: &ExecutionContext,
     value: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
     use runmat_runtime::sequence::ResolveValueSequence;
 
-    let mut values = await_sequence(context, value).await?.resolve(
-        runmat_types::SequenceUse::RequireSingle,
-        runmat_runtime::sequence::SequenceResolutionContext::default(),
-    )?;
-    Ok(values.remove(0))
+    await_sequence(context, value).await?.try_map_owned(
+        |sequence| {
+            let mut values = sequence.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                runmat_runtime::sequence::SequenceResolutionContext::default(),
+            )?;
+            Ok(values.remove(0))
+        },
+        runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
+    )
 }
 
 async fn await_sequence(
     context: &ExecutionContext,
     value: Value,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     use runmat_runtime::execution::AwaitAction;
 
     let mut value = runmat_runtime::parallel::future::execution_value(&value)
@@ -263,12 +380,14 @@ async fn await_sequence(
         match context
             .runtime
             .execution()
-            .begin_await(value)
+            .begin_await_in_context(value, &context.runtime)
             .map_err(execution_error)?
         {
             AwaitAction::Passthrough(value) => {
-                return runmat_value::ValueSequence::single(value)
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                let sequence = runmat_value::ValueSequence::single(value)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+                return runmat_runtime::execution::RootedValueSequence::new(sequence)
+                    .map_err(execution_error);
             }
             AwaitAction::Completed(sequence) => return Ok(sequence),
             AwaitAction::Pending(pending) => {
@@ -292,6 +411,10 @@ async fn await_sequence(
                         crate::execute_deferred_program_in_context(*call, context.runtime.clone())
                             .await
                             .map_err(execution_error)
+                            .and_then(|sequence| {
+                                runmat_runtime::execution::RootedValueSequence::new(sequence)
+                                    .map_err(execution_error)
+                            })
                     }
                 };
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {
@@ -309,7 +432,7 @@ pub(super) async fn fetch_next(
     futures: &Value,
     timeout_seconds: Option<f64>,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     use runmat_execution::TaskResultClaim;
 
     let tasks = runmat_runtime::parallel::future::tasks(futures).ok_or_else(|| {
@@ -376,7 +499,7 @@ pub(super) async fn fetch_outputs(
     futures: &Value,
     requested_outputs: usize,
     uniform_output: bool,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     let tasks = runmat_runtime::parallel::future::output_tasks(futures).ok_or_else(|| {
         crate::interpreter::errors::mex(
             "InvalidFuture",
@@ -404,13 +527,13 @@ pub(super) async fn fetch_outputs(
         worker_outputs.push(split_outputs(result, requested_outputs)?);
     }
     if tasks.len() == 1 {
-        return join_outputs(
-            worker_outputs
-                .pop()
-                .expect("one task produced one output row"),
-        );
+        return worker_outputs
+            .pop()
+            .expect("one task produced one output row")
+            .with_owned_values(root_join_outputs);
     }
-    let mut combined = Vec::with_capacity(requested_outputs);
+    let mut combined =
+        runmat_runtime::execution::RootedValuesBuilder::with_capacity(requested_outputs);
     for output_index in 0..requested_outputs {
         let values = worker_outputs
             .iter()
@@ -424,21 +547,32 @@ pub(super) async fn fetch_outputs(
                 runmat_hir::CallableFallbackPolicy::None,
                 runmat_runtime::call::descriptor::CallableCallKind::Direct,
             );
-            let mut values = crate::call::execute_callable_descriptor(&context.runtime, descriptor)
+            let output = crate::call::execute_callable_descriptor(&context.runtime, descriptor)
                 .await?
-                .resolve(
-                    runmat_types::SequenceUse::RequireSingle,
-                    runmat_runtime::sequence::SequenceResolutionContext::default(),
+                .try_map_owned(
+                    |sequence| {
+                        let mut values = sequence.resolve(
+                            runmat_types::SequenceUse::RequireSingle,
+                            runmat_runtime::sequence::SequenceResolutionContext::default(),
+                        )?;
+                        Ok(values.remove(0))
+                    },
+                    runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
                 )?;
-            combined.push(values.remove(0));
+            output.with_owned(|value| combined.push(value).map_err(execution_error))?;
         } else {
-            combined.push(Value::Cell(
-                runmat_value::CellArray::new_with_shape(values, vec![tasks.len(), 1])
-                    .map_err(|error| crate::interpreter::errors::mex("FetchOutputs", &error))?,
-            ));
+            combined
+                .push(Value::Cell(
+                    runmat_value::CellArray::new_with_shape(values, vec![tasks.len(), 1])
+                        .map_err(|error| crate::interpreter::errors::mex("FetchOutputs", &error))?,
+                ))
+                .map_err(execution_error)?;
         }
     }
-    join_outputs(combined)
+    combined
+        .finish()
+        .map_err(execution_error)?
+        .with_owned_values(root_join_outputs)
 }
 
 pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, RuntimeError> {
@@ -474,27 +608,30 @@ pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, Runtime
 }
 
 fn split_outputs(
-    sequence: runmat_value::ValueSequence,
+    sequence: runmat_runtime::execution::RootedValueSequence,
     count: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    match count {
-        0 => Ok(Vec::new()),
-        1 => sequence.resolve(
-            runmat_types::SequenceUse::SelectPrefix { count: 1 },
-            runmat_runtime::sequence::SequenceResolutionContext::default(),
-        ),
-        _ => sequence
-            .resolve(
-                runmat_types::SequenceUse::SelectPrefix { count },
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    sequence.with_owned_sequence(|sequence| {
+        let values = match count {
+            0 => Ok(Vec::new()),
+            1 => sequence.resolve(
+                runmat_types::SequenceUse::SelectPrefix { count: 1 },
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
-            )
-            .map_err(|_| {
-                crate::interpreter::errors::mex(
-                    "OutputCountMismatch",
-                    "future result does not contain the requested number of outputs",
+            ),
+            _ => sequence
+                .resolve(
+                    runmat_types::SequenceUse::SelectPrefix { count },
+                    runmat_runtime::sequence::SequenceResolutionContext::default(),
                 )
-            }),
-    }
+                .map_err(|_| {
+                    crate::interpreter::errors::mex(
+                        "OutputCountMismatch",
+                        "future result does not contain the requested number of outputs",
+                    )
+                }),
+        }?;
+        runmat_runtime::execution::RootedValues::new(values).map_err(execution_error)
+    })
 }
 
 fn join_outputs(outputs: Vec<Value>) -> Result<runmat_value::ValueSequence, RuntimeError> {
@@ -507,6 +644,13 @@ fn join_outputs(outputs: Vec<Value>) -> Result<runmat_value::ValueSequence, Runt
         _ => runmat_value::ValueSequence::comma_separated(outputs)
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
     })
+}
+
+fn root_join_outputs(
+    outputs: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    runmat_runtime::execution::RootedValueSequence::new(join_outputs(outputs)?)
+        .map_err(execution_error)
 }
 
 pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
@@ -526,33 +670,44 @@ pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
 
 fn fetch_next_outputs(
     index: usize,
-    result: runmat_value::ValueSequence,
+    result: runmat_runtime::execution::RootedValueSequence,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     if requested_outputs == 0 {
-        return Ok(runmat_value::ValueSequence::empty());
+        return runmat_runtime::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::empty(),
+        )
+        .map_err(execution_error);
     }
     if requested_outputs == 1 {
-        return runmat_value::ValueSequence::single(Value::Num((index + 1) as f64))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime);
+        return runmat_runtime::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::single(Value::Num((index + 1) as f64))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        )
+        .map_err(execution_error);
     }
-    let mut outputs = Vec::with_capacity(requested_outputs);
-    outputs.push(Value::Num((index + 1) as f64));
-    if requested_outputs > 1 {
-        outputs.extend(result.into_values());
-    }
-    runmat_value::ValueSequence::comma_separated(outputs)
-        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+    result.try_map_owned(
+        |result| {
+            let mut outputs = Vec::with_capacity(requested_outputs);
+            outputs.push(Value::Num((index + 1) as f64));
+            outputs.extend(result.into_values());
+            runmat_value::ValueSequence::comma_separated(outputs)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        },
+        runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
+    )
 }
 
-fn empty_outputs(requested_outputs: usize) -> Result<runmat_value::ValueSequence, RuntimeError> {
+fn empty_outputs(
+    requested_outputs: usize,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     let empty = || {
         Value::Tensor(
             runmat_value::Tensor::new(Vec::new(), vec![0, 0])
                 .expect("the canonical empty tensor shape is valid"),
         )
     };
-    Ok(match requested_outputs {
+    let sequence = match requested_outputs {
         0 => runmat_value::ValueSequence::empty(),
         1 => runmat_value::ValueSequence::single(empty())
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
@@ -560,7 +715,8 @@ fn empty_outputs(requested_outputs: usize) -> Result<runmat_value::ValueSequence
             runmat_value::ValueSequence::comma_separated((0..count).map(|_| empty()).collect())
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?
         }
-    })
+    };
+    runmat_runtime::execution::RootedValueSequence::new(sequence).map_err(execution_error)
 }
 
 pub(super) async fn yield_once() {

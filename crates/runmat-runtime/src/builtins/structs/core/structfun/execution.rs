@@ -1,3 +1,4 @@
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{current_requested_outputs, gather_if_needed_async, BuiltinResult};
 use runmat_value::Value;
 
@@ -11,7 +12,10 @@ pub(super) async fn execute(
     function: Value,
     structure: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _inputs_root =
+        RootedValueLease::for_values([&function, &structure].into_iter().chain(rest.iter()))
+            .map_err(|error| error.into_runtime_error())?;
     let callable = Callable::parse(function)?;
     let fields = Fields::parse(structure)?;
     let options = Options::parse(rest)?;
@@ -47,16 +51,29 @@ pub(super) async fn execute(
             .iter_mut()
             .zip(output::normalize(result, requested)?)
         {
-            collector.push(field, gather_if_needed_async(&result).await?)?;
+            let gathered = gather_if_needed_async(result.value()).await?;
+            collector.push(
+                field,
+                RootedValue::new(gathered).map_err(|error| error.into_runtime_error())?,
+            )?;
         }
     }
-    let outputs = collectors
-        .into_iter()
-        .map(|collector| collector.finish(fields.names.len()))
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    if requested == 1 {
-        Ok(outputs.into_iter().next().expect("one requested output"))
-    } else {
-        Ok(Value::OutputList(outputs))
+    let mut outputs = RootedValuesBuilder::with_capacity(collectors.len());
+    for collector in collectors {
+        collector
+            .finish(fields.names.len())?
+            .with_owned(|value| outputs.push(value))
+            .map_err(|error| error.into_runtime_error())?;
     }
+    outputs
+        .finish()
+        .map_err(|error| error.into_runtime_error())?
+        .with_owned_values(|mut values| {
+            let value = if requested == 1 {
+                values.pop().expect("one requested output")
+            } else {
+                Value::OutputList(values)
+            };
+            RootedValue::new(value).map_err(|error| error.into_runtime_error())
+        })
 }

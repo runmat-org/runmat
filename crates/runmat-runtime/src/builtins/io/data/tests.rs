@@ -318,11 +318,15 @@ fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
             .unwrap_or_else(|error| panic!("{dtype}: create failed: {error}"));
         let array = call_builtin(
             "Dataset.array",
-            &[dataset, Value::String("samples".to_string())],
+            &[
+                dataset.value().clone(),
+                Value::String("samples".to_string()),
+            ],
         )
         .expect("array handle");
-        let Value::Tensor(values) = call_builtin("DataArray.read", &[array]).expect("read zeros")
-        else {
+        let read = call_builtin("DataArray.read", std::slice::from_ref(array.value()))
+            .expect("read zeros");
+        let Value::Tensor(values) = read.value() else {
             panic!("{dtype}: expected tensor");
         };
         assert_eq!(values.shape(), &[2, 3], "{dtype}");
@@ -547,7 +551,7 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         call_builtin(
             "Dataset.set_attr",
             &[
-                ds.clone(),
+                ds.value().clone(),
                 Value::String(format!("direct_{name}")),
                 Value::Int(source.clone()),
             ],
@@ -556,12 +560,15 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         bulk.fields
             .insert(format!("bulk_{name}"), Value::Int(source.clone()));
     }
-    call_builtin("Dataset.set_attrs", &[ds.clone(), Value::Struct(bulk)])
-        .expect("set integer attributes");
+    call_builtin(
+        "Dataset.set_attrs",
+        &[ds.value().clone(), Value::Struct(bulk)],
+    )
+    .expect("set integer attributes");
 
-    let Value::Struct(attrs) =
-        call_builtin("Dataset.attrs", std::slice::from_ref(&ds)).expect("read attributes")
-    else {
+    let attributes =
+        call_builtin("Dataset.attrs", std::slice::from_ref(ds.value())).expect("read attributes");
+    let Value::Struct(attrs) = attributes.value() else {
         panic!("expected attribute struct");
     };
     for (name, source, canonical) in cases {
@@ -569,7 +576,7 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         assert_eq!(
             call_builtin(
                 "Dataset.get_attr",
-                &[ds.clone(), Value::String(format!("direct_{name}"))],
+                &[ds.value().clone(), Value::String(format!("direct_{name}"))],
             )
             .expect("get integer attribute"),
             expected,
@@ -584,7 +591,7 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
             call_builtin(
                 "Dataset.get_attr",
                 &[
-                    ds.clone(),
+                    ds.value().clone(),
                     Value::String(format!("missing_{name}")),
                     Value::Int(source.clone()),
                 ],
@@ -1032,15 +1039,16 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         &[Value::String("pinned.data".into()), Value::Struct(schema)],
     )
     .expect("create finishes on original authority after ambient swap");
-    assert!(matches!(result, Value::Object(_)));
+    assert!(matches!(result.value(), Value::Object(_)));
     assert_eq!(
-        call_builtin("Dataset.path", std::slice::from_ref(&result)).expect("sealed public path"),
+        call_builtin("Dataset.path", std::slice::from_ref(result.value()))
+            .expect("sealed public path"),
         Value::String("pinned.data".into())
     );
     for method in ["Dataset.id", "Dataset.version"] {
-        let Value::String(value) = call_builtin(method, std::slice::from_ref(&result))
-            .expect("sealed Dataset identity accessor")
-        else {
+        let identity = call_builtin(method, std::slice::from_ref(result.value()))
+            .expect("sealed Dataset identity accessor");
+        let Value::String(value) = identity.value() else {
             panic!("{method} must return text");
         };
         assert!(!value.is_empty());
@@ -1048,7 +1056,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     assert_eq!(
         call_builtin(
             "Dataset.has_array",
-            &[result.clone(), Value::String("sample".into())]
+            &[result.value().clone(), Value::String("sample".into())]
         )
         .expect("pinned membership"),
         Value::Bool(true)
@@ -1056,49 +1064,51 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     assert_eq!(
         call_builtin(
             "Dataset.has_array",
-            &[result.clone(), Value::String("other".into())]
+            &[result.value().clone(), Value::String("other".into())]
         )
         .expect("pinned non-membership"),
         Value::Bool(false)
     );
-    let arrays = call_builtin("Dataset.arrays", std::slice::from_ref(&result))
+    let arrays = call_builtin("Dataset.arrays", std::slice::from_ref(result.value()))
         .expect("follow-on Dataset read retains selected provider");
-    let Value::Cell(arrays) = arrays else {
+    let Value::Cell(arrays) = arrays.value() else {
         panic!("Dataset.arrays must return a cell");
     };
     assert_eq!(arrays.data, vec![Value::String("sample".into())]);
     let array = call_builtin(
         "Dataset.array",
-        &[result.clone(), Value::String("sample".into())],
+        &[result.value().clone(), Value::String("sample".into())],
     )
     .expect("child array inherits selected provider");
-    let dtype = call_builtin("DataArray.dtype", std::slice::from_ref(&array))
+    let dtype = call_builtin("DataArray.dtype", std::slice::from_ref(array.value()))
         .expect("array metadata retains selected provider");
     assert_eq!(dtype, Value::String("uint64".into()));
     assert_eq!(
-        call_builtin("DataArray.name", std::slice::from_ref(&array)).expect("sealed array name"),
+        call_builtin("DataArray.name", std::slice::from_ref(array.value()))
+            .expect("sealed array name"),
         Value::String("sample".into())
     );
     assert_eq!(
-        call_builtin("DataArray.codec", std::slice::from_ref(&array))
+        call_builtin("DataArray.codec", std::slice::from_ref(array.value()))
             .expect("pinned codec metadata"),
         Value::String("zstd".into())
     );
     assert_eq!(
-        call_builtin("DataArray.rank", std::slice::from_ref(&array)).expect("pinned rank metadata"),
+        call_builtin("DataArray.rank", std::slice::from_ref(array.value()))
+            .expect("pinned rank metadata"),
         Value::Num(2.0)
     );
     for method in ["DataArray.shape", "DataArray.chunk_shape"] {
-        let Value::Tensor(shape) =
-            call_builtin(method, std::slice::from_ref(&array)).expect("pinned shape metadata")
-        else {
+        let shape_result = call_builtin(method, std::slice::from_ref(array.value()))
+            .expect("pinned shape metadata");
+        let Value::Tensor(shape) = shape_result.value() else {
             panic!("{method} must return a tensor");
         };
         assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
     }
-    let values = call_builtin("DataArray.read", std::slice::from_ref(&array))
+    let values = call_builtin("DataArray.read", std::slice::from_ref(array.value()))
         .expect("array payload retains selected provider");
-    let Value::Tensor(values) = values else {
+    let Value::Tensor(values) = values.value() else {
         panic!("DataArray.read must return a tensor");
     };
     assert_eq!(
@@ -1108,7 +1118,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     call_builtin(
         "DataArray.write",
         &[
-            array.clone(),
+            array.value().clone(),
             Value::Tensor(
                 Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![42]), vec![1, 1])
                     .expect("replacement value"),
@@ -1116,9 +1126,9 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         ],
     )
     .expect("array write retains selected provider");
-    let Value::Tensor(written) = call_builtin("DataArray.read", std::slice::from_ref(&array))
-        .expect("read after pinned write")
-    else {
+    let written_result = call_builtin("DataArray.read", std::slice::from_ref(array.value()))
+        .expect("read after pinned write");
+    let Value::Tensor(written) = written_result.value() else {
         panic!("DataArray.read must return a tensor");
     };
     assert_eq!(
@@ -1127,12 +1137,12 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     );
     call_builtin(
         "DataArray.fill",
-        &[array.clone(), Value::Int(IntValue::U64(9))],
+        &[array.value().clone(), Value::Int(IntValue::U64(9))],
     )
     .expect("fill stays on original provider");
-    let Value::Tensor(filled) = call_builtin("DataArray.read", std::slice::from_ref(&array))
-        .expect("read after pinned fill")
-    else {
+    let filled_result = call_builtin("DataArray.read", std::slice::from_ref(array.value()))
+        .expect("read after pinned fill");
+    let Value::Tensor(filled) = filled_result.value() else {
         panic!("DataArray.read must return a tensor");
     };
     assert_eq!(
@@ -1142,7 +1152,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     call_builtin(
         "DataArray.resize",
         &[
-            array.clone(),
+            array.value().clone(),
             Value::Tensor(
                 Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
                     .expect("resize shape"),
@@ -1150,9 +1160,9 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         ],
     )
     .expect("resize stays on original provider");
-    let Value::Tensor(resized) =
-        call_builtin("DataArray.read", &[array]).expect("read after pinned resize")
-    else {
+    let resized_result = call_builtin("DataArray.read", std::slice::from_ref(array.value()))
+        .expect("read after pinned resize");
+    let Value::Tensor(resized) = resized_result.value() else {
         panic!("DataArray.read must return a tensor");
     };
     assert_eq!(resized.shape(), &[1, 2]);
@@ -1160,48 +1170,49 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         resized.integer_storage(),
         Some(&runmat_value::IntegerStorage::U64(vec![0, 0]))
     );
-    let tx = call_builtin("Dataset.begin", std::slice::from_ref(&result))
+    let tx = call_builtin("Dataset.begin", std::slice::from_ref(result.value()))
         .expect("transaction inherits selected provider");
     call_builtin(
         "DataTransaction.set_attr",
         &[
-            tx.clone(),
+            tx.value().clone(),
             Value::String("owner".into()),
             Value::String("selected".into()),
         ],
     )
     .expect("enqueue transaction attribute");
-    call_builtin("DataTransaction.commit", &[tx]).expect("commit retains selected provider");
+    call_builtin("DataTransaction.commit", std::slice::from_ref(tx.value()))
+        .expect("commit retains selected provider");
     assert_eq!(
         call_builtin(
             "Dataset.get_attr",
-            &[result.clone(), Value::String("owner".into())],
+            &[result.value().clone(), Value::String("owner".into())],
         )
         .expect("read committed attribute through selected provider"),
         Value::String("selected".into())
     );
-    let Value::Struct(attrs) = call_builtin("Dataset.attrs", std::slice::from_ref(&result))
-        .expect("attributes stay on original provider")
-    else {
+    let attributes = call_builtin("Dataset.attrs", std::slice::from_ref(result.value()))
+        .expect("attributes stay on original provider");
+    let Value::Struct(attrs) = attributes.value() else {
         panic!("Dataset.attrs must return a struct");
     };
     assert_eq!(
         attrs.fields.get("owner"),
         Some(&Value::String("selected".into()))
     );
-    let refreshed = call_builtin("Dataset.refresh", std::slice::from_ref(&result))
+    let refreshed = call_builtin("Dataset.refresh", std::slice::from_ref(result.value()))
         .expect("refresh stays on original provider");
     assert_ne!(
-        call_builtin("Dataset.version", std::slice::from_ref(&result)).unwrap(),
-        call_builtin("Dataset.version", &[refreshed]).unwrap(),
+        call_builtin("Dataset.version", std::slice::from_ref(result.value())).unwrap(),
+        call_builtin("Dataset.version", std::slice::from_ref(refreshed.value())).unwrap(),
         "old handle retains its captured version"
     );
     let snapshot = call_builtin(
         "Dataset.snapshot",
-        &[result.clone(), Value::String("owner-check".into())],
+        &[result.value().clone(), Value::String("owner-check".into())],
     )
     .expect("snapshot stays on original provider");
-    let Value::String(snapshot) = snapshot else {
+    let Value::String(snapshot) = snapshot.value() else {
         panic!("Dataset.snapshot must return a path");
     };
     assert!(std::path::Path::new(&snapshot).is_file());
@@ -1250,22 +1261,23 @@ fn create_open_write_read_dataset() {
 
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
     let write_tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("write tensor");
     call_builtin(
         "DataArray.write",
-        &[arr.clone(), Value::Tensor(write_tensor)],
+        &[arr.value().clone(), Value::Tensor(write_tensor)],
     )
     .expect("write array");
 
-    let read_back = call_builtin("DataArray.read", &[arr]).expect("read array");
-    let Value::Tensor(t) = read_back else {
+    let read_back =
+        call_builtin("DataArray.read", std::slice::from_ref(arr.value())).expect("read array");
+    let Value::Tensor(t) = read_back.value() else {
         panic!("expected tensor");
     };
     assert_eq!(t.shape(), &[2, 2]);
-    assert_eq!(tensor_values(&t), vec![1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(tensor_values(t), vec![1.0, 2.0, 3.0, 4.0]);
 }
 
 #[test]
@@ -1299,7 +1311,7 @@ fn write_and_read_slice_payload() {
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
 
@@ -1317,14 +1329,19 @@ fn write_and_read_slice_payload() {
     let rhs = Value::Tensor(
         Tensor::new(vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0], vec![2, 3]).expect("rhs"),
     );
-    call_builtin("DataArray.write", &[arr.clone(), slice.clone(), rhs]).expect("slice write");
+    call_builtin(
+        "DataArray.write",
+        &[arr.value().clone(), slice.clone(), rhs],
+    )
+    .expect("slice write");
 
-    let read_back = call_builtin("DataArray.read", &[arr.clone(), slice]).expect("slice read");
-    let Value::Tensor(t) = read_back else {
+    let read_back =
+        call_builtin("DataArray.read", &[arr.value().clone(), slice]).expect("slice read");
+    let Value::Tensor(t) = read_back.value() else {
         panic!("expected tensor");
     };
     assert_eq!(t.shape(), &[2, 3]);
-    assert_eq!(tensor_values(&t), vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
+    assert_eq!(tensor_values(t), vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
 }
 
 #[test]
@@ -1366,14 +1383,14 @@ fn slice_write_updates_only_touched_chunks() {
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
 
     let full = Value::Tensor(
         Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).expect("full tensor"),
     );
-    call_builtin("DataArray.write", &[arr.clone(), full]).expect("initial write");
+    call_builtin("DataArray.write", &[arr.value().clone(), full]).expect("initial write");
 
     let root = std::path::PathBuf::from(&path);
     let untouched_path = root.join("arrays/temperature/chunks/obj_1_1.json");
@@ -1396,7 +1413,7 @@ fn slice_write_updates_only_touched_chunks() {
         .expect("slice cell"),
     );
     let rhs = Value::Tensor(Tensor::new(vec![99.0, 98.0, 97.0, 96.0], vec![2, 2]).expect("rhs"));
-    call_builtin("DataArray.write", &[arr.clone(), slice, rhs]).expect("slice write");
+    call_builtin("DataArray.write", &[arr.value().clone(), slice, rhs]).expect("slice write");
 
     let untouched_after =
         futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
@@ -1449,14 +1466,14 @@ fn slice_write_uploads_only_touched_chunk_targets() {
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
 
     call_builtin(
         "DataArray.write",
         &[
-            arr.clone(),
+            arr.value().clone(),
             Value::Tensor(
                 Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).expect("full tensor"),
             ),
@@ -1494,7 +1511,7 @@ fn slice_write_uploads_only_touched_chunk_targets() {
         .expect("slice cell"),
     );
     let rhs = Value::Tensor(Tensor::new(vec![9.0, 8.0, 7.0, 6.0], vec![2, 2]).expect("rhs"));
-    call_builtin("DataArray.write", &[arr, slice, rhs]).expect("slice write");
+    call_builtin("DataArray.write", &[arr.value().clone(), slice, rhs]).expect("slice write");
 
     let keys = uploaded.lock().expect("uploaded keys lock");
     assert_eq!(keys.as_slice(), ["0.0".to_string()].as_slice());
@@ -1542,14 +1559,14 @@ fn slice_write_uploads_expected_cross_boundary_chunk_targets() {
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
 
     call_builtin(
         "DataArray.write",
         &[
-            arr.clone(),
+            arr.value().clone(),
             Value::Tensor(
                 Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).expect("full tensor"),
             ),
@@ -1573,7 +1590,7 @@ fn slice_write_uploads_expected_cross_boundary_chunk_targets() {
         .expect("slice cell"),
     );
     let rhs = Value::Tensor(Tensor::new(vec![19.0, 18.0, 17.0, 16.0], vec![2, 2]).expect("rhs"));
-    call_builtin("DataArray.write", &[arr, slice, rhs]).expect("slice write");
+    call_builtin("DataArray.write", &[arr.value().clone(), slice, rhs]).expect("slice write");
 
     let mut keys = uploaded.lock().expect("uploaded keys lock").clone();
     keys.sort();
@@ -1632,14 +1649,14 @@ fn slice_write_hits_http_server_data_endpoints_with_expected_keys() {
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("temperature".to_string())],
+        &[ds.value().clone(), Value::String("temperature".to_string())],
     )
     .expect("dataset array");
 
     call_builtin(
         "DataArray.write",
         &[
-            arr.clone(),
+            arr.value().clone(),
             Value::Tensor(
                 Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).expect("full tensor"),
             ),
@@ -1664,7 +1681,7 @@ fn slice_write_hits_http_server_data_endpoints_with_expected_keys() {
         .expect("slice cell"),
     );
     let rhs = Value::Tensor(Tensor::new(vec![19.0, 18.0, 17.0, 16.0], vec![2, 2]).expect("rhs"));
-    call_builtin("DataArray.write", &[arr, slice, rhs]).expect("slice write");
+    call_builtin("DataArray.write", &[arr.value().clone(), slice, rhs]).expect("slice write");
 
     let mut keys = uploads.lock().expect("uploads lock").clone();
     keys.sort();
@@ -1714,7 +1731,7 @@ fn tx_create_resize_fill_and_delete_array() {
     )
     .expect("create dataset");
 
-    let tx = call_builtin("Dataset.begin", &[ds]).expect("begin tx");
+    let tx = call_builtin("Dataset.begin", std::slice::from_ref(ds.value())).expect("begin tx");
     let mut new_meta = StructValue::new();
     new_meta
         .fields
@@ -1726,7 +1743,7 @@ fn tx_create_resize_fill_and_delete_array() {
     call_builtin(
         "DataTransaction.create_array",
         &[
-            tx.clone(),
+            tx.value().clone(),
             Value::String("new_array".to_string()),
             Value::Struct(new_meta),
         ],
@@ -1735,7 +1752,7 @@ fn tx_create_resize_fill_and_delete_array() {
     call_builtin(
         "DataTransaction.resize",
         &[
-            tx.clone(),
+            tx.value().clone(),
             Value::String("new_array".to_string()),
             Value::Tensor(Tensor::new(vec![3.0, 1.0], vec![1, 2]).expect("shape tensor")),
         ],
@@ -1744,7 +1761,7 @@ fn tx_create_resize_fill_and_delete_array() {
     call_builtin(
         "DataTransaction.fill",
         &[
-            tx.clone(),
+            tx.value().clone(),
             Value::String("new_array".to_string()),
             Value::Num(7.0),
         ],
@@ -1752,30 +1769,34 @@ fn tx_create_resize_fill_and_delete_array() {
     .expect("fill array in tx");
     call_builtin(
         "DataTransaction.delete_array",
-        &[tx.clone(), Value::String("base".to_string())],
+        &[tx.value().clone(), Value::String("base".to_string())],
     )
     .expect("delete array in tx");
-    call_builtin("commit", &[tx, Value::Struct(StructValue::new())])
-        .expect("commit tx through alias options form");
+    call_builtin(
+        "commit",
+        &[tx.value().clone(), Value::Struct(StructValue::new())],
+    )
+    .expect("commit tx through alias options form");
 
     let ds = call_builtin("data.open", &[Value::String(path)]).expect("open dataset");
     let has_base = call_builtin(
         "Dataset.has_array",
-        &[ds.clone(), Value::String("base".to_string())],
+        &[ds.value().clone(), Value::String("base".to_string())],
     )
     .expect("has base");
     assert_eq!(has_base, Value::Bool(false));
     let arr = call_builtin(
         "Dataset.array",
-        &[ds, Value::String("new_array".to_string())],
+        &[ds.value().clone(), Value::String("new_array".to_string())],
     )
     .expect("new array");
-    let read_back = call_builtin("DataArray.read", &[arr]).expect("read array");
-    let Value::Tensor(t) = read_back else {
+    let read_back =
+        call_builtin("DataArray.read", std::slice::from_ref(arr.value())).expect("read array");
+    let Value::Tensor(t) = read_back.value() else {
         panic!("expected tensor");
     };
     assert_eq!(t.shape(), &[3, 1]);
-    assert_eq!(tensor_values(&t), vec![7.0, 7.0, 7.0]);
+    assert_eq!(tensor_values(t), vec![7.0, 7.0, 7.0]);
 }
 
 #[test]
@@ -1882,8 +1903,8 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             .insert("arrays".to_string(), Value::Struct(arrays));
         let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
             .expect("create dataset");
-        let tx =
-            call_builtin("Dataset.begin", std::slice::from_ref(&ds)).expect("begin transaction");
+        let tx = call_builtin("Dataset.begin", std::slice::from_ref(ds.value()))
+            .expect("begin transaction");
 
         let mut meta = StructValue::new();
         meta.fields
@@ -1899,7 +1920,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
         call_builtin(
             "DataTransaction.create_array",
             &[
-                tx.clone(),
+                tx.value().clone(),
                 Value::String("typed".to_string()),
                 Value::Struct(meta),
             ],
@@ -1908,7 +1929,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
         call_builtin(
             "DataTransaction.resize",
             &[
-                tx.clone(),
+                tx.value().clone(),
                 Value::String("typed".to_string()),
                 Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("resize shape")),
             ],
@@ -1917,7 +1938,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
         call_builtin(
             "DataTransaction.fill",
             &[
-                tx.clone(),
+                tx.value().clone(),
                 Value::String("typed".to_string()),
                 Value::Int(attribute.clone()),
             ],
@@ -1937,7 +1958,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
         call_builtin(
             "DataTransaction.write",
             &[
-                tx.clone(),
+                tx.value().clone(),
                 Value::String("typed".to_string()),
                 slice,
                 Value::Tensor(Tensor::new_integer(values.clone(), vec![2, 1]).expect("values")),
@@ -1947,7 +1968,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
         call_builtin(
             "DataTransaction.set_attr",
             &[
-                tx.clone(),
+                tx.value().clone(),
                 Value::String(format!("{dtype}_one")),
                 Value::Int(attribute.clone()),
             ],
@@ -1959,16 +1980,20 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             .insert(format!("{dtype}_many"), Value::Int(attribute));
         call_builtin(
             "DataTransaction.set_attrs",
-            &[tx.clone(), Value::Struct(attrs)],
+            &[tx.value().clone(), Value::Struct(attrs)],
         )
         .expect("queue attributes");
-        call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+        call_builtin("DataTransaction.commit", std::slice::from_ref(tx.value()))
+            .expect("commit transaction");
 
-        let arr = call_builtin("Dataset.array", &[ds, Value::String("typed".to_string())])
-            .expect("open typed array");
-        let Value::Tensor(read_back) =
-            call_builtin("DataArray.read", &[arr]).expect("read typed array")
-        else {
+        let arr = call_builtin(
+            "Dataset.array",
+            &[ds.value().clone(), Value::String("typed".to_string())],
+        )
+        .expect("open typed array");
+        let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value()))
+            .expect("read typed array");
+        let Value::Tensor(read_back) = read.value() else {
             panic!("expected tensor");
         };
         assert_eq!(read_back.integer_storage(), Some(&values), "{dtype}");
@@ -2060,24 +2085,29 @@ fn data_arrays_preserve_every_integer_class_through_chunked_write_and_read() {
 
         let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
             .expect("create dataset");
-        let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
-            .expect("array");
+        let arr = call_builtin(
+            "Dataset.array",
+            &[ds.value().clone(), Value::String("samples".to_string())],
+        )
+        .expect("array");
         let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
-        call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
-            .expect("write integer array");
+        call_builtin(
+            "DataArray.write",
+            &[arr.value().clone(), Value::Tensor(input)],
+        )
+        .expect("write integer array");
 
-        let Value::Tensor(read_back) =
-            call_builtin("DataArray.read", std::slice::from_ref(&arr)).expect("read")
-        else {
+        let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value())).expect("read");
+        let Value::Tensor(read_back) = read.value() else {
             panic!("expected tensor");
         };
         assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
 
-        call_builtin("DataArray.fill", &[arr.clone(), Value::Int(fill)])
+        call_builtin("DataArray.fill", &[arr.value().clone(), Value::Int(fill)])
             .expect("fill integer array");
-        let Value::Tensor(read_back) =
-            call_builtin("DataArray.read", &[arr]).expect("read filled array")
-        else {
+        let filled = call_builtin("DataArray.read", std::slice::from_ref(arr.value()))
+            .expect("read filled array");
+        let Value::Tensor(read_back) = filled.value() else {
             panic!("expected tensor");
         };
         assert_eq!(
@@ -2118,14 +2148,14 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
         .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.clone(), Value::String("samples".to_string())],
+        &[ds.value().clone(), Value::String("samples".to_string())],
     )
     .expect("array");
 
     call_builtin(
         "DataArray.fill",
         &[
-            arr.clone(),
+            arr.value().clone(),
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ],
     )
@@ -2148,23 +2178,26 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     .expect("replacement");
     call_builtin(
         "DataArray.write",
-        &[arr.clone(), slice, Value::Tensor(replacement)],
+        &[arr.value().clone(), slice, Value::Tensor(replacement)],
     )
     .expect("slice write");
 
-    let tx = call_builtin("Dataset.begin", &[ds]).expect("begin transaction");
+    let tx =
+        call_builtin("Dataset.begin", std::slice::from_ref(ds.value())).expect("begin transaction");
     call_builtin(
         "DataTransaction.fill",
         &[
-            tx.clone(),
+            tx.value().clone(),
             Value::String("samples".to_string()),
             Value::Int(runmat_value::IntValue::U64(1_u64 << 63)),
         ],
     )
     .expect("queue transaction fill");
-    call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+    call_builtin("DataTransaction.commit", std::slice::from_ref(tx.value()))
+        .expect("commit transaction");
 
-    let Value::Tensor(read_back) = call_builtin("DataArray.read", &[arr]).expect("read") else {
+    let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value())).expect("read");
+    let Value::Tensor(read_back) = read.value() else {
         panic!("expected tensor");
     };
     assert_eq!(
@@ -2205,8 +2238,11 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
         .insert("arrays".to_string(), Value::Struct(arrays));
     let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
         .expect("create dataset");
-    let arr =
-        call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())]).expect("array");
+    let arr = call_builtin(
+        "Dataset.array",
+        &[ds.value().clone(), Value::String("samples".to_string())],
+    )
+    .expect("array");
     let wide = (1_u64 << 53) + 1;
     let initial_storage = IntegerComplexStorage::new(
         IntegerStorage::U64(vec![wide, u64::MAX, 3, 4]),
@@ -2217,13 +2253,13 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
         .expect("initial paired tensor");
     call_builtin(
         "DataArray.write",
-        &[arr.clone(), Value::ComplexTensor(initial)],
+        &[arr.value().clone(), Value::ComplexTensor(initial)],
     )
     .expect("write paired array");
 
-    let Value::ComplexTensor(read_back) =
-        call_builtin("DataArray.read", std::slice::from_ref(&arr)).expect("read paired array")
-    else {
+    let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value()))
+        .expect("read paired array");
+    let Value::ComplexTensor(read_back) = read.value() else {
         panic!("expected paired tensor");
     };
     assert_eq!(read_back.integer_storage(), Some(&initial_storage));
@@ -2245,13 +2281,17 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
         ComplexTensor::new_integer(replacement_storage, vec![1, 2]).expect("replacement tensor");
     call_builtin(
         "DataArray.write",
-        &[arr.clone(), slice, Value::ComplexTensor(replacement)],
+        &[
+            arr.value().clone(),
+            slice,
+            Value::ComplexTensor(replacement),
+        ],
     )
     .expect("write paired slice");
 
-    let Value::ComplexTensor(read_back) =
-        call_builtin("DataArray.read", &[arr]).expect("read paired slice result")
-    else {
+    let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value()))
+        .expect("read paired slice result");
+    let Value::ComplexTensor(read_back) = read.value() else {
         panic!("expected paired tensor");
     };
     let storage = read_back.integer_storage().expect("paired storage");

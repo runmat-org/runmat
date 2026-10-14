@@ -12,6 +12,7 @@ pub use contract::*;
 pub use options::*;
 
 pub const FILEWRITE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "filewrite" },
     category: "io/filetext",

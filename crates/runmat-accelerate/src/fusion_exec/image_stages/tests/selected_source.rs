@@ -98,7 +98,7 @@ fn exact_source_input(graph: &AccelGraph, id: ValueId, group_start: usize) -> Va
         ValueOrigin::NodeOutput { node, .. } => *node,
         ValueOrigin::Variable { kind, index } => {
             let selected = crate::graph::VarBinding {
-                kind: kind.clone(),
+                kind: *kind,
                 index: *index,
             };
             graph

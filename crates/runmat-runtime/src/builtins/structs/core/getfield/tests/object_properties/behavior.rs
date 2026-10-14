@@ -42,7 +42,7 @@ fn getfield_object_property() {
     let mut obj = ObjectInstance::new("TestClass".to_string());
     obj.properties.insert("value".to_string(), Value::Num(7.0));
     let result = run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
-    assert_eq!(result, Value::Num(7.0));
+    assert_eq!(result.value(), &Value::Num(7.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -76,7 +76,7 @@ fn getfield_dependent_property_invokes_getter() {
         .insert("p_backing".to_string(), Value::Num(42.0));
 
     let result = run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
-    assert_eq!(result, Value::Num(42.0));
+    assert_eq!(result.value(), &Value::Num(42.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -121,5 +121,5 @@ fn getfield_inherited_dependent_property_uses_parent_metadata() {
 
     let result =
         run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("inherited dependent");
-    assert_eq!(result, Value::Num(17.0));
+    assert_eq!(result.value(), &Value::Num(17.0));
 }

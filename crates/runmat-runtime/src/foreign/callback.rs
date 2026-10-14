@@ -5,7 +5,7 @@ use std::pin::Pin;
 use crate::context::{RuntimeCallRequest, RuntimeContext};
 use crate::RuntimeError;
 use runmat_types::CallableIdentity;
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 
 #[derive(Debug, Clone)]
 pub struct ForeignCallbackRequest {
@@ -30,18 +30,15 @@ pub fn foreign_callback_request(
         Value::ExternalFunctionHandle(name) => {
             (crate::external_callable_identity_for_name(name), None)
         }
-        Value::MethodFunctionHandle(name) => {
-            (CallableIdentity::Method(MethodId(name.clone())), None)
-        }
-        Value::BoundFunctionHandle {
-            function,
-            authority,
-            ..
-        } => (
-            CallableIdentity::BoundFunction(FunctionId(*function)),
+        Value::MethodFunctionHandle(name) => (
+            CallableIdentity::Method(MethodId(name.name().to_owned())),
+            None,
+        ),
+        Value::BoundFunctionHandle(handle) => (
+            CallableIdentity::BoundFunction(FunctionId(handle.function)),
             Some(runmat_value::BoundFunctionBinding {
-                function: *function,
-                authority: authority.clone(),
+                function: handle.function,
+                authority: handle.authority.clone(),
             }),
         ),
         Value::Closure(closure) => {
@@ -77,7 +74,9 @@ pub fn foreign_callback_request(
 pub fn invoke_foreign_callback(
     context: RuntimeContext,
     request: ForeignCallbackRequest,
-) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
+) -> Pin<
+    Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'static>,
+> {
     Box::pin(async move {
         if context.is_cancelled() {
             return Err(foreign_error(
@@ -110,6 +109,7 @@ mod tests {
     use crate::context::{RuntimeCallRequest, RuntimeCallService, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;
     use runmat_types::SymbolName;
+    use runmat_value::ValueSequence;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -127,12 +127,19 @@ mod tests {
             &self,
             _runtime: RuntimeContext,
             request: RuntimeCallRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>
+                    + 'static,
+            >,
+        > {
             self.requests.borrow_mut().push(request);
             Box::pin(async {
-                ValueSequence::single(Value::Num(42.0)).map_err(|error| {
+                let value = ValueSequence::single(Value::Num(42.0)).map_err(|error| {
                     crate::runtime_error::semantic_error("ForeignCallbackOutput", error.to_string())
-                })
+                })?;
+                crate::execution::RootedValueSequence::new(value)
+                    .map_err(|error| error.into_runtime_error())
             })
         }
     }
@@ -153,7 +160,9 @@ mod tests {
         ))
         .unwrap();
 
-        assert_eq!(result.into_values(), vec![Value::Num(42.0)]);
+        result.with_owned_sequence(|values| {
+            assert_eq!(values.into_values(), vec![Value::Num(42.0)]);
+        });
         let requests = service.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].requested_outputs, 1);
@@ -186,13 +195,16 @@ mod tests {
     #[test]
     fn bound_callback_retains_exact_authority_and_prepends_captures_once() {
         let binding = runmat_value::BoundFunctionBinding::unavailable(77);
-        let callback = Value::Closure(runmat_value::Closure {
-            function_name: "display_is_not_authority".into(),
-            binding: Some(binding.clone()),
-            source_role: runmat_types::FunctionSourceRole::Anonymous,
-            source_file: None,
-            captures: vec![Value::Num(3.0)],
-        });
+        let callback = Value::Closure(runmat_value::Closure::from_data(
+            runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "display_is_not_authority".into(),
+                binding: Some(binding.clone()),
+                source_role: runmat_types::FunctionSourceRole::Anonymous,
+                source_file: None,
+                captures: vec![Value::Num(3.0)],
+            },
+        ));
         let request = foreign_callback_request(&callback, vec![Value::Num(4.0)], 1)
             .expect("callback normalization");
         assert_eq!(request.binding, Some(binding));

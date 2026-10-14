@@ -45,18 +45,25 @@ roots = ["src"]
         let handoff = FrozenProjectHandoff::new(frozen);
         let mut session =
             RunMatSession::with_options(false, false).expect("create interpreter session");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("project lifecycle test runtime");
         assert_eq!(
-            session
-                .install_project_handoff(handoff)
+            runtime
+                .block_on(session.install_project_handoff(handoff))
                 .expect("install frozen project"),
             expected_revision
         );
 
-        let result = runmat_core::execute_text_request_for_testing(
-            &mut session,
-            "result = ecosystem_fn_1023(40); assert(result == 42);",
-        )
-        .expect("analyze, compile, and execute source from large frozen graph");
+        let result = {
+            let _entered = runtime.enter();
+            runmat_core::execute_text_request_for_testing(
+                &mut session,
+                "result = ecosystem_fn_1023(40); assert(result == 42);",
+            )
+            .expect("analyze, compile, and execute source from large frozen graph")
+        };
         assert!(
             result.error.is_none(),
             "representative ecosystem execution failed: {:?}",

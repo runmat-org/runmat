@@ -7,6 +7,7 @@ use super::{
     ELU_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, LAYER_GRAPH_CLASS, RELU_LAYER_CLASS,
     SOFTMAX_LAYER_CLASS,
 };
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{builtins::common::tensor, BuiltinResult};
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ProviderExecutionError, ProviderPrecision,
@@ -173,12 +174,12 @@ async fn dlnetwork_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     dlnetwork_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
-pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
     dlnetwork_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
 
@@ -186,7 +187,9 @@ async fn dlnetwork_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _argument_roots =
+        RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
     if requested_outputs.is_some_and(|count| count > 1) {
         return Err(deep_learning_error(
             "dlnetwork",
@@ -209,15 +212,20 @@ async fn dlnetwork_in_runtime(
             .expect("validated first layer argument"),
         "dlnetwork",
     )?;
-    if options.initialize {
-        initialise_layers_in_runtime(runtime, &mut layers, "dlnetwork").await?;
-    }
-    network_object(
+    let _layer_roots =
+        RootedValueLease::for_values(layers.iter()).map_err(|error| error.into_runtime_error())?;
+    let _initialized_roots = if options.initialize {
+        Some(initialise_layers_in_runtime(runtime, &mut layers, "dlnetwork").await?)
+    } else {
+        None
+    };
+    let network = network_object(
         DLNETWORK_CLASS,
         layers,
         options.into_properties(),
         "dlnetwork",
-    )
+    )?;
+    RootedValue::new(network).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(

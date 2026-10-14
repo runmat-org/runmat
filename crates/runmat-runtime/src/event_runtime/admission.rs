@@ -1,6 +1,67 @@
 use super::{event_descriptor_error, RuntimeError};
 use runmat_builtins::BuiltinErrorDescriptor;
-use runmat_types::{ClassIdentity, EventDeclaration, MemberName};
+use runmat_types::{ClassIdentity, EventAccess, EventDeclaration, MemberName};
+use std::rc::Rc;
+
+fn selected_target_facts(
+    target: &runmat_value::HandleRef,
+) -> Result<Option<Rc<runmat_value::SelectedObjectClassFacts>>, RuntimeError> {
+    runmat_gc::gc_with_value(&target.target, |value| match value {
+        runmat_value::Value::Object(object) if object.class_name == target.class_name => {
+            if object
+                .selected_class()
+                .is_some_and(|facts| !facts.is_handle_class())
+                || (object.selected_class().is_some() && object.has_native_payload())
+            {
+                return Err(crate::build_runtime_error(
+                    "selected event target has invalid class authority",
+                )
+                .with_identifier("RunMat:EventTargetInvalid")
+                .build());
+            }
+            Ok(object.selected_class().cloned())
+        }
+        _ => Err(
+            crate::build_runtime_error("selected event target is not its class object")
+                .with_identifier("RunMat:EventTargetInvalid")
+                .build(),
+        ),
+    })
+    .map_err(|error| {
+        crate::build_runtime_error(error.to_string())
+            .with_identifier("RunMat:EventTargetInvalid")
+            .build()
+    })?
+}
+
+fn selected_event_accessible(
+    declaration: &EventDeclaration,
+    owner: &ClassIdentity,
+    caller: Option<&ClassIdentity>,
+    operation: EventOperation,
+    projection: &crate::class_registry::SelectedReceiverView,
+) -> bool {
+    let access = match operation {
+        EventOperation::Listen => &declaration.attributes.listen_access,
+        EventOperation::Notify => &declaration.attributes.notify_access,
+    };
+    if !matches!(access, EventAccess::Public) && !projection.active_product_matches() {
+        // A class-name access frame alone can describe a newer same-named
+        // class. Non-public selected events require the active method's exact
+        // class product, not ambient registry identity.
+        return false;
+    }
+    match access {
+        EventAccess::Public => true,
+        EventAccess::Private => caller == Some(owner),
+        EventAccess::Protected => {
+            caller.is_some_and(|class| projection.class_is_or_subclass(class, owner))
+        }
+        EventAccess::Classes(classes) => {
+            caller.is_some_and(|class| class == owner || classes.contains(class))
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum EventOperation {
@@ -51,11 +112,78 @@ pub(super) struct EventAdmission {
     declaration: EventDeclaration,
     owner: ClassIdentity,
     caller_class: Option<ClassIdentity>,
-    generation: u64,
+    generation: crate::class_registry::ClassRegistryRevision,
     operation: EventOperation,
+    selected: Option<(
+        Rc<runmat_value::SelectedObjectClassFacts>,
+        crate::class_registry::SelectedReceiverView,
+    )>,
 }
 
 impl EventAdmission {
+    pub(super) fn for_target(
+        target: &runmat_value::HandleRef,
+        event_name: &str,
+        operation: EventOperation,
+    ) -> Result<Self, RuntimeError> {
+        let Some(facts) = selected_target_facts(target)? else {
+            return Self::new(&target.class_name, event_name, operation);
+        };
+        let projection = crate::class_registry::checked_receiver_facts(&facts).map_err(|_| {
+            event_descriptor_error(
+                operation.builtin(),
+                operation.changed_descriptor(),
+                "selected event target has no exact class product",
+            )
+        })?;
+        if facts.class() != &target.class_name || !facts.is_handle_class() {
+            return Err(event_descriptor_error(
+                operation.builtin(),
+                operation.changed_descriptor(),
+                "selected event target differs from its class product",
+            ));
+        }
+        let name = MemberName::from(event_name);
+        let (declaration, owner) =
+            projection
+                .receiver_event(facts.class(), &name)
+                .ok_or_else(|| {
+                    event_descriptor_error(
+                        operation.builtin(),
+                        operation.unknown_descriptor(),
+                        format!("{}: unknown event '{}'", operation.builtin(), event_name),
+                    )
+                })?;
+        let caller_class = crate::dispatcher::class_access_context();
+        if !selected_event_accessible(
+            &declaration,
+            &owner,
+            caller_class.as_ref(),
+            operation,
+            &projection,
+        ) {
+            return Err(event_descriptor_error(
+                operation.builtin(),
+                operation.access_descriptor(),
+                format!(
+                    "{}: event '{}' is not accessible",
+                    operation.builtin(),
+                    event_name
+                ),
+            ));
+        }
+        Ok(Self {
+            receiver_class: target.class_name.clone(),
+            name,
+            declaration,
+            owner,
+            caller_class,
+            generation: crate::class_registry::class_registry_generation(),
+            operation,
+            selected: Some((facts, projection)),
+        })
+    }
+
     pub(super) fn new(
         receiver_class: &ClassIdentity,
         event_name: &str,
@@ -95,6 +223,7 @@ impl EventAdmission {
             caller_class,
             generation: crate::class_registry::class_registry_generation(),
             operation,
+            selected: None,
         })
     }
 
@@ -112,6 +241,31 @@ impl EventAdmission {
                     self.operation.builtin()
                 ),
             ));
+        }
+        if let Some((facts, projection)) = &self.selected {
+            let current = selected_target_facts(target)?;
+            let issued = crate::class_registry::checked_receiver_facts(facts).ok();
+            if current
+                .as_ref()
+                .is_none_or(|current| !Rc::ptr_eq(current, facts))
+                || issued.as_ref().is_none_or(|issued| {
+                    !std::sync::Arc::ptr_eq(issued.declarations(), projection.declarations())
+                })
+                || !selected_event_accessible(
+                    &self.declaration,
+                    &self.owner,
+                    self.caller_class.as_ref(),
+                    self.operation,
+                    projection,
+                )
+            {
+                return Err(event_descriptor_error(
+                    self.operation.builtin(),
+                    self.operation.changed_descriptor(),
+                    "selected event target changed during dispatch",
+                ));
+            }
+            return Ok(());
         }
         if crate::class_registry::class_registry_generation() == self.generation {
             return Ok(());

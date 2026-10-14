@@ -182,9 +182,10 @@ pub(super) fn dynamic_def_to_metadata_object(
 
 pub(super) fn dynamic_def_from_class_property(
     class_name: &runmat_types::ClassIdentity,
-    prop: &crate::class_registry::RuntimeProperty,
+    name: &runmat_types::MemberName,
+    prop: &runmat_value::SelectedReceiverPropertyDeclaration,
 ) -> DynamicPropertyDef {
-    let mut def = DynamicPropertyDef::new(prop.name.to_string(), class_name.clone());
+    let mut def = DynamicPropertyDef::new(name.to_string(), class_name.clone());
     def.get_access = prop.get_access;
     def.set_access = prop.set_access;
     def.dependent = prop.is_dependent;
@@ -332,6 +333,20 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
     let Some((def, value)) = dynamic_property_get(obj, name) else {
         return Ok(None);
     };
+    if let Some(projection) = crate::class_registry::checked_receiver_projection(obj)? {
+        if !projection.receiver_member_accessible(
+            &def.defining_class,
+            def.get_access,
+            crate::dispatcher::class_access_context().as_ref(),
+        ) {
+            return Err(dynamic_error(
+                "getfield",
+                &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+                format!("Property '{name}' is not accessible"),
+            ));
+        }
+        return Ok(Some(value));
+    }
     if def.get_access == MemberAccess::Private {
         return Err(dynamic_error(
             "getfield",

@@ -1,5 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{execution::RootedValue, RuntimeError};
 use runmat_value::Value;
 
 pub(super) async fn agree(
@@ -52,7 +52,7 @@ pub(super) async fn broadcast_from(
     id: runmat_types::CollectiveId,
     root: runmat_types::LabRank,
     value: Value,
-) -> Result<(Value, runmat_execution::SpmdTaskContext), RuntimeError> {
+) -> Result<(RootedValue, runmat_execution::SpmdTaskContext), RuntimeError> {
     let collective = execution
         .runtime
         .service_ports()
@@ -88,8 +88,16 @@ pub(super) async fn broadcast_from(
         ));
     };
     Ok((
-        runmat_runtime::execution::value_codec::decode_inline_value(&value)
-            .map_err(super::super::value_codec_error)?,
+        runmat_runtime::execution::value_codec::decode_inline_value_owned(&value).map_err(
+            |error| match error {
+                runmat_runtime::execution::value_codec::CooperativeValueCodecError::Value(
+                    error,
+                ) => super::super::value_codec_error(error),
+                runmat_runtime::execution::value_codec::CooperativeValueCodecError::Execution(
+                    error,
+                ) => error.into_runtime_error(),
+            },
+        )?,
         context,
     ))
 }

@@ -86,6 +86,16 @@ mod tests {
     use super::*;
     use crate::value_fact::value_fact;
 
+    async fn sum_builtin(
+        observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+        value: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        super::super::sum_builtin(None, observation, value, rest)
+            .await
+            .map(|owned| owned.value().clone())
+    }
+
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {
         let fact = value_fact(value);
         futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {

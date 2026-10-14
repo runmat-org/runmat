@@ -1,13 +1,17 @@
 //! Dense logical conversion after the existing NaN/storage admission.
 use super::*;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinPreparationFormId, LOGICAL_CATALOG_ENTRY};
 
 #[cfg(test)]
 mod tests;
 
-pub(super) async fn execute(tensor: Tensor) -> BuiltinResult<Value> {
-    execute_current_invocation(
+pub(super) async fn execute(
+    context: Option<&crate::context::RuntimeContext>,
+    tensor: Tensor,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    execute_invocation(
+        context,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: LOGICAL_CATALOG_ENTRY.identity,
@@ -20,7 +24,7 @@ pub(super) async fn execute(tensor: Tensor) -> BuiltinResult<Value> {
         },
         vec![Value::Tensor(tensor)],
         |mut operands| async move {
-            match operands.remove(0) {
+            let value = match operands.remove(0) {
                 Value::Tensor(tensor) => {
                     logical_buffer_to_host(LogicalBuffer::from_real_tensor(&tensor))
                 }
@@ -29,7 +33,8 @@ pub(super) async fn execute(tensor: Tensor) -> BuiltinResult<Value> {
                     "logical: preparation changed the admitted data kind",
                     &LOGICAL_ERROR_INTERNAL,
                 )),
-            }
+            }?;
+            crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
         },
     )
     .await

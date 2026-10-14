@@ -57,39 +57,40 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         Box::pin(async move {
             if request.form().operation == Operation::RuntimeOwned {
-                return Ok(PreparedBuiltinOperands::passthrough(
-                    request.into_operands(),
-                ));
+                return request
+                    .into_operands()
+                    .with_owned_values(PreparedBuiltinOperands::passthrough);
             }
             if let Operation::Sink(mode) = request.form().operation {
                 fusion_residency::clear_inputs(
                     request.operands(),
                     request.admission().binding.builtin.name,
                 )?;
-                let operands = match mode {
-                    BuiltinSinkPreparation::Barrier => request.into_operands(),
-                    BuiltinSinkPreparation::Gather => gather_args(request.operands())
-                        .await
-                        .map_err(preparation_error)?,
+                return match mode {
+                    BuiltinSinkPreparation::Barrier => request
+                        .into_operands()
+                        .with_owned_values(PreparedBuiltinOperands::passthrough),
+                    BuiltinSinkPreparation::Gather => {
+                        let operands = gather_args(request.operands())
+                            .await
+                            .map_err(preparation_error)?;
+                        PreparedBuiltinOperands::passthrough(operands)
+                    }
                 };
-                return Ok(PreparedBuiltinOperands::passthrough(operands));
             }
             if !auto_enabled() {
-                return Ok(PreparedBuiltinOperands::passthrough(
-                    request.into_operands(),
-                ));
+                return request
+                    .into_operands()
+                    .with_owned_values(PreparedBuiltinOperands::passthrough);
             }
             let Some(auto) = global().await else {
-                return Ok(PreparedBuiltinOperands::passthrough(
-                    request.into_operands(),
-                ));
+                return request
+                    .into_operands()
+                    .with_owned_values(PreparedBuiltinOperands::passthrough);
             };
             let prepared = prepare_with(&auto, &context, request).map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
-            Ok(PreparedBuiltinOperands::new(
-                operands,
-                Some(Box::new(guard)),
-            ))
+            PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
         })
     }
 }
@@ -97,10 +98,28 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
 pub(super) fn prepare_with(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
+    request: AdmittedBuiltinPreparation,
+) -> PreparationResult<PreparedBuiltinCall> {
+    // The request owns the original managed graph. Keep an independent
+    // root-only lease across private preparation's raw argument handoff,
+    // then transfer it to the execution guard until the fallible prepared
+    // carrier has synchronously published its own operand roots.
+    let input_root =
+        runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
+            .map_err(|error| Box::new(error.into_runtime_error()))?;
+    let prepared = prepare_with_inner(auto, context, request)?;
+    Ok(prepared.with_request_input_root(input_root))
+}
+
+fn prepare_with_inner(
+    auto: &NativeAutoOffload,
+    context: &RuntimeContext,
     mut request: AdmittedBuiltinPreparation,
 ) -> PreparationResult<PreparedBuiltinCall> {
     if request.form().operation == Operation::RuntimeOwned {
-        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+        return Ok(request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinCall::unobserved));
     }
     let host_instruction = match request.form().operation {
         Operation::ElementwiseBinary => {
@@ -119,19 +138,23 @@ pub(super) fn prepare_with(
                 })
         })
     }) {
-        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+        return Ok(request.into_operands().with_owned_values(PreparedBuiltinCall::unobserved));
     }
     if !auto.enabled
         || (request.form().provider_requirement == BuiltinPreparationProviderRequirement::F64
             && auto.provider.precision() != ProviderPrecision::F64)
     {
-        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+        return Ok(request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinCall::unobserved));
     }
     if !super::owner_admission::matches_selected_owner(auto.provider, request.operands())? {
         // The domain already owns the correct direct/cross-provider behavior.
         // Do not upload other operands or observe a candidate whose retained
         // provider cannot execute the actual borrowed operands.
-        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+        return Ok(request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinCall::unobserved));
     }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
@@ -176,7 +199,9 @@ pub(super) fn prepare_with(
             if controls.axes.is_empty() && controls.input_class == controls.publication_class {
                 // The domain has proved an identity route with no class change.
                 // Do not upload a host array only to return it unchanged.
-                return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+                return Ok(request
+                    .into_operands()
+                    .with_owned_values(PreparedBuiltinCall::unobserved));
             }
             let axes = controls
                 .axes
@@ -248,7 +273,7 @@ impl BuiltinPreparationObservation for BuiltinCallGuard {
             .as_ref()
             .and_then(BuiltinCallObservation::recorder)
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(self: Box<Self>, result: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         (*self).finish(result).map_err(|error| *error)
     }
     fn abort(self: Box<Self>) {

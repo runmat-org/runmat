@@ -22,6 +22,8 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 
@@ -114,14 +116,24 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "sum",
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::sum",
+    context = true,
     call_observation = true
 )]
 pub(crate) async fn sum_builtin(
+    runtime: Option<RuntimeContext>,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
     value: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
-    sum_for_invocation_observed(value, rest, None, SumInvocation::Sum, observation).await
+) -> crate::BuiltinResult<RootedValue> {
+    sum_for_invocation_observed(
+        runtime.as_ref(),
+        value,
+        rest,
+        None,
+        SumInvocation::Sum,
+        observation,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -130,26 +142,32 @@ async fn sum_with_nan_policy(
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
-    sum_for_invocation(value, rest, imposed_nan_mode, SumInvocation::Sum).await
+    sum_for_invocation(None, value, rest, imposed_nan_mode, SumInvocation::Sum).await
 }
 
 #[cfg(test)]
 async fn sum_for_invocation(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
     invocation: SumInvocation,
 ) -> crate::BuiltinResult<Value> {
-    sum_for_invocation_observed(value, rest, imposed_nan_mode, invocation, None).await
+    sum_for_invocation_observed(runtime, value, rest, imposed_nan_mode, invocation, None)
+        .await
+        .map(|owned| owned.value().clone())
 }
 
 pub(crate) async fn sum_for_invocation_observed(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
     invocation: SumInvocation,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     let input_count = rest.len() + 1;
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(sum_invalid_input(
@@ -164,10 +182,12 @@ pub(crate) async fn sum_for_invocation_observed(
         SumInvocation::Sum => imposed_nan_mode.unwrap_or(parsed.nan_mode),
     };
     if preparation::eligible(&value, parsed.output) {
-        return preparation::execute(value, parsed, input_meta, input_count, observation).await;
+        return preparation::execute(runtime, value, parsed, input_meta, input_count, observation)
+            .await;
     }
     let raw_result = execute_raw(value, &parsed).await?;
-    apply_output_template(raw_result, &parsed.output, &input_meta).await
+    let published = apply_output_template(raw_result, &parsed.output, &input_meta).await?;
+    RootedValue::new(published).map_err(|cause| cause.into_runtime_error())
 }
 
 async fn execute_raw(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
@@ -1275,7 +1295,7 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sum_builtin(None, value, rest))
+        block_on(super::sum_builtin(None, None, value, rest)).map(|owned| owned.value().clone())
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {

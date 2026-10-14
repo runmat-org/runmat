@@ -1,46 +1,52 @@
 use std::rc::Rc;
 
+use runmat_execution_artifact::PrivateArtifactRoot;
 use runmat_mex::{MexArtifactBundle, MexArtifactManifest};
 
 pub(crate) struct InstalledMexArtifacts {
-    _root: tempfile::TempDir,
+    _root: PrivateArtifactRoot,
 }
 
+#[cfg(test)]
 pub(crate) fn install(
     bytes: &[u8],
     session: &Rc<runmat_runtime::foreign::MexRuntimeSession>,
 ) -> Result<InstalledMexArtifacts, String> {
     let bundle = MexArtifactBundle::from_canonical_bytes(bytes)
         .map_err(|error| format!("standalone MEX artifact bundle is invalid: {error}"))?;
-    ensure_required_providers(&bundle)?;
-    let root = tempfile::Builder::new()
-        .prefix("runmat-aot-mex-")
-        .tempdir()
-        .map_err(|error| format!("create standalone MEX artifact root: {error}"))?;
+    install_admitted(&bundle, session)
+}
+
+pub(crate) fn install_admitted(
+    bundle: &MexArtifactBundle,
+    session: &Rc<runmat_runtime::foreign::MexRuntimeSession>,
+) -> Result<InstalledMexArtifacts, String> {
+    ensure_required_providers(bundle)?;
+    let mut root = PrivateArtifactRoot::new("runmat-aot-mex-")?;
     for (index, entry) in bundle.artifacts.iter().enumerate() {
         let manifest = MexArtifactManifest::from_canonical_bytes(&entry.manifest)
             .map_err(|error| format!("decode standalone MEX artifact: {error}"))?;
         manifest
             .validate_current_module(&entry.module)
             .map_err(|error| format!("validate standalone MEX artifact: {error}"))?;
-        let directory = root.path().join(index.to_string());
-        std::fs::create_dir(&directory)
-            .map_err(|error| format!("create standalone MEX directory: {error}"))?;
-        let module_path = directory.join(format!(
-            "{}.{}",
+        let module_relative = format!(
+            "{index}/{}.{}",
             manifest.module_name, manifest.target.suffix
-        ));
-        let manifest_path = MexArtifactManifest::path_for_module(&module_path);
-        crate::materialize::write_private_read_only(&module_path, &entry.module)?;
-        crate::materialize::write_private_read_only(&manifest_path, &entry.manifest)?;
+        );
+        let module_path = root.write_verified(&module_relative, &entry.module)?;
+        let manifest_path = MexArtifactManifest::path_for_module(module_path.as_path());
+        let manifest_relative = manifest_path
+            .strip_prefix(root.path())
+            .map_err(|error| format!("MEX manifest is outside private root: {error}"))?;
+        root.write_verified(&manifest_relative.to_string_lossy(), &entry.manifest)?;
         session
-            .install_artifact(&module_path)
+            .install_artifact(module_path.as_path())
             .map_err(|error| format!("install standalone MEX artifact: {error}"))?;
     }
     Ok(InstalledMexArtifacts { _root: root })
 }
 
-fn ensure_required_providers(bundle: &MexArtifactBundle) -> Result<(), String> {
+pub(crate) fn ensure_required_providers(bundle: &MexArtifactBundle) -> Result<(), String> {
     let requires_cuda = bundle.artifacts.iter().try_fold(false, |required, entry| {
         MexArtifactManifest::from_canonical_bytes(&entry.manifest)
             .map(|manifest| {
@@ -107,15 +113,43 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .contains(identity.as_str()));
         std::fs::remove_file(&artifact.manifest).unwrap();
         std::fs::remove_file(&artifact.module).unwrap();
-        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+        let mut runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let value = session
-            .load_and_call("embedded_fixture", Vec::new(), 1, runtime)
+        let local_tasks = Rc::new(runmat_runtime::context::RuntimeLocalTaskSupervisor::new());
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_local_tasks(local_tasks.submission_port(runtime.local_identity()))
+            .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
+        runtime = runtime.with_service_ports(ports);
+        let lifecycle_host =
+            runmat_runtime::context::RuntimeLifecycleHost::new(&runtime, local_tasks.clone())
+                .unwrap();
+        let mut guard =
+            crate::mex::install(&runtime, session.clone(), local_tasks.clone()).unwrap();
+        local_tasks
+            .drive_until(runtime.clone().scope(async {
+                let value = session
+                    .load_and_call("embedded_fixture", Vec::new(), 1, runtime.clone())
+                    .await
+                    .expect("installed artifact resolves")
+                    .expect("embedded artifact executes");
+                value.with_owned_sequence(|value| {
+                    assert_eq!(value.into_values(), vec![runmat_value::Value::Num(42.0)]);
+                });
+                match guard.shutdown_gracefully_retirement().await {
+                    runmat_runtime::foreign::MexSessionRetirement::Retired(result) => {
+                        result.expect("embedded module retires before private storage")
+                    }
+                    runmat_runtime::foreign::MexSessionRetirement::Retained(error) => {
+                        panic!("embedded module retained after shutdown: {error}")
+                    }
+                }
+            }))
             .await
-            .expect("installed artifact resolves")
-            .expect("embedded artifact executes");
-        assert_eq!(value.into_values(), vec![runmat_value::Value::Num(42.0)]);
+            .expect("scoped MEX lifecycle completes");
+        lifecycle_host.force_close();
         drop(installed);
     }
 }

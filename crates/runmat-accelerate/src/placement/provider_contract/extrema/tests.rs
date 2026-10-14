@@ -145,6 +145,49 @@ fn values_only_still_accounts_for_two_physical_float_outputs() {
     assert_eq!(estimate.transient_bytes, Some(64));
 }
 
+#[cfg(feature = "wgpu")]
+#[test]
+fn optional_query_cost_excludes_index_readback_submission() {
+    use runmat_accelerate_api::observation::ProviderObservationCapability;
+
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F32,
+        max_groups: 1,
+        max_buffer_bytes: 4096,
+    };
+    for (demand, readback_submissions) in [
+        (ProviderExtremaDemand::ValuesOnly, 0),
+        (ProviderExtremaDemand::ValuesAndIndices, 1),
+    ] {
+        let query = query(
+            ProviderExtremaKind::Minimum,
+            demand,
+            ProviderElementType::F32,
+            NumericElementType::F32,
+        );
+        let compute_encoders = supported(validate(&provider, true, &query).unwrap())
+            .dispatches
+            .unwrap();
+        let ProviderObservationCapability::Supported(overhead) =
+            observation_capability(&provider, &query)
+        else {
+            panic!("audited extrema route");
+        };
+        assert_eq!(
+            overhead.submissions,
+            compute_encoders + readback_submissions
+        );
+        let optional = overhead.wgpu_compute_query.unwrap();
+        assert_eq!(optional.max_compute_encoders, compute_encoders);
+        assert_eq!(optional.max_total_encoders, overhead.submissions);
+        assert_eq!(optional.max_query_sets, overhead.submissions);
+        assert_eq!(
+            optional.max_timestamp_slots,
+            u64::from(overhead.submissions) * 18
+        );
+    }
+}
+
 #[test]
 fn native_wide_integer_value_and_float_index_have_distinct_physical_bytes() {
     let provider = GeometryProvider {

@@ -9,6 +9,14 @@ use std::sync::Arc;
 mod named;
 pub use named::*;
 
+/// Publish a semantic fixture's result before its invocation scope retires.
+pub fn rooted_single_value_sequence(
+    value: Value,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    let sequence = crate::sequence::single_value_sequence(value)?;
+    crate::execution::RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
+}
+
 pub fn exact_fixture_runtime() -> RuntimeContext {
     let runtime = RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
@@ -66,13 +74,15 @@ pub fn exact_local_handle(runtime: &RuntimeContext, name: &str, function: usize)
 }
 
 pub fn exact_local_value(name: &str, binding: BoundFunctionBinding) -> Value {
-    Value::BoundFunctionHandle {
-        name: name.into(),
-        function: binding.function,
-        authority: binding.authority,
-        source_role: runmat_types::FunctionSourceRole::Unknown,
-        source_file: None,
-    }
+    Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+        runmat_value::BoundFunctionHandleData {
+            name: name.into(),
+            function: binding.function,
+            authority: binding.authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
+        },
+    ))
 }
 
 /// Tests retain the old numeric callback oracle only behind a checked exact
@@ -85,11 +95,16 @@ pub fn install_bound_forwarders(
     expected: Vec<BoundFunctionBinding>,
 ) -> super::BoundFunctionInvokerGuard {
     super::install_local_bound_function_invoker(std::rc::Rc::new(
-        move |_runtime, binding, arguments, requested_outputs| {
+        move |runtime, binding, arguments, requested_outputs, _lexical_environment| {
             assert!(expected.contains(&binding), "wrong exact callback owner");
             let invoker = super::current_semantic_function_invoker()
                 .expect("numeric fixture invoker in same runtime");
-            let future = invoker(binding.function, arguments.values(), requested_outputs);
+            let future = invoker(
+                Some(runtime),
+                binding.function,
+                arguments.values(),
+                requested_outputs,
+            );
             Box::pin(async move {
                 let _arguments = arguments;
                 future.await

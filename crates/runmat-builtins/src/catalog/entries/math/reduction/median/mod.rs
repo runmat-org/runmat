@@ -13,6 +13,7 @@ pub use contract::{
 };
 
 pub const MEDIAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "median" },
     category: "math/reduction",

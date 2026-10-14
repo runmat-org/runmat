@@ -321,8 +321,7 @@ impl PipelineBundle {
 
     /// Check the selected physical shader before output allocation or submission.
     pub(crate) fn preflight(&self) -> anyhow::Result<()> {
-        self.access
-            .with_shared(|emission| self.validate_features(emission.device().features()))??;
+        self.validate_features(self.access.enabled_features())?;
         Ok(())
     }
 
@@ -2107,11 +2106,12 @@ fn compile_pipeline(
     entries: &[wgpu::BindGroupLayoutEntry],
     shader_source: &str,
 ) -> CompiledPipelineBundle {
-    let device = emission.device();
-    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(layout_label),
-        entries,
-    });
+    let layout = emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(layout_label),
+            entries,
+        });
     let patched = if shader_source.contains("@WG@") || shader_source.contains("@MT@") {
         substitute_tokens(
             shader_source,
@@ -2121,16 +2121,18 @@ fn compile_pipeline(
     } else {
         Cow::Borrowed(shader_source)
     };
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(shader_label),
-        source: wgpu::ShaderSource::Wgsl(patched),
-    });
+    let module = emission
+        .device()
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(shader_label),
+            source: wgpu::ShaderSource::Wgsl(patched),
+        });
 
-    let pipeline = device.create_compute_pipeline(
+    let pipeline = emission.device().create_compute_pipeline(
         &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
             label: Some(pipeline_label),
             layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                &emission.device().create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&(pipeline_label.to_string() + "-layout")),
                     bind_group_layouts: &[&layout],
                     push_constant_ranges: &[],
@@ -2149,7 +2151,6 @@ pub fn create_shader_module(
     label: &str,
     wgsl: &str,
 ) -> wgpu::ShaderModule {
-    let device = emission.device();
     let patched = if wgsl.contains("@WG@") || wgsl.contains("@MT@") {
         substitute_tokens(
             wgsl,
@@ -2159,10 +2160,12 @@ pub fn create_shader_module(
     } else {
         Cow::Borrowed(wgsl)
     };
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(label),
-        source: wgpu::ShaderSource::Wgsl(patched),
-    })
+    emission
+        .device()
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(patched),
+        })
 }
 
 pub fn create_pipeline_layout(
@@ -2170,12 +2173,13 @@ pub fn create_pipeline_layout(
     label: &str,
     bgl: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
-    let device = emission.device();
-    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(label),
-        bind_group_layouts: &[bgl],
-        push_constant_ranges: &[],
-    })
+    emission
+        .device()
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[bgl],
+            push_constant_ranges: &[],
+        })
 }
 
 #[cfg(test)]

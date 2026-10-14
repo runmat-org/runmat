@@ -49,7 +49,9 @@ fn deopt_ownership(cancel: bool) {
                 *observed_service.borrow_mut() = Some(service);
             }
             let result = owned_value.clone();
-            Box::pin(async move { Ok(ValueSequence::single(result).unwrap()) })
+            Box::pin(async move {
+                rooted_sequence(ValueSequence::single(result).unwrap()).map_err(|error| *error)
+            })
         }),
     ));
     drop(activation);

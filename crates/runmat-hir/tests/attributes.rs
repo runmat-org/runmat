@@ -43,8 +43,35 @@ fn classdef_method_attributes_round_trip() {
     assert_eq!(method.attributes.access, MemberAccess::Private);
     assert!(matches!(
         assembly.functions[method.function.0].kind,
-        FunctionKind::ClassMethod { is_static: true }
+        FunctionKind::ClassMethod {
+            is_static: true,
+            role: runmat_types::ClassMethodRole::Ordinary
+        }
     ));
+}
+
+#[test]
+fn constructor_role_is_classified_once_from_its_declaration() {
+    let src = "classdef Owner\n  methods\n    function obj = Owner(); end\n    function out = other(obj); out = obj; end\n  end\nend";
+    let ast = parse(src).expect("parse constructor owner");
+    let assembly = lower(&ast, &LoweringContext::empty())
+        .expect("lower constructor owner")
+        .assembly;
+    let class = &assembly.classes[0];
+    for method in &class.declaration.methods {
+        let expected = if method.name.display_name() == "Owner" {
+            runmat_types::ClassMethodRole::Constructor
+        } else {
+            runmat_types::ClassMethodRole::Ordinary
+        };
+        assert!(matches!(
+            &assembly.functions[method.function.0].kind,
+            FunctionKind::ClassMethod {
+                is_static: false,
+                role,
+            } if *role == expected
+        ));
+    }
 }
 
 #[test]

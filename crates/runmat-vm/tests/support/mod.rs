@@ -2,6 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_hir::LoweringContext;
+use runmat_runtime::execution::RootedValues;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -46,13 +47,13 @@ pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError>
 }
 
 #[allow(dead_code)]
-pub fn execute_source(source: &str) -> Result<Vec<Value>, RuntimeError> {
+pub fn execute_source(source: &str) -> Result<RootedValues, RuntimeError> {
     let bc = compile_source(source)?;
     interpret(&bc)
 }
 
 #[allow(dead_code)]
-pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<RootedValues, RuntimeError> {
     let bytecode = bytecode.clone();
     run_with_stack(move || block_on(runmat_vm::interpret(&bytecode)))?
 }
@@ -62,7 +63,7 @@ pub fn interpret_with_program_source(
     bytecode: &runmat_vm::Bytecode,
     name: &str,
     text: &str,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<RootedValues, RuntimeError> {
     let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
@@ -83,6 +84,8 @@ pub fn interpret_with_program_source(
             runtime,
         ))?;
         let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
-        Ok(completion.values)
+        completion.with_owned(|completion| {
+            RootedValues::new(completion.values).map_err(|error| error.into_runtime_error())
+        })
     })?
 }

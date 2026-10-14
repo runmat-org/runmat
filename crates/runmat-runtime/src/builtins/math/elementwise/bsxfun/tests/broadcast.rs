@@ -6,7 +6,7 @@ fn bsxfun_plus_expands_row_and_column_vectors() {
     let column = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let row = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(column),
         Value::Tensor(row),
     )
@@ -28,7 +28,7 @@ fn bsxfun_normalizes_rank_zero_and_rank_one_tensor_inputs_for_broadcasting() {
     let scalar = Tensor::new(vec![2.0], vec![]).expect("rank-zero tensor");
     let vector = Tensor::new(vec![10.0, 20.0], vec![2]).expect("rank-one tensor");
     let Value::Tensor(output) = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(scalar),
         Value::Tensor(vector),
     )
@@ -45,7 +45,7 @@ fn bsxfun_nd_expansion_uses_matlab_trailing_dimensions() {
     let left = Tensor::new((1..=24).map(|value| value as f64).collect(), vec![2, 3, 4]).unwrap();
     let right = Tensor::new(vec![100.0, 200.0, 300.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(left),
         Value::Tensor(right),
     )
@@ -69,7 +69,7 @@ fn bsxfun_rejects_front_padded_nd_shapes() {
     let left = Tensor::new((1..=24).map(|value| value as f64).collect(), vec![2, 3, 4]).unwrap();
     let right = Tensor::new((1..=12).map(|value| value as f64).collect(), vec![3, 4]).unwrap();
     let err = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(left),
         Value::Tensor(right),
     )
@@ -83,7 +83,7 @@ fn bsxfun_singleton_dimension_can_expand_to_zero() {
     let empty = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
     let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(empty),
         Value::Tensor(row),
     )
@@ -102,7 +102,7 @@ fn bsxfun_rejects_incompatible_sizes() {
     let left = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::Tensor(left),
         Value::Tensor(right),
     )

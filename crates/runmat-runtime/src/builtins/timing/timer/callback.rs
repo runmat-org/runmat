@@ -94,7 +94,7 @@ async fn run_callback_with_error(
         function @ (Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)) => {
             let args = callback_base_args(runtime, handle, slot, error.as_ref());
             crate::call_feval_async_with_outputs_in_context(runtime, function, &args, 0).await?;

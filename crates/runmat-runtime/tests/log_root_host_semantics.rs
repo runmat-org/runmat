@@ -1,7 +1,7 @@
 use futures::executor::block_on;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
-fn call(name: &str, value: Value) -> Value {
+fn call(name: &str, value: Value) -> runmat_runtime::execution::RootedValue {
     block_on(runmat_runtime::call_builtin_async_with_outputs(
         name,
         &[value],
@@ -13,22 +13,25 @@ fn call(name: &str, value: Value) -> Value {
 #[test]
 fn complex_roots_retain_small_components_and_finite_extremes() {
     for sign in [-1.0, 1.0] {
-        let Value::Complex(real, imag) = call("sqrt", Value::Complex(1.0, sign * 1e-20)) else {
+        let result = call("sqrt", Value::Complex(1.0, sign * 1e-20));
+        let Value::Complex(real, imag) = result.value() else {
             panic!("complex scalar result");
         };
-        assert_eq!(real, 1.0);
+        assert_eq!(*real, 1.0);
         assert!((imag / (sign * 5e-21) - 1.0).abs() < 4.0 * f64::EPSILON);
     }
     // Polar half-angle identities supply an oracle without forming |MAX+iMAX|.
     let scale = f64::MAX.sqrt();
-    let Value::Complex(real, imag) = call("sqrt", Value::Complex(f64::MAX, f64::MAX)) else {
+    let result = call("sqrt", Value::Complex(f64::MAX, f64::MAX));
+    let Value::Complex(real, imag) = result.value() else {
         panic!("complex scalar result");
     };
     let radius = 2.0_f64.powf(0.25);
     let angle = std::f64::consts::FRAC_PI_8;
     assert!((real / scale - radius * angle.cos()).abs() < 1e-15);
     assert!((imag / scale - radius * angle.sin()).abs() < 1e-15);
-    let Value::Complex(real, imag) = call("sqrt", Value::Complex(f64::MAX, 1.0)) else {
+    let result = call("sqrt", Value::Complex(f64::MAX, 1.0));
+    let Value::Complex(real, imag) = result.value() else {
         panic!("complex scalar result");
     };
     assert!((real / scale - 1.0).abs() < 4.0 * f64::EPSILON);
@@ -39,11 +42,12 @@ fn complex_roots_retain_small_components_and_finite_extremes() {
         vec![1, 1, 2],
     )
     .unwrap();
-    let Value::ComplexTensor(output) = call("sqrt", Value::ComplexTensor(input)) else {
+    let result = call("sqrt", Value::ComplexTensor(input));
+    let Value::ComplexTensor(output) = result.value() else {
         panic!("single complex pages");
     };
     assert_eq!(output.shape(), &[1, 1, 2]);
-    let ComplexStorage::F32(values) = output.into_complex_storage() else {
+    let ComplexStorage::F32(values) = output.complex_storage() else {
         panic!("single retained")
     };
     assert!((values[0].1 / 5e-21 - 1.0).abs() < 4.0 * f32::EPSILON);
@@ -58,7 +62,8 @@ fn complex_logarithms_do_not_overflow_finite_magnitudes() {
         ("log2", std::f64::consts::LOG2_E),
         ("log10", std::f64::consts::LOG10_E),
     ] {
-        let Value::Complex(real, imag) = call(name, Value::Complex(f64::MAX, f64::MAX)) else {
+        let result = call(name, Value::Complex(f64::MAX, f64::MAX));
+        let Value::Complex(real, imag) = result.value() else {
             panic!("{name}: complex result");
         };
         let expected = (f64::MAX.ln() + std::f64::consts::LN_2 * 0.5) * multiplier;
@@ -75,10 +80,11 @@ fn complex_logarithms_do_not_overflow_finite_magnitudes() {
             vec![1, 1],
         )
         .unwrap();
-        let Value::ComplexTensor(output) = call(name, Value::ComplexTensor(input)) else {
+        let result = call(name, Value::ComplexTensor(input));
+        let Value::ComplexTensor(output) = result.value() else {
             panic!("single complex")
         };
-        let ComplexStorage::F32(values) = output.into_complex_storage() else {
+        let ComplexStorage::F32(values) = output.complex_storage() else {
             panic!("single retained")
         };
         let expected = (f64::from(f32::MAX).ln() + std::f64::consts::LN_2 * 0.5) * multiplier;
@@ -125,16 +131,18 @@ fn logarithms_retain_small_real_and_complex_components() {
         ("log2", (1.0_f64 + 1e-14).log2()),
         ("log10", (1.0_f64 + 1e-14).log10()),
     ] {
-        let Value::Num(value) = call(name, Value::Num(1.0 + 1e-14)) else {
+        let result = call(name, Value::Num(1.0 + 1e-14));
+        let Value::Num(value) = result.value() else {
             panic!("real result");
         };
-        assert_eq!(value, expected);
-        assert!(value > 0.0);
+        assert_eq!(*value, expected);
+        assert!(*value > 0.0);
     }
-    let Value::Num(value) = call("log1p", Value::Num(1e-300)) else {
+    let result = call("log1p", Value::Num(1e-300));
+    let Value::Num(value) = result.value() else {
         panic!("real result");
     };
-    assert_eq!(value, 1e-300_f64.ln_1p());
+    assert_eq!(*value, 1e-300_f64.ln_1p());
     for name in ["log", "log2", "log10", "log1p"] {
         let scalar = call(name, Value::Complex(1.0, 1e-20));
         let tensor = call(
@@ -142,11 +150,12 @@ fn logarithms_retain_small_real_and_complex_components() {
             Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1e-20)], vec![1, 1]).unwrap()),
         );
         assert_eq!(scalar, tensor, "{name}");
-        let Value::Complex(_, imaginary) = tensor else {
+        let Value::Complex(_, imaginary) = tensor.value() else {
             panic!("complex result");
         };
-        assert!(imaginary > 0.0, "{name}");
-        let Value::Num(value) = call(name, Value::Num(f64::NAN)) else {
+        assert!(*imaginary > 0.0, "{name}");
+        let result = call(name, Value::Num(f64::NAN));
+        let Value::Num(value) = result.value() else {
             panic!("real NaN");
         };
         assert!(value.is_nan());
@@ -155,23 +164,27 @@ fn logarithms_retain_small_real_and_complex_components() {
 
 #[test]
 fn square_root_preserves_small_results_and_nan_real_domain() {
-    let Value::Num(value) = call("sqrt", Value::Num(1e-300)) else {
+    let result = call("sqrt", Value::Num(1e-300));
+    let Value::Num(value) = result.value() else {
         panic!("real double");
     };
-    assert_eq!(value, 1e-150);
-    let Value::Complex(real, imag) = call("sqrt", Value::Num(-1e-300)) else {
+    assert_eq!(*value, 1e-150);
+    let result = call("sqrt", Value::Num(-1e-300));
+    let Value::Complex(real, imag) = result.value() else {
         panic!("complex double");
     };
-    assert_eq!(real, 0.0);
-    assert_eq!(imag, 1e-150);
-    let Value::Tensor(single) = call(
+    assert_eq!(*real, 0.0);
+    assert_eq!(*imag, 1e-150);
+    let result = call(
         "sqrt",
         Value::Tensor(Tensor::from_f32(vec![1e-30], vec![1, 1]).unwrap()),
-    ) else {
+    );
+    let Value::Tensor(single) = result.value() else {
         panic!("dense single");
     };
     assert!((single.as_f32_slice().unwrap()[0] / 1e-15 - 1.0).abs() < 1e-6);
-    let Value::Num(value) = call("sqrt", Value::Num(f64::NAN)) else {
+    let result = call("sqrt", Value::Num(f64::NAN));
+    let Value::Num(value) = result.value() else {
         panic!("real NaN");
     };
     assert!(value.is_nan());
@@ -185,7 +198,7 @@ fn floating_singleton_runtime_carriers_match_inference() {
             Value::Tensor(Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap()),
         );
         assert!(
-            matches!(real, Value::Tensor(ref value) if value.numeric_dtype() == NumericDType::F32),
+            matches!(real.value(), Value::Tensor(value) if value.numeric_dtype() == NumericDType::F32),
             "{name}"
         );
         if name != "realsqrt" {
@@ -200,7 +213,7 @@ fn floating_singleton_runtime_carriers_match_inference() {
                 ),
             );
             assert!(
-                matches!(complex, Value::ComplexTensor(ref value) if value.numeric_dtype() == NumericDType::F32),
+                matches!(complex.value(), Value::ComplexTensor(value) if value.numeric_dtype() == NumericDType::F32),
                 "{name}"
             );
         }
@@ -214,7 +227,8 @@ fn character_pages_keep_shape_and_column_major_positions() {
         CharArray::new_with_shape(vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], vec![2, 2, 2])
             .unwrap();
     for name in ["log", "log10", "log1p", "log2", "sqrt"] {
-        let Value::Tensor(output) = call(name, Value::CharArray(chars.clone())) else {
+        let result = call(name, Value::CharArray(chars.clone()));
+        let Value::Tensor(output) = result.value() else {
             panic!("{name}: dense character result");
         };
         assert_eq!(output.shape(), chars.shape, "{name}");
@@ -224,18 +238,20 @@ fn character_pages_keep_shape_and_column_major_positions() {
             .iter()
             .zip(chars.to_column_major())
         {
-            let Value::Num(expected) = call(name, Value::Num(character as u32 as f64)) else {
+            let scalar = call(name, Value::Num(character as u32 as f64));
+            let Value::Num(expected) = scalar.value() else {
                 panic!("scalar result");
             };
-            assert_eq!(*actual, expected, "{name}");
+            assert_eq!(*actual, *expected, "{name}");
         }
     }
-    let Value::OutputList(outputs) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+    let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
         "log2",
         &[Value::CharArray(chars.clone())],
         2,
     ))
-    .unwrap() else {
+    .unwrap();
+    let Value::OutputList(outputs) = result.value() else {
         panic!("two outputs");
     };
     let [Value::Tensor(fractions), Value::Tensor(exponents)] = outputs.as_slice() else {

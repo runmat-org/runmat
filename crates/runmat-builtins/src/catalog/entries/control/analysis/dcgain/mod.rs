@@ -12,6 +12,7 @@ mod tests;
 pub use contract::{DCGAIN_DESCRIPTOR, DCGAIN_INTEGER_CAPABILITIES};
 
 pub const DCGAIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dcgain" },
     category: "control/analysis",

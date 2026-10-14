@@ -1,3 +1,4 @@
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::{gather_if_needed_async, BuiltinResult};
 use runmat_value::Value;
 
@@ -5,7 +6,10 @@ use super::error_context;
 use super::options::Invocation;
 use super::plan::Plan;
 
-pub(super) async fn execute(function: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn execute(function: Value, arguments: Vec<Value>) -> BuiltinResult<RootedValue> {
+    let _inputs_root =
+        RootedValueLease::for_values(std::iter::once(&function).chain(arguments.iter()))
+            .map_err(|error| error.into_runtime_error())?;
     let plan = Plan::build(Invocation::parse(function, arguments)?)?;
     plan.callable
         .validate_outputs(crate::current_requested_outputs())?;
@@ -33,7 +37,7 @@ impl Execution {
         })
     }
 
-    async fn run(&self) -> BuiltinResult<Value> {
+    async fn run(&self) -> BuiltinResult<RootedValue> {
         let requested = crate::current_requested_outputs();
         let mut collectors = (0..requested)
             .map(|_| super::output::Collector::new(self.plan.uniform_output))
@@ -50,18 +54,27 @@ impl Execution {
                 collector.push(value).await?;
             }
         }
-        let values = collectors
-            .into_iter()
-            .map(|collector| collector.finish(&self.plan.shape))
-            .collect::<BuiltinResult<Vec<_>>>()?;
-        if requested == 1 {
-            Ok(values.into_iter().next().expect("one output"))
-        } else {
-            Ok(Value::OutputList(values))
+        let mut outputs = RootedValuesBuilder::with_capacity(collectors.len());
+        for collector in collectors {
+            collector
+                .finish(&self.plan.shape)?
+                .with_owned(|value| outputs.push(value))
+                .map_err(|error| error.into_runtime_error())?;
         }
+        outputs
+            .finish()
+            .map_err(|error| error.into_runtime_error())?
+            .with_owned_values(|mut values| {
+                let value = if requested == 1 {
+                    values.pop().expect("one output")
+                } else {
+                    Value::OutputList(values)
+                };
+                RootedValue::new(value).map_err(|error| error.into_runtime_error())
+            })
     }
 
-    async fn evaluate(&self, index: usize, requested: usize) -> BuiltinResult<Value> {
+    async fn evaluate(&self, index: usize, requested: usize) -> BuiltinResult<RootedValue> {
         let mut cell_values = Vec::with_capacity(self.plan.cells.len());
         for cell in &self.plan.cells {
             let value = cell.iter_column_major().nth(index).ok_or_else(|| {

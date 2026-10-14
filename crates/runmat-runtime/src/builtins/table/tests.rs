@@ -3489,7 +3489,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         std::slice::from_ref(&ordinal),
     ))
     .unwrap();
-    let Value::Object(max_cat) = max_value else {
+    let Value::Object(max_cat) = max_value.value() else {
         panic!("expected categorical max result");
     };
     match max_cat.properties.get("Codes").unwrap() {
@@ -3501,7 +3501,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         std::slice::from_ref(&ordinal),
     ))
     .unwrap();
-    let Value::Object(min_cat) = min_value else {
+    let Value::Object(min_cat) = min_value.value() else {
         panic!("expected categorical min result");
     };
     match min_cat.properties.get("Codes").unwrap() {
@@ -3517,7 +3517,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         ],
     ))
     .unwrap();
-    let Value::Object(all_max_cat) = all_max else {
+    let Value::Object(all_max_cat) = all_max.value() else {
         panic!("expected categorical all max result");
     };
     match all_max_cat.properties.get("Codes").unwrap() {
@@ -4062,7 +4062,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         std::slice::from_ref(&ordinal_with_missing),
     ))
     .unwrap();
-    let Value::Object(default_max) = default_max else {
+    let Value::Object(default_max) = default_max.value() else {
         panic!("expected categorical max with missing");
     };
     match default_max.properties.get("Codes").unwrap() {
@@ -4079,7 +4079,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         ],
     ))
     .unwrap();
-    let Value::Object(omitnan_max) = omitnan_max else {
+    let Value::Object(omitnan_max) = omitnan_max.value() else {
         panic!("expected omitnan categorical max");
     };
     match omitnan_max.properties.get("Codes").unwrap() {
@@ -4093,10 +4093,10 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         2,
     ))
     .unwrap();
-    match two_outputs {
+    match two_outputs.value() {
         Value::OutputList(values) => {
             assert_eq!(values.len(), 2);
-            assert!(matches!(values[0], Value::Object(_)));
+            assert!(matches!(&values[0], Value::Object(_)));
             match &values[1] {
                 Value::Num(index) => assert_eq!(*index, 2.0),
                 other => panic!("expected numeric index, got {other:?}"),
@@ -4138,7 +4138,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         ],
     ))
     .unwrap();
-    let Value::Object(row_max) = row_max else {
+    let Value::Object(row_max) = row_max.value() else {
         panic!("expected categorical row max");
     };
     match row_max.properties.get("Codes").unwrap() {

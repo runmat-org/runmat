@@ -50,6 +50,8 @@ occt-native = ["runmat-runtime/occt-native"]
 occt-wasm-host = ["runmat-runtime/occt-wasm-host"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+runmat-accelerate = { workspace = true, features = ["cuda"] }
+runmat-execution-artifact = { workspace = true }
 runmat-java = { workspace = true }
 runmat-python = { workspace = true }
 runmat-mex = { workspace = true }
@@ -76,3 +78,8 @@ runmat-execution-artifact = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }
+
+[[test]]
+name = "python_interop"
+path = "tests/python_interop.rs"
+harness = false

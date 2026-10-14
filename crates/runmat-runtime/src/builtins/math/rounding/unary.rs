@@ -117,3 +117,10 @@ pub(super) fn input_provider(
     }
     Ok(provider)
 }
+
+/// Root a rounding result at its numerical or synchronous object publication.
+pub(super) fn root_output(
+    value: runmat_value::Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
+}

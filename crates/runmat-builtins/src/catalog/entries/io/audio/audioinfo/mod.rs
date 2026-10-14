@@ -13,6 +13,7 @@ const AUDIOINFO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAud
 };
 
 pub const AUDIOINFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "audioinfo" },
     category: "io/audio",

@@ -47,8 +47,11 @@ impl RuntimeBuiltinService for ObserveFunctionContext {
             |invocation| {
                 assert_eq!(invocation.args, &[Value::Bool(true)]);
                 Box::pin(async {
-                    runmat_value::ValueSequence::single(Value::Bool(true))
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                    runmat_runtime::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(Value::Bool(true))
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
         )]

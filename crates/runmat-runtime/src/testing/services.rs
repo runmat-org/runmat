@@ -5,12 +5,13 @@ use std::rc::Rc;
 
 use runmat_value::Value;
 
+use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
-pub type RunSuiteService = dyn Fn(Value, Vec<Value>) -> RunSuiteFuture;
-pub type RunTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
-pub type DiscoverTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
+pub type RunSuiteService = dyn Fn(Option<RuntimeContext>, Value, Vec<Value>) -> RunSuiteFuture;
+pub type RunTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
+pub type DiscoverTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
 
 /// Runtime-facing ports supplied by the active Core execution composition.
 ///
@@ -33,9 +34,9 @@ impl std::fmt::Debug for RuntimeTestServices {
 
 impl RuntimeTestServices {
     pub fn new(
-        run_suite: impl Fn(Value, Vec<Value>) -> RunSuiteFuture + 'static,
-        run_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
-        discover_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
+        run_suite: impl Fn(Option<RuntimeContext>, Value, Vec<Value>) -> RunSuiteFuture + 'static,
+        run_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
+        discover_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
     ) -> Self {
         Self {
             run_suite: Rc::new(run_suite),
@@ -78,16 +79,23 @@ pub fn install_test_services(services: RuntimeTestServices) -> TestServicesGuard
     TestServicesGuard { context }
 }
 
-fn current_test_services() -> Option<RuntimeTestServices> {
+fn current_test_services() -> Option<(RuntimeTestServices, Option<RuntimeContext>)> {
     if let Some(context) = crate::context::legacy::active() {
-        return context.state().test_services.borrow().last().cloned();
+        let service = { context.state().test_services.borrow().last().cloned() };
+        return service.map(|service| (service, Some(context)));
     }
-    TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned())
+    TEST_SERVICES_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .cloned()
+            .map(|service| (service, None))
+    })
 }
 
 pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<Value> {
     let service = current_test_services();
-    let Some(service) = service else {
+    let Some((service, caller)) = service else {
         return Err(crate::build_runtime_error(
             "TestRunner.run requires an active Core test executor",
         )
@@ -95,12 +103,12 @@ pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<
         .with_builtin("matlab.unittest.TestRunner.run")
         .build());
     };
-    (service.run_suite)(suite, plugins).await
+    (service.run_suite)(caller, suite, plugins).await
 }
 
 pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
     let service = current_test_services();
-    let Some(service) = service else {
+    let Some((service, caller)) = service else {
         return Err(
             crate::build_runtime_error("runtests requires an active Core test executor")
                 .with_identifier("RunMat:Testing:RequiresExecutor")
@@ -108,12 +116,12 @@ pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
                 .build(),
         );
     };
-    (service.run_tests)(args).await
+    (service.run_tests)(caller, args).await
 }
 
 pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
     let service = current_test_services();
-    let Some(service) = service else {
+    let Some((service, caller)) = service else {
         return Err(
             crate::build_runtime_error("testsuite requires an active Core test executor")
                 .with_identifier("RunMat:Testing:RequiresExecutor")
@@ -121,7 +129,7 @@ pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
                 .build(),
         );
     };
-    (service.discover_tests)(args).await
+    (service.discover_tests)(caller, args).await
 }
 
 #[cfg(test)]
@@ -131,8 +139,8 @@ mod tests {
     #[test]
     fn service_installation_is_scoped_and_async_safe() {
         let _guard = install_test_services(RuntimeTestServices::new(
-            |suite, _plugins| Box::pin(async move { Ok(suite) }),
-            |args| {
+            |_caller, suite, _plugins| Box::pin(async move { Ok(suite) }),
+            |_caller, args| {
                 Box::pin(async move {
                     let count = args.len();
                     Ok(Value::Cell(
@@ -140,7 +148,7 @@ mod tests {
                     ))
                 })
             },
-            |args| {
+            |_caller, args| {
                 Box::pin(async move {
                     Ok(args
                         .into_iter()
@@ -154,5 +162,44 @@ mod tests {
             futures::executor::block_on(run_test_suite(suite.clone(), Vec::new())).unwrap(),
             suite
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_service_receives_selected_callers_ancestry_at_admission() {
+        use crate::execution::RuntimeExecutionService;
+        use crate::foreign::MexCallbackAncestry;
+
+        let parent = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_mex_callback_ancestry(MexCallbackAncestry::from_wire(2).unwrap());
+        let unrelated = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let service = RuntimeTestServices::new(
+            |_caller, suite, _plugins| Box::pin(async move { Ok(suite) }),
+            |caller, _args| {
+                let depth = caller
+                    .expect("the caller is selected at admission")
+                    .mex_callback_ancestry()
+                    .wire();
+                Box::pin(async move { Ok(Value::Num(f64::from(depth))) })
+            },
+            |_caller, _args| Box::pin(async move { Ok(Value::Num(0.0)) }),
+        );
+        let observed = futures::executor::block_on(parent.scope(async {
+            let _guard = install_test_services(service);
+            run_tests(Vec::new()).await.unwrap()
+        }));
+        assert_eq!(observed, Value::Num(2.0));
+        assert_eq!(parent.mex_callback_ancestry().wire(), 2);
+        assert_eq!(unrelated.mex_callback_ancestry().wire(), 0);
+
+        let child = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .try_inherit_foreign_callback_lineage_for_child(&parent)
+            .expect("the child has independent Runtime owners");
+        assert_eq!(child.mex_callback_ancestry().wire(), 2);
+        assert!(!Rc::ptr_eq(parent.state(), child.state()));
+        assert!(parent
+            .clone()
+            .try_inherit_foreign_callback_lineage_for_child(&parent)
+            .is_none());
     }
 }

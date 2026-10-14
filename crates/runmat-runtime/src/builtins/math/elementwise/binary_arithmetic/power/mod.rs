@@ -13,6 +13,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::elementwise::integer_arithmetic::reject_integer_logical_operands;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -91,9 +93,17 @@ fn power_error_with_detail(
 #[runtime_builtin(
     name = "power",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::power"
 )]
-async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn power_builtin(
+    runtime: Option<RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter().chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::POWER_DESCRIPTOR,
         &runmat_builtins::POWER_ERROR_TOO_MANY_OUTPUTS,
@@ -118,15 +128,25 @@ async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     let template =
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
-    preparation::execute(2 + rest.len(), lhs, rhs, |lhs, rhs| async move {
-        let base_result = match (lhs, rhs) {
-            (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
-            (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
-            (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
-            (lhs, rhs) => Ok(power_host(lhs, rhs)?),
-        }?;
-        apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base_result, &template).await
-    })
+    preparation::execute(
+        runtime.as_ref(),
+        2 + rest.len(),
+        lhs,
+        rhs,
+        |lhs, rhs| async move {
+            let base_result = match (lhs, rhs) {
+                (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
+                (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
+                (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
+                (lhs, rhs) => Ok(power_host(lhs, rhs)?),
+            }?;
+            let base = RootedValue::new(base_result).map_err(|cause| cause.into_runtime_error())?;
+            let value =
+                apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)
+                    .await?;
+            RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
+        },
+    )
     .await
 }
 

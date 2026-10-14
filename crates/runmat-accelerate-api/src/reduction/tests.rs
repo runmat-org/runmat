@@ -32,18 +32,18 @@ fn default_typed_reduction_declines_before_effects_and_keeps_input() {
         .allocate_zeroed(vec![4, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     let recipe = recipe(descriptor());
-    let inputs = [input.handle.clone()];
-    let selected = ReductionSelection::new(&recipe, ReductionStrategy::SinglePass).unwrap();
-    let submitted = ReductionSubmission::new(selected, &inputs, owner.device_id()).unwrap();
-    let error = NoReductionProvider
-        .submit_reduction_recipe(&submitted)
-        .unwrap_err();
-    assert!(error.is_unsupported());
-    assert!(!error.is_after_effect());
-    input.handle.allocation_lease().validate_live().unwrap();
-    assert_eq!(input.probe.retirements(), 0);
-    drop(submitted);
-    drop(inputs);
+    {
+        let inputs = [input.handle.clone()];
+        let selected = ReductionSelection::new(&recipe, ReductionStrategy::SinglePass).unwrap();
+        let submitted = ReductionSubmission::new(selected, &inputs, owner.device_id()).unwrap();
+        let error = NoReductionProvider
+            .submit_reduction_recipe(&submitted)
+            .unwrap_err();
+        assert!(error.is_unsupported());
+        assert!(!error.is_after_effect());
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
     drop(input.handle);
     assert_eq!(input.probe.retirements(), 1);
 }

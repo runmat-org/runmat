@@ -1,8 +1,9 @@
 use runmat_execution::cancellation::CancellationToken;
+use std::any::Any;
 use std::rc::Rc;
 
 use crate::{
-    value_from_mx_in_context, value_to_mx_for_interface_in_context, MexDiagnostic,
+    value_from_mx_in_context, value_to_mx_for_interface_in_context, MexCallOutput, MexDiagnostic,
     MexEngineCompletion, MexHostServices, MxApiMode, MxArray, MxBoundaryInterface, MxValueContext,
 };
 
@@ -62,9 +63,16 @@ pub trait MexBoundaryHostServices {
 #[doc(hidden)]
 pub struct DirectMexBoundaryHostServices {
     services: Rc<dyn MexHostServices>,
+    codec: MxBoundaryCodec,
+}
+
+/// Origin-thread MxArray conversion and token registration authority.
+#[doc(hidden)]
+pub struct MxBoundaryCodec {
     values: Rc<MxValueContext>,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
+    _origin_lease: Option<Rc<dyn Any>>,
 }
 
 impl DirectMexBoundaryHostServices {
@@ -76,19 +84,98 @@ impl DirectMexBoundaryHostServices {
     ) -> Self {
         Self {
             services,
-            values,
-            mode,
-            interface,
+            codec: MxBoundaryCodec::new(values, mode, interface),
         }
     }
 
-    fn decode(&self, value: &MxArray) -> Result<runmat_value::Value, MexDiagnostic> {
+    /// Keep an origin-thread resource (such as the runtime's registered MEX
+    /// token table) alive until this callback service itself retires. Native
+    /// commands can outlive a cancelled foreground future.
+    pub fn new_with_origin_lease(
+        services: Rc<dyn MexHostServices>,
+        values: Rc<MxValueContext>,
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+        origin_lease: Rc<dyn Any>,
+    ) -> Self {
+        Self {
+            services,
+            codec: MxBoundaryCodec::new_with_origin_lease(values, mode, interface, origin_lease),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn decode(&self, value: &MxArray) -> Result<runmat_value::Value, MexDiagnostic> {
+        self.codec.decode(value)
+    }
+
+    #[doc(hidden)]
+    pub fn encode(&self, value: &runmat_value::Value) -> Result<MxArray, MexDiagnostic> {
+        self.codec.encode(value)
+    }
+
+    #[doc(hidden)]
+    pub fn encode_one(&self, owned: Box<dyn MexCallOutput>) -> Result<MxArray, MexDiagnostic> {
+        self.codec.encode_one(owned)
+    }
+}
+
+impl MxBoundaryCodec {
+    pub fn new(
+        values: Rc<MxValueContext>,
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+    ) -> Self {
+        Self {
+            values,
+            mode,
+            interface,
+            _origin_lease: None,
+        }
+    }
+
+    pub fn new_with_origin_lease(
+        values: Rc<MxValueContext>,
+        mode: MxApiMode,
+        interface: MxBoundaryInterface,
+        origin_lease: Rc<dyn Any>,
+    ) -> Self {
+        Self {
+            values,
+            mode,
+            interface,
+            _origin_lease: Some(origin_lease),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn decode(&self, value: &MxArray) -> Result<runmat_value::Value, MexDiagnostic> {
         value_from_mx_in_context(value, Some(&self.values)).map_err(conversion_diagnostic)
     }
 
-    fn encode(&self, value: &runmat_value::Value) -> Result<MxArray, MexDiagnostic> {
+    #[doc(hidden)]
+    pub fn encode(&self, value: &runmat_value::Value) -> Result<MxArray, MexDiagnostic> {
         value_to_mx_for_interface_in_context(value, self.mode, self.interface, Some(&self.values))
             .map_err(conversion_diagnostic)
+    }
+
+    #[doc(hidden)]
+    pub fn encode_one(&self, owned: Box<dyn MexCallOutput>) -> Result<MxArray, MexDiagnostic> {
+        let mut encoded = None;
+        owned.publish(&mut |value| {
+            if encoded.is_some() {
+                return Err(MexDiagnostic {
+                    identifier: Some("RunMat:MEX:CallbackProtocol".into()),
+                    message: "single-value callback published multiple values".into(),
+                });
+            }
+            encoded = Some(self.encode(&value)?);
+            Ok(())
+        })?;
+        encoded.ok_or_else(|| MexDiagnostic {
+            identifier: Some("RunMat:MEX:CallbackProtocol".into()),
+            message: "single-value callback published no value".into(),
+        })
     }
 }
 
@@ -120,11 +207,13 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
             .iter()
             .map(|argument| self.decode(argument))
             .collect::<Result<Vec<_>, _>>()?;
-        self.services
-            .call(function, arguments, requested_outputs)?
-            .iter()
-            .map(|output| self.encode(output))
-            .collect()
+        let owned = self.services.call(function, arguments, requested_outputs)?;
+        let mut outputs = Vec::with_capacity(requested_outputs);
+        owned.publish(&mut |output| {
+            outputs.push(self.encode(&output)?);
+            Ok(())
+        })?;
+        Ok(outputs)
     }
 
     fn call_captured(
@@ -144,10 +233,16 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
         let completion = self
             .services
             .call_captured(function, arguments, requested_outputs);
+        let result = completion.result.and_then(|owned| {
+            let mut outputs = Vec::with_capacity(requested_outputs);
+            owned.publish(&mut |output| {
+                outputs.push(self.encode(&output)?);
+                Ok(())
+            })?;
+            Ok(outputs)
+        });
         MexEngineCompletion {
-            result: completion
-                .result
-                .and_then(|outputs| outputs.iter().map(|output| self.encode(output)).collect()),
+            result,
             stdout: completion.stdout,
             stderr: completion.stderr,
         }
@@ -156,8 +251,7 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
     fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<MxArray>, MexDiagnostic> {
         self.services
             .get_variable(workspace, name)?
-            .as_ref()
-            .map(|value| self.encode(value))
+            .map(|value| self.encode_one(value))
             .transpose()
     }
 
@@ -179,7 +273,7 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
     ) -> Result<MxArray, MexDiagnostic> {
         let object = self.decode(&object)?;
         let value = self.services.get_object_property_at(object, index, name)?;
-        self.encode(&value)
+        self.encode_one(value)
     }
 
     fn set_object_property(
@@ -194,7 +288,7 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
         let object = self
             .services
             .set_object_property_at(object, index, name, value)?;
-        self.encode(&object)
+        self.encode_one(object)
     }
 }
 

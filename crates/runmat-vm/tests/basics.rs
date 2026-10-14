@@ -15,12 +15,14 @@ use std::path::Path;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_source(source: &str) -> Vec<Value> {
+fn execute_source(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
 
-fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+fn execute_source_result(
+    source: &str,
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).map_err(Box::new)
 }

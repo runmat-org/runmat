@@ -127,11 +127,12 @@ fn rejects_matrix_and_indivisible_byte_count() {
 fn registered_binding_dispatches_exact_storage() {
     let input =
         Tensor::new_integer(IntegerStorage::I16(vec![-1, i16::MIN]), vec![1, 2]).expect("input");
-    let Value::Tensor(output) = crate::dispatcher::call_builtin(
+    let result = crate::dispatcher::call_builtin(
         "typecast",
         &[Value::Tensor(input), Value::String("uint16".to_string())],
     )
-    .expect("registered typecast") else {
+    .expect("registered typecast");
+    let Value::Tensor(output) = result.value() else {
         panic!("expected tensor");
     };
     assert_eq!(

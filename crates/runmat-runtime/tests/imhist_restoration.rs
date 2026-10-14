@@ -142,39 +142,44 @@ fn public_histogram_restoration_preserves_causes_classes_and_partial_ownership()
                         assert!(contains_cause::<RestoreFailure>(&error));
                     }
                 } else {
-                    let Value::OutputList(outputs) = result.expect("histogram outputs") else {
-                        panic!("two requested outputs must be retained");
-                    };
-                    assert_eq!(outputs.len(), 2);
-                    for (output, expected) in outputs
-                        .into_iter()
-                        .zip([vec![2., 1., 1.], vec![0., 0.5, 1.]])
-                    {
-                        match output {
-                            Value::GpuTensor(handle) => {
-                                assert_eq!(fail_at, 0);
-                                assert_eq!(handle.device_id(), input.device_id());
-                                assert!(!handle.shares_allocation_with(&input));
-                                assert_eq!(
-                                    handle.physical().element_type(),
-                                    NumericElementType::F64
-                                );
-                                assert_eq!(handle.shape(), [3, 1]);
-                                assert_eq!(handle_is_explicit(&handle), explicit);
-                                let host =
-                                    block_on(provider.inner.download_numeric(&handle)).unwrap();
-                                assert_eq!(host.data, HostNumericDataOwned::F64(expected));
-                                handle.release().unwrap();
+                    result.expect("histogram outputs").with_owned(|value| {
+                        let Value::OutputList(outputs) = value else {
+                            panic!("two requested outputs must be retained");
+                        };
+                        assert_eq!(outputs.len(), 2);
+                        for (output, expected) in outputs
+                            .into_iter()
+                            .zip([vec![2., 1., 1.], vec![0., 0.5, 1.]])
+                        {
+                            match output {
+                                Value::GpuTensor(handle) => {
+                                    assert_eq!(fail_at, 0);
+                                    assert_eq!(handle.device_id(), input.device_id());
+                                    assert!(!handle.shares_allocation_with(&input));
+                                    assert_eq!(
+                                        handle.physical().element_type(),
+                                        NumericElementType::F64
+                                    );
+                                    assert_eq!(handle.shape(), [3, 1]);
+                                    assert_eq!(handle_is_explicit(&handle), explicit);
+                                    let host =
+                                        block_on(provider.inner.download_numeric(&handle)).unwrap();
+                                    assert_eq!(host.data, HostNumericDataOwned::F64(expected));
+                                    handle.release().unwrap();
+                                }
+                                Value::Tensor(tensor) => {
+                                    assert!(unsupported && !explicit && fail_at != 0);
+                                    assert_eq!(tensor.shape(), &[3, 1]);
+                                    assert_eq!(
+                                        tensor.numeric_dtype(),
+                                        runmat_value::NumericDType::F64
+                                    );
+                                    assert_eq!(tensor.materialize_f64(), expected);
+                                }
+                                _ => panic!("unexpected histogram output"),
                             }
-                            Value::Tensor(tensor) => {
-                                assert!(unsupported && !explicit && fail_at != 0);
-                                assert_eq!(tensor.shape(), &[3, 1]);
-                                assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
-                                assert_eq!(tensor.materialize_f64(), expected);
-                            }
-                            _ => panic!("unexpected histogram output"),
                         }
-                    }
+                    });
                 }
                 let outputs = provider.outputs.lock().unwrap();
                 assert_eq!(outputs.len(), if fail_at == 0 { 2 } else { fail_at - 1 });

@@ -2,8 +2,8 @@ use super::*;
 use crate::builtins::close::close_builtin;
 use crate::context::{
     RuntimeServiceFuture, RuntimeServicePorts, RuntimeTcpBind, RuntimeTcpClient,
-    RuntimeTcpClientStatus, RuntimeTcpConnect, RuntimeTcpReadMode, RuntimeTcpReadResult,
-    RuntimeTcpServer, RuntimeTcpService,
+    RuntimeTcpClientStatus, RuntimeTcpConnect, RuntimeTcpInvocation, RuntimeTcpReadMode,
+    RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
 };
 use crate::tcp::TcpTransportError;
 use runmat_builtins::{CLOSE_NETWORK_SELECTOR_EXTENSION, CLOSE_TCP_CELL_EXTENSION};
@@ -44,28 +44,28 @@ impl RuntimeTcpService for CloseCalls {
 
     fn describe_client(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, TcpTransportError>> {
         panic!("close admission must not describe a client")
     }
     fn connect(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpConnect,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
         panic!("close admission must not connect")
     }
     fn bind(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: RuntimeTcpBind,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpServer, TcpTransportError>> {
         panic!("close admission must not bind")
     }
     fn accept(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
@@ -73,7 +73,7 @@ impl RuntimeTcpService for CloseCalls {
     }
     fn read(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: RuntimeTcpReadMode,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, TcpTransportError>> {
@@ -81,7 +81,7 @@ impl RuntimeTcpService for CloseCalls {
     }
     fn write(
         &self,
-        _: RuntimeTcpIssuer,
+        _: RuntimeTcpInvocation,
         _: ForeignRef,
         _: Vec<u8>,
     ) -> RuntimeServiceFuture<Result<usize, TcpTransportError>> {

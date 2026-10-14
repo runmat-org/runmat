@@ -75,6 +75,7 @@ pub const XMLREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerA
     notes: "xmlread accepts a scalar text filename; native integer filename classes reject before filesystem or provider access.",
 };
 pub const XMLREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "xmlread" },
     category: "io/repl_fs",

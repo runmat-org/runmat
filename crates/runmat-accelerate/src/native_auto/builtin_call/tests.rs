@@ -19,6 +19,10 @@ use std::{
     rc::Rc,
 };
 
+fn rooted(value: Value) -> runmat_runtime::execution::RootedValue {
+    runmat_runtime::execution::RootedValue::new(value).expect("fixture output root")
+}
+
 struct UploadRejectingProvider;
 impl AccelProvider for UploadRejectingProvider {
     fn upload(&self, _: &HostTensorView<'_>) -> Result<runmat_accelerate_api::GpuTensorHandle> {
@@ -212,6 +216,7 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
         args,
         observation: Some(observation),
         uploads: None,
+        request_input_root: None,
     }
 }
 
@@ -221,7 +226,7 @@ fn cpu_call_is_observed_only_once_after_its_result() {
     let prepared = observed(&probe, false, vec![Value::Num(1.)]);
     let observation = prepared.into_execution().1;
     assert!(probe.feedback.borrow().is_empty());
-    observation.finish(&Ok(Value::Num(2.))).unwrap();
+    observation.finish(Ok(&Value::Num(2.))).unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }
@@ -233,14 +238,14 @@ fn completed_error_reports_failure_but_abandoned_futures_do_not() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("test failure")))
+        .finish(Err(&RuntimeError::new("test failure")))
         .unwrap();
     drop(observed(&probe, false, vec![]));
     let prepared = observed(&probe, false, vec![]);
     let observation = prepared.into_execution().1;
     let future = async move {
         std::future::pending::<()>().await;
-        observation.finish(&Ok(Value::Num(1.))).unwrap();
+        observation.finish(Ok(&Value::Num(1.))).unwrap();
     };
     drop(future);
     // Retaining prepared arguments must not retain a cancelled call's ticket.
@@ -259,7 +264,7 @@ fn provider_return_is_not_a_completed_device_cost_sample() {
     prepared
         .into_execution()
         .1
-        .finish(&Ok(Value::Num(1.)))
+        .finish(Ok(&Value::Num(1.)))
         .unwrap();
     assert!(
         probe.feedback.borrow().is_empty(),
@@ -269,7 +274,7 @@ fn provider_return_is_not_a_completed_device_cost_sample() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("provider failed")))
+        .finish(Err(&RuntimeError::new("provider failed")))
         .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
@@ -289,7 +294,7 @@ fn resident_input_or_output_prevents_unproven_cpu_sample() {
     let device = Value::GpuTensor(allocation.handle);
     for (input, output) in [(device.clone(), Value::Num(1.)), (Value::Num(1.), device)] {
         let prepared = observed(&probe, false, vec![input]);
-        prepared.into_execution().1.finish(&Ok(output)).unwrap();
+        prepared.into_execution().1.finish(Ok(&output)).unwrap();
     }
     assert!(probe.feedback.borrow().is_empty());
     assert_eq!(allocation.probe.retirements(), 1);
@@ -307,7 +312,7 @@ fn preparation_fallback_is_failed_provider_attempt_not_cpu_success() {
     prepared
         .into_execution()
         .1
-        .finish(&Ok(Value::Num(2.)))
+        .finish(Ok(&Value::Num(2.)))
         .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
@@ -333,7 +338,7 @@ fn cancellation_flag_prevents_a_success_sample() {
     prepared
         .into_execution()
         .1
-        .finish(&Ok(Value::Num(1.)))
+        .finish(Ok(&Value::Num(1.)))
         .unwrap();
     assert!(probe.feedback.borrow().is_empty());
 }
@@ -361,7 +366,7 @@ fn admitted_operation_passes_session_and_exact_identity_to_existing_planner() {
     prepared
         .into_execution()
         .1
-        .finish(&Ok(Value::Num(1.)))
+        .finish(Ok(&Value::Num(1.)))
         .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);

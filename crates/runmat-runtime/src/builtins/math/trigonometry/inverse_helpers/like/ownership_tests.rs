@@ -21,11 +21,14 @@ fn pending_like_adaptation_owns_fresh_intermediate_and_preserves_caller_alias() 
         Value::GpuTensor(input.handle.clone()),
         Some(&input.handle),
         &Template::Default,
-        move |_value, _protected| async move { Ok(Value::GpuTensor(output.handle)) },
+        move |_value, _protected| async move {
+            RootedValue::new(Value::GpuTensor(output.handle))
+                .map_err(|cause| cause.into_runtime_error())
+        },
         |value, protected| async move {
             std::future::pending::<()>().await;
             drop(protected);
-            Ok(value)
+            RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
         },
     ));
     assert!(future
@@ -44,14 +47,20 @@ fn pending_like_adaptation_owns_fresh_intermediate_and_preserves_caller_alias() 
 fn like_output_adoption_and_replacement_use_actual_value_ownership() {
     let owner = TestAllocationOwner::new();
     let allocation = allocate(&owner);
-    let output = block_on(evaluate(
-        Value::Num(0.0),
-        None,
-        &Template::Default,
-        move |_, _| async move { Ok(Value::GpuTensor(allocation.handle)) },
-        |value, _| async move { Ok(value) },
-    ))
-    .unwrap();
+    let output =
+        block_on(evaluate(
+            Value::Num(0.0),
+            None,
+            &Template::Default,
+            move |_, _| async move {
+                RootedValue::new(Value::GpuTensor(allocation.handle))
+                    .map_err(|cause| cause.into_runtime_error())
+            },
+            |value, _| async move {
+                RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
+            },
+        ))
+        .unwrap();
     assert_eq!(allocation.probe.retirements(), 0);
     drop(output);
     assert_eq!(allocation.probe.retirements(), 1);
@@ -60,14 +69,17 @@ fn like_output_adoption_and_replacement_use_actual_value_ownership() {
         Value::Num(0.0),
         None,
         &Template::Default,
-        move |_, _| async move { Ok(Value::GpuTensor(allocation.handle)) },
+        move |_, _| async move {
+            RootedValue::new(Value::GpuTensor(allocation.handle))
+                .map_err(|cause| cause.into_runtime_error())
+        },
         |value, _| async move {
             drop(value);
-            Ok(Value::Num(1.0))
+            RootedValue::new(Value::Num(1.0)).map_err(|cause| cause.into_runtime_error())
         },
     ))
     .unwrap();
-    assert!(matches!(output, Value::Num(1.0)));
+    assert!(matches!(output.value(), Value::Num(1.0)));
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
@@ -80,7 +92,10 @@ fn like_adaptation_error_releases_result_without_consuming_borrowed_caller() {
         Value::GpuTensor(input.handle.clone()),
         Some(&input.handle),
         &Template::Default,
-        move |_, _| async move { Ok(Value::GpuTensor(output.handle)) },
+        move |_, _| async move {
+            RootedValue::new(Value::GpuTensor(output.handle))
+                .map_err(|cause| cause.into_runtime_error())
+        },
         |value, _| async move {
             drop(value);
             Err(crate::build_runtime_error("fixture adaptation failed").build())

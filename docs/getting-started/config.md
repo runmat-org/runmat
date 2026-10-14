@@ -203,6 +203,7 @@ The table name must match the module name recorded by the manifest. The filename
 | --- | --- | --- | --- | --- |
 | `isolation` | string | `"process"` | `process`, `in_process` | Runs shared-library calls in a same-executable child host by default. `in_process` is an explicit trusted-code opt-in. |
 | `timeout_ms` | positive integer | unset | — | Terminates the isolated native-library host when one invocation exceeds the configured duration. An unset value applies no automatic invocation deadline; cancellation still terminates the host. |
+| `timeout` | table | unset | `{ secs = ..., nanos = ... }` | An exact-duration alternative to `timeout_ms`. The duration must be positive and `nanos` must be below 1,000,000,000. Specify only one timeout representation. |
 
 Process isolation contains native crashes and hangs but does not reduce the library's operating-system permissions. Packaged standalone programs and distributed workers always use the process boundary. See [Native Library Interfaces](/docs/execution/native-libraries) for preparation, packaging, callbacks, and pointer lifetime behavior.
 
@@ -236,6 +237,10 @@ path = "lib/analysis.jar"
 | `minimum_version` | string | `"3.9"` | `major.minor` | Rejects an older interpreter before startup. |
 | `maximum_version` | string | unset | `major.minor` | Rejects a newer interpreter before startup. |
 | `execution_mode` | string | `"in_process"` | `in_process`, `out_of_process` | Chooses direct in-process execution or an isolated child mode of the same `runmat` executable. |
+| `exact_version` | table | unset | `{ major = ..., minor = ..., patch = ... }` | Pins the complete CPython version, in addition to the feature-version bounds. |
+| `required_abi_tag` | string | unset | — | Requires the ABI tag reported by the selected interpreter. |
+| `required_platform_tag` | string | unset | — | Requires the platform tag reported by the selected interpreter. |
+| `module_paths` | array of paths | `[]` | — | Adds host-local import roots. Custom roots are not portable package artifacts; remote execution rejects paths it cannot authenticate and materialize. |
 
 Use `[python-artifacts.<name>]` for a wheel that belongs to the project. `path` is a project-relative `.whl` file and `module` is its top-level import name:
 

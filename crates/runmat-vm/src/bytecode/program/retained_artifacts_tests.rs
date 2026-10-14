@@ -74,6 +74,25 @@ fn limits() -> RetainedCallableStageLimits {
 }
 
 #[test]
+fn retained_publication_requires_a_canonical_admitted_source_product() {
+    let runtime = runtime();
+    let fixture = unit(&runtime, b"test-only-source", ["primary", "helper"]);
+    let staged = prepare_retained_callable_units(
+        &runtime,
+        &FunctionRegistry::default(),
+        vec![fixture.unit],
+        limits(),
+    )
+    .expect("test-only body may be inspected during staging");
+    assert!(matches!(
+        staged.into_parts(),
+        Err(RetainedCallableStageError::RetainedSourceOwner(
+            "staged imported unit has no canonical V3 product"
+        ))
+    ));
+}
+
+#[test]
 fn overlapping_originating_ids_are_fresh_and_retained_only() {
     let runtime = runtime();
     let destination = FunctionRegistry::new(HashMap::from([(
@@ -414,7 +433,8 @@ fn same_origin_and_body_with_different_local_packaging_is_deduplicated() {
             .values()
             .cloned()
             .map(|mut body| {
-                function_remap::remap_closed_function(&mut body, &local_remap);
+                function_remap::remap_closed_function(&mut body, &local_remap)
+                    .expect("closed local projection");
                 (body.function, body)
             })
             .collect(),

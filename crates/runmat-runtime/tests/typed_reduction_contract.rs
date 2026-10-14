@@ -40,17 +40,26 @@ fn receipt(
     }))
     .map_err(Box::new)
 }
-fn host(name: &str, input: &Value, controls: &[Value]) -> Result<Value, Box<RuntimeError>> {
+fn host(
+    name: &str,
+    input: &Value,
+    controls: &[Value],
+) -> Result<runmat_runtime::execution::RootedValue, Box<RuntimeError>> {
     let mut args = vec![input.clone()];
     args.extend_from_slice(controls);
     let result = block_on(call_builtin_async_with_outputs(name, &args, 1)).map_err(Box::new)?;
-    Ok(match result {
-        Value::OutputList(mut outputs) => {
-            assert_eq!(outputs.len(), 1, "{name}: exactly one requested result");
-            outputs.remove(0)
-        }
-        value => value,
-    })
+    result.try_map_owned(
+        |value| -> Result<Value, Box<RuntimeError>> {
+            Ok(match value {
+                Value::OutputList(mut outputs) => {
+                    assert_eq!(outputs.len(), 1, "{name}: exactly one requested result");
+                    outputs.remove(0)
+                }
+                value => value,
+            })
+        },
+        |error| Box::new(error.into_runtime_error()),
+    )
 }
 fn array(single: bool, data: &[f64], shape: &[usize]) -> Value {
     if single {

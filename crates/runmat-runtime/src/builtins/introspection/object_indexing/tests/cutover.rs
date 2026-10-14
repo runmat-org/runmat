@@ -38,9 +38,8 @@ fn requested_cell_outputs_preserve_nested_resident_values_without_provider_acces
     let path = substruct("{}", cell(vec![Value::String(":".into())]));
     for count in [0, 1, 2] {
         let _guard = crate::output_count::push_output_count(Some(count));
-        let Value::OutputList(values) =
-            block_on(subsref_builtin(source.clone(), path.clone())).unwrap()
-        else {
+        let result = block_on(subsref_builtin(source.clone(), path.clone())).unwrap();
+        let Value::OutputList(values) = result.value() else {
             panic!("explicit output carrier");
         };
         assert_eq!(values.len(), count);

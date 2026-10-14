@@ -236,12 +236,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.access.poll(wgpu::Maintain::Poll);
         let (out_buffer, out_len) = self.with_emission(|emission, pending| -> Result<_> {
-            let flush_enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-flush-single-pass-gap"),
-                    });
+            let flush_enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flush-single-pass-gap"),
+                },
+            );
             self.submit(emission, pending, flush_enc)?;
             let out_len = num_slices.max(1);
             let mut out_buffer = self.create_storage_buffer_checked_with_usage(
@@ -294,9 +294,7 @@ impl WgpuProvider {
                 std::mem::size_of::<Params>() as u64,
                 "runmat-reduction-params",
             )?;
-            emission
-                .queue()
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
             let mut input_bufs: Vec<(runmat_accelerate_api::WgpuBufferOwner, u64)> =
                 Vec::with_capacity(inputs.len());
@@ -320,12 +318,12 @@ impl WgpuProvider {
                             mapped_at_creation: false,
                         }),
                     );
-                    let mut enc =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-fused-input-snapshot-copy"),
-                            });
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fused-input-snapshot-copy"),
+                        },
+                    );
                     enc.copy_buffer_to_buffer(buf.as_ref(), 0, snap.as_ref(), 0, *bytes);
                     self.submit(emission, pending, enc)?;
                     bind_input_bufs.push(snap);
@@ -528,12 +526,12 @@ impl WgpuProvider {
         };
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
-            let flush_enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-flush-before-pass1"),
-                    });
+            let flush_enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flush-before-pass1"),
+                },
+            );
             self.submit(emission, pending, flush_enc)?;
             crate::backend::wgpu::dispatch::reduction::warmup_noop_after_pass2(
                 emission,
@@ -577,12 +575,12 @@ impl WgpuProvider {
                             mapped_at_creation: false,
                         }),
                     );
-                    let mut enc =
-                        emission
-                            .device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-fused-p1-input-snapshot-copy"),
-                            });
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fused-p1-input-snapshot-copy"),
+                        },
+                    );
                     enc.copy_buffer_to_buffer(input_buf.as_ref(), 0, snap.as_ref(), 0, bytes);
                     self.submit(emission, pending, enc)?;
                     snap
@@ -701,9 +699,7 @@ impl WgpuProvider {
                     "runmat-reduction-p2-params",
                 )?;
 
-                emission
-                    .queue()
-                    .write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
+                emission.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
                 let scale_value = flavor.scale(reduce_len);
                 match self.precision {
                     NumericPrecision::F64 => {
@@ -714,9 +710,7 @@ impl WgpuProvider {
                             _pad: 0,
                             scale: scale_value,
                         };
-                        emission
-                            .queue()
-                            .write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+                        emission.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
                     }
                     NumericPrecision::F32 => {
                         let p2u = P2F32 {
@@ -725,9 +719,7 @@ impl WgpuProvider {
                             flags,
                             scale: scale_value as f32,
                         };
-                        emission
-                            .queue()
-                            .write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+                        emission.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
                     }
                 }
                 let entries_bg1 = vec![

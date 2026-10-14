@@ -99,7 +99,9 @@ async fn initialized_network(
     runtime: Option<&crate::context::RuntimeContext>,
     source: &Value,
     caller: TrainingCaller,
-) -> BuiltinResult<ObjectInstance> {
+) -> BuiltinResult<(ObjectInstance, crate::execution::RootedValueLease)> {
+    let _source_roots = crate::execution::RootedValueLease::for_values(std::iter::once(source))
+        .map_err(|error| error.into_runtime_error())?;
     let function = caller.function();
     if let Value::Object(existing) = source {
         if model::is_deep_learning_network_object(existing) {
@@ -107,13 +109,17 @@ async fn initialized_network(
             let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
                 return Err(fail(function, "network is missing Layers"));
             };
-            model::initialise_layers_in_runtime(runtime, &mut layers.data, function).await?;
+            let _initialized_roots =
+                model::initialise_layers_in_runtime(runtime, &mut layers.data, function).await?;
             model::state::initialize_missing(&mut network, function)?;
-            return Ok(network);
+            let roots = crate::execution::RootedValueLease::for_traced(&network)
+                .map_err(|error| error.into_runtime_error())?;
+            return Ok((network, roots));
         }
     }
     let mut layers = model::layers_from_network_value(source.clone(), function)?;
-    model::initialise_layers_in_runtime(runtime, &mut layers, function).await?;
+    let _initialized_roots =
+        model::initialise_layers_in_runtime(runtime, &mut layers, function).await?;
     let class = match caller {
         TrainingCaller::Trainnet => model::DLNETWORK_CLASS,
         TrainingCaller::TrainNetwork => {
@@ -129,7 +135,9 @@ async fn initialized_network(
     else {
         unreachable!("network constructor produces an object")
     };
-    Ok(network)
+    let roots = crate::execution::RootedValueLease::for_traced(&network)
+        .map_err(|error| error.into_runtime_error())?;
+    Ok((network, roots))
 }
 
 fn attach_training_result(
@@ -174,7 +182,10 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
     source: &Value,
     declared_loss: Option<LossKind>,
     config: TrainingConfig,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _argument_roots =
+        crate::execution::RootedValueLease::for_values([input, target, source].into_iter())
+            .map_err(|error| error.into_runtime_error())?;
     let function = caller.function();
     let layers = model::layers_from_network_ref(source, function)?;
     model::validate_forward_layers(layers, function)?;
@@ -202,7 +213,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         loss_kind == LossKind::Classification,
         function,
     )?;
-    let mut network = initialized_network(runtime, source, caller).await?;
+    let (mut network, mut network_roots) = initialized_network(runtime, source, caller).await?;
     let full_input = {
         let full_plan = HostNetworkPlan::admit(&network, input, function)?;
         let HostValue::Real(full_input) = full_plan.prepare_input(input).await? else {
@@ -277,7 +288,10 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
             else {
                 unreachable!("parameter owner returns a network object")
             };
+            let updated_roots = crate::execution::RootedValueLease::for_traced(&updated)
+                .map_err(|error| error.into_runtime_error())?;
             network = updated;
+            network_roots = updated_roots;
             epoch_loss += loss.value * indices.len() as f64;
             seen += indices.len();
         }
@@ -300,5 +314,9 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
     } else {
         None
     };
-    output_network(Value::Object(network), info, function, requested_outputs)
+    let output = output_network(Value::Object(network), info, function, requested_outputs)?;
+    let rooted =
+        crate::execution::RootedValue::new(output).map_err(|error| error.into_runtime_error())?;
+    drop(network_roots);
+    Ok(rooted)
 }

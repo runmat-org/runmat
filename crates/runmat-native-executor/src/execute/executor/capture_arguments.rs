@@ -62,10 +62,14 @@ mod tests {
 
     fn body() -> runmat_native_codegen::NativeFunction {
         runmat_native_codegen::NativeFunction {
+            lexical_bindings: Vec::new(),
+            inherited_storage_bindings: Vec::new(),
+            creates_lexical_environment: false,
             id: ProgramFunctionId(4),
             source: ProgramSourceId(0),
             name: "nested".into(),
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            lexical_parent: None,
             class_method_owner: None,
             capabilities: Default::default(),
             abi: NativeFunctionAbi {

@@ -667,6 +667,8 @@ impl GarbageCollector {
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
         let _admission = ROOT_ADMISSION.write();
+        let raw = Self::non_null_value_ptr(&root)?;
+        self.validate_value_handle(&root, raw)?;
         let mut roots = self.root_ptrs.lock();
         *roots.entry(root).or_insert(0) += 1;
         Ok(())

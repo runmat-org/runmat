@@ -36,7 +36,7 @@ fn run_weboptions(rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<crate::execution::RootedValue> {
     let runtime = crate::builtins::io::http::transport::test_runtime_context();
     futures::executor::block_on(call_builtin_async_in_context(&runtime, name, args))
 }
@@ -395,7 +395,7 @@ fn webread_uses_weboptions_without_polluting_query() {
 
     let args = vec![Value::from(url.clone()), options];
     let result = run_call_builtin("webread", &args).expect("webread with options");
-    match result {
+    match result.value() {
         Value::Struct(reply) => {
             assert!(matches!(reply.fields.get("ok"), Some(Value::Bool(true))));
         }
@@ -457,7 +457,7 @@ fn webwrite_uses_weboptions_auto_request_method() {
 
     let args = vec![Value::from(url), payload, options];
     let result = run_call_builtin("webwrite", &args).expect("webwrite with weboptions");
-    match result {
+    match result.value() {
         Value::Struct(reply) => {
             assert!(matches!(reply.fields.get("ack"), Some(Value::Bool(true))));
         }

@@ -8,6 +8,7 @@ pub use contract::BFSEARCH_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&BFSEARCH_CATALOG_ENTRY];
 
 pub const BFSEARCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "bfsearch" },
     category: "graph",

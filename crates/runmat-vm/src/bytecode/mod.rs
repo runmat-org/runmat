@@ -1,12 +1,12 @@
 mod artifact;
-#[cfg(feature = "native-accel")]
-mod multi_store;
-#[cfg(feature = "native-accel")]
-mod fusion_stage;
+pub mod compile;
 #[cfg(feature = "native-accel")]
 pub(crate) mod fusion_private_temp;
-pub mod compile;
+#[cfg(feature = "native-accel")]
+mod fusion_stage;
 pub mod instr;
+#[cfg(feature = "native-accel")]
+mod multi_store;
 mod parallel;
 pub mod program;
 mod region;
@@ -16,9 +16,9 @@ mod statement_pc;
 mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 15;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 17;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 11;
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 15;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,
@@ -46,12 +46,13 @@ pub use multi_store::{
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{
-    rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
+    rebind_session_source, remap_closed_session_function, remap_decorated_session_definitions,
+    remap_session_entrypoint, remap_session_function, SessionCallableBinding,
 };
 pub use program::{
     semantic_definition_fingerprint, AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode,
-    FunctionRegistry, FunctionSourceProjectionError, PrivateSourceAlias, PrivateSourceDirectory,
-    SpawnSite,
+    FunctionRegistry, FunctionSourceProjectionError, InheritedStorageKind, InheritedStorageSlot,
+    PrivateSourceAlias, PrivateSourceDirectory, PublishedNameResolutionView, SpawnSite,
 };
 #[cfg(feature = "native-accel")]
 pub use program::{

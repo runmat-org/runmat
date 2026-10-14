@@ -3784,13 +3784,13 @@ fn function_surface_function_value(
 ) -> BuiltinResult<Value> {
     Ok(match function {
         super::state::FunctionSurfaceFunctionRef::FunctionHandle(name) => {
-            Value::FunctionHandle(name.clone())
+            Value::function_handle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::ExternalFunctionHandle(name) => {
-            Value::ExternalFunctionHandle(name.clone())
+            Value::external_function_handle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::MethodFunctionHandle(name) => {
-            Value::MethodFunctionHandle(name.clone())
+            Value::method_function_handle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::OwnedCallable(token) => {
             return super::state::callbacks::resolve(token, builtin);

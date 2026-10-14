@@ -139,6 +139,7 @@ fn worker_uses_captured_output_provider_not_thread_ambient_provider() {
         input,
         PathBuf::from("/captured-output"),
         None,
+        None,
         provider.clone(),
         None,
     ))
@@ -178,6 +179,7 @@ fn revoked_worker_lease_rejects_before_opening_or_parsing_source() {
     let error = block_on(extract_archive_file_on_worker(
         input,
         output.path().to_path_buf(),
+        None,
         None,
         vfs::current_provider(),
         Some(std::sync::Arc::new(Revoked(valid))),

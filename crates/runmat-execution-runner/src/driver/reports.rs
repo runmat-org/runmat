@@ -38,6 +38,44 @@ impl Driver {
             self.discard_backend_report(report, "attempt is already terminal", actions);
             return Ok(());
         }
+        let cancelling_graph = attempt.cancellation_requested_at.is_some()
+            && matches!(
+                &attempt.request.task.callable.program,
+                runmat_execution::ProgramCallable::GraphTarget { .. }
+            );
+        if matches!(&report.report, AttemptReport::GraphRetiredCancelled) && !cancelling_graph {
+            self.discard_backend_report(
+                report,
+                "Graph retirement certificate lacks an active cancellation",
+                actions,
+            );
+            return Ok(());
+        }
+        if cancelling_graph
+            && !matches!(
+                &report.report,
+                AttemptReport::Started
+                    | AttemptReport::GraphRetiredCancelled
+                    | AttemptReport::RetirementUnverified { .. }
+            )
+        {
+            // A generic Lost, Failed, Success, or Cancelled report does not
+            // certify Graph worker retirement. Fail closed without replay or
+            // masking uncertainty as ordinary cancellation.
+            if let AttemptReport::Succeeded { result } = &report.report {
+                actions.push(DriverAction::GarbageCollectResults {
+                    task_id: report.task_id,
+                    objects: result.result_objects().to_vec(),
+                });
+            }
+            self.finish_attempt(&attempt, AttemptState::Lost)?;
+            self.emit(DriverEventKind::AttemptLost {
+                task_id: report.task_id,
+                attempt_id: report.attempt_id,
+            });
+            self.transition_task(report.task_id, TaskState::Indeterminate)?;
+            return Ok(());
+        }
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
@@ -90,6 +128,24 @@ impl Driver {
                     attempt_id: report.attempt_id,
                 });
                 self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
+            }
+            AttemptReport::RetirementUnverified { .. } => {
+                self.finish_attempt(&attempt, AttemptState::Lost)?;
+                self.emit(DriverEventKind::AttemptLost {
+                    task_id: report.task_id,
+                    attempt_id: report.attempt_id,
+                });
+                if !self.task_is_terminal(report.task_id)? {
+                    self.transition_task(report.task_id, TaskState::Indeterminate)?;
+                }
+            }
+            AttemptReport::GraphRetiredCancelled => {
+                self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                self.emit(DriverEventKind::AttemptCancelled {
+                    task_id: report.task_id,
+                    attempt_id: report.attempt_id,
+                });
+                self.transition_task(report.task_id, TaskState::Cancelled)?;
             }
             AttemptReport::Cancelled => {
                 self.finish_attempt(&attempt, AttemptState::Cancelled)?;

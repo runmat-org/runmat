@@ -16,6 +16,7 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 pub(crate) const ENTRIES: &[&BuiltinCatalogEntry] = &[&WARNING_CATALOG_ENTRY];
 
 pub const WARNING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "warning" },
     category: "diagnostics",

@@ -4,6 +4,7 @@ use std::pin::Pin;
 
 use runmat_value::Value;
 
+use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::{
     ObjectIndexKind, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
@@ -19,7 +20,7 @@ pub(super) async fn read_default_step_sequence(
     base: Value,
     step: &ObjectSubscript,
     caller: Option<&str>,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     match step.kind() {
         ObjectIndexKind::Member => {
             let ObjectIndexSelector::Member(member) = step.selector() else {
@@ -36,10 +37,13 @@ pub(super) async fn read_default_step_sequence(
         }
         ObjectIndexKind::Brace => read_brace_sequence(runtime, base, step).await,
         ObjectIndexKind::Paren => read_default_step(runtime, base, step, caller)
-            .await
-            .and_then(|value| {
-                ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
-            }),
+            .await?
+            .try_map_owned(
+                |value| {
+                    ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            ),
     }
 }
 
@@ -49,8 +53,12 @@ pub(super) fn assign_default_steps<'a>(
     mut steps: VecDeque<ObjectSubscript>,
     values: Vec<Value>,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
+        let _inputs_root = crate::execution::RootedValueLease::for_values(
+            std::iter::once(&base).chain(values.iter()),
+        )
+        .map_err(|error| error.into_runtime_error())?;
         let step = steps.pop_front().ok_or_else(invalid_path)?;
         if steps.is_empty() {
             return write_default_step(runtime, base, step, values, caller).await;
@@ -59,12 +67,21 @@ pub(super) fn assign_default_steps<'a>(
         let remaining = ObjectSubscriptPath::new(steps.into_iter().collect())?;
         let updated = match runtime {
             Some(runtime) => {
-                super::assign_subscript_path_in_context(runtime, child, remaining, values, caller)
+                super::assign_subscript_path_in_context(
+                    runtime,
+                    child.value().clone(),
+                    remaining,
+                    values,
+                    caller,
+                )
+                .await?
+            }
+            None => {
+                super::assign_subscript_path(child.value().clone(), remaining, values, caller)
                     .await?
             }
-            None => super::assign_subscript_path(child, remaining, values, caller).await?,
         };
-        write_default_step(runtime, base, step, vec![updated], caller).await
+        write_default_step(runtime, base, step, vec![updated.value().clone()], caller).await
     })
 }
 
@@ -73,13 +90,13 @@ pub(super) async fn read_default_step(
     base: Value,
     step: &ObjectSubscript,
     caller: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match step.kind() {
         ObjectIndexKind::Member => {
             let ObjectIndexSelector::Member(member) = step.selector() else {
                 return Err(invalid_selector());
             };
-            let mut values = crate::object::resolve::read_member_sequence_with_context(
+            crate::object::resolve::read_member_sequence_with_context(
                 runtime,
                 base,
                 member.0.clone(),
@@ -87,24 +104,35 @@ pub(super) async fn read_default_step(
                 caller,
             )
             .await?
-            .resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                SequenceResolutionContext::default(),
-            )?;
-            values.pop().ok_or_else(single_value_error)
+            .try_map_owned(
+                |sequence| {
+                    let mut values = sequence.resolve(
+                        runmat_types::SequenceUse::RequireSingle,
+                        SequenceResolutionContext::default(),
+                    )?;
+                    values.pop().ok_or_else(single_value_error)
+                },
+                |error| error.into_runtime_error(),
+            )
         }
         ObjectIndexKind::Paren => {
             let values = index_values(step)?;
             let plan = plan_for(&base, values, false).await?;
-            crate::indexing::value::read_with_plan(base, &plan)
+            RootedValue::new(crate::indexing::value::read_with_plan(base, &plan)?)
+                .map_err(|error| error.into_runtime_error())
         }
-        ObjectIndexKind::Brace => {
-            let mut values = read_brace_sequence(runtime, base, step).await?.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                SequenceResolutionContext::default(),
-            )?;
-            values.pop().ok_or_else(single_value_error)
-        }
+        ObjectIndexKind::Brace => read_brace_sequence(runtime, base, step)
+            .await?
+            .try_map_owned(
+                |sequence| {
+                    let mut values = sequence.resolve(
+                        runmat_types::SequenceUse::RequireSingle,
+                        SequenceResolutionContext::default(),
+                    )?;
+                    values.pop().ok_or_else(single_value_error)
+                },
+                |error| error.into_runtime_error(),
+            ),
     }
 }
 
@@ -112,19 +140,19 @@ async fn read_brace_sequence(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: &ObjectSubscript,
-) -> Result<ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
+    let _base_root = crate::execution::RootedValueLease::for_values(std::iter::once(&base))
+        .map_err(|error| error.into_runtime_error())?;
     let indices = protocol_values(index_values(step)?);
-    let values = match base {
+    match base {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_) => {
-            return Err(semantic_error(
-                "UnsupportedFunctionHandleSelector",
-                "Function handle call does not support brace selector syntax",
-            ));
-        }
+        | Value::BoundFunctionHandle(_)
+        | Value::Closure(_) => Err(semantic_error(
+            "UnsupportedFunctionHandleSelector",
+            "Function handle call does not support brace selector syntax",
+        )),
         Value::Composite(handle) => {
             let runtime = runtime.ok_or_else(|| {
                 semantic_error(
@@ -132,22 +160,32 @@ async fn read_brace_sequence(
                     "Composite brace indexing requires a selected runtime",
                 )
             })?;
-            vec![
-                crate::parallel::composite::read_composite_entry(runtime, *handle, &indices)
-                    .await?,
-            ]
+            crate::parallel::composite::read_composite_entry(runtime, *handle, &indices)
+                .await?
+                .try_map_owned(
+                    |value| {
+                        ValueSequence::comma_separated(vec![value])
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                )
         }
         base @ (Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)) => {
-            crate::call::arguments::expand_brace_values(base, &indices, None).await?
+            crate::call::arguments::expand_brace_values(base, &indices, None)
+                .await?
+                .with_owned_values(|values| {
+                    RootedValueSequence::new(
+                        ValueSequence::comma_separated(values)
+                            .map_err(crate::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
+                })
         }
-        _ => {
-            return Err(semantic_error(
-                "CellIndexingOnNonCell",
-                "Cell indexing on non-cell",
-            ));
-        }
-    };
-    ValueSequence::comma_separated(values).map_err(crate::sequence::sequence_error_to_runtime)
+        _ => Err(semantic_error(
+            "CellIndexingOnNonCell",
+            "Cell indexing on non-cell",
+        )),
+    }
 }
 
 async fn write_default_step(
@@ -156,7 +194,10 @@ async fn write_default_step(
     step: ObjectSubscript,
     values: Vec<Value>,
     caller: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
+    let _inputs_root =
+        crate::execution::RootedValueLease::for_values(std::iter::once(&base).chain(values.iter()))
+            .map_err(|error| error.into_runtime_error())?;
     match step.kind() {
         ObjectIndexKind::Member => {
             let ObjectIndexSelector::Member(member) = step.selector() else {
@@ -192,7 +233,10 @@ async fn write_default_step(
                 ));
             };
             let plan = plan_for(&base, index_values(&step)?, true).await?;
-            crate::indexing::value::assign_with_plan(base, &plan, rhs.clone()).await
+            RootedValue::new(
+                crate::indexing::value::assign_with_plan(base, &plan, rhs.clone()).await?,
+            )
+            .map_err(|error| error.into_runtime_error())
         }
         ObjectIndexKind::Brace => {
             crate::sequence::destination::endpoint::assign_cell_contents_with_context(

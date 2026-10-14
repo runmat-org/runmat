@@ -547,7 +547,7 @@ fn is_function_handle(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -1141,7 +1141,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(x, y))) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f(x, y),
+                    ))
+                })
             },
         )));
         drop(entry);

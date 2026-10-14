@@ -2583,6 +2583,35 @@ fn feval_lowers_to_dynamic_mir_callee() {
 }
 
 #[test]
+fn feval_after_external_workspace_effect_keeps_static_workspace_first_fallback() {
+    let mir = lower_mir("run('setup.m'); f = @sin; y = feval(f, 0);");
+    let call = mir
+        .bodies
+        .values()
+        .flat_map(|body| body.blocks.iter())
+        .flat_map(|block| &block.statements)
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } if call
+                .workspace_first_name
+                .as_ref()
+                .is_some_and(|name| name.0 == "feval") =>
+            {
+                Some(call)
+            }
+            _ => None,
+        })
+        .expect("workspace-first feval call");
+    assert!(matches!(
+        &call.callee,
+        MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == "feval"
+    ));
+    assert_eq!(call.args.len(), 2, "feval's target remains an argument");
+}
+
+#[test]
 fn unverified_qualified_function_handle_preserves_dynamic_identity_operand() {
     let mir = lower_mir("h = @Point.origin; y = feval(h);");
     let body = mir.bodies.values().next().expect("body");

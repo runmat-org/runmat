@@ -101,8 +101,8 @@ fn handle_name(handle: &Value) -> Option<String> {
     match handle {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.clone()),
-        Value::BoundFunctionHandle { name, .. } => Some(name.clone()),
+        | Value::MethodFunctionHandle(name) => Some(name.name().to_owned()),
+        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
         Value::Closure(closure) => Some(closure.function_name.clone()),
         _ => None,
     }
@@ -129,12 +129,16 @@ mod tests {
             ("teardown", 5),
         ]
         .into_iter()
-        .map(|(name, function)| Value::BoundFunctionHandle {
-            name: name.into(),
-            function,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(function),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
+        .map(|(name, function)| {
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: name.into(),
+                    function,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(function),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            ))
         })
         .collect();
         let input = Value::Cell(CellArray::new(handles, 1, 5).unwrap());

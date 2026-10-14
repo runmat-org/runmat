@@ -2,6 +2,7 @@ mod error_map;
 mod shorthand;
 
 use crate::builtins::common::mapped_callable::MappedCallable;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_value::Value;
 
@@ -31,7 +32,11 @@ impl Callable {
             .map_err(error_map::parse)
     }
 
-    pub(super) async fn call(&self, arguments: &[Value], outputs: usize) -> BuiltinResult<Value> {
+    pub(super) async fn call(
+        &self,
+        arguments: &[Value],
+        outputs: usize,
+    ) -> BuiltinResult<RootedValue> {
         match self {
             Self::Mapped(callable) => callable
                 .invoke_with_outputs(arguments, outputs)
@@ -39,7 +44,8 @@ impl Callable {
                 .map_err(error_map::call),
             Self::Shorthand(callable) => {
                 self.validate_outputs(outputs)?;
-                callable.call(arguments).await
+                RootedValue::new(callable.call(arguments).await?)
+                    .map_err(|error| error.into_runtime_error())
             }
         }
     }

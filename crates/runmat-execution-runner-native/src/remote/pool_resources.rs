@@ -15,6 +15,8 @@ pub(super) fn inventory(
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes,
         accelerators: accelerator_devices.to_vec(),
+        // Allocation resources are requested capacity, not authenticated
+        // evidence of the launched worker binary's V11 support.
         capabilities: Default::default(),
     };
     inventory

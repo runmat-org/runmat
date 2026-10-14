@@ -185,5 +185,6 @@ pub(super) fn plan(
             prepared_kernel_requested_bytes: planned_kernel.then_some(prepared_kernel_bytes),
         },
         submissions,
+        compute_encoders: 0,
     })
 }

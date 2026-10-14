@@ -133,17 +133,17 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
     .unwrap();
     let array = call_builtin(
         "Dataset.array",
-        &[dataset.clone(), Value::String("sample".into())],
+        &[dataset.value().clone(), Value::String("sample".into())],
     )
     .unwrap();
-    let transaction = call_builtin("Dataset.begin", std::slice::from_ref(&dataset)).unwrap();
+    let transaction = call_builtin("Dataset.begin", std::slice::from_ref(dataset.value())).unwrap();
     let manifest_path = root.join("arity.data/manifest.json");
     let before = provider.read_project_path(&manifest_path).unwrap();
     for (name, arguments) in [
         (
             "Dataset.get_attr",
             vec![
-                dataset.clone(),
+                dataset.value().clone(),
                 Value::String("k".into()),
                 Value::Num(1.0),
                 Value::Num(2.0),
@@ -151,12 +151,12 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         ),
         (
             "Dataset.begin",
-            vec![dataset.clone(), Value::String("ignored".into())],
+            vec![dataset.value().clone(), Value::String("ignored".into())],
         ),
         (
             "Dataset.snapshot",
             vec![
-                dataset.clone(),
+                dataset.value().clone(),
                 Value::String("label".into()),
                 Value::String("ignored".into()),
             ],
@@ -164,7 +164,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataArray.read",
             vec![
-                array.clone(),
+                array.value().clone(),
                 Value::String(":".into()),
                 Value::String(":".into()),
             ],
@@ -172,7 +172,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataArray.resize",
             vec![
-                array.clone(),
+                array.value().clone(),
                 Value::Num(2.0),
                 Value::String("ignored".into()),
             ],
@@ -180,7 +180,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataArray.fill",
             vec![
-                array.clone(),
+                array.value().clone(),
                 Value::Num(2.0),
                 Value::String("ignored".into()),
             ],
@@ -188,7 +188,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataTransaction.write",
             vec![
-                transaction.clone(),
+                transaction.value().clone(),
                 Value::String("sample".into()),
                 Value::String(":".into()),
                 Value::Num(2.0),
@@ -198,7 +198,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataTransaction.resize",
             vec![
-                transaction.clone(),
+                transaction.value().clone(),
                 Value::String("sample".into()),
                 Value::Num(2.0),
                 Value::String("ignored".into()),
@@ -207,7 +207,7 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         (
             "DataTransaction.fill",
             vec![
-                transaction.clone(),
+                transaction.value().clone(),
                 Value::String("sample".into()),
                 Value::Num(2.0),
                 Value::String(":".into()),
@@ -224,10 +224,18 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
         );
     }
     assert_eq!(
-        call_builtin("DataTransaction.status", std::slice::from_ref(&transaction)).unwrap(),
+        call_builtin(
+            "DataTransaction.status",
+            std::slice::from_ref(transaction.value())
+        )
+        .unwrap(),
         Value::String("open".into())
     );
-    assert!(call_builtin("DataTransaction.abort", &[transaction]).is_ok());
+    assert!(call_builtin(
+        "DataTransaction.abort",
+        std::slice::from_ref(transaction.value())
+    )
+    .is_ok());
 }
 
 #[test]
@@ -254,7 +262,7 @@ fn finite_uncertified_receiver_write_rejects_before_mutation() {
         &runtime,
         "Dataset.set_attr",
         &[
-            dataset,
+            dataset.value().clone(),
             Value::String("owner".into()),
             Value::String("changed".into()),
         ],
@@ -296,7 +304,7 @@ fn session_issued_dataset_survives_later_invocation_but_rejects_foreign_session(
         futures::executor::block_on(crate::call_builtin_async_in_context(
             &next_invocation,
             "Dataset.path",
-            std::slice::from_ref(&dataset)
+            std::slice::from_ref(dataset.value())
         ))
         .unwrap(),
         Value::String("session.data".into())
@@ -305,10 +313,10 @@ fn session_issued_dataset_survives_later_invocation_but_rejects_foreign_session(
     let error = futures::executor::block_on(crate::call_builtin_async_in_context(
         &foreign,
         "Dataset.path",
-        std::slice::from_ref(&dataset),
+        std::slice::from_ref(dataset.value()),
     ))
     .expect_err("separate session must not receive a sealed owner");
     assert_eq!(error.identifier.as_deref(), Some("RUNMAT:Data:Error"));
     drop(runtime);
-    assert!(call_builtin("Dataset.path", &[dataset]).is_err());
+    assert!(call_builtin("Dataset.path", std::slice::from_ref(dataset.value())).is_err());
 }

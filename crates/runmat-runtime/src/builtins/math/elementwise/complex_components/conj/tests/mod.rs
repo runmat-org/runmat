@@ -8,7 +8,7 @@ use runmat_value::{
 use super::*;
 
 fn conj_builtin(value: Value) -> BuiltinResult<Value> {
-    block_on(super::conj_builtin(value))
+    block_on(super::conj_builtin(None, value)).map(|owned| owned.value().clone())
 }
 
 #[cfg(feature = "wgpu")]

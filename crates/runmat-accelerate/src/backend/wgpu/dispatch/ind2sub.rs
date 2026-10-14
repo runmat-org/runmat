@@ -7,11 +7,12 @@ pub(crate) fn run(
     bind_group: &wgpu::BindGroup,
     workgroups: u32,
 ) -> anyhow::Result<()> {
-    let mut encoder = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut encoder = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-ind2sub-encoder"),
-        });
+        },
+    );
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-ind2sub-pass"),

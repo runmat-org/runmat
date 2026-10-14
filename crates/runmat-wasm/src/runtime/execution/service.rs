@@ -41,6 +41,74 @@ pub(crate) struct BrowserExecutionService {
     self_weak: RefCell<Weak<Self>>,
 }
 
+/// Keep the deferred source graph visible to GC while an arbitrary VM graph
+/// snapshot runs outside the RefCell borrow. Errors and unwinds restore only
+/// this exact reservation; a concurrent/reentrant cancellation wins.
+struct MaterializationGuard<'a> {
+    service: &'a BrowserExecutionService,
+    future_id: FutureId,
+    id: u64,
+    armed: bool,
+}
+
+struct GraphDecodeGuard<'a> {
+    service: &'a BrowserExecutionService,
+    future_id: FutureId,
+    graph: Rc<runmat_execution::value::PayloadGraph>,
+    receipt: Rc<dyn runmat_runtime::execution::GraphResultReceipt>,
+    armed: bool,
+}
+
+impl Drop for GraphDecodeGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let mut state = self.service.state.borrow_mut();
+        if matches!(
+            state.futures.get(&self.future_id),
+            Some(FutureState::ExecutingInCaller)
+        ) {
+            state.futures.insert(
+                self.future_id,
+                FutureState::GraphCompleted {
+                    graph: Rc::clone(&self.graph),
+                    receipt: Rc::clone(&self.receipt),
+                },
+            );
+        }
+    }
+}
+
+impl Drop for MaterializationGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let retired = {
+            let mut state = self.service.state.borrow_mut();
+            let Some(FutureState::Materializing {
+                id,
+                call,
+                cancelled,
+            }) = state.futures.get(&self.future_id)
+            else {
+                return;
+            };
+            if *id != self.id {
+                return;
+            }
+            let next = if *cancelled {
+                FutureState::Cancelled
+            } else {
+                FutureState::Deferred(Rc::clone(call))
+            };
+            state.futures.insert(self.future_id, next)
+        };
+        drop(retired);
+    }
+}
+
 impl BrowserExecutionService {
     pub(crate) fn new(
         host: Option<BrowserExecutionHost>,
@@ -105,6 +173,7 @@ impl BrowserExecutionService {
             state: RefCell::new(State {
                 next_future: 0,
                 next_task: 0,
+                next_materialization: 0,
                 next_completion: 0,
                 futures: Default::default(),
                 tasks: Default::default(),
@@ -222,7 +291,7 @@ impl BrowserExecutionService {
             );
             return;
         };
-        program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+        let assignment = runmat_execution::ProgramExecutionAssignment {
             scope_id: attempt.scope_id,
             pool_id: attempt.task.pool_id,
             task_id: attempt.task_id,
@@ -230,7 +299,15 @@ impl BrowserExecutionService {
             worker_id: attempt.worker_id,
             backend: self.pool_backend(),
             resources: attempt.resource_assignment.clone(),
-        });
+        };
+        match &mut program {
+            runmat_execution_artifact::WorkerProgramRequest::Direct(request) => {
+                request.assignment = Some(assignment)
+            }
+            runmat_execution_artifact::WorkerProgramRequest::Graph(request) => {
+                request.assignment = Some(assignment)
+            }
+        }
         let weak = self.self_weak.borrow().clone();
         let host = self.host.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -243,7 +320,7 @@ impl BrowserExecutionService {
                     )
                     .await
                 }
-                None => Ok(super::execute_local_program(program).await),
+                None => Ok(super::admission::execute_local_worker_program(program).await),
             };
             if let Some(service) = weak.upgrade() {
                 service.finish_attempt(attempt, response);
@@ -256,7 +333,33 @@ impl BrowserExecutionService {
         attempt: AttemptRequest,
         response: Result<ProgramExecutionResponse, String>,
     ) {
-        let (future_id, result, report) = match response {
+        let (selected_request, graph_receipt) = {
+            let state = self.state.borrow();
+            let selected_request = state.requests.get(&attempt.task_id).cloned();
+            let receipt = state
+                .tasks
+                .get(&attempt.task_id)
+                .and_then(|task| state.futures.get(&task.future_id))
+                .and_then(|future| match future {
+                    FutureState::Scheduled { receipt, .. } => receipt.clone(),
+                    _ => None,
+                });
+            (selected_request, receipt)
+        };
+        let response = response.and_then(|response| {
+            match selected_request.as_ref() {
+                Some(runmat_execution_artifact::WorkerProgramRequest::Direct(request)) => {
+                    response.validate_against(request)
+                }
+                Some(runmat_execution_artifact::WorkerProgramRequest::Graph(request)) => {
+                    request.validate_response(&response)
+                }
+                None => return Err("browser scheduler lost the exact program request".into()),
+            }
+            .map_err(|error| error.to_string())?;
+            Ok(response)
+        });
+        let (future_id, completion, report) = match response {
             Ok(ProgramExecutionResponse::Success { outputs }) => {
                 let decoded = outputs
                     .iter()
@@ -274,7 +377,41 @@ impl BrowserExecutionService {
                         result_objects: Vec::new(),
                     },
                 };
-                (self.future_id(attempt.task_id), decoded, report)
+                (
+                    self.future_id(attempt.task_id),
+                    FutureState::Completed(decoded),
+                    report,
+                )
+            }
+            Ok(ProgramExecutionResponse::GraphSuccess { graph }) => {
+                if let Some(receipt) = graph_receipt {
+                    let report = AttemptReport::Succeeded {
+                        result: AttemptSuccess::Graph {
+                            graph: graph.clone(),
+                        },
+                    };
+                    (
+                        self.future_id(attempt.task_id),
+                        FutureState::GraphCompleted {
+                            graph: Rc::new(graph),
+                            receipt,
+                        },
+                        report,
+                    )
+                } else {
+                    let message =
+                        "graph worker response has no selected result receipt".to_string();
+                    let result = Err(ExecutionServiceError::Infrastructure(message.clone()));
+                    let report = AttemptReport::Failed {
+                        kind: AttemptFailureKind::Infrastructure,
+                        message,
+                    };
+                    (
+                        self.future_id(attempt.task_id),
+                        FutureState::Completed(result),
+                        report,
+                    )
+                }
             }
             Ok(ProgramExecutionResponse::ExternalizedSuccess { .. }) => {
                 let message =
@@ -284,7 +421,11 @@ impl BrowserExecutionService {
                     kind: AttemptFailureKind::Rejected,
                     message,
                 };
-                (self.future_id(attempt.task_id), result, report)
+                (
+                    self.future_id(attempt.task_id),
+                    FutureState::Completed(result),
+                    report,
+                )
             }
             Ok(ProgramExecutionResponse::SpmdSuccess { .. }) => {
                 let message =
@@ -294,7 +435,11 @@ impl BrowserExecutionService {
                     kind: AttemptFailureKind::Rejected,
                     message,
                 };
-                (self.future_id(attempt.task_id), result, report)
+                (
+                    self.future_id(attempt.task_id),
+                    FutureState::Completed(result),
+                    report,
+                )
             }
             Ok(ProgramExecutionResponse::Failure { message }) => {
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
@@ -302,14 +447,26 @@ impl BrowserExecutionService {
                     kind: AttemptFailureKind::Execution,
                     message,
                 };
-                (self.future_id(attempt.task_id), result, report)
+                (
+                    self.future_id(attempt.task_id),
+                    FutureState::Completed(result),
+                    report,
+                )
             }
             Ok(ProgramExecutionResponse::RuntimeFailure { failure }) => {
-                let result = Err(ExecutionServiceError::RuntimeFailure(Box::new(
-                    failure.clone(),
-                )));
-                let report = AttemptReport::RuntimeFailed { failure };
-                (self.future_id(attempt.task_id), result, report)
+                let report = AttemptReport::RuntimeFailed {
+                    failure: failure.clone(),
+                };
+                let state = match graph_receipt {
+                    Some(receipt) => FutureState::GraphFailed {
+                        failure: Rc::new(failure),
+                        receipt,
+                    },
+                    None => FutureState::Completed(Err(ExecutionServiceError::RuntimeFailure(
+                        Box::new(failure),
+                    ))),
+                };
+                (self.future_id(attempt.task_id), state, report)
             }
             Err(message) => {
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
@@ -317,15 +474,18 @@ impl BrowserExecutionService {
                     kind: AttemptFailureKind::Infrastructure,
                     message,
                 };
-                (self.future_id(attempt.task_id), result, report)
+                (
+                    self.future_id(attempt.task_id),
+                    FutureState::Completed(result),
+                    report,
+                )
             }
         };
         let mut state = self.state.borrow_mut();
+        let mut retired = None;
         if let Some(future_id) = future_id {
             if !matches!(state.futures.get(&future_id), Some(FutureState::Cancelled)) {
-                state
-                    .futures
-                    .insert(future_id, FutureState::Completed(result));
+                retired = state.futures.insert(future_id, completion);
                 record_browser_completion(&mut state, attempt.task_id);
             }
         }
@@ -337,6 +497,7 @@ impl BrowserExecutionService {
             )))
             .unwrap_or_default();
         drop(state);
+        drop(retired);
         self.dispatch(actions);
     }
 
@@ -374,8 +535,14 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         let state = self.state.try_borrow().ok()?;
         for future in state.futures.values() {
             match future {
-                FutureState::Deferred(call) => call.invocation.visit_retained_values(visitor)?,
-                FutureState::Completed(Ok(sequence)) => {
+                FutureState::Deferred(call) | FutureState::Materializing { call, .. } => {
+                    call.invocation.visit_retained_values(visitor)?;
+                }
+                FutureState::Completed(Ok(sequence))
+                | FutureState::GraphResolved {
+                    result: Ok(sequence),
+                    ..
+                } => {
                     for value in sequence.value().iter() {
                         visitor(value)?;
                     }
@@ -383,7 +550,10 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 // Caller execution owns its moved invocation; scheduled worker
                 // requests contain serialized payloads, not local Value handles.
                 FutureState::ExecutingInCaller
-                | FutureState::Scheduled(_)
+                | FutureState::Scheduled { .. }
+                | FutureState::GraphCompleted { .. }
+                | FutureState::GraphFailed { .. }
+                | FutureState::GraphResolved { result: Err(_), .. }
                 | FutureState::Completed(Err(_))
                 | FutureState::Cancelled => {}
             }
@@ -474,7 +644,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         let id = FutureId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         state
             .futures
-            .insert(id, FutureState::Deferred(Box::new(call)));
+            .insert(id, FutureState::Deferred(Rc::new(call)));
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
@@ -484,16 +654,43 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
-        let mut state = self.state.borrow_mut();
-        let call = match state.futures.get(&future.id) {
-            Some(FutureState::Deferred(call)) => call.clone(),
-            Some(_) => {
-                return Err(ExecutionServiceError::Failed(
-                    "future has already been scheduled".into(),
-                ))
-            }
-            None => return Err(ExecutionServiceError::UnknownHandle),
+        let (reservation_id, call) = {
+            let mut state = self.state.borrow_mut();
+            let call = match state.futures.get(&future.id) {
+                Some(FutureState::Deferred(call)) => Rc::clone(call),
+                Some(_) => {
+                    return Err(ExecutionServiceError::Failed(
+                        "future has already been scheduled".into(),
+                    ));
+                }
+                None => return Err(ExecutionServiceError::UnknownHandle),
+            };
+            let id = state.next_materialization;
+            state.next_materialization = id.checked_add(1).ok_or_else(|| {
+                ExecutionServiceError::Infrastructure(
+                    "browser materialization identity exhausted".into(),
+                )
+            })?;
+            let retired = state.futures.insert(
+                future.id,
+                FutureState::Materializing {
+                    id,
+                    call: Rc::clone(&call),
+                    cancelled: false,
+                },
+            );
+            drop(state);
+            drop(retired);
+            (id, call)
         };
+        let mut guard = MaterializationGuard {
+            service: self,
+            future_id: future.id,
+            id: reservation_id,
+            armed: true,
+        };
+        // This can traverse managed values and call source/GC observers. It
+        // must never run under the service's RefCell mutable borrow.
         let (callable, invocation_context, recipe, artifact, arguments) =
             runmat_vm::materialize_deferred_call(
                 &call,
@@ -502,6 +699,35 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     "wasm32-browser-interpreter-bytecode-v2",
                 ),
             )?;
+        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+        let resources = browser_request(self.capabilities, recipe.accelerators.clone());
+        recipe
+            .validate_resource_request(&resources)
+            .map_err(|error| {
+                ExecutionServiceError::Failed(format!(
+                    "browser scheduler resources do not satisfy the program: {error}"
+                ))
+            })?;
+        let host = artifact
+            .execution_host_requirement(
+                &recipe,
+                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+            )
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let mut state = self.state.borrow_mut();
+        match state.futures.get(&future.id) {
+            Some(FutureState::Materializing {
+                id,
+                cancelled: false,
+                ..
+            }) if *id == reservation_id => {}
+            Some(FutureState::Materializing {
+                id,
+                cancelled: true,
+                ..
+            }) if *id == reservation_id => return Err(ExecutionServiceError::Cancelled),
+            _ => return Err(ExecutionServiceError::UnknownHandle),
+        }
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);
         let task_id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
@@ -525,38 +751,8 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             arguments: arguments.clone(),
             requested_outputs: future.outputs.requested_outputs,
         };
-        state.requests.insert(task_id, request);
-        state
-            .futures
-            .insert(future.id, FutureState::Scheduled(task_id));
         let generation = 1;
-        state.tasks.insert(
-            task_id,
-            TaskRecord {
-                future_id: future.id,
-                generation,
-                scope_id: task_scope_id,
-                read: false,
-                claimed: false,
-                completion_order: None,
-            },
-        );
-        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        let resources = browser_request(self.capabilities, recipe.accelerators.clone());
-        recipe
-            .validate_resource_request(&resources)
-            .map_err(|error| {
-                ExecutionServiceError::Failed(format!(
-                    "browser scheduler resources do not satisfy the program: {error}"
-                ))
-            })?;
-        let host = artifact
-            .execution_host_requirement(
-                &recipe,
-                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
-            )
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        let actions = state
+        let actions = match state
             .driver
             .handle(DriverCommand::Submit(Box::new(TaskSubmission {
                 request: TaskRequest {
@@ -575,9 +771,42 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 },
                 dependencies: BTreeSet::new(),
                 priority: 0,
-            })))
-            .map_err(driver_error)?;
+            }))) {
+            Ok(actions) => actions,
+            Err(error) => {
+                let _ = state.driver.handle(DriverCommand::CancelScope {
+                    scope_id: task_scope_id,
+                    reason: CancellationReason::DependencyFailed,
+                    now_millis: js_sys::Date::now() as u64,
+                });
+                return Err(driver_error(error));
+            }
+        };
+        state.requests.insert(
+            task_id,
+            runmat_execution_artifact::WorkerProgramRequest::Direct(request),
+        );
+        state.tasks.insert(
+            task_id,
+            TaskRecord {
+                future_id: future.id,
+                generation,
+                scope_id: task_scope_id,
+                read: false,
+                claimed: false,
+                completion_order: None,
+            },
+        );
+        let retired = state.futures.insert(
+            future.id,
+            FutureState::Scheduled {
+                task_id,
+                receipt: None,
+            },
+        );
         drop(state);
+        drop(retired);
+        guard.armed = false;
         self.dispatch(actions);
         Ok(TaskHandle {
             id: task_id,
@@ -707,7 +936,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .ok_or(ExecutionServiceError::UnknownHandle)?
         {
             FutureState::Deferred(call) => {
-                let call = call.clone();
+                let call = Box::new(call.as_ref().clone());
                 *state
                     .futures
                     .get_mut(&future.id)
@@ -717,22 +946,145 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     call,
                 })
             }
-            FutureState::Scheduled(_) => Ok(AwaitAction::Pending(original)),
+            FutureState::Materializing {
+                cancelled: true, ..
+            } => Err(ExecutionServiceError::Cancelled),
+            FutureState::Scheduled { .. } | FutureState::Materializing { .. } => {
+                Ok(AwaitAction::Pending(original))
+            }
             FutureState::ExecutingInCaller => Err(ExecutionServiceError::Failed(
                 "future is already executing in its caller".into(),
             )),
             FutureState::Completed(result) => {
                 let result = result.clone();
-                result.map(|value| AwaitAction::Completed(value.value().clone()))
+                result.map(AwaitAction::Completed)
             }
+            FutureState::GraphCompleted { .. }
+            | FutureState::GraphFailed { .. }
+            | FutureState::GraphResolved { .. } => Err(ExecutionServiceError::Infrastructure(
+                "graph result requires an explicit await context".into(),
+            )),
             FutureState::Cancelled => Err(ExecutionServiceError::Cancelled),
+        }
+    }
+
+    fn begin_await_in_context(
+        &self,
+        value: Value,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<AwaitAction, ExecutionServiceError> {
+        let future = match self.future_for_value(value.clone())? {
+            Ok(future) => future,
+            Err(value) => return Ok(AwaitAction::Passthrough(value)),
+        };
+        self.validate_scope(future.scope_id)?;
+        let (graph, receipt) = {
+            let state = self.state.borrow();
+            if let Some(FutureState::GraphFailed { failure, receipt }) =
+                state.futures.get(&future.id)
+            {
+                let failure = Rc::clone(failure);
+                let receipt = Rc::clone(receipt);
+                drop(state);
+                receipt.check_issuing_context(runtime)?;
+                let localized = receipt
+                    .decode_failure_in_context(runtime, &failure)
+                    .map(|error| ExecutionServiceError::LocalizedRuntimeFailure(error.into()))
+                    .unwrap_or_else(|error| error);
+                if matches!(&localized, ExecutionServiceError::ForeignScope) {
+                    return Err(localized);
+                }
+                let mut state = self.state.borrow_mut();
+                match state.futures.get(&future.id) {
+                    Some(FutureState::GraphFailed {
+                        failure: current_failure,
+                        receipt: current_receipt,
+                    }) if Rc::ptr_eq(current_failure, &failure)
+                        && Rc::ptr_eq(current_receipt, &receipt) =>
+                    {
+                        let retired = state.futures.insert(
+                            future.id,
+                            FutureState::GraphResolved {
+                                result: Err(localized.clone()),
+                                receipt,
+                            },
+                        );
+                        drop(state);
+                        drop(retired);
+                        return Err(localized);
+                    }
+                    Some(FutureState::Cancelled) => return Err(ExecutionServiceError::Cancelled),
+                    _ => return Err(ExecutionServiceError::UnknownHandle),
+                }
+            }
+            if let Some(FutureState::GraphResolved { result, receipt }) =
+                state.futures.get(&future.id)
+            {
+                let result = result.clone();
+                let receipt = Rc::clone(receipt);
+                drop(state);
+                receipt.check_issuing_context(runtime)?;
+                return result.map(AwaitAction::Completed);
+            }
+            let Some(FutureState::GraphCompleted { graph, receipt }) =
+                state.futures.get(&future.id)
+            else {
+                drop(state);
+                return self.begin_await(value);
+            };
+            let graph = Rc::clone(graph);
+            let receipt = Rc::clone(receipt);
+            (graph, receipt)
+        };
+        receipt.check_issuing_context(runtime)?;
+        {
+            let mut state = self.state.borrow_mut();
+            if !matches!(
+                state.futures.get(&future.id),
+                Some(FutureState::GraphCompleted { graph: current_graph, receipt: current_receipt })
+                    if Rc::ptr_eq(current_graph, &graph) && Rc::ptr_eq(current_receipt, &receipt)
+            ) {
+                return Err(ExecutionServiceError::UnknownHandle);
+            }
+            state
+                .futures
+                .insert(future.id, FutureState::ExecutingInCaller);
+        }
+        let mut guard = GraphDecodeGuard {
+            service: self,
+            future_id: future.id,
+            graph,
+            receipt,
+            armed: true,
+        };
+        let result = guard.receipt.decode_in_context(runtime, &guard.graph);
+        if matches!(&result, Err(ExecutionServiceError::ForeignScope)) {
+            // Dropping the armed guard restores GraphCompleted; another
+            // session cannot consume the issuing session's result receipt.
+            return Err(ExecutionServiceError::ForeignScope);
+        }
+        let mut state = self.state.borrow_mut();
+        match state.futures.get(&future.id) {
+            Some(FutureState::Cancelled) => Err(ExecutionServiceError::Cancelled),
+            Some(FutureState::ExecutingInCaller) => {
+                state.futures.insert(
+                    future.id,
+                    FutureState::GraphResolved {
+                        result: result.clone(),
+                        receipt: Rc::clone(&guard.receipt),
+                    },
+                );
+                guard.armed = false;
+                result.map(AwaitAction::Completed)
+            }
+            _ => Err(ExecutionServiceError::UnknownHandle),
         }
     }
 
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
+        result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.borrow_mut();
@@ -742,10 +1094,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .ok_or(ExecutionServiceError::UnknownHandle)?;
         match record {
             FutureState::ExecutingInCaller => {
-                *record = FutureState::Completed(match result {
-                    Ok(value) => runmat_runtime::execution::RootedValueSequence::new(value),
-                    Err(error) => Err(error),
-                });
+                *record = FutureState::Completed(result);
                 if let Some(task_id) = state
                     .tasks
                     .iter()
@@ -770,7 +1119,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.borrow();
                 let scheduled_task = match state.futures.get(&handle.id) {
-                    Some(FutureState::Scheduled(task_id)) => Some(*task_id),
+                    Some(FutureState::Scheduled { task_id, .. }) => Some(*task_id),
                     _ => None,
                 };
                 let task_scope = scheduled_task
@@ -789,13 +1138,15 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             }
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
-        {
+        let retired = {
             let mut state = self.state.borrow_mut();
-            state.futures.insert(future_id, FutureState::Cancelled);
+            let retired = state.futures.insert(future_id, FutureState::Cancelled);
             if let Some(task_id) = task_id {
                 record_browser_completion(&mut state, task_id);
             }
-        }
+            retired
+        };
+        drop(retired);
         let actions = if let Some(scope_id) = cancellation_scope {
             self.state
                 .borrow_mut()
@@ -829,8 +1180,13 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .unwrap_or_default();
         let mut state = self.state.borrow_mut();
         for future in state.futures.values_mut() {
-            if !matches!(future, FutureState::Completed(_)) {
-                *future = FutureState::Cancelled;
+            match future {
+                FutureState::Completed(_)
+                | FutureState::GraphCompleted { .. }
+                | FutureState::GraphFailed { .. }
+                | FutureState::GraphResolved { .. } => {}
+                FutureState::Materializing { cancelled, .. } => *cancelled = true,
+                _ => *future = FutureState::Cancelled,
             }
         }
         let task_ids = state.tasks.keys().copied().collect::<Vec<_>>();
@@ -863,7 +1219,16 @@ fn record_browser_completion(state: &mut State, task_id: TaskId) {
 fn browser_future_state(state: &FutureState) -> ExecutionHandleState {
     match state {
         FutureState::Deferred(_) => ExecutionHandleState::Deferred,
-        FutureState::ExecutingInCaller | FutureState::Scheduled(_) => ExecutionHandleState::Running,
+        FutureState::Materializing {
+            cancelled: true, ..
+        } => ExecutionHandleState::Cancelled,
+        FutureState::ExecutingInCaller
+        | FutureState::Materializing { .. }
+        | FutureState::Scheduled { .. } => ExecutionHandleState::Running,
+        FutureState::GraphCompleted { .. } => ExecutionHandleState::Finished,
+        FutureState::GraphFailed { .. } => ExecutionHandleState::Failed,
+        FutureState::GraphResolved { result: Ok(_), .. } => ExecutionHandleState::Finished,
+        FutureState::GraphResolved { result: Err(_), .. } => ExecutionHandleState::Failed,
         FutureState::Completed(Ok(_)) => ExecutionHandleState::Finished,
         FutureState::Completed(Err(_)) => ExecutionHandleState::Failed,
         FutureState::Cancelled => ExecutionHandleState::Cancelled,
@@ -894,7 +1259,7 @@ mod tests {
             retry: RetryPolicy::Never,
             program_revision: None,
             capabilities: Default::default(),
-            program: Some(program),
+            program: runmat_runtime::execution::DeferredProgram::InterpreterV2(program.into()),
         }
     }
 

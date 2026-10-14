@@ -52,6 +52,12 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
             "1".to_string(),
         );
+        if bootstrap.ready_v1 {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_WORKER_READY_V1".to_string(),
+                "1".to_string(),
+            );
+        }
         for (name, value) in [
             ("RUNMAT_EXECUTION_SERVER_URL", server_url.to_string()),
             ("RUNMAT_EXECUTION_RUN_ID", bootstrap.run_id.clone()),
@@ -187,6 +193,12 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_DRIVER_CREDENTIAL".to_string(),
             bootstrap.credential.clone(),
         );
+        if bootstrap.ready_v1 {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_SERVER_READY_V1".to_string(),
+                "1".to_string(),
+            );
+        }
         command.environment.insert(
             "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE".to_string(),
             sandbox

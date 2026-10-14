@@ -22,7 +22,7 @@ fn error_message(err: crate::RuntimeError) -> String {
     err.message().to_string()
 }
 
-fn run_getfield(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+fn run_getfield(base: Value, rest: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     futures::executor::block_on(getfield_builtin(None, base, rest))
 }
 

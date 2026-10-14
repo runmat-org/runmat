@@ -3,7 +3,7 @@
 use super::control::{
     canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
 };
-use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpIssuer};
+use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpInvocation};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetConstructorOption, TCPSERVER_ERROR_BIND_FAILED,
     TCPSERVER_ERROR_INTERNAL, TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -128,7 +128,7 @@ pub(crate) async fn tcpserver_builtin(
     let endpoint = work
         .await_service(
             service.bind(
-                RuntimeTcpIssuer::from_context(runtime.as_ref()),
+                RuntimeTcpInvocation::from_context(runtime.as_ref()),
                 RuntimeTcpBind {
                     address: host.clone(),
                     port,

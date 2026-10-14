@@ -2,12 +2,28 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
+use super::retirement::ProcessSpawnEvidence;
 use super::{CapturedStderr, ChildProcess, ChildStdio};
 use crate::command::{ChildLifetime, HostCommand, StdioPolicy};
 use crate::environment::apply_environment;
 use crate::{ProcessHostError, ProcessHostResult};
 
 pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
+    spawn_internal(spec, None).await
+}
+
+pub async fn spawn_observed(
+    spec: HostCommand,
+    evidence: &ProcessSpawnEvidence,
+) -> ProcessHostResult<ChildProcess> {
+    spawn_internal(spec, Some(evidence)).await
+}
+
+async fn spawn_internal(
+    spec: HostCommand,
+    evidence: Option<&ProcessSpawnEvidence>,
+) -> ProcessHostResult<ChildProcess> {
+    super::process_tree::validate_join_parent(spec.process_group_placement)?;
     let mut command = Command::new(&spec.executable);
     command
         .args(&spec.arguments)
@@ -62,13 +78,23 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
         }
     };
     apply_environment(&mut command, &spec.environment_policy, &spec.environment);
-    super::process_tree::configure(&mut command);
+    super::process_tree::configure(&mut command, spec.process_group_placement);
     super::limits::configure(&mut command, spec.resource_limits);
     let child = command.spawn()?;
+    if let Some(evidence) = evidence {
+        evidence.mark_child_created();
+    }
     let process_id = child.id();
-    let containment = super::process_tree::contain(&child, spec.resource_limits)?;
+    let containment =
+        super::process_tree::contain(&child, spec.resource_limits, spec.process_group_placement)?;
     let stderr = CapturedStderr::new(spec.max_stderr_bytes);
-    let mut process = ChildProcess::new(child, process_id, stderr, containment);
+    let mut process = ChildProcess::new(
+        child,
+        process_id,
+        stderr,
+        containment,
+        spec.process_group_placement,
+    );
     if piped {
         let stdin = process.child_stdin().ok_or_else(|| {
             ProcessHostError::Protocol("child stdin was unavailable after piped spawn".into())

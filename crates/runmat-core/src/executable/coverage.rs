@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 use sha2::{Digest, Sha256};
@@ -24,11 +24,28 @@ impl CoveragePlan {
         format!("sha256:{:x}", digest.finalize())
     }
 
+    #[cfg(test)]
     pub(crate) fn instrument(
         source: &ExecutableSource,
         revision: &ExecutableRevision,
         source_map: &ExecutableSourceMap,
         bytecode: &mut runmat_vm::Bytecode,
+    ) -> Self {
+        let registered_bodies = bytecode
+            .function_registry
+            .functions
+            .keys()
+            .copied()
+            .collect();
+        Self::instrument_for_product(source, revision, source_map, bytecode, &registered_bodies)
+    }
+
+    pub(crate) fn instrument_for_product(
+        source: &ExecutableSource,
+        revision: &ExecutableRevision,
+        source_map: &ExecutableSourceMap,
+        bytecode: &mut runmat_vm::Bytecode,
+        registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Self {
         let mut builder = CoveragePlanBuilder::new(source, revision, source_map);
         instrument_program(
@@ -44,6 +61,7 @@ impl CoveragePlan {
             .function_registry
             .functions
             .keys()
+            .filter(|id| registered_bodies.contains(id))
             .copied()
             .collect::<Vec<_>>();
         function_ids.sort_by_key(|function| function.0);
@@ -61,6 +79,9 @@ impl CoveragePlan {
             }
         }
         for (function_id, function) in &mut bytecode.bound_functions {
+            if !registered_bodies.contains(function_id) {
+                continue;
+            }
             if let Some(instrumented) = bytecode.function_registry.functions.get(function_id) {
                 function.coverage_sites = instrumented.coverage_sites.clone();
             } else {

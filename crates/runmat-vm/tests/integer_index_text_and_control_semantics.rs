@@ -5,7 +5,7 @@ use test_helpers::{compile_source, execute_source};
 
 fn execute_source_with_catalog(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).map_err(Box::new)?;
     test_helpers::interpret_with_program_source(
         &bytecode,

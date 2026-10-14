@@ -23,7 +23,7 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
         vec![Value::from("p")],
     ))
     .expect("enclosing two-output request must not reject selected one-output call");
-    assert_eq!(result, Value::Num(7.0));
+    assert_eq!(result.value(), &Value::Num(7.0));
     assert_eq!(crate::output_count::current_output_count(), Some(2));
 
     drop(selected_outputs);
@@ -85,6 +85,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
                 access: MemberAccess::Public,
                 function_name: "SelectedGetfieldSession.get.p".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });
@@ -102,8 +103,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
                 &expected_session
             ));
             Box::pin(async {
-                crate::sequence::ValueSequence::single(Value::Num(29.0))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(29.0))
             })
         }),
     ));
@@ -115,7 +115,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
         vec![Value::from("p")],
     ))
     .expect("selected public getfield getter");
-    assert_eq!(result, Value::Num(29.0));
+    assert_eq!(result.value(), &Value::Num(29.0));
     assert!(!wrong.runmat_extensions_enabled());
     assert!(std::sync::Weak::ptr_eq(
         &crate::context::legacy::active()

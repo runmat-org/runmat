@@ -137,6 +137,7 @@ macro_rules! define_equality {
             }
         ];
         pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(),
             module_path!()),
             identity: crate::BuiltinCatalogIdentity {

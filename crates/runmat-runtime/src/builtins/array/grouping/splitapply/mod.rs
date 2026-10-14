@@ -26,6 +26,6 @@ pub(crate) async fn splitapply_builtin(
     function: Value,
     first_data: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     execute::apply(function, first_data, rest).await
 }

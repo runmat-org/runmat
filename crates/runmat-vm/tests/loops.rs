@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_program(source: &str) -> Vec<runmat_value::Value> {
+fn execute_program(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }

@@ -34,8 +34,10 @@ impl RuntimeBuiltinService for ChangingService {
 
 fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
-        runmat_value::ValueSequence::single(Value::Num(99.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        let sequence = runmat_value::ValueSequence::single(Value::Num(99.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 

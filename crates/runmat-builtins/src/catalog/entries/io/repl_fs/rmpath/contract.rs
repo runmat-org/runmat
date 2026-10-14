@@ -1,4 +1,13 @@
 use crate::*;
+use runmat_types::EffectKind;
+
+pub(super) const EFFECTS: [EffectKind; 5] = [
+    EffectKind::EnvironmentRead,
+    EffectKind::EnvironmentWrite,
+    EffectKind::FilesystemRead,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];
 
 const OLD_PATH: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "oldpath",

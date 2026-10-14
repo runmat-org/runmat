@@ -8,6 +8,7 @@ pub(crate) async fn extract_remote_archive(
     url: &Url,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    command_origin: Option<runmat_execution::profiling::CommandProfilingReceipt>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
     resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
@@ -46,6 +47,7 @@ pub(crate) async fn extract_remote_archive(
             temp,
             output_folder.to_path_buf(),
             runtime.map(crate::context::RuntimeContext::cancellation),
+            command_origin,
             provider,
             resource_lease.clone(),
         )
@@ -67,6 +69,7 @@ pub(crate) async fn extract_remote_archive(
             Cursor::new(bytes),
             output_folder,
             runtime,
+            command_origin,
             provider,
             resource_lease.clone(),
         )
@@ -212,12 +215,14 @@ mod tests {
         impl RuntimeHttpService for Service {
             fn send(
                 &self,
+                _: crate::context::RuntimeContext,
                 _: HttpRequest,
             ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
                 unreachable!("archive uses bounded streaming")
             }
             fn open_bounded(
                 &self,
+                _: crate::context::RuntimeContext,
                 _: HttpRequest,
                 _: u64,
             ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
@@ -252,6 +257,7 @@ mod tests {
             &url,
             Path::new("/output"),
             Some(&runtime),
+            None,
             provider.clone(),
             &lease,
         ));

@@ -1,7 +1,7 @@
 use super::{
     aliases::extend_aliases,
     entries::{extend_constants, extend_entries},
-    BuiltinCatalogAlias, BuiltinCatalogEntry, BuiltinConstantCatalogEntry,
+    BuiltinCatalogAlias, BuiltinCatalogAudience, BuiltinCatalogEntry, BuiltinConstantCatalogEntry,
 };
 use std::cmp::Ordering;
 use std::sync::LazyLock;
@@ -15,6 +15,14 @@ static CATALOG_ENTRIES: LazyLock<Vec<&'static BuiltinCatalogEntry>> = LazyLock::
     let mut entries = Vec::new();
     extend_entries(&mut entries);
     entries
+});
+
+static PUBLIC_CATALOG_ENTRIES: LazyLock<Vec<&'static BuiltinCatalogEntry>> = LazyLock::new(|| {
+    CATALOG_ENTRIES
+        .iter()
+        .copied()
+        .filter(|entry| entry.audience == BuiltinCatalogAudience::Public)
+        .collect()
 });
 
 static CATALOG_ALIASES: LazyLock<Vec<&'static BuiltinCatalogAlias>> = LazyLock::new(|| {
@@ -50,6 +58,12 @@ static CATALOG_ALIAS_NAME_INDEX: LazyLock<Vec<&'static BuiltinCatalogAlias>> =
 
 pub fn builtin_catalog_entries() -> &'static [&'static BuiltinCatalogEntry] {
     CATALOG_ENTRIES.as_slice()
+}
+
+/// User-facing catalog projection. Executable lookup and registry validation
+/// deliberately continue to use the complete catalog.
+pub fn public_builtin_catalog_entries() -> &'static [&'static BuiltinCatalogEntry] {
+    PUBLIC_CATALOG_ENTRIES.as_slice()
 }
 
 pub fn builtin_catalog_aliases() -> &'static [&'static BuiltinCatalogAlias] {
@@ -90,6 +104,11 @@ pub fn builtin_catalog_entry_by_name(name: &str) -> Option<&'static BuiltinCatal
     })
 }
 
+pub fn public_builtin_catalog_entry_by_name(name: &str) -> Option<&'static BuiltinCatalogEntry> {
+    builtin_catalog_entry_by_name(name)
+        .filter(|entry| entry.audience == BuiltinCatalogAudience::Public)
+}
+
 pub fn canonical_builtin_name(name: &str) -> Option<&'static str> {
     builtin_catalog_entry_by_name(name).map(|entry| entry.identity.name)
 }
@@ -114,7 +133,7 @@ pub fn builtin_catalog_entry_for_class_method(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BuiltinConstantKind;
+    use crate::{BuiltinConstantKind, BuiltinConstantLiteral};
 
     #[test]
     fn compiled_primary_inventory_is_unique_valid_and_resolvable() {
@@ -176,6 +195,9 @@ mod tests {
         let mut represented_kinds = [false; 3];
         for entry in entries {
             assert!(!entry.name.is_empty());
+            if entry.literal.is_some() {
+                assert_eq!(entry.kind, BuiltinConstantKind::Logical);
+            }
             assert_eq!(
                 builtin_constant_catalog_entry_by_name(entry.name),
                 Some(entry),
@@ -213,6 +235,14 @@ mod tests {
             "the catalog must exercise every typed constant projection"
         );
         assert!(builtin_constant_catalog_entry_by_name("not_a_runmat_constant").is_none());
+        assert_eq!(
+            builtin_constant_catalog_entry_by_name("true").and_then(|entry| entry.literal),
+            Some(BuiltinConstantLiteral::Logical(true))
+        );
+        assert_eq!(
+            builtin_constant_catalog_entry_by_name("false").and_then(|entry| entry.literal),
+            Some(BuiltinConstantLiteral::Logical(false))
+        );
     }
 
     #[test]

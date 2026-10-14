@@ -616,9 +616,7 @@ impl WgpuProvider {
                     chirp.push(angle.sin());
                 }
                 self.with_emission(|emission, _| {
-                    emission
-                        .queue()
-                        .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp))
+                    emission.write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp))
                 })?;
             }
             NumericPrecision::F32 => {
@@ -629,9 +627,7 @@ impl WgpuProvider {
                     chirp.push(angle.sin() as f32);
                 }
                 self.with_emission(|emission, _| {
-                    emission
-                        .queue()
-                        .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp))
+                    emission.write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp))
                 })?;
             }
         }

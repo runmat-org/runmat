@@ -1670,7 +1670,7 @@ fn complex_single_shape_transforms_preserve_native_storage_through_vm_dispatch()
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("native complex single {name} should execute: {error}"));
         let mut complex_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::ComplexTensor(tensor) = value {
                 complex_results += 1;
                 assert_eq!(
@@ -1706,7 +1706,7 @@ fn every_real_integer_class_survives_the_full_shape_matrix_through_vm_dispatch()
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("{class} shape matrix should execute: {error}"));
         let mut integer_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::Tensor(tensor) = value {
                 if tensor.integer_storage().is_some() {
                     integer_results += 1;
@@ -1750,7 +1750,7 @@ fn empty_complex_single_shape_transforms_preserve_native_storage_through_vm_disp
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("empty complex single {name} should execute: {error}"));
         let mut complex_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::ComplexTensor(tensor) = value {
                 complex_results += 1;
                 assert_eq!(

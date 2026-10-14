@@ -38,11 +38,12 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
     };
     let checkpoint = recorder.submission_checkpoint();
     provider.with_emission(|emission, pending| -> Result<()> {
-        let encoder = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let encoder = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-observed-upload-completion"),
-            });
+            },
+        );
         provider.submit(emission, pending, encoder)?;
         Ok(())
     })??;
@@ -154,6 +155,10 @@ fn confirm_extrema_kernel_submission(
 }
 
 impl AccelProvider for WgpuProvider {
+    fn wgpu_device_access(&self) -> Option<&runmat_accelerate_api::WgpuDeviceAccess> {
+        Some(&self.access)
+    }
+
     fn propose_real_binary(
         &self,
         request: &runmat_accelerate_api::ProviderRealBinaryRequest,
@@ -307,6 +312,13 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        let with_device_query = |capability| {
+            crate::backend::wgpu::dispatch::observation::gate_prospective_encoder_query(
+                capability,
+                self.timestamp_capability,
+                &self.observation_budget,
+            )
+        };
         #[cfg(not(target_arch = "wasm32"))]
         if !self
             .observation_progress
@@ -316,10 +328,14 @@ impl AccelProvider for WgpuProvider {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
         if query.workload.typed_reduction.is_some() {
-            return crate::placement::typed_reduction_observation_capability(query);
+            return with_device_query(crate::placement::typed_reduction_observation_capability(
+                query,
+            ));
         }
         if query.workload.extrema.is_some() {
-            return crate::placement::extrema_observation_capability(self, query);
+            return with_device_query(crate::placement::extrema_observation_capability(
+                self, query,
+            ));
         }
         if query.operation.0 == "transfer.upload" {
             let output_count = query
@@ -343,48 +359,31 @@ impl AccelProvider for WgpuProvider {
                         requested_peak_buffer_bytes,
                         clear_commands: submissions,
                         map_callbacks: submissions,
+                        wgpu_compute_query: None,
                     },
                 )
             } else {
                 runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
             };
         }
-        let capability = crate::placement::provider_observation_capability(self, query);
-        if matches!(
-            capability,
-            runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
-        ) {
-            let cast = crate::placement::floating_cast_observation_capability(self, query);
-            if matches!(
-                cast,
-                runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
-            ) {
-                let sum = crate::placement::sum_observation_capability(self, query);
-                if matches!(
-                    sum,
-                    runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
-                ) {
-                    let convolution =
-                        crate::placement::convolution_observation_capability(self, query);
-                    if matches!(convolution, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
-                        let fspecial = crate::placement::fspecial_observation_capability(self, query);
-                        if matches!(fspecial, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
-                            crate::placement::imfilter_observation_capability(self, query)
-                        } else {
-                            fspecial
-                        }
-                    } else {
-                        convolution
-                    }
-                } else {
-                    sum
-                }
-            } else {
-                cast
-            }
-        } else {
-            capability
+        use runmat_accelerate_api::observation::ProviderObservationCapability;
+        let mut capability = crate::placement::provider_observation_capability(self, query);
+        if matches!(capability, ProviderObservationCapability::Unsupported) {
+            capability = crate::placement::floating_cast_observation_capability(self, query);
         }
+        if matches!(capability, ProviderObservationCapability::Unsupported) {
+            capability = crate::placement::sum_observation_capability(self, query);
+        }
+        if matches!(capability, ProviderObservationCapability::Unsupported) {
+            capability = crate::placement::convolution_observation_capability(self, query);
+        }
+        if matches!(capability, ProviderObservationCapability::Unsupported) {
+            capability = crate::placement::fspecial_observation_capability(self, query);
+        }
+        if matches!(capability, ProviderObservationCapability::Unsupported) {
+            capability = crate::placement::imfilter_observation_capability(self, query);
+        }
+        with_device_query(capability)
     }
 
     fn begin_operation_observation(
@@ -662,6 +661,9 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
+        if let Some(native_integer) = super::integer::integer_division_feasibility(self, query) {
+            return native_integer;
+        }
         crate::placement::wgpu_feasibility(self, query, self.adapter_limits.max_buffer_size)
     }
 

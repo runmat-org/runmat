@@ -373,7 +373,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => "FunctionHandle",
+        | Value::BoundFunctionHandle(_) => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
@@ -1209,12 +1209,12 @@ pub(crate) mod tests {
             ))
             .expect("feval static zeros");
             for result in [direct, via_feval] {
-                let Value::GpuTensor(handle) = result else {
+                let Value::GpuTensor(handle) = result.value() else {
                     panic!("static GPU zeros must remain resident");
                 };
                 assert_eq!(handle.shape(), vec![2, 3]);
                 assert_eq!(
-                    runmat_accelerate_api::handle_precision(&handle),
+                    runmat_accelerate_api::handle_precision(handle),
                     Some(ProviderPrecision::F32)
                 );
             }
@@ -1225,7 +1225,7 @@ pub(crate) mod tests {
             ))
             .expect("primitive static zeros");
             assert!(
-                matches!(primitive, Value::Tensor(ref tensor) if tensor.numeric_dtype() == NumericDType::U8)
+                matches!(primitive.value(), Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::U8)
             );
         });
     }

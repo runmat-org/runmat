@@ -15,9 +15,8 @@ fn gathers_field_values_through_their_owner() {
             .unwrap();
         let mut structure = StructValue::new();
         structure.insert("angle", Value::GpuTensor(handle));
-        let Value::Tensor(output) =
-            call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap()
-        else {
+        let result = call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap();
+        let Value::Tensor(output) = result.value() else {
             panic!("expected tensor")
         };
         assert!((output.materialize_f64()[0] - 0.5f64.sin()).abs() < 1e-12);
@@ -45,9 +44,8 @@ fn gathers_field_values_from_an_actual_wgpu_provider() {
     let retained_input = handle.clone();
     let mut structure = StructValue::new();
     structure.insert("angle", Value::GpuTensor(handle));
-    let Value::Tensor(output) =
-        call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap()
-    else {
+    let result = call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap();
+    let Value::Tensor(output) = result.value() else {
         panic!("expected tensor")
     };
     let (expected, tolerance) = match precision {

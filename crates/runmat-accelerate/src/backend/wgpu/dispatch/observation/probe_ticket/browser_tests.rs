@@ -43,12 +43,8 @@ async fn browser_callback_completes_optional_probe_ticket_after_cleanup() {
         context
             .access
             .with_shared(|emission| {
-                pending.submit(
-                    emission,
-                    emission
-                        .device()
-                        .create_command_encoder(&Default::default()),
-                )
+                let encoder = pending.profiled_encoder(emission, &Default::default());
+                pending.submit(emission, encoder)
             })
             .expect("browser emission")
             .expect("same device");

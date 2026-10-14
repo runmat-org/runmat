@@ -7,6 +7,7 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 pub(super) struct RemoteDriverConfig {
     pub authority: DriverAuthority,
     pub endpoint_identity_file: PathBuf,
+    pub ready_v1: bool,
 }
 
 impl RemoteDriverConfig {
@@ -36,6 +37,10 @@ impl RemoteDriverConfig {
         Ok(Self {
             authority,
             endpoint_identity_file,
+            ready_v1: std::env::var("RUNMAT_EXECUTION_SERVER_READY_V1")
+                .ok()
+                .as_deref()
+                == Some("1"),
         })
     }
 }

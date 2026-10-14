@@ -1,6 +1,31 @@
 //! Values retained while a sequence destination is prepared across calls.
 use super::*;
 use crate::object::indexing::{ObjectIndexComponent, ObjectIndexSelector};
+use runmat_gc::{Trace, Tracer};
+
+impl Trace for AssignmentStepSpec {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        visit_specs(std::slice::from_ref(self), &mut |value| value.trace(tracer));
+    }
+}
+
+impl Trace for SequenceDestinationBuilder {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.visit_retained_values(&mut |value| value.trace(tracer));
+    }
+}
+
+impl Trace for PreparedDestinationKind {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        visit_destination_kind(self, &mut |value| value.trace(tracer));
+    }
+}
+
+impl Trace for PreparedSequenceDestination {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.visit_retained_values(&mut |value| value.trace(tracer));
+    }
+}
 
 impl SequenceDestinationBuilder {
     pub fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
@@ -16,17 +41,21 @@ impl SequenceDestinationBuilder {
 
 impl PreparedSequenceDestination {
     pub fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
-        match &self.kind {
-            PreparedDestinationKind::Structural { steps, endpoint } => {
-                visit_prepared_steps(steps, visitor);
-                endpoint.visit_retained_values(visitor);
-            }
-            PreparedDestinationKind::ObjectProtocol(object) => {
-                visit_prepared_steps(&object.prefix, visitor);
-                visit_specs(&object.suffix_steps, visitor);
-                object.endpoint.visit_retained_values(visitor);
-                visit_subscripts(object.path.steps(), visitor);
-            }
+        visit_destination_kind(&self.kind, visitor);
+    }
+}
+
+fn visit_destination_kind(kind: &PreparedDestinationKind, visitor: &mut impl FnMut(&Value)) {
+    match kind {
+        PreparedDestinationKind::Structural { steps, endpoint } => {
+            visit_prepared_steps(steps, visitor);
+            endpoint.visit_retained_values(visitor);
+        }
+        PreparedDestinationKind::ObjectProtocol(object) => {
+            visit_prepared_steps(&object.prefix, visitor);
+            visit_specs(&object.suffix_steps, visitor);
+            object.endpoint.visit_retained_values(visitor);
+            visit_subscripts(object.path.steps(), visitor);
         }
     }
 }
@@ -77,9 +106,151 @@ fn visit_subscripts(steps: &[ObjectSubscript], visitor: &mut impl FnMut(&Value))
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn prepared_destination_retains_original_source_root() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("source".into()))
+                .expect("allocate source payload");
+            let handle = initial.handle();
+            let source = Value::Cell(
+                runmat_value::CellArray::new_with_shape(
+                    vec![Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "SourcePayload".into(),
+                        target: handle,
+                        valid: true,
+                    })],
+                    vec![1, 1],
+                )
+                .expect("source cell"),
+            );
+            let builder = SequenceDestinationBuilder::new(&source).expect("root source");
+            initial.unroot().expect("transfer source to builder");
+            let destination = futures::executor::block_on(builder.finish(
+                SequenceEndpointSpec::CellContents(vec![ObjectIndexComponent::Colon]),
+            ))
+            .expect("prepare cell destination");
+            runmat_gc::gc_collect_major().expect("collect with prepared destination");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("source remains rooted"),
+                Value::String("source".into())
+            );
+            drop(destination);
+            runmat_gc::gc_collect_major().expect("collect after destination retirement");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn prepared_selector_survives_collecting_builder_retirement() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        use runmat_value::{HandleRef, ObjectInstance};
+
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("selector".into()))
+                .expect("allocate selector payload");
+            let handle = initial.handle();
+            let selector = ObjectIndexComponent::Value(Value::HandleObject(HandleRef {
+                class_name: "SelectorPayload".into(),
+                target: handle,
+                valid: true,
+            }));
+            let mut builder = SequenceDestinationBuilder::new(&Value::Object(ObjectInstance::new(
+                "SelectorReceiver",
+            )))
+            .expect("root destination");
+            futures::executor::block_on(
+                builder.push_step(AssignmentStepSpec::Braces(vec![selector.clone()]), None),
+            )
+            .expect("retain selector before preparing destination");
+            initial.unroot().expect("transfer selector to builder");
+
+            let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
+                ObjectIndexSelector::IndexValues {
+                    components: vec![selector.clone()],
+                },
+            ));
+            let prepared = PreparedSequenceDestination::rooted(
+                PreparedDestinationKind::ObjectProtocol(Box::new(
+                    PreparedObjectProtocolDestination {
+                        prefix: Vec::new(),
+                        expected_class: "SelectorReceiver".into(),
+                        cardinality_method: None,
+                        suffix_steps: Vec::new(),
+                        endpoint: SequenceEndpointSpec::CellContents(vec![selector]),
+                        path,
+                        cardinality: 1,
+                    },
+                )),
+                builder.source_roots.clone(),
+            )
+            .expect("root prepared selector before builder retires");
+
+            let observed = Arc::new(AtomicBool::new(false));
+            let observed_in_callback = Arc::clone(&observed);
+            let identity = (handle.addr(), handle.epoch());
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                let runmat_gc::RootRetirement::Explicit(handle) = event else {
+                    return;
+                };
+                if (handle.addr(), handle.epoch()) != identity
+                    || observed_in_callback.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                runmat_gc::gc_collect_major().expect("collect during builder root retirement");
+                assert_eq!(
+                    runmat_gc::gc_clone_value(&handle).expect("prepared selector stays live"),
+                    Value::String("selector".into())
+                );
+            }))
+            .expect("register collecting retirement observer");
+            drop(builder);
+            assert!(observed.load(Ordering::SeqCst));
+            drop(prepared);
+            runmat_gc::gc_collect_major().expect("collect after prepared destination retires");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn builder_owns_nested_handles_until_retirement() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("destination".into()))
+                .expect("allocate destination payload");
+            let handle = initial.handle();
+            let source = Value::Cell(
+                runmat_value::CellArray::new_with_shape(
+                    vec![Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "DestinationPayload".into(),
+                        target: handle,
+                        valid: true,
+                    })],
+                    vec![1, 1],
+                )
+                .expect("destination container"),
+            );
+            let builder = SequenceDestinationBuilder::new(&source).expect("root destination");
+            initial.unroot().expect("transfer to builder");
+            runmat_gc::gc_collect_major().expect("collect with live builder");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("builder retains payload"),
+                Value::String("destination".into())
+            );
+            drop(builder);
+            runmat_gc::gc_collect_major().expect("collect after builder retirement");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
     #[test]
     fn builder_retains_current_and_prepared_selector_values() {
-        let mut builder = SequenceDestinationBuilder::new(&Value::String("root".into()));
+        let mut builder = SequenceDestinationBuilder::new(&Value::String("root".into()))
+            .expect("root destination");
         builder.steps.push(PreparedAssignmentStep::Braces(vec![
             ObjectIndexComponent::Colon,
             ObjectIndexComponent::Value(Value::String("selector".into())),

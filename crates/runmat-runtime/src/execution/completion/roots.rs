@@ -41,6 +41,16 @@ impl RootedValueMember {
         self.value
     }
 
+    /// Promote a decoded member without retiring its construction roots first.
+    pub(crate) fn into_rooted_value(
+        self,
+    ) -> Result<super::RootedValue, super::super::ExecutionServiceError> {
+        let Self { value, roots } = self;
+        let rooted = super::RootedValue::new(value)?;
+        drop(roots);
+        Ok(rooted)
+    }
+
     pub(crate) fn into_child(self, children: &mut RootedValueChildren) -> Value {
         let Self { value, roots } = self;
         children.push(roots);

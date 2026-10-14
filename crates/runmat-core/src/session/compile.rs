@@ -115,7 +115,7 @@ fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<S
     Some(package_segments.join("."))
 }
 
-fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
+pub(super) fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
     for stmt in stmts {
         if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
             if !name.contains('.') {
@@ -906,13 +906,17 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
-        crate::ExecutableUnit::new(
-            source,
-            revision,
-            source_map,
-            prepared.mir,
-            prepared.analysis,
-            prepared.bytecode,
+        let PreparedExecution {
+            mir,
+            analysis,
+            bytecode,
+            published_registry_for_reuse,
+            private_companion_function_names,
+            current_function_ids,
+            ..
+        } = prepared;
+        let mut draft = crate::executable::ExecutableUnitDraft::prepare(
+            source, revision, source_map, mir, analysis, bytecode,
         )
         .map_err(|error| {
             RunError::Runtime(
@@ -920,7 +924,24 @@ impl RunMatSession {
                     .with_identifier("RunMat:ExecutableProduct")
                     .build(),
             )
-        })
+        })?;
+        if let Some(remap) = super::semantic_definition::unchanged_product_remap(
+            draft.bytecode(),
+            &current_function_ids,
+            &published_registry_for_reuse,
+            &private_companion_function_names,
+        ) {
+            draft
+                .rebind_current_definitions(&published_registry_for_reuse, &remap)
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableFunctionIdentity")
+                            .build(),
+                    )
+                })?;
+        }
+        Ok(draft.seal())
     }
 
     #[cfg(test)]
@@ -1034,6 +1055,8 @@ impl RunMatSession {
         input: &str,
         portable_source: Option<&crate::ExecutableSource>,
     ) -> std::result::Result<PreparedExecution, RunError> {
+        self.sync_workspace_binding_metadata()
+            .map_err(RunError::Runtime)?;
         let source_name = self.current_source_name().to_string();
         let source_fullpath_name = self.current_source_fullpath_name().map(ToString::to_string);
         let interactive_source = self.canonical_interactive_source(input)?;
@@ -1089,6 +1112,20 @@ impl RunMatSession {
                             .build(),
                         )
                         })?;
+                    let identity =
+                        runmat_runtime::source_context::portable_source_identity_in_context(
+                            &self.runtime_context,
+                            runtime_id,
+                        )
+                        .ok_or_else(|| {
+                            RunError::Runtime(
+                                build_runtime_error(
+                                    "retained function lacks its original portable source owner",
+                                )
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                            )
+                        })?;
                     retained_sources.push((
                         runtime_id,
                         SourceContextData {
@@ -1096,6 +1133,7 @@ impl RunMatSession {
                             fullpath_name: source.fullpath_name.as_deref().map(ToString::to_string),
                             text: source.text.to_string(),
                         },
+                        identity,
                     ));
                 }
             }
@@ -1233,6 +1271,7 @@ impl RunMatSession {
             function_registry_after_success,
             next_semantic_function_id_after_success,
             function_id_remap,
+            published_registry_for_reuse,
         ) = self.prepare_session_semantic_function_registry(
             &mut bytecode,
             &private_companion_function_names,
@@ -1268,7 +1307,10 @@ impl RunMatSession {
             analysis,
             bytecode,
             portable_source_map: Some(source_table.source_map),
+            source_projection,
             function_registry_after_success,
+            published_registry_for_reuse,
+            private_companion_function_names,
             current_function_ids: function_id_remap.values().copied().collect(),
             next_semantic_function_id_after_success,
         })
@@ -1292,6 +1334,7 @@ impl RunMatSession {
             runmat_vm::FunctionRegistry,
             usize,
             HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+            runmat_vm::FunctionRegistry,
         ),
         RunError,
     > {
@@ -1312,6 +1355,7 @@ impl RunMatSession {
                     )
                 })?;
         }
+        let published_registry_for_reuse = execution_registry.clone();
         // Published semantic functions share the retained executable layout's
         // function-id namespace. Reserve every unit-local layout id before
         // assigning session-stable ids so a closure/local function can never
@@ -1331,7 +1375,7 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.function_registry = execution_registry;
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
-            let bindings = semantic_function_bindings(bytecode);
+            let bindings = semantic_function_bindings(bytecode)?;
             runmat_vm::remap_session_entrypoint(bytecode, &HashMap::new(), &bindings).map_err(
                 |error| {
                     RunError::Runtime(
@@ -1341,25 +1385,23 @@ impl RunMatSession {
                     )
                 },
             )?;
-            return Ok((session_registry, next_semantic_function_id, HashMap::new()));
+            return Ok((
+                session_registry,
+                next_semantic_function_id,
+                HashMap::new(),
+                published_registry_for_reuse,
+            ));
         }
 
-        let reused = super::semantic_definition::unchanged_unit_remap(
-            bytecode,
-            &current_registry,
-            &execution_registry,
-            private_companion_function_names,
-        );
-        let reuse_definitions = reused.is_some();
-        let mut remap = reused.unwrap_or_default();
-        if !reuse_definitions {
-            let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
-            ids.sort_by_key(|id| id.0);
-            for old_id in ids {
-                let new_id = runmat_hir::FunctionId(next_semantic_function_id);
-                next_semantic_function_id += 1;
-                remap.insert(old_id, new_id);
-            }
+        // Provisional identities remain fresh until the *decorated* product
+        // proves same-stage equality immediately before immutable sealing.
+        let mut remap = HashMap::new();
+        let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        for old_id in ids {
+            let new_id = runmat_hir::FunctionId(next_semantic_function_id);
+            next_semantic_function_id += 1;
+            remap.insert(old_id, new_id);
         }
 
         let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
@@ -1369,11 +1411,7 @@ impl RunMatSession {
             .collect();
 
         let mut replaced_sources = Vec::new();
-        for function in current_registry
-            .functions
-            .values()
-            .filter(|_| !reuse_definitions)
-        {
+        for function in current_registry.functions.values() {
             if private_companion_function_names.contains(&function.display_name) {
                 continue;
             }
@@ -1457,7 +1495,7 @@ impl RunMatSession {
 
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        let bindings = semantic_function_bindings(bytecode);
+        let bindings = semantic_function_bindings(bytecode)?;
         runmat_vm::remap_session_entrypoint(bytecode, &remap, &bindings).map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("session entrypoint remap: {error}"))
@@ -1465,7 +1503,12 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        Ok((session_registry, next_semantic_function_id, remap))
+        Ok((
+            session_registry,
+            next_semantic_function_id,
+            remap,
+            published_registry_for_reuse,
+        ))
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
@@ -1576,138 +1619,47 @@ impl RunMatSession {
 
 fn semantic_function_bindings(
     bytecode: &runmat_vm::Bytecode,
-) -> Vec<runmat_vm::SessionCallableBinding> {
+) -> Result<Vec<runmat_vm::SessionCallableBinding>, RunError> {
     let registry = &bytecode.function_registry;
-    let mut bindings = semantic_callback_literal_bindings(bytecode, registry);
+    let mut bindings = Vec::new();
     for (pc, instr) in bytecode.instructions.iter().enumerate() {
-        if let runmat_vm::Instr::CreateFunctionHandle(name) = instr {
+        if let runmat_vm::Instr::CreateFunctionHandle(name)
+        | runmat_vm::Instr::CreateExternalFunctionHandle(name) = instr
+        {
             if let Some(function) = registry.resolve_name(name) {
-                bindings.push(runmat_vm::SessionCallableBinding {
+                if matches!(instr, runmat_vm::Instr::CreateFunctionHandle(_)) {
+                    bindings.push(runmat_vm::SessionCallableBinding::named(
+                        pc,
+                        function,
+                        name.clone(),
+                    ));
+                }
+                continue;
+            }
+            if runmat_builtins::builtin_name_is_known(name) {
+                continue;
+            }
+            let constructor =
+                registry
+                    .resolve_session_constructor_handle(name)
+                    .map_err(|message| {
+                        RunError::Runtime(
+                            build_runtime_error(message)
+                                .with_identifier("RunMat:SelectedConstructorHandle")
+                                .build(),
+                        )
+                    })?;
+            if let Some(function) = constructor {
+                bindings.push(runmat_vm::SessionCallableBinding::constructor(
                     pc,
                     function,
-                    display_name: name.clone(),
-                });
+                    name.clone(),
+                ));
             }
         }
     }
-    bindings
+    Ok(bindings)
 }
-
-fn semantic_callback_literal_bindings(
-    bytecode: &runmat_vm::Bytecode,
-    registry: &runmat_vm::FunctionRegistry,
-) -> Vec<runmat_vm::SessionCallableBinding> {
-    let mut stack: Vec<usize> = Vec::new();
-    let mut replacements = Vec::new();
-
-    for (pc, instr) in bytecode.instructions.iter().enumerate() {
-        match instr {
-            runmat_vm::Instr::CallBuiltinMulti(name, argc, _)
-                if matches!(name.as_str(), "cellfun" | "arrayfun") && *argc > 0 =>
-            {
-                if stack.len() >= *argc {
-                    let producer = stack[stack.len() - *argc];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
-                }
-            }
-            runmat_vm::Instr::CallFevalMulti(argc, _) => {
-                let pops = *argc + 1;
-                if stack.len() >= pops {
-                    let producer = stack[stack.len() - pops];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
-                }
-            }
-            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(argc, _) => {
-                let pops = *argc + 1;
-                if stack.len() >= pops {
-                    let producer = stack[stack.len() - pops];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
-                }
-            }
-            runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
-                if let Some(effect) = instr.stack_effect() {
-                    if stack.len() >= effect.pops {
-                        let producer = stack[stack.len() - effect.pops];
-                        if let Some((function, display_name)) =
-                            callback_literal(bytecode.instructions.get(producer), registry)
-                        {
-                            replacements.push((producer, function, display_name));
-                        }
-                    }
-                }
-            }
-            runmat_vm::Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _) => {
-                if let Some(effect) = instr.stack_effect() {
-                    if stack.len() >= effect.pops {
-                        let producer = stack[stack.len() - effect.pops];
-                        if let Some((function, display_name)) =
-                            callback_literal(bytecode.instructions.get(producer), registry)
-                        {
-                            replacements.push((producer, function, display_name));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        let Some(effect) = instr.stack_effect() else {
-            stack.clear();
-            continue;
-        };
-        if effect.pops > stack.len() {
-            stack.clear();
-        } else {
-            for _ in 0..effect.pops {
-                stack.pop();
-            }
-        }
-        for _ in 0..effect.pushes {
-            stack.push(pc);
-        }
-    }
-
-    replacements
-        .into_iter()
-        .map(
-            |(pc, function, display_name)| runmat_vm::SessionCallableBinding {
-                pc,
-                function,
-                display_name,
-            },
-        )
-        .collect()
-}
-
-fn callback_literal(
-    instr: Option<&runmat_vm::Instr>,
-    registry: &runmat_vm::FunctionRegistry,
-) -> Option<(runmat_hir::FunctionId, String)> {
-    let text = match instr? {
-        runmat_vm::Instr::LoadString(text) | runmat_vm::Instr::LoadCharRow(text) => text,
-        _ => return None,
-    };
-    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
-    if name.is_empty() {
-        return None;
-    }
-    registry
-        .resolve_name(name)
-        .map(|function| (function, name.to_string()))
-}
-
 #[cfg(test)]
 mod source_discovery_tests {
     use super::*;
@@ -1884,6 +1836,9 @@ roots = ["src"]
     }
 }
 
+#[cfg(test)]
+#[path = "compile/name_binding_tests.rs"]
+mod name_binding_tests;
 #[cfg(test)]
 #[path = "compile/portable_source_tests.rs"]
 mod portable_source_tests;

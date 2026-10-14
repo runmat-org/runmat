@@ -24,6 +24,7 @@ pub use contract::{
 pub use options::{MnrfitConstant, MnrfitOption, MnrfitStatsetField};
 
 pub const MNRFIT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "mnrfit" },
     category: "stats/ml",

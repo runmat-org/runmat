@@ -367,7 +367,7 @@ fn explicit_gpu_mapped_rhs_is_gated_then_gathered_once_in_runmat_mode() {
         Value::GpuTensor(explicit),
     ))
     .unwrap();
-    assert!(matches!(updated, Value::Object(_)));
+    assert!(matches!(updated.value(), Value::Object(_)));
     assert_eq!(gpu.downloads.load(Ordering::SeqCst), 1);
     assert_eq!(provider.writes.load(Ordering::SeqCst), 1);
     assert_eq!(*provider.bytes.lock().unwrap(), 7.0f64.to_le_bytes());

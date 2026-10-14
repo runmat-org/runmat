@@ -558,7 +558,7 @@ fn public_dispatch_still_gathers_resident_bin_specifications() {
             Value::Tensor(Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).expect("histogram data"));
         let value = crate::dispatcher::call_builtin("histcounts", &[data, Value::GpuTensor(bins)])
             .expect("legacy dispatcher fallback gathers resident bin edges");
-        let Value::Tensor(counts) = value else {
+        let Value::Tensor(counts) = value.value() else {
             panic!("expected count tensor");
         };
         assert_eq!(counts.materialize_f64(), vec![2.0, 1.0]);

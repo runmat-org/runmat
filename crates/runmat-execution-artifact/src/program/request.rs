@@ -14,9 +14,98 @@ pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
 /// V7 makes failure-frame source IDs program ordinals, never worker-local IDs.
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V7: u16 = 7;
+/// V10 binds one optional canonical bundle archive to every selected V3 unit.
+pub use runmat_execution::value::{
+    GRAPH_REQUEST_SCHEMA_V10 as GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
+    GRAPH_REQUEST_SCHEMA_V11 as GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
+};
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V7;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
+
+#[path = "request/graph.rs"]
+mod graph;
+pub use graph::{
+    AdmittedGraphUnitBundle, ArchiveAdmittedGraphExecutionRequest, GraphExecutionRequest,
+    GraphInvocationRoots, GraphResponseAuthority, ValidatedGraphExecutionRequest,
+};
+
+/// Direct V7 requests keep their exact public wire shape. Graph V10 is a
+/// separate typed worker route and cannot reinterpret a direct manifest call.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WorkerProgramRequest {
+    Direct(ProgramExecutionRequest),
+    Graph(GraphExecutionRequest),
+}
+
+/// The encrypted remote `program` object. Direct V7 keeps its historical
+/// descriptor bytes and separate input object; Graph V10 carries its complete
+/// archive-bearing request in that same encrypted object.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RemoteProgramObject {
+    Direct(Box<ProgramExecutionDescriptor>),
+    Graph(Box<GraphExecutionRequest>),
+}
+
+impl RemoteProgramObject {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        match self {
+            Self::Direct(descriptor) => descriptor.validate_for_portable_host(),
+            Self::Graph(request) => request.validate(),
+        }
+    }
+}
+
+pub fn admit_remote_program_object_bytes(bytes: &[u8]) -> ArtifactResult<()> {
+    let header: ProgramExecutionSchemaHeader = serde_json::from_slice(bytes).map_err(|error| {
+        ArtifactError::Invalid(format!("invalid remote program object envelope: {error}"))
+    })?;
+    match header.schema_version {
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_V7 => {
+            let descriptor: ProgramExecutionDescriptor = serde_json::from_slice(bytes)
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            descriptor.validate_for_portable_host()
+        }
+        GRAPH_EXECUTION_REQUEST_SCHEMA_V10 | GRAPH_EXECUTION_REQUEST_SCHEMA_V11 => {
+            let request: GraphExecutionRequest = serde_json::from_slice(bytes)
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            request.validate()
+        }
+        version => Err(ArtifactError::Invalid(format!(
+            "unsupported remote program object schema {version}"
+        ))),
+    }
+}
+
+impl WorkerProgramRequest {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        match self {
+            Self::Direct(request) => request.validate(),
+            Self::Graph(request) => request.validate(),
+        }
+    }
+}
+
+pub fn admit_worker_program_request_bytes(bytes: &[u8]) -> ArtifactResult<()> {
+    let header: ProgramExecutionSchemaHeader = serde_json::from_slice(bytes).map_err(|error| {
+        ArtifactError::Invalid(format!("invalid worker program request envelope: {error}"))
+    })?;
+    match header.schema_version {
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_V7 => admit_program_execution_request_bytes(bytes),
+        GRAPH_EXECUTION_REQUEST_SCHEMA_V10 | GRAPH_EXECUTION_REQUEST_SCHEMA_V11 => {
+            let request: GraphExecutionRequest =
+                serde_json::from_slice(bytes).map_err(|error| {
+                    ArtifactError::Invalid(format!("invalid graph worker request: {error}"))
+                })?;
+            request.validate()
+        }
+        version => Err(ArtifactError::Invalid(format!(
+            "unsupported worker program request schema {version}"
+        ))),
+    }
+}
 
 #[derive(Deserialize)]
 struct ProgramExecutionSchemaHeader {
@@ -51,6 +140,7 @@ impl ProgramExecutionDescriptor {
         let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
             || self.callable.validate().is_err()
+            || matches!(self.callable, ProgramCallable::GraphTarget { .. })
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
         {
@@ -59,7 +149,8 @@ impl ProgramExecutionDescriptor {
             ));
         }
         if let Some(admission) = artifact.unit_admission.as_ref() {
-            if self.callable.semantic_function() != Some(admission.identity.entrypoint_function) {
+            let entrypoint = direct_executable_entrypoint(&admission.identity)?;
+            if self.callable.semantic_function() != Some(entrypoint) {
                 return Err(ArtifactError::Invalid(
                     "program descriptor callable does not match its executable-unit entrypoint"
                         .into(),
@@ -153,6 +244,7 @@ impl ProgramExecutionRequest {
         }
         let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.callable.validate().is_err()
+            || matches!(self.callable, ProgramCallable::GraphTarget { .. })
             || self
                 .assignment
                 .as_ref()
@@ -173,7 +265,8 @@ impl ProgramExecutionRequest {
                 .unit_admission
                 .as_ref()
                 .expect("executable-unit form returns its validated admission header");
-            if self.callable.semantic_function() != Some(admission.identity.entrypoint_function)
+            let entrypoint = direct_executable_entrypoint(&admission.identity)?;
+            if self.callable.semantic_function() != Some(entrypoint)
                 || (admission.identity.entrypoint_kind
                     == runmat_execution::ExecutableEntrypointKind::Script
                     && !self.arguments.is_empty())
@@ -194,6 +287,20 @@ impl ProgramExecutionRequest {
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
         self.validate()?;
         self.artifact.target.validate_for_portable_host()
+    }
+}
+
+fn direct_executable_entrypoint(
+    identity: &runmat_execution::ExecutableIdentity,
+) -> ArtifactResult<runmat_execution::ProgramFunctionId> {
+    match identity.validated_entrypoint().map_err(contract_error)? {
+        runmat_execution::ValidatedExecutableEntrypoint::Function(function)
+        | runmat_execution::ValidatedExecutableEntrypoint::Script(function) => Ok(function),
+        runmat_execution::ValidatedExecutableEntrypoint::DeclarationOnly(_) => {
+            Err(ArtifactError::Invalid(
+                "declaration-only product cannot be executed as a Direct callable".into(),
+            ))
+        }
     }
 }
 
@@ -259,6 +366,10 @@ pub enum ProgramExecutionResponse {
     Success {
         outputs: Vec<ValuePayload>,
     },
+    /// One rooted output graph for a V8 invocation; Direct V7 rejects it.
+    GraphSuccess {
+        graph: runmat_execution::value::PayloadGraph,
+    },
     ExternalizedSuccess {
         outputs: Vec<ValuePayload>,
         result_objects: Vec<ValueRef>,
@@ -290,6 +401,9 @@ impl ProgramExecutionResponse {
                 }
                 validate_output_payloads(outputs, source_map)
             }
+            Self::GraphSuccess { .. } => Err(ArtifactError::Invalid(
+                "direct program request cannot receive a graph response".into(),
+            )),
             Self::ExternalizedSuccess {
                 outputs,
                 result_objects,
@@ -317,9 +431,20 @@ impl ProgramExecutionResponse {
                 }
                 Ok(())
             }
-            Self::RuntimeFailure { failure } => failure
-                .validate_for_program_sources(source_map)
-                .map_err(contract_error),
+            Self::RuntimeFailure { failure } => {
+                if failure
+                    .call_frames
+                    .iter()
+                    .any(|frame| frame.detached_diagnostic.is_some())
+                {
+                    return Err(ArtifactError::Invalid(
+                        "direct program failure cannot carry a graph detached diagnostic".into(),
+                    ));
+                }
+                failure
+                    .validate_for_program_sources(source_map)
+                    .map_err(contract_error)
+            }
         }
     }
 }
@@ -438,6 +563,7 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(
@@ -459,13 +585,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn remote_direct_program_object_preserves_descriptor_wire_bytes() {
+        let request = request();
+        let descriptor = ProgramExecutionDescriptor {
+            schema_version: request.schema_version,
+            recipe: request.recipe,
+            artifact: request.artifact,
+            callable: request.callable,
+            requested_outputs: request.requested_outputs,
+        };
+        let direct_bytes = serde_json::to_vec(&descriptor).unwrap();
+        let envelope_bytes =
+            serde_json::to_vec(&RemoteProgramObject::Direct(Box::new(descriptor.clone()))).unwrap();
+        assert_eq!(envelope_bytes, direct_bytes);
+        admit_remote_program_object_bytes(&envelope_bytes).unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<RemoteProgramObject>(&envelope_bytes).unwrap(),
+            RemoteProgramObject::Direct(recovered) if *recovered == descriptor
+        ));
+    }
+
     fn executable_unit_request() -> ProgramExecutionRequest {
-        let bytes = include_bytes!(
-            "../../../runmat-execution/tests/fixtures/executable-unit-stale-components.json"
+        // Keep the frozen compatibility fixture untouched. This test needs a
+        // current envelope so request validation can reach callable checks.
+        let mut envelope: runmat_execution::ExecutableUnitEnvelope = serde_json::from_slice(
+            include_bytes!("../../../runmat-execution/tests/fixtures/executable-unit-current.json"),
         )
-        .to_vec();
+        .unwrap();
+        envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+        envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+        let bytes = envelope.canonical_bytes().unwrap();
         let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes)
-            .expect("frozen executable-unit fixture remains canonical");
+            .expect("current control envelope remains canonical");
         let identity = &envelope.manifest.identity;
         let recipe = ProgramBuildRecipe {
             schema_version: crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -481,6 +633,13 @@ mod tests {
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: Some(
+                crate::foreign_policy_object(
+                    br#"{"fixture":"direct-request","schema_version":1}"#.to_vec(),
+                )
+                .unwrap()
+                .descriptor,
+            ),
             expected_artifact_id: None,
         };
         let artifact =
@@ -489,7 +648,11 @@ mod tests {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
-            callable: ProgramCallable::semantic(identity.entrypoint_function, Some("main".into())),
+            callable: ProgramCallable::semantic(
+                direct_executable_entrypoint(identity)
+                    .expect("frozen fixture has a callable entrypoint"),
+                Some("main".into()),
+            ),
             context: ProgramInvocationContext::Direct,
             assignment: None,
             job_id: None,
@@ -568,7 +731,9 @@ mod tests {
                         task_id: None,
                         call_frames: vec![ExceptionCallFrame {
                             function: "source_function".into(),
-                            program_source_id: Some(runmat_types::ProgramSourceId(ordinal)),
+                            source: runmat_execution::value::ExceptionFrameSource::Admitted(
+                                runmat_types::ProgramSourceId(ordinal),
+                            ),
                             span: None,
                         }],
                         call_frames_elided: 0,
@@ -724,6 +889,7 @@ mod tests {
                 function: "source_function".into(),
                 program_source_id: Some(runmat_types::ProgramSourceId(1)),
                 span: None,
+                detached_diagnostic: None,
             }],
             call_frames_elided: 0,
             call_stack: vec!["source_function @ source.m:1:1".into()],
@@ -785,6 +951,7 @@ mod tests {
                 function: "source_function".into(),
                 program_source_id: Some(runmat_types::ProgramSourceId(0)),
                 span: None,
+                detached_diagnostic: None,
             }],
             call_frames_elided: 0,
             call_stack: vec!["source_function @ source.m:1:1".into()],
@@ -795,6 +962,20 @@ mod tests {
         }
         .validate_against(&selected)
         .unwrap();
+
+        let mut detached = failure.clone();
+        detached.call_frames[0].program_source_id = None;
+        detached.call_frames[0].detached_diagnostic =
+            Some(runmat_execution::ProgramDetachedDiagnosticSource {
+                display_name: "retired.m".into(),
+                line: Some(1),
+                column: Some(1),
+            });
+        assert!(
+            ProgramExecutionResponse::RuntimeFailure { failure: detached }
+                .validate_against(&selected)
+                .is_err()
+        );
         let mut outside = failure;
         outside.call_frames[0].program_source_id = Some(runmat_types::ProgramSourceId(1));
         assert!(

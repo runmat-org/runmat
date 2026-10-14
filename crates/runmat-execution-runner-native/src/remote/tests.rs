@@ -289,6 +289,7 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             resolved.frozen.clone(),
         ))
+        .await
         .unwrap();
     let prepared = session
         .prepare_tests(&snapshot, &TestSelector::default())
@@ -514,6 +515,7 @@ async fn run_encrypted_remote_request(
             checkpoint: None,
             cancellation_requested: false,
             driver_resources: resource_request(),
+            driver_accelerator_devices: Vec::new(),
             desired_worker_count: 0,
             worker_resources: resource_request(),
         },
@@ -538,6 +540,7 @@ async fn run_encrypted_remote_request(
             credential: "driver-secret".into(),
         },
         endpoint_identity_file: identity_path,
+        ready_v1: false,
     };
 
     run_remote_driver(config, control.clone()).await.unwrap();
@@ -591,6 +594,7 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }

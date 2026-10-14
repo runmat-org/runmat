@@ -54,7 +54,7 @@ test("registered calendar-duration reparent preserves its exact reviewed glob ex
   const rendered = renderModuleCompositionProduct({
     ...structuredClone(definition), state: "present", children: product.children,
   });
-  assert.match(rendered, /mod support;\n\npub use support::\*;/);
+  assert.match(rendered, /mod support;\n\npub use self::support::\*;/);
 });
 
 test("decomposition can retain typed support and exact identity destinations", () => {

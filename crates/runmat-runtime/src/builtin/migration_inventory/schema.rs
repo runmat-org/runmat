@@ -7,7 +7,7 @@ use runmat_builtins::{
 use runmat_types::{CapabilityRequirement, ExecutionStackRequirement};
 use serde::Serialize;
 
-pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 3;
+pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Serialize)]
 pub struct MigrationInventory<'a> {

@@ -8,6 +8,7 @@ mod handle;
 mod instance;
 mod listener;
 mod memmap;
+mod selected_class;
 
 pub use array::{ObjectArray, ObjectArrayAdmission, ValidatedObjectArrayParts};
 pub use containers_map::{
@@ -27,4 +28,9 @@ pub use listener::Listener;
 pub use memmap::{
     MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
     MemmapReceiverState,
+};
+pub use selected_class::{
+    SelectedObjectClassFacts, SelectedObjectMethod, SelectedReceiverClassDeclaration,
+    SelectedReceiverDeclarations, SelectedReceiverMethodDeclaration,
+    SelectedReceiverPropertyDeclaration,
 };

@@ -2,15 +2,24 @@ use super::cellfun_builtin;
 use futures::executor::block_on;
 use runmat_value::{CellArray, Tensor, Value};
 
-fn call(function: Value, arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn call(
+    function: Value,
+    arguments: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     block_on(cellfun_builtin(function, arguments))
+}
+
+fn rooted_sequence(
+    sequence: runmat_value::ValueSequence,
+) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
+    crate::execution::RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
 }
 
 fn cell(values: Vec<Value>, shape: &[usize]) -> Value {
     Value::Cell(CellArray::new_with_shape(values, shape.to_vec()).expect("valid cell fixture"))
 }
 
-fn tensor_values(value: Value) -> Vec<f64> {
+fn tensor_values(value: &Value) -> Vec<f64> {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor")
     };

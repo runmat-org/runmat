@@ -293,7 +293,9 @@ impl TfSystem {
 }
 
 #[cfg(feature = "plot-core")]
-async fn render_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<Value> {
+async fn render_impulse_plot(
+    response: &ImpulseResponse,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let t = response.t_value()?;
     let y = response.y_value()?;
     let plot_name = if response.discrete { "stem" } else { "plot" };
@@ -301,7 +303,9 @@ async fn render_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<Value>
 }
 
 #[cfg(not(feature = "plot-core"))]
-async fn render_impulse_plot(_response: &ImpulseResponse) -> BuiltinResult<Value> {
+async fn render_impulse_plot(
+    _response: &ImpulseResponse,
+) -> BuiltinResult<crate::execution::RootedValue> {
     Err(crate::plotting_hooks::unavailable_presentation())
 }
 

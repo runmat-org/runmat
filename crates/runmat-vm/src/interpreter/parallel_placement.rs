@@ -1,6 +1,7 @@
 use std::fmt;
 
 use runmat_execution::PoolBackend;
+use runmat_runtime::execution::{RootedValueLease, RootedValuesBuilder};
 use runmat_types::{EffectKind, ParallelVariableRole};
 use runmat_value::Value;
 
@@ -15,6 +16,7 @@ use crate::BytecodeParforRegion;
 /// only their worker input is replaced by the operator identity.
 pub(crate) struct PreparedParallelInputs {
     pub(crate) task_inputs: Vec<Value>,
+    pub(crate) task_roots: RootedValueLease,
     pub(crate) sliced_destinations: Vec<(usize, Value)>,
 }
 
@@ -22,11 +24,27 @@ pub(crate) struct PreparedParallelInputs {
 pub(crate) enum ParallelPlacementRejection {
     NoWorkerCapacity,
     UnsafeEffect(EffectKind),
-    StaticValueNotTransferable { slot: usize },
-    ExplicitDeviceIntent { slot: usize },
-    AutomaticGatherFailed { slot: usize, reason: String },
-    UnsupportedSlicedStorage { slot: usize, family: &'static str },
-    RuntimeValueNotTransferable { slot: usize, reason: String },
+    StaticValueNotTransferable {
+        slot: usize,
+    },
+    ExplicitDeviceIntent {
+        slot: usize,
+    },
+    AutomaticGatherFailed {
+        slot: usize,
+        reason: String,
+    },
+    UnsupportedSlicedStorage {
+        slot: usize,
+        family: &'static str,
+    },
+    RuntimeValueNotTransferable {
+        slot: usize,
+        reason: String,
+    },
+    InputRootingFailed {
+        error: runmat_runtime::execution::ExecutionServiceError,
+    },
 }
 
 impl fmt::Display for ParallelPlacementRejection {
@@ -58,6 +76,9 @@ impl fmt::Display for ParallelPlacementRejection {
                 formatter,
                 "compiled slot {slot} failed runtime transfer validation: {reason}"
             ),
+            Self::InputRootingFailed { error } => {
+                write!(formatter, "parallel task input ownership failed: {error}")
+            }
         }
     }
 }
@@ -83,7 +104,7 @@ pub(crate) async fn prepare(
         return Err(ParallelPlacementRejection::UnsafeEffect(effect));
     }
 
-    let mut task_inputs = Vec::with_capacity(inputs.len());
+    let mut task_inputs = RootedValuesBuilder::with_capacity(inputs.len());
     let mut sliced_destinations = Vec::new();
     for (variable, value) in executable.input_variables().zip(inputs) {
         let slot = variable.slot;
@@ -129,18 +150,34 @@ pub(crate) async fn prepare(
                         reason: error.to_string(),
                     }
                 })?;
-                task_inputs.push(identity);
+                identity
+                    .with_owned(|value| task_inputs.push(value))
+                    .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
             }
             ParallelVariableRole::Sliced { .. } => {
                 sliced_destinations.push((slot, host_value.clone()));
-                task_inputs.push(host_value);
+                task_inputs
+                    .push(host_value)
+                    .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
             }
-            _ => task_inputs.push(host_value),
+            _ => task_inputs
+                .push(host_value)
+                .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?,
         }
     }
 
+    let task_inputs = task_inputs
+        .finish()
+        .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
+    let (task_inputs, task_roots) = task_inputs
+        .with_owned_values(|values| {
+            RootedValueLease::for_values(values.iter()).map(|roots| (values, roots))
+        })
+        .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
+
     Ok(PreparedParallelInputs {
         task_inputs,
+        task_roots,
         sliced_destinations,
     })
 }

@@ -16,7 +16,7 @@ fn bsxfun_integer_wgpu_fallback_gathers_exactly_and_returns_host_storage() {
     let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
         .expect("integer upload");
     let result = call(
-        Value::FunctionHandle("plus".to_string()),
+        Value::FunctionHandle("plus".into()),
         Value::GpuTensor(handle),
         Value::Int(IntValue::U64(1)),
     )

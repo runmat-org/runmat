@@ -48,6 +48,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
     if let Some(project) = prepared.project_handoff.clone() {
         session
             .install_project_handoff(project)
+            .await
             .context("failed to install frozen project for test discovery")?;
     }
     let prepared_run = session
@@ -183,6 +184,9 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             false,
         )
         .context("failed to prepare project foreign artifacts for remote tests")?;
+        let foreign_policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&runtime.foreign)
+                .map_err(anyhow::Error::msg)?;
         let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
             project: args.project,
             cluster: cluster.clone(),
@@ -191,6 +195,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             max_workers: jobs,
             project_handoff,
             interop: foreign_artifacts.interop,
+            foreign_policy,
             foreign_artifacts: foreign_artifacts.objects,
             foreign_artifact_closures: foreign_artifacts.closures,
         })

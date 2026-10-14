@@ -10,6 +10,7 @@ const EFFECTS: &[EffectKind] = &[
 const CAPABILITIES: &[CapabilityRequirement] = &[CapabilityRequirement::Filesystem];
 
 pub const MEMMAPFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "memmapfile" },
     category: "io/repl_fs",

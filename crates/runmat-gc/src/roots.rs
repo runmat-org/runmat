@@ -471,7 +471,7 @@ mod tests {
             let target =
                 crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
                     .expect("target allocation");
-            let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
+            let callback = crate::gc_allocate(Value::function_handle("onEvent".to_string()))
                 .expect("callback allocation");
 
             let values = vec![
@@ -506,7 +506,7 @@ mod tests {
             let handle_target =
                 crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
                     .expect("target allocation");
-            let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            let callback = crate::gc_allocate(Value::function_handle("cb".to_string()))
                 .expect("callback allocation");
 
             let handle = Value::HandleObject(HandleRef {
@@ -530,13 +530,14 @@ mod tests {
             let mut struct_value = StructValue::new();
             struct_value.fields.insert(
                 "closure".to_string(),
-                Value::Closure(Closure {
-                    function_name: "f".into(),
-                    binding: None,
-                    source_role: Default::default(),
-                    source_file: None,
-                    captures: vec![listener],
-                }),
+                Value::Closure(Closure::new(
+                    "f".into(),
+                    None,
+                    Default::default(),
+                    None,
+                    vec![listener],
+                    None,
+                )),
             );
             struct_value
                 .fields

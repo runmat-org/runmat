@@ -5,8 +5,8 @@
 
 use runmat_runtime::context::{
     RuntimeServiceFuture, RuntimeTcpBind, RuntimeTcpClient, RuntimeTcpClientStatus,
-    RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,
-    RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
+    RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpInvocation, RuntimeTcpIssuer,
+    RuntimeTcpReadMode, RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
 };
 use runmat_runtime::tcp::{NativeTcpService, TcpTransportError, TcpTransportErrorKind};
 use runmat_value::ForeignRef;
@@ -65,53 +65,53 @@ impl RuntimeTcpService for LazyNativeTcpService {
 
     fn describe_client(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, TcpTransportError>> {
-        self.call(move |native| native.describe_client(issuer, client))
+        self.call(move |native| native.describe_client(invocation, client))
     }
 
     fn connect(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         request: RuntimeTcpConnect,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
-        self.call(move |native| native.connect(issuer, request))
+        self.call(move |native| native.connect(invocation, request))
     }
 
     fn bind(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         request: RuntimeTcpBind,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpServer, TcpTransportError>> {
-        self.call(move |native| native.bind(issuer, request))
+        self.call(move |native| native.bind(invocation, request))
     }
 
     fn accept(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         server: ForeignRef,
         timeout: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpClient, TcpTransportError>> {
-        self.call(move |native| native.accept(issuer, server, timeout))
+        self.call(move |native| native.accept(invocation, server, timeout))
     }
 
     fn read(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
         mode: RuntimeTcpReadMode,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, TcpTransportError>> {
-        self.call(move |native| native.read(issuer, client, mode))
+        self.call(move |native| native.read(invocation, client, mode))
     }
 
     fn write(
         &self,
-        issuer: RuntimeTcpIssuer,
+        invocation: RuntimeTcpInvocation,
         client: ForeignRef,
         bytes: Vec<u8>,
     ) -> RuntimeServiceFuture<Result<usize, TcpTransportError>> {
-        self.call(move |native| native.write(issuer, client, bytes))
+        self.call(move |native| native.write(invocation, client, bytes))
     }
 
     fn close(

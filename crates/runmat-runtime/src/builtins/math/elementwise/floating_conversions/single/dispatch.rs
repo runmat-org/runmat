@@ -2,9 +2,17 @@ use runmat_builtins::SINGLE_LIKE_OUTPUT_EXTENSION;
 use runmat_value::Value;
 
 use super::{execution, parse_output_template, OutputTemplate, CONVERSION};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 
-pub(super) async fn execute(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn execute(
+    runtime: Option<&RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         runmat_builtins::SINGLE_CATALOG_ENTRY.descriptor,
         &runmat_builtins::SINGLE_ERROR_INVALID_ARGUMENT,
@@ -32,6 +40,7 @@ pub(super) async fn execute(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
     let signature = usize::from(!rest.is_empty());
     let input_count = 1 + rest.len();
     super::super::preparation::execute(
+        runtime,
         runmat_builtins::SINGLE_CATALOG_ENTRY.identity,
         value,
         signature,

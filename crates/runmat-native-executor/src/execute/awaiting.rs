@@ -1,7 +1,9 @@
 use runmat_native_codegen::NativeEdge;
-use runmat_runtime::execution::{AwaitAction, DeferredCall, ExecutionServiceError};
+use runmat_runtime::execution::{
+    AwaitAction, DeferredCall, ExecutionServiceError, RootedValue, RootedValueSequence,
+};
 use runmat_runtime::sequence::ResolveValueSequence;
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -9,13 +11,13 @@ use super::state::HostState;
 use runmat_runtime::execution::RunningFutureLease;
 
 pub(super) enum AwaitStart {
-    Ready(Value),
+    Ready(RootedValue),
     Suspended { continuation: u64, generation: u64 },
 }
 
 pub(super) struct AwaitCompletion {
     pub edge: NativeEdge,
-    pub value: Value,
+    pub value: RootedValue,
 }
 
 pub(super) struct PendingAwait {
@@ -41,10 +43,10 @@ pub(super) fn begin(
     let action = state
         .runtime
         .execution()
-        .begin_await(value)
+        .begin_await_in_context(value, &state.runtime)
         .map_err(execution_error)?;
     match action {
-        AwaitAction::Passthrough(value) => Ok(AwaitStart::Ready(value)),
+        AwaitAction::Passthrough(value) => Ok(AwaitStart::Ready(root_value(value)?)),
         AwaitAction::Completed(sequence) => Ok(AwaitStart::Ready(resolve_await_value(sequence)?)),
         AwaitAction::Pending(value) => {
             let (continuation, generation) = state.next_suspension_identity()?;
@@ -94,10 +96,15 @@ pub(super) async fn complete(
                 yield_once().await;
                 match runtime
                     .execution()
-                    .begin_await(value)
+                    .begin_await_in_context(value, &runtime)
                     .map_err(execution_error)?
                 {
-                    AwaitAction::Passthrough(value) => return Ok(AwaitCompletion { edge, value }),
+                    AwaitAction::Passthrough(value) => {
+                        return Ok(AwaitCompletion {
+                            edge,
+                            value: root_value(value)?,
+                        });
+                    }
                     AwaitAction::Completed(sequence) => {
                         return Ok(AwaitCompletion {
                             edge,
@@ -131,17 +138,41 @@ pub(super) async fn complete(
                 }
                 .map_err(NativeExecutorError::from)
                 .and_then(|sequence| normalize_outputs(sequence, requested_outputs));
-                let stored = result
-                    .as_ref()
-                    .map(Clone::clone)
-                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()));
-                running.complete(stored).map_err(execution_error)?;
-                let sequence = result?;
+                let sequence = store_callable_outcome(&mut running, result)?;
                 return Ok(AwaitCompletion {
                     edge,
                     value: resolve_await_value(sequence)?,
                 });
             }
+        }
+    }
+}
+
+fn store_callable_outcome(
+    running: &mut RunningFutureLease,
+    result: NativeExecutorResult<RootedValueSequence>,
+) -> NativeExecutorResult<RootedValueSequence> {
+    match result {
+        Ok(sequence) => {
+            running
+                .complete(Ok(sequence.clone()))
+                .map_err(execution_error)?;
+            Ok(sequence)
+        }
+        Err(NativeExecutorError::Runtime(error)) => {
+            let original = runmat_runtime::runtime_error::RuntimeErrorOwner::new(*error);
+            running
+                .complete(Err(ExecutionServiceError::LocalizedRuntimeFailure(
+                    original.clone(),
+                )))
+                .map_err(execution_error)?;
+            Err(runmat_runtime::RuntimeError::from_shared_original(original).into())
+        }
+        Err(error) => {
+            running
+                .complete(Err(ExecutionServiceError::Failed(error.to_string())))
+                .map_err(execution_error)?;
+            Err(error)
         }
     }
 }
@@ -163,13 +194,14 @@ pub(super) fn validate_pending(
 }
 
 fn normalize_outputs(
-    sequence: ValueSequence,
+    sequence: RootedValueSequence,
     requested_outputs: usize,
-) -> NativeExecutorResult<ValueSequence> {
+) -> NativeExecutorResult<RootedValueSequence> {
     runmat_value::validate_output_count(requested_outputs)
         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
     if requested_outputs == 0 {
-        return Ok(ValueSequence::empty());
+        return RootedValueSequence::new(runmat_value::ValueSequence::empty())
+            .map_err(execution_error);
     }
     if sequence.len() != requested_outputs {
         return Err(runmat_runtime::runtime_error::semantic_error(
@@ -184,17 +216,29 @@ fn normalize_outputs(
     Ok(sequence)
 }
 
-fn resolve_await_value(sequence: ValueSequence) -> Result<Value, NativeExecutorError> {
-    sequence
-        .resolve(
-            runmat_types::SequenceUse::RequireSingle,
-            runmat_runtime::sequence::SequenceResolutionContext::default(),
-        )
-        .map(|mut values| values.remove(0))
-        .map_err(NativeExecutorError::from)
+fn resolve_await_value(sequence: RootedValueSequence) -> Result<RootedValue, NativeExecutorError> {
+    sequence.try_map_owned(
+        |sequence| {
+            sequence
+                .resolve(
+                    runmat_types::SequenceUse::RequireSingle,
+                    runmat_runtime::sequence::SequenceResolutionContext::default(),
+                )
+                .map(|mut values| values.remove(0))
+                .map_err(NativeExecutorError::from)
+        },
+        execution_error,
+    )
+}
+
+fn root_value(value: Value) -> NativeExecutorResult<RootedValue> {
+    RootedValue::new(value).map_err(execution_error)
 }
 
 fn execution_error(error: ExecutionServiceError) -> NativeExecutorError {
+    if matches!(&error, ExecutionServiceError::LocalizedRuntimeFailure(_)) {
+        return error.into_runtime_error().into();
+    }
     runmat_runtime::runtime_error::semantic_error("ExecutionService", error.to_string()).into()
 }
 
@@ -210,4 +254,92 @@ async fn yield_once() {
         }
     })
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::rc::Rc;
+
+    use runmat_runtime::context::RuntimeContext;
+    use runmat_runtime::execution::{
+        AwaitAction, DeferredInvocation, DeferredProgram, RuntimeExecutionService,
+        RuntimeExecutionServices,
+    };
+    use runmat_types::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+
+    use super::*;
+
+    #[test]
+    fn local_callable_failure_keeps_one_cached_typed_error_owner() {
+        let service = Rc::new(RuntimeExecutionService::new());
+        let runtime = RuntimeContext::new(service.clone());
+        let future = service
+            .create_future(DeferredCall {
+                invocation: DeferredInvocation::Callable(
+                    runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                        CallableIdentity::BoundFunction(FunctionId(1)),
+                        Vec::new(),
+                        1,
+                        CallableFallbackPolicy::None,
+                        runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                    ),
+                ),
+                retry: runmat_execution::RetryPolicy::Never,
+                program_revision: None,
+                capabilities: Default::default(),
+                program: DeferredProgram::Local,
+            })
+            .expect("create local future");
+        assert!(matches!(
+            service.begin_await(Value::Future(future.clone())),
+            Ok(AwaitAction::ExecuteFuture { .. })
+        ));
+
+        let error = runmat_runtime::build_runtime_error("local callback failed")
+            .with_identifier("Acme:LocalCallback")
+            .with_call_frames(vec![runmat_runtime::CallFrame {
+                function: "local_callback".into(),
+                source_id: None,
+                span: Some((4, 2)),
+                source_owner: None,
+                diagnostic_source: None,
+            }])
+            .with_source(std::io::Error::other("typed provider failure"))
+            .build();
+        let mut running = RunningFutureLease::new(runtime, future.clone());
+        let immediate = store_callable_outcome(&mut running, Err(error.into()))
+            .expect_err("local callback must fail");
+        let NativeExecutorError::Runtime(immediate) = immediate else {
+            panic!("local failure must retain RuntimeError");
+        };
+        assert_eq!(immediate.identifier(), Some("Acme:LocalCallback"));
+        assert_eq!(immediate.context.call_frames[0].function, "local_callback");
+        assert!(has_typed_provider_source(immediate.as_ref()));
+
+        let first = service
+            .begin_await(Value::Future(future.clone()))
+            .expect_err("first cached fetch must fail");
+        let second = service
+            .begin_await(Value::Future(future))
+            .expect_err("repeated cached fetch must fail");
+        assert_eq!(first, second, "both fetches must share one failure owner");
+        for failure in [first, second] {
+            let error = failure.into_runtime_error();
+            assert_eq!(error.identifier(), Some("Acme:LocalCallback"));
+            assert_eq!(error.context.call_frames[0].function, "local_callback");
+            assert!(has_typed_provider_source(&error));
+        }
+    }
+
+    fn has_typed_provider_source(error: &(dyn Error + 'static)) -> bool {
+        let mut source = error.source();
+        while let Some(current) = source {
+            if current.downcast_ref::<std::io::Error>().is_some() {
+                return true;
+            }
+            source = current.source();
+        }
+        false
+    }
 }

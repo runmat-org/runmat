@@ -506,7 +506,7 @@ fn at_prefixed_builtin_uses_the_same_integer_parameter_gate() {
     let error = call(
         Value::Num(0.0),
         Value::Num(0.0),
-        Value::FunctionHandle("@rectpuls".to_string()),
+        Value::FunctionHandle("@rectpuls".into()),
         vec![Value::Int(IntValue::I16(1))],
     )
     .expect_err("typed integer width must be gated");
@@ -535,7 +535,7 @@ fn at_prefixed_builtin_resident_width_controls_output_ownership() {
             let output = call(
                 Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("times")),
                 Value::Num(0.0),
-                Value::FunctionHandle("@rectpuls".to_string()),
+                Value::FunctionHandle("@rectpuls".into()),
                 vec![Value::GpuTensor(resident.clone())],
             )
             .expect("resident width waveform");

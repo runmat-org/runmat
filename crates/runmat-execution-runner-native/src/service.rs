@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -8,24 +10,51 @@ use runmat_execution::{
     PoolSnapshot, PoolState, TaskHandle, TaskId, TaskResultClaim,
 };
 use runmat_runtime::execution::{
-    AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
-    SpmdExecutionMode,
+    AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, GraphResultReceipt,
+    RuntimeExecutionServices, SpmdExecutionMode,
 };
 use runmat_value::{Value, ValueSequence};
 
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
-use crate::supervisor::ProgramBatchSubmission;
+use crate::supervisor::{GraphBatchSubmission, ProgramBatchSubmission};
 use crate::{NativeExecutionConfig, NativeExecutionResult};
+
+mod materialization;
 
 static NEXT_NATIVE_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 enum FutureState {
-    Deferred(Box<DeferredCall>),
-    Running(Arc<TaskCompletion>),
+    Deferred(Rc<DeferredCall>),
+    ExecutingInCaller,
+    Materializing(materialization::Reservation),
+    Running(RunningCompletion),
+    // Graph cancellation is requested, but its selected receipt and host
+    // resources remain owned until the process driver reports retirement.
+    CancellingGraph(RunningCompletion),
+    GraphResolved {
+        result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
+        receipt: Rc<dyn GraphResultReceipt>,
+    },
     Completed(Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>),
     Cancelled,
+}
+
+enum RunningCompletion {
+    Direct(Arc<TaskCompletion>),
+    Graph {
+        completion: Arc<TaskCompletion>,
+        receipt: Rc<dyn GraphResultReceipt>,
+    },
+}
+
+impl RunningCompletion {
+    fn completion(&self) -> &Arc<TaskCompletion> {
+        match self {
+            Self::Direct(completion) | Self::Graph { completion, .. } => completion,
+        }
+    }
 }
 
 struct TaskRecord {
@@ -36,11 +65,25 @@ struct TaskRecord {
     completion_order: Option<u64>,
 }
 
+struct GraphJobReceipt {
+    handle: JobHandle,
+    receipt: Rc<dyn GraphResultReceipt>,
+    // A successful RootedValueSequence retains its GC root lease until the
+    // supervisor's terminal/retention prune drops this exact receipt.
+    terminal: RefCell<
+        Option<Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>>,
+    >,
+    retain_until_unix_millis: u64,
+}
+
 struct State {
     next_future: u64,
     next_task: u64,
+    next_materialization: u64,
     futures: HashMap<FutureId, FutureState>,
+    cancelling_graphs: Vec<FutureId>,
     tasks: HashMap<TaskId, TaskRecord>,
+    graph_jobs: HashMap<runmat_execution::JobId, Rc<GraphJobReceipt>>,
     pool_generation: u64,
     pool_open: bool,
 }
@@ -53,6 +96,13 @@ pub struct NativeExecutionService {
 }
 
 impl NativeExecutionService {
+    fn sweep_completed_graph_cancellations(&self) {
+        let mut state = self.state.lock().expect("native service poisoned");
+        let retired = retire_verified_graph_cancellations(&mut state);
+        drop(state);
+        drop(retired);
+    }
+
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_NATIVE_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-session", nonce);
@@ -65,8 +115,11 @@ impl NativeExecutionService {
             state: Mutex::new(State {
                 next_future: 0,
                 next_task: 0,
+                next_materialization: 0,
                 futures: HashMap::new(),
+                cancelling_graphs: Vec::new(),
                 tasks: HashMap::new(),
+                graph_jobs: HashMap::new(),
                 pool_generation: 1,
                 pool_open: false,
             }),
@@ -79,6 +132,44 @@ impl NativeExecutionService {
         } else {
             Err(ExecutionServiceError::ForeignScope)
         }
+    }
+
+    /// Release retained V3/source leases only when the durable supervisor's
+    /// terminal/retention authority has expired. Never hold the service lock
+    /// across the supervisor query, which may reenter a callback or block.
+    fn prune_expired_graph_receipts(&self) -> Result<(), ExecutionServiceError> {
+        let now = crate::supervisor::unix_millis();
+        let candidates = {
+            let state = self.state.lock().expect("native service poisoned");
+            state
+                .graph_jobs
+                .iter()
+                .filter(|(_, record)| record.retain_until_unix_millis <= now)
+                .map(|(id, record)| (*id, Rc::clone(record)))
+                .collect::<Vec<_>>()
+        };
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let expired = self
+            .durable
+            .expired_graph_receipts(candidates.iter().map(|(id, _)| *id).collect())?;
+        let mut state = self.state.lock().expect("native service poisoned");
+        let mut retired = Vec::new();
+        for id in expired {
+            if let Some((_, original)) = candidates.iter().find(|(candidate, _)| *candidate == id) {
+                if state
+                    .graph_jobs
+                    .get(&id)
+                    .is_some_and(|record| Rc::ptr_eq(record, original))
+                {
+                    retired.extend(state.graph_jobs.remove(&id));
+                }
+            }
+        }
+        drop(state);
+        drop(retired);
+        Ok(())
     }
 
     fn future_for_value(
@@ -110,11 +201,22 @@ impl NativeExecutionService {
 
 impl RuntimeExecutionServices for NativeExecutionService {
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        let mut state = self.state.try_lock().ok()?;
+        let retired = retire_verified_graph_cancellations(&mut state);
+        drop(state);
+        drop(retired);
         let state = self.state.try_lock().ok()?;
         for future in state.futures.values() {
             match future {
                 FutureState::Deferred(call) => call.invocation.visit_retained_values(visitor)?,
-                FutureState::Completed(Ok(sequence)) => {
+                FutureState::Materializing(reservation) => {
+                    reservation.call.invocation.visit_retained_values(visitor)?;
+                }
+                FutureState::Completed(Ok(sequence))
+                | FutureState::GraphResolved {
+                    result: Ok(sequence),
+                    ..
+                } => {
                     for value in sequence.value().iter() {
                         visitor(value)?;
                     }
@@ -122,7 +224,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 // Running workers retain serialized ValuePayload/AttemptSuccess,
                 // never this process's resident Value handles.
                 FutureState::Running(_)
+                | FutureState::CancellingGraph(_)
+                | FutureState::ExecutingInCaller
                 | FutureState::Completed(Err(_))
+                | FutureState::GraphResolved { result: Err(_), .. }
                 | FutureState::Cancelled => {}
             }
         }
@@ -138,6 +243,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
         let state = self.state.lock().expect("native service poisoned");
         if !state.pool_open {
             return Ok(None);
@@ -232,6 +338,11 @@ impl RuntimeExecutionServices for NativeExecutionService {
         }
         state.pool_open = false;
         state.pool_generation = state.pool_generation.wrapping_add(1);
+        for future in state.futures.values_mut() {
+            if let FutureState::Materializing(reservation) = future {
+                reservation.cancelled = true;
+            }
+        }
         drop(state);
         self.driver.cancel_all(CancellationReason::User);
         Ok(())
@@ -291,7 +402,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 retry: runmat_execution::RetryPolicy::Never,
                 program_revision: call.program_revision.clone(),
                 capabilities: call.capabilities.clone(),
-                program: Some(call.program.clone()),
+                program: runmat_runtime::execution::DeferredProgram::RegionSourcesV1(
+                    call.program.clone().into(),
+                ),
             };
             let (callable, invocation_context, recipe, artifact, inputs) =
                 match materialize_call(&invocation, OutputContract { requested_outputs }) {
@@ -365,7 +478,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                                 ExecutionServiceError::InvalidOutputContract,
                             );
                         }
-                        Ok(runmat_execution_runner::AttemptSuccess::Values { .. }) => {
+                        Ok(
+                            runmat_execution_runner::AttemptSuccess::Values { .. }
+                            | runmat_execution_runner::AttemptSuccess::Graph { .. },
+                        ) => {
                             retain_first_spmd_failure(
                                 &mut first_failure,
                                 completion.completion_order(),
@@ -388,7 +504,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                                 ExecutionServiceError::Infrastructure(message),
                             );
                         }
-                        Err(crate::driver::TransferFailure::WorkerLost(message)) => {
+                        Err(
+                            crate::driver::TransferFailure::WorkerLost(message)
+                            | crate::driver::TransferFailure::RetirementUnverified(message),
+                        ) => {
                             retain_first_spmd_failure(
                                 &mut first_failure,
                                 completion.completion_order(),
@@ -431,6 +550,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.lock().expect("native service poisoned");
@@ -439,7 +559,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let id = FutureId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         state
             .futures
-            .insert(id, FutureState::Deferred(Box::new(call)));
+            .insert(id, FutureState::Deferred(Rc::new(call)));
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
@@ -448,55 +568,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
-        self.validate_scope(future.scope_id)?;
-        let mut state = self.state.lock().expect("native service poisoned");
-        let call = match state.futures.get(&future.id) {
-            Some(FutureState::Deferred(call)) => call.clone(),
-            Some(_) => {
-                return Err(ExecutionServiceError::Failed(
-                    "future has already been scheduled".into(),
-                ))
-            }
-            None => return Err(ExecutionServiceError::UnknownHandle),
-        };
-        let (callable, invocation_context, recipe, artifact, inputs) =
-            materialize_call(&call, future.outputs.clone())?;
-        let sequence = state.next_task;
-        state.next_task = sequence.wrapping_add(1);
-        let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
-        let completion = self
-            .driver
-            .submit(crate::driver::LocalProgramSubmission {
-                task_id: id,
-                callable,
-                invocation_context,
-                recipe,
-                artifact,
-                inputs,
-                outputs: future.outputs.clone(),
-                retry: call.retry,
-            })
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        state
-            .futures
-            .insert(future.id, FutureState::Running(completion));
-        let generation = 1;
-        state.tasks.insert(
-            id,
-            TaskRecord {
-                future_id: future.id,
-                generation,
-                read: false,
-                claimed: false,
-                completion_order: None,
-            },
-        );
-        Ok(TaskHandle {
-            id,
-            scope_id: self.scope_id,
-            generation,
-            outputs: future.outputs.clone(),
-        })
+        self.sweep_completed_graph_cancellations();
+        materialization::spawn(self, future)
     }
 
     fn inspect_future(
@@ -504,6 +577,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         future: &FutureHandle,
     ) -> Result<ExecutionHandleSnapshot, ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
+        self.sweep_completed_graph_cancellations();
         let state = self.state.lock().expect("native service poisoned");
         let stored_state = state
             .futures
@@ -525,6 +599,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         task: &TaskHandle,
     ) -> Result<ExecutionHandleSnapshot, ExecutionServiceError> {
         self.validate_scope(task.scope_id)?;
+        self.sweep_completed_graph_cancellations();
         let state = self.state.lock().expect("native service poisoned");
         let record = state
             .tasks
@@ -549,6 +624,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         &self,
         tasks: &[TaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
         let mut state = self.state.lock().expect("native service poisoned");
         let mut selected: Option<(u64, usize, TaskId)> = None;
         let mut has_unread = false;
@@ -572,7 +648,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 record
                     .completion_order
                     .or_else(|| match state.futures.get(&record.future_id) {
-                        Some(FutureState::Running(completion)) => completion.completion_order(),
+                        Some(
+                            FutureState::Running(running) | FutureState::CancellingGraph(running),
+                        ) => running.completion().completion_order(),
                         _ => None,
                     });
             if let Some(order) = order {
@@ -617,9 +695,79 @@ impl RuntimeExecutionServices for NativeExecutionService {
         call: DeferredCall,
         options: DurableJobOptions,
     ) -> Result<JobHandle, ExecutionServiceError> {
+        // Best-effort reclamation cannot prevent a valid new submission when
+        // the supervisor is temporarily unavailable.
+        let _ = self.prune_expired_graph_receipts();
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let outputs = OutputContract { requested_outputs };
+        if matches!(
+            &call.program,
+            runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+        ) {
+            let target = runmat_execution_artifact::ProgramTarget::portable(format!(
+                "{}-{}-interpreter-bytecode-v2",
+                std::env::consts::ARCH,
+                std::env::consts::OS
+            ));
+            let (_, request, receipt) = runmat_vm::materialize_deferred_graph_call(
+                &call,
+                outputs.clone(),
+                target,
+                runmat_execution::value::ValueLimits::default(),
+            )?;
+            let submitted = self.durable.submit_graph(GraphBatchSubmission {
+                request,
+                idempotency_key: options.idempotency_key,
+                retention_millis: options.retention_millis,
+            })?;
+            if submitted.handle.outputs != outputs {
+                return Err(ExecutionServiceError::InvalidOutputContract);
+            }
+            loop {
+                let existing = {
+                    let state = self.state.lock().expect("native service poisoned");
+                    state.graph_jobs.get(&submitted.handle.id).map(Rc::clone)
+                };
+                if let Some(existing) = existing {
+                    if existing.handle != submitted.handle
+                        || existing.retain_until_unix_millis != submitted.retain_until_unix_millis
+                        || !existing.receipt.same_selected_admission(receipt.as_ref())
+                    {
+                        return Err(ExecutionServiceError::ForeignScope);
+                    }
+                    let state = self.state.lock().expect("native service poisoned");
+                    if state
+                        .graph_jobs
+                        .get(&submitted.handle.id)
+                        .is_some_and(|current| Rc::ptr_eq(current, &existing))
+                    {
+                        return Ok(existing.handle.clone());
+                    }
+                    continue;
+                }
+                if !submitted.created_new {
+                    // A supervisor record from a previous service/session
+                    // cannot mint this session's local source and definition
+                    // leases, even when its canonical bytes are identical.
+                    return Err(ExecutionServiceError::UnknownHandle);
+                }
+                let mut state = self.state.lock().expect("native service poisoned");
+                if state.graph_jobs.contains_key(&submitted.handle.id) {
+                    continue;
+                }
+                state.graph_jobs.insert(
+                    submitted.handle.id,
+                    Rc::new(GraphJobReceipt {
+                        handle: submitted.handle.clone(),
+                        receipt,
+                        terminal: RefCell::new(None),
+                        retain_until_unix_millis: submitted.retain_until_unix_millis,
+                    }),
+                );
+                return Ok(submitted.handle);
+            }
+        }
         let (callable, invocation_context, recipe, artifact, arguments) =
             materialize_call(&call, outputs)?;
         self.durable.submit(ProgramBatchSubmission {
@@ -635,10 +783,22 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 
     fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
+        if self
+            .state
+            .lock()
+            .expect("native service poisoned")
+            .graph_jobs
+            .contains_key(&job.id)
+        {
+            return Err(ExecutionServiceError::Failed(
+                "graph job requires the issuing runtime context".into(),
+            ));
+        }
         self.durable.await_job(job.clone())
     }
 
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
         if let Value::Job(handle) = &value {
             return self
                 .await_job(handle)
@@ -646,6 +806,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     ValueSequence::single(value)
                         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
                 })
+                .and_then(runmat_runtime::execution::RootedValueSequence::new)
                 .map(AwaitAction::Completed);
         }
         let original = value.clone();
@@ -661,23 +822,55 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 .get_mut(&future.id)
                 .ok_or(ExecutionServiceError::UnknownHandle)?
             {
-                FutureState::Deferred(call) => {
-                    let call = call.clone();
-                    *state
+                FutureState::Deferred(_) => {
+                    let retired = state
                         .futures
-                        .get_mut(&future.id)
-                        .expect("future was just resolved") = FutureState::Completed(Err(
-                        ExecutionServiceError::Failed("future is executing in its caller".into()),
-                    ));
+                        .insert(future.id, FutureState::ExecutingInCaller)
+                        .expect("future was just resolved");
+                    drop(state);
+                    let FutureState::Deferred(call) = retired else {
+                        unreachable!("validated deferred future changed under mutex")
+                    };
+                    let call = Rc::try_unwrap(call).map_err(|_| {
+                        ExecutionServiceError::Infrastructure(
+                            "deferred call retained an unexpected concurrent owner".into(),
+                        )
+                    })?;
                     return Ok(AwaitAction::ExecuteFuture {
                         handle: future,
-                        call,
+                        call: Box::new(call),
                     });
                 }
-                FutureState::Running(completion) => Arc::clone(completion),
+                FutureState::Materializing(reservation) if reservation.cancelled => {
+                    return Err(ExecutionServiceError::Cancelled);
+                }
+                FutureState::Materializing(_) => return Ok(AwaitAction::Pending(original)),
+                FutureState::ExecutingInCaller => {
+                    return Err(ExecutionServiceError::Failed(
+                        "future is executing in its caller".into(),
+                    ));
+                }
+                FutureState::Running(RunningCompletion::Direct(completion)) => {
+                    Arc::clone(completion)
+                }
+                FutureState::Running(RunningCompletion::Graph { .. }) => {
+                    return Err(ExecutionServiceError::Infrastructure(
+                        "graph result requires the issuing runtime context".into(),
+                    ));
+                }
+                FutureState::CancellingGraph(_) => {
+                    return Err(ExecutionServiceError::Infrastructure(
+                        "graph result requires the issuing runtime context".into(),
+                    ));
+                }
+                FutureState::GraphResolved { .. } => {
+                    return Err(ExecutionServiceError::Infrastructure(
+                        "graph result requires the issuing runtime context".into(),
+                    ));
+                }
                 FutureState::Completed(result) => {
                     let result = result.clone();
-                    return result.map(|value| AwaitAction::Completed(value.value().clone()));
+                    return result.map(AwaitAction::Completed);
                 }
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
@@ -718,7 +911,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 crate::driver::TransferFailure::Infrastructure(message) => {
                     ExecutionServiceError::Infrastructure(message)
                 }
-                crate::driver::TransferFailure::WorkerLost(message) => {
+                crate::driver::TransferFailure::WorkerLost(message)
+                | crate::driver::TransferFailure::RetirementUnverified(message) => {
                     ExecutionServiceError::WorkerLost(message)
                 }
                 crate::driver::TransferFailure::Cancelled => ExecutionServiceError::Cancelled,
@@ -728,38 +922,222 @@ impl RuntimeExecutionServices for NativeExecutionService {
             });
         let mut state = self.state.lock().expect("native service poisoned");
         let rooted = result.and_then(runmat_runtime::execution::RootedValueSequence::new);
-        state
+        let retired = state
             .futures
             .insert(future.id, FutureState::Completed(rooted.clone()));
-        rooted.map(|value| AwaitAction::Completed(value.value().clone()))
+        drop(state);
+        drop(retired);
+        rooted.map(AwaitAction::Completed)
+    }
+
+    fn begin_await_in_context(
+        &self,
+        value: Value,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<AwaitAction, ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
+        if let Value::Job(handle) = &value {
+            self.prune_expired_graph_receipts()?;
+            let graph = {
+                let state = self.state.lock().expect("native service poisoned");
+                state.graph_jobs.get(&handle.id).map(Rc::clone)
+            };
+            if let Some(record) = graph {
+                if record.handle != *handle {
+                    return Err(ExecutionServiceError::UnknownHandle);
+                }
+                let receipt = &record.receipt;
+                receipt.check_issuing_context(runtime)?;
+                if let Some(terminal) = record.terminal.borrow().as_ref() {
+                    return terminal.clone().map(AwaitAction::Completed);
+                }
+                let response = self.durable.await_response(handle.clone())?;
+                let terminal = match response {
+                    runmat_execution_artifact::ProgramExecutionResponse::GraphSuccess { graph } => {
+                        receipt
+                            .decode_in_context(runtime, &graph)
+                            .and_then(|result| {
+                                (result.as_slice().len()
+                                    == usize::from(record.handle.outputs.requested_outputs))
+                                .then_some(result)
+                                .ok_or(ExecutionServiceError::InvalidOutputContract)
+                            })
+                    }
+                    runmat_execution_artifact::ProgramExecutionResponse::Failure { message } => {
+                        Err(ExecutionServiceError::Failed(message))
+                    }
+                    runmat_execution_artifact::ProgramExecutionResponse::RuntimeFailure {
+                        failure,
+                    } => Err(ExecutionServiceError::LocalizedRuntimeFailure(
+                        receipt.decode_failure_in_context(runtime, &failure)?.into(),
+                    )),
+                    _ => Err(ExecutionServiceError::Infrastructure(
+                        "graph job returned an incompatible durable response".into(),
+                    )),
+                };
+                if matches!(
+                    &terminal,
+                    Err(ExecutionServiceError::ForeignScope | ExecutionServiceError::UnknownHandle)
+                ) {
+                    // A session check can race issuer retirement. Never let a
+                    // foreign or retired fetch publish this job's local cache.
+                    return terminal.map(AwaitAction::Completed);
+                }
+                let mut pending = Some(terminal);
+                let published = {
+                    let mut cache = record.terminal.borrow_mut();
+                    if cache.is_none() {
+                        *cache = pending.take();
+                    }
+                    cache
+                        .as_ref()
+                        .expect("graph terminal was published")
+                        .clone()
+                };
+                // A reentrant fetch may have won publication while this call
+                // decoded. Retire the unused rooted value outside the borrow.
+                drop(pending);
+                return published.map(AwaitAction::Completed);
+            }
+            return self.begin_await(value);
+        }
+        let original = value.clone();
+        let future = match self.future_for_value(value)? {
+            Ok(future) => future,
+            Err(value) => return Ok(AwaitAction::Passthrough(value)),
+        };
+        self.validate_scope(future.scope_id)?;
+        let graph_running = {
+            let state = self.state.lock().expect("native service poisoned");
+            match state.futures.get(&future.id) {
+                Some(FutureState::Running(RunningCompletion::Graph {
+                    completion,
+                    receipt,
+                })) => Some((Arc::clone(completion), Rc::clone(receipt))),
+                Some(FutureState::CancellingGraph(RunningCompletion::Graph {
+                    completion,
+                    receipt,
+                })) => {
+                    let completion = Arc::clone(completion);
+                    let receipt = Rc::clone(receipt);
+                    drop(state);
+                    receipt.check_issuing_context(runtime)?;
+                    return cancelling_graph_await(&completion, original);
+                }
+                Some(FutureState::GraphResolved { result, receipt }) => {
+                    let result = result.clone();
+                    let receipt = Rc::clone(receipt);
+                    drop(state);
+                    receipt.check_issuing_context(runtime)?;
+                    return result.map(AwaitAction::Completed);
+                }
+                _ => None,
+            }
+        };
+        let Some((completion, receipt)) = graph_running else {
+            return self.begin_await(original);
+        };
+        receipt.check_issuing_context(runtime)?;
+        let Some(transfer) = completion.try_value() else {
+            return Ok(AwaitAction::Pending(original));
+        };
+        let rooted = match transfer {
+            Ok(runmat_execution_runner::AttemptSuccess::Graph { graph }) => {
+                receipt.decode_in_context(runtime, &graph)
+            }
+            Ok(_) => Err(ExecutionServiceError::Infrastructure(
+                "graph task returned a non-graph result".into(),
+            )),
+            Err(failure) => Err(match failure {
+                crate::driver::TransferFailure::Execution(message) => {
+                    ExecutionServiceError::Failed(message)
+                }
+                crate::driver::TransferFailure::Infrastructure(message) => {
+                    ExecutionServiceError::Infrastructure(message)
+                }
+                crate::driver::TransferFailure::WorkerLost(message)
+                | crate::driver::TransferFailure::RetirementUnverified(message) => {
+                    ExecutionServiceError::WorkerLost(message)
+                }
+                crate::driver::TransferFailure::Cancelled => ExecutionServiceError::Cancelled,
+                crate::driver::TransferFailure::Runtime(failure) => receipt
+                    .decode_failure_in_context(runtime, &failure)
+                    .map(|error| ExecutionServiceError::LocalizedRuntimeFailure(error.into()))
+                    .unwrap_or_else(|error| error),
+            }),
+        };
+        if matches!(&rooted, Err(ExecutionServiceError::ForeignScope)) {
+            // A different session may inspect this handle, but it cannot
+            // consume the issuing session's completed graph or receipt.
+            return Err(ExecutionServiceError::ForeignScope);
+        }
+        let mut state = self.state.lock().expect("native service poisoned");
+        match state.futures.get(&future.id) {
+            Some(FutureState::Running(RunningCompletion::Graph { .. })) => {}
+            Some(FutureState::Cancelled) => return Err(ExecutionServiceError::Cancelled),
+            Some(FutureState::CancellingGraph(_)) => {
+                return cancelling_graph_await(&completion, original);
+            }
+            Some(FutureState::GraphResolved { result, receipt }) => {
+                let result = result.clone();
+                let receipt = Rc::clone(receipt);
+                drop(state);
+                receipt.check_issuing_context(runtime)?;
+                return result.map(AwaitAction::Completed);
+            }
+            Some(FutureState::Completed(_)) => {
+                return Err(ExecutionServiceError::Infrastructure(
+                    "graph task changed into a direct result".into(),
+                ));
+            }
+            _ => {
+                return Err(ExecutionServiceError::Infrastructure(
+                    "graph task changed ownership during result publication".into(),
+                ))
+            }
+        }
+        let retired = state.futures.insert(
+            future.id,
+            FutureState::GraphResolved {
+                result: rooted.clone(),
+                receipt,
+            },
+        );
+        drop(state);
+        drop(retired);
+        rooted.map(AwaitAction::Completed)
     }
 
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<ValueSequence, ExecutionServiceError>,
+        result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
-        self.state
-            .lock()
-            .expect("native service poisoned")
-            .futures
-            .insert(
-                future.id,
-                FutureState::Completed(
-                    result.and_then(runmat_runtime::execution::RootedValueSequence::new),
-                ),
-            );
         let mut state = self.state.lock().expect("native service poisoned");
+        if !matches!(
+            state.futures.get(&future.id),
+            Some(FutureState::ExecutingInCaller)
+        ) {
+            return Err(ExecutionServiceError::Failed(
+                "future is not executing in its caller".into(),
+            ));
+        }
+        let retired = state
+            .futures
+            .insert(future.id, FutureState::Completed(result));
         record_native_completion(&mut state, future.id);
+        drop(state);
+        drop(retired);
         Ok(())
     }
 
     fn cancel(
         &self,
         value: &Value,
-        _reason: CancellationReason,
+        reason: CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
+        self.sweep_completed_graph_cancellations();
         let future_id = match value {
             Value::Future(handle) => {
                 self.validate_scope(handle.scope_id)?;
@@ -783,34 +1161,146 @@ impl RuntimeExecutionServices for NativeExecutionService {
             .futures
             .get_mut(&future_id)
             .ok_or(ExecutionServiceError::UnknownHandle)?;
-        if let FutureState::Running(completion) = record {
-            completion.cancel();
+        if let FutureState::Materializing(reservation) = record {
+            reservation.cancelled = true;
+            return Ok(());
         }
-        *record = FutureState::Cancelled;
-        record_native_completion(&mut state, future_id);
+        if matches!(record, FutureState::CancellingGraph(_)) {
+            return Ok(());
+        }
+        let previous = std::mem::replace(record, FutureState::Cancelled);
+        let (running, retired) = match previous {
+            FutureState::Running(RunningCompletion::Graph {
+                completion,
+                receipt,
+            }) => {
+                *state.futures.get_mut(&future_id).expect("future exists") =
+                    FutureState::CancellingGraph(RunningCompletion::Graph {
+                        completion: Arc::clone(&completion),
+                        receipt,
+                    });
+                state.cancelling_graphs.push(future_id);
+                (Some(completion), None)
+            }
+            other => {
+                let running = match &other {
+                    FutureState::Running(running) => Some(Arc::clone(running.completion())),
+                    _ => None,
+                };
+                record_native_completion(&mut state, future_id);
+                (running, Some(other))
+            }
+        };
+        let task_id = running.as_ref().and_then(|_| {
+            state
+                .tasks
+                .iter()
+                .find(|(_, task)| task.future_id == future_id)
+                .map(|(task_id, _)| *task_id)
+        });
+        drop(state);
+        if let Some(completion) = running {
+            completion.cancel_with_reason(reason);
+            let task_id = task_id.ok_or_else(|| {
+                ExecutionServiceError::Infrastructure(
+                    "running native future has no accepted scheduler task".into(),
+                )
+            })?;
+            self.driver
+                .cancel_task(task_id)
+                .map_err(|error| ExecutionServiceError::Infrastructure(error.to_string()))?;
+        }
+        drop(retired);
         Ok(())
     }
 
     fn drain_scope(&self, reason: CancellationReason) {
+        self.sweep_completed_graph_cancellations();
         self.driver.cancel_all(reason);
         let mut state = self.state.lock().expect("native service poisoned");
-        for future in state.futures.values_mut() {
-            if let FutureState::Running(completion) = future {
-                completion.cancel();
+        let mut retired = Vec::new();
+        let mut running = Vec::new();
+        let mut newly_cancelling = Vec::new();
+        for (future_id, future) in &mut state.futures {
+            if let FutureState::Materializing(reservation) = future {
+                reservation.cancelled = true;
+                continue;
             }
-            if !matches!(future, FutureState::Completed(_)) {
-                *future = FutureState::Cancelled;
+            if matches!(future, FutureState::CancellingGraph(_)) {
+                continue;
+            }
+            if !matches!(
+                future,
+                FutureState::Completed(_) | FutureState::GraphResolved { .. }
+            ) {
+                let previous = std::mem::replace(future, FutureState::Cancelled);
+                if let FutureState::Running(RunningCompletion::Graph { .. }) = &previous {
+                    *future = FutureState::CancellingGraph(match previous {
+                        FutureState::Running(running) => running,
+                        _ => unreachable!(),
+                    });
+                    newly_cancelling.push(*future_id);
+                    continue;
+                }
+                if let FutureState::Running(completion) = &previous {
+                    running.push(Arc::clone(completion.completion()));
+                }
+                retired.push(previous);
             }
         }
+        state.cancelling_graphs.extend(newly_cancelling);
         let future_ids = state
             .tasks
             .values()
             .map(|task| task.future_id)
             .collect::<Vec<_>>();
         for future_id in future_ids {
-            record_native_completion(&mut state, future_id);
+            if !matches!(
+                state.futures.get(&future_id),
+                Some(FutureState::CancellingGraph(_))
+            ) {
+                record_native_completion(&mut state, future_id);
+            }
+        }
+        drop(state);
+        for completion in running {
+            completion.cancel();
+        }
+        drop(retired);
+    }
+}
+
+fn retire_verified_graph_cancellations(state: &mut State) -> Vec<FutureState> {
+    let mut still_pending = Vec::new();
+    let mut completed = Vec::new();
+    for id in std::mem::take(&mut state.cancelling_graphs) {
+        if let Some(FutureState::CancellingGraph(running)) = state.futures.get(&id) {
+            match running.completion().verified_terminal() {
+                Some(true) => completed.push((id, running.completion().completion_order())),
+                None => still_pending.push(id),
+                // Failed tree retirement is deliberately retained, but
+                // it cannot later become a verified cancellation.
+                Some(false) => {}
+            }
         }
     }
+    state.cancelling_graphs = still_pending;
+    let mut retired = Vec::with_capacity(completed.len());
+    for (future_id, order) in completed {
+        if let Some(previous) = state.futures.insert(future_id, FutureState::Cancelled) {
+            retired.push(previous);
+        }
+        if let Some(task) = state
+            .tasks
+            .values_mut()
+            .find(|task| task.future_id == future_id)
+        {
+            if task.completion_order.is_none() {
+                task.completion_order = order;
+            }
+        }
+    }
+    retired
 }
 
 fn record_native_completion(state: &mut State, future_id: FutureId) {
@@ -829,17 +1319,48 @@ fn record_native_completion(state: &mut State, future_id: FutureId) {
 fn native_future_state(state: &FutureState) -> ExecutionHandleState {
     match state {
         FutureState::Deferred(_) => ExecutionHandleState::Deferred,
-        FutureState::Running(completion) if completion.try_value().is_none() => {
+        FutureState::ExecutingInCaller => ExecutionHandleState::Running,
+        FutureState::Materializing(reservation) if reservation.cancelled => {
+            ExecutionHandleState::Cancelled
+        }
+        FutureState::Materializing(_) => ExecutionHandleState::Running,
+        FutureState::Running(running) if running.completion().try_value().is_none() => {
             ExecutionHandleState::Running
         }
-        FutureState::Running(completion) => match completion.try_value() {
+        FutureState::CancellingGraph(running)
+            if running.completion().verified_terminal().is_none() =>
+        {
+            ExecutionHandleState::Running
+        }
+        FutureState::CancellingGraph(running)
+            if running.completion().verified_terminal() == Some(false) =>
+        {
+            ExecutionHandleState::Failed
+        }
+        FutureState::CancellingGraph(_) => ExecutionHandleState::Cancelled,
+        FutureState::Running(running) => match running.completion().try_value() {
             Some(Ok(_)) => ExecutionHandleState::Finished,
             Some(Err(_)) => ExecutionHandleState::Failed,
             None => ExecutionHandleState::Running,
         },
         FutureState::Completed(Ok(_)) => ExecutionHandleState::Finished,
         FutureState::Completed(Err(_)) => ExecutionHandleState::Failed,
+        FutureState::GraphResolved { result: Ok(_), .. } => ExecutionHandleState::Finished,
+        FutureState::GraphResolved { result: Err(_), .. } => ExecutionHandleState::Failed,
         FutureState::Cancelled => ExecutionHandleState::Cancelled,
+    }
+}
+
+fn cancelling_graph_await(
+    completion: &TaskCompletion,
+    original: Value,
+) -> Result<AwaitAction, ExecutionServiceError> {
+    match completion.try_value() {
+        None => Ok(AwaitAction::Pending(original)),
+        Some(Err(crate::driver::TransferFailure::RetirementUnverified(message))) => {
+            Err(ExecutionServiceError::WorkerLost(message))
+        }
+        Some(_) => Err(ExecutionServiceError::Cancelled),
     }
 }
 

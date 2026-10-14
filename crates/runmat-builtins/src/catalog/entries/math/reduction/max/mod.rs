@@ -16,6 +16,7 @@ pub use contract::{
 pub use options::{MaxComparisonMethod, MaxControl};
 
 pub const MAX_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "max" },
     category: "math/reduction",

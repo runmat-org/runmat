@@ -12,7 +12,7 @@ pub async fn read_composite_entry(
     runtime: &RuntimeContext,
     handle: CompositeHandle,
     raw_indices: &[Value],
-) -> Result<Value, RuntimeError> {
+) -> Result<crate::execution::RootedValue, RuntimeError> {
     super::lease::validate_composite(runtime, &handle)?;
     if raw_indices.len() != 1 {
         return Err(semantic_error(

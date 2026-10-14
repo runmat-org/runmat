@@ -51,11 +51,15 @@ pub struct WgpuProvider {
     /// The same authority is exported to renderers and retained by progress.
     /// Nested emitters borrow its permit; they must not reacquire the gate.
     pub(super) access: runmat_accelerate_api::WgpuDeviceAccess,
+    pub(super) emission_authority: runmat_accelerate_api::CanonicalWgpuEmissionAuthority,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
     /// Features of the device actually created, not the adapter's advertised set.
     pub(super) enabled_features: wgpu::Features,
+    /// Available at device creation, independent of a command's current owner.
+    pub(super) timestamp_capability:
+        Option<crate::backend::wgpu::dispatch::observation::TimestampCapability>,
     pub(super) workgroup_config: WorkgroupConfig,
     pub(super) linear_launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
     pub(super) global_reduce_launch: crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch,
@@ -107,6 +111,10 @@ pub struct WgpuProvider {
     pub(super) fft_twiddle_cache:
         Mutex<HashMap<(usize, u8), runmat_accelerate_api::WgpuBufferOwner>>, // (len, mode) -> twiddle buffer
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "authority_tests.rs"]
+mod authority_tests;
 
 #[derive(Clone)]
 pub(super) struct BufferEntry {

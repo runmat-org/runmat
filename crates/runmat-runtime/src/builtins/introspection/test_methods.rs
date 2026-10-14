@@ -1,9 +1,12 @@
 //! Test-only class/method builtins used by semantic and VM pipeline tests.
 
+use crate::execution::RootedValue;
 use crate::{runtime_descriptor_error, runtime_descriptor_error_with_detail};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    OVERIDX_ERROR_RECEIVER_INVALID, OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
+    OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
 };
 use runmat_value::{ObjectInstance, StructValue, Value};
 
@@ -330,76 +333,15 @@ pub(crate) async fn pkgg_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(20.0))
 }
 
-const OVERIDX_SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed value.",
-}];
-
-const OVERIDX_SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-];
-
-const OVERIDX_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.subsref(obj, S)",
-    inputs: &OVERIDX_SUBSREF_INPUTS,
-    outputs: &OVERIDX_SUBSREF_OUTPUT,
-}];
-
-const OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSREF_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsrefPayloadUnsupported"),
-    when: "Indexing kind/payload combination is unsupported.",
-    message: "OverIdx.subsref: unsupported payload",
-};
-
-const OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSASGN_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsasgnPayloadUnsupported"),
-    when: "Indexing assignment kind/payload combination is unsupported.",
-    message: "OverIdx.subsasgn: unsupported payload",
-};
-
-const OVERIDX_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.RECEIVER_INVALID",
-    identifier: Some("RunMat:OverIdxReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "OverIdx: receiver must be object",
-};
-
-const OVERIDX_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSREF_ERRORS,
-};
-
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsref",
-    descriptor(self::OVERIDX_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
-pub(crate) async fn overidx_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn overidx_subsref(
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(obj, path, overidx_read_step, None).await
 }
@@ -407,10 +349,10 @@ pub(crate) async fn overidx_subsref(obj: Value, subscript: Value) -> crate::Buil
 async fn overidx_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
     // Simple sentinel implementation: return different values for '.' vs '()'
-    match (obj, step.kind(), payload) {
+    let value = match (obj, step.kind(), payload) {
         (Value::Object(_), crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
             Ok(Value::Num(99.0))
         }
@@ -449,69 +391,20 @@ async fn overidx_read_step(
             "OverIdx.subsref",
             &OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
         )),
-    }
+    }?;
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
-
-const OVERIDX_SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object.",
-}];
-
-const OVERIDX_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
-
-const OVERIDX_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = OverIdx.subsasgn(obj, S, rhs)",
-    inputs: &OVERIDX_SUBSASGN_INPUTS,
-    outputs: &OVERIDX_SUBSASGN_OUTPUT,
-}];
-
-const OVERIDX_SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSASGN_ERRORS,
-};
 
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsasgn",
-    descriptor(self::OVERIDX_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_subsasgn(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsasgn(
         obj,
@@ -536,17 +429,17 @@ async fn overidx_write_step(
     mut obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
     match (&mut obj, step.kind(), payload) {
         (Value::Object(o), crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
             // Store into 'last' property
             o.properties.insert("last".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
         (Value::Object(o), crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
             o.properties.insert("lastCell".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
         (
             Value::Object(o),
@@ -554,7 +447,7 @@ async fn overidx_write_step(
             Value::String(field),
         ) => {
             o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
         (
             Value::Object(o),
@@ -563,13 +456,14 @@ async fn overidx_write_step(
         ) => {
             let field: String = ca.data.iter().collect();
             o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
         _ => Err(runtime_descriptor_error(
             "OverIdx.subsasgn",
             &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
         )),
-    }
+    }?;
+    RootedValue::new(obj).map_err(|error| error.into_runtime_error())
 }
 
 const OVERIDX_NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -1154,4 +1048,70 @@ pub(crate) async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<
     let a = lhs != 0.0;
     let b = rhs != 0.0;
     Ok(Value::Num(if a ^ b { 1.0 } else { 0.0 }))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod rooted_fixture_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    thread_local! {
+        static OBSERVED_HANDLE: RefCell<Option<runmat_gc::GcHandle>> = const { RefCell::new(None) };
+    }
+
+    #[test]
+    fn managed_property_survives_producer_root_retirement_until_fixture_result_drops() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("fixture payload".into()))
+                .expect("allocate managed test property");
+            let handle = initial.handle();
+            let mut object = ObjectInstance::new("OverIdx");
+            object.properties.insert(
+                "last".into(),
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "FixturePayload".into(),
+                    target: handle,
+                    valid: true,
+                }),
+            );
+            let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(
+                ".",
+                Value::String("last".into()),
+            )
+            .expect("member path");
+            let output =
+                futures::executor::block_on(overidx_subsref(Value::Object(object), subscript))
+                    .expect("fixture member read");
+            OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
+            let seen = Arc::new(AtomicBool::new(false));
+            let observed = Arc::clone(&seen);
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                OBSERVED_HANDLE.with(|slot| {
+                    let Some(handle) = *slot.borrow() else {
+                        return;
+                    };
+                    if event != runmat_gc::RootRetirement::Explicit(handle) {
+                        return;
+                    }
+                    runmat_gc::gc_collect_major().expect("collect at producer retirement");
+                    assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                    observed.store(true, Ordering::SeqCst);
+                });
+            }))
+            .expect("observe producer retirement");
+            initial.unroot().expect("retire producer root");
+            assert!(seen.load(Ordering::SeqCst));
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("fixture result retains property"),
+                Value::String("fixture payload".into())
+            );
+            drop(_observer);
+            OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = None);
+            drop(output);
+            runmat_gc::gc_collect_major().expect("collect after result drop");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
 }

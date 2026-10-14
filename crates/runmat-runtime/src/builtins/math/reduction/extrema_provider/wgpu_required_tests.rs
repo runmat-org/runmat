@@ -27,15 +27,17 @@ fn selected_wgpu() -> &'static dyn AccelProvider {
     provider
 }
 
-fn host_tensor(value: Value) -> Tensor {
+fn host_tensor(value: &Value) -> Tensor {
     match value {
-        gpu @ Value::GpuTensor(_) => test_support::gather(gpu).expect("resident extrema download"),
-        Value::Tensor(tensor) => tensor,
+        gpu @ Value::GpuTensor(_) => {
+            test_support::gather(gpu.clone()).expect("resident extrema download")
+        }
+        Value::Tensor(tensor) => tensor.clone(),
         other => panic!("expected nonscalar extrema tensor, got {other:?}"),
     }
 }
 
-fn evaluate_pair(kind: ExtremaKind, value: Value, rest: &[Value]) -> (Value, Value) {
+fn evaluate_pair(kind: ExtremaKind, value: Value, rest: &[Value]) -> crate::execution::RootedValue {
     let arguments: Vec<Value> = std::iter::once(value).chain(rest.iter().cloned()).collect();
     let output = futures::executor::block_on(crate::call_builtin_async_with_outputs(
         kind.name(),
@@ -43,10 +45,20 @@ fn evaluate_pair(kind: ExtremaKind, value: Value, rest: &[Value]) -> (Value, Val
         2,
     ))
     .expect("registered extrema evaluation");
-    let Value::OutputList(outputs) = output else {
+    let Value::OutputList(outputs) = output.value() else {
         panic!("{}: expected two registered extrema outputs", kind.name());
     };
-    let [values, indices]: [Value; 2] = outputs.try_into().expect("two extrema outputs");
+    assert_eq!(outputs.len(), 2, "two extrema outputs");
+    output
+}
+
+fn output_pair(output: &crate::execution::RootedValue) -> (&Value, &Value) {
+    let Value::OutputList(outputs) = output.value() else {
+        panic!("expected extrema output list");
+    };
+    let [values, indices] = outputs.as_slice() else {
+        panic!("expected two extrema outputs");
+    };
     (values, indices)
 }
 
@@ -104,7 +116,8 @@ fn actual_wgpu_min_max_default_and_dim_two_keep_values_and_double_indices() {
             vec![2, 1],
         ),
     ] {
-        let (values, indices) = evaluate_pair(kind, Value::GpuTensor(input.clone()), &controls);
+        let output = evaluate_pair(kind, Value::GpuTensor(input.clone()), &controls);
+        let (values, indices) = output_pair(&output);
         let Value::GpuTensor(ref resident_values) = values else {
             panic!(
                 "{}: supported WGPU dimensional values must remain resident",
@@ -147,7 +160,8 @@ fn actual_wgpu_min_max_keep_wide_u64_values_exact() {
         (ExtremaKind::Min, vec![1_u64 << 63, 7], vec![2.0, 2.0]),
         (ExtremaKind::Max, vec![u64::MAX, 9], vec![1.0, 1.0]),
     ] {
-        let (values, indices) = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let output = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let (values, indices) = output_pair(&output);
         let Value::GpuTensor(ref resident_values) = values else {
             panic!("{}: native uint64 values must remain resident", kind.name());
         };
@@ -188,7 +202,8 @@ fn actual_wgpu_logical_extrema_keep_double_values_and_origins() {
         (ExtremaKind::Min, vec![0.0, 0.0], vec![2.0, 1.0]),
         (ExtremaKind::Max, vec![1.0, 1.0], vec![1.0, 2.0]),
     ] {
-        let (values, indices) = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let output = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let (values, indices) = output_pair(&output);
         let values = host_tensor(values);
         let indices = host_tensor(indices);
         assert_eq!(values.shape(), &[1, 2]);
@@ -228,7 +243,8 @@ fn actual_wgpu_nan_and_signed_zero_preserve_extrema_origins() {
         (ExtremaKind::Min, (-0.0f64).to_bits(), 1.0),
         (ExtremaKind::Max, 0.0f64.to_bits(), 2.0),
     ] {
-        let (values, indices) = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let output = evaluate_pair(kind, Value::GpuTensor(input.clone()), &[]);
+        let (values, indices) = output_pair(&output);
         assert!(matches!(&values, Value::GpuTensor(_)));
         let values = host_tensor(values).materialize_f64();
         assert_eq!(values[0].to_bits(), zero_bits, "{} zero sign", kind.name());
@@ -279,12 +295,13 @@ fn actual_wgpu_explicit_all_and_vecdim_materialize_through_owning_provider() {
     for controls in [vec![empty.clone(), Value::from("all")], vec![empty, vecdim]] {
         for kind in [ExtremaKind::Min, ExtremaKind::Max] {
             let expected = evaluate_pair(kind, host.clone(), &controls);
-            let (values, indices) = evaluate_pair(kind, Value::GpuTensor(input.clone()), &controls);
+            let output = evaluate_pair(kind, Value::GpuTensor(input.clone()), &controls);
+            let (values, indices) = output_pair(&output);
             assert!(!matches!(&values, Value::GpuTensor(_)));
             assert!(!matches!(&indices, Value::GpuTensor(_)));
             assert_eq!(
-                (values, indices),
-                expected,
+                output.value(),
+                expected.value(),
                 "{} owning host route",
                 kind.name()
             );

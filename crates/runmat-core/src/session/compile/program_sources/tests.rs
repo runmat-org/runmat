@@ -103,13 +103,42 @@ fn lease(
     runtime: &runmat_runtime::context::RuntimeContext,
     source: &SourceContextData,
 ) -> runmat_runtime::source_context::RuntimeSourceLease {
-    runmat_runtime::source_context::lease_source_context_in_context(
+    let map = runmat_runtime::source_context::ValidatedPortableSourceMap::new(Arc::new(
+        runmat_execution::ExecutableSourceMapV2::new(vec![
+            runmat_execution::ExecutableSourceRecordV2 {
+                source_id: ProgramSourceId(0),
+                owner_identity: "interactive".into(),
+                relative_path: source.display_name.clone(),
+                content_revision: runmat_execution::Digest::sha256(source.text.as_bytes()),
+                display_name: source.display_name.clone(),
+                text: source.text.clone(),
+            },
+        ])
+        .expect("validated retained source map"),
+    ))
+    .expect("admitted retained source map");
+    runmat_runtime::source_context::lease_portable_source_context_in_context(
         runtime,
-        source.display_name.as_str(),
+        &map.record(ProgramSourceId(0)).expect("retained ordinal"),
         source.fullpath_name.as_deref().map(Arc::<str>::from),
-        source.text.as_str(),
     )
-    .expect("canonical retained source")
+    .expect("captured retained source identity")
+}
+
+fn retained(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    lease: &runmat_runtime::source_context::RuntimeSourceLease,
+    source: SourceContextData,
+) -> (
+    runmat_runtime::source_context::RuntimeSourceRef,
+    SourceContextData,
+    runmat_runtime::source_context::PortableSourceIdentity,
+) {
+    let reference = lease.source_ref();
+    let identity =
+        runmat_runtime::source_context::portable_source_identity_in_context(runtime, reference)
+            .expect("retained source owner");
+    (reference, source, identity)
 }
 
 fn discovered(text: &str, name: &str, display: &str) -> DiscoveredSourceStatement {
@@ -194,7 +223,7 @@ fn retained_definition_sources_use_stable_ordinals_not_runtime_ids() {
         &empty,
         1,
         None,
-        &[(first_lease.source_ref(), prior.clone())],
+        &[retained(&runtime, &first_lease, prior.clone())],
     )
     .unwrap();
     let second = ProgramSourceTable::build(
@@ -203,7 +232,7 @@ fn retained_definition_sources_use_stable_ordinals_not_runtime_ids() {
         &empty,
         1,
         None,
-        &[(second_lease.source_ref(), prior)],
+        &[retained(&runtime, &second_lease, prior)],
     )
     .unwrap();
     assert_eq!(first.source_map, second.source_map);
@@ -215,6 +244,54 @@ fn retained_definition_sources_use_stable_ordinals_not_runtime_ids() {
         second.retained_runtime_sources[&second_lease.source_ref()],
         ProgramSourceId(1)
     );
+}
+
+#[test]
+fn retained_source_keeps_original_owner_across_a_foreign_primary() {
+    let runtime = runtime();
+    let prior = SourceContextData {
+        display_name: "prior.m".into(),
+        fullpath_name: None,
+        text: "function y = prior(); y = 4; end".into(),
+    };
+    let lease = lease(&runtime, &prior);
+    let table = ProgramSourceTable::build(
+        &crate::ExecutableSource::new("new-owner", "main.m", "y = prior();"),
+        None,
+        &CompanionSourceDiscovery::default(),
+        1,
+        None,
+        &[retained(&runtime, &lease, prior)],
+    )
+    .expect("retained source table");
+    let retained_entry = &table.source_map.entries()[1];
+    assert_eq!(retained_entry.owner_identity, "interactive");
+    assert_eq!(retained_entry.relative_path, "prior.m");
+}
+
+#[test]
+fn retained_source_rejects_content_outside_its_issued_owner() {
+    let runtime = runtime();
+    let prior = SourceContextData {
+        display_name: "prior.m".into(),
+        fullpath_name: None,
+        text: "function y = prior(); y = 4; end".into(),
+    };
+    let lease = lease(&runtime, &prior);
+    let mut altered = prior.clone();
+    altered.text = "function y = prior(); y = 5; end".into();
+    let result = ProgramSourceTable::build(
+        &crate::ExecutableSource::new("new-owner", "main.m", "y = prior();"),
+        None,
+        &CompanionSourceDiscovery::default(),
+        1,
+        None,
+        &[retained(&runtime, &lease, altered)],
+    );
+    assert!(matches!(
+        result,
+        Err(ref error) if error == "retained source text disagrees with its issued portable identity"
+    ));
 }
 
 #[test]
@@ -237,8 +314,8 @@ fn retained_generations_at_one_location_have_explicit_content_revisions() {
         1,
         None,
         &[
-            (first_lease.source_ref(), first_source),
-            (second_lease.source_ref(), second_source),
+            retained(&runtime, &first_lease, first_source),
+            retained(&runtime, &second_lease, second_source),
         ],
     )
     .unwrap();
@@ -269,6 +346,7 @@ fn same_retained_sources_ignore_runtime_issuance_order_but_not_content() {
     let build = |retained: &[(
         runmat_runtime::source_context::RuntimeSourceRef,
         SourceContextData,
+        runmat_runtime::source_context::PortableSourceIdentity,
     )]| {
         ProgramSourceTable::build(
             &root,
@@ -282,17 +360,17 @@ fn same_retained_sources_ignore_runtime_issuance_order_but_not_content() {
         .source_map
     };
     let first = build(&[
-        (first_a.source_ref(), a.clone()),
-        (first_b.source_ref(), b.clone()),
+        retained(&runtime, &first_a, a.clone()),
+        retained(&runtime, &first_b, b.clone()),
     ]);
     let reordered = build(&[
-        (second_b.source_ref(), b.clone()),
-        (second_a.source_ref(), a),
+        retained(&runtime, &second_b, b.clone()),
+        retained(&runtime, &second_a, a),
     ]);
     assert_eq!(first, reordered);
     let changed = build(&[
-        (second_b.source_ref(), b),
-        (changed.source_ref(), changed_a),
+        retained(&runtime, &second_b, b),
+        retained(&runtime, &changed, changed_a),
     ]);
     assert_ne!(first, changed);
 }

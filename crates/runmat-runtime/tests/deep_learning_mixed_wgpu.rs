@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
     ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_runtime::call_builtin;
+use runmat_runtime::execution::RootedValuesBuilder;
 use runmat_value::{CellArray, Tensor, Value};
 
 #[path = "deep_learning_mixed_wgpu/routes.rs"]
@@ -103,9 +104,12 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
             } else {
                 Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap())
             };
-            let layers = [
-                call_builtin("featureInputLayer", &[Value::Num(2.0)]).unwrap(),
+            let mut layers = RootedValuesBuilder::with_capacity(3);
+            layers.push_owned(call_builtin("featureInputLayer", &[Value::Num(2.0)]).unwrap());
+            layers.push_owned(
                 call_builtin("layerNormalizationLayer", &normalization_options).unwrap(),
+            );
+            layers.push_owned(
                 call_builtin(
                     "fullyConnectedLayer",
                     &[
@@ -117,15 +121,20 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
                     ],
                 )
                 .unwrap(),
-            ];
-            let network = call_builtin(
-                "dlnetwork",
-                &[Value::Cell(CellArray::new(layers.to_vec(), 3, 1).unwrap())],
-            )
-            .unwrap();
+            );
+            let layers = layers.finish().unwrap();
+            let network = layers.with_owned_values(|layers| {
+                call_builtin(
+                    "dlnetwork",
+                    &[Value::Cell(CellArray::new(layers, 3, 1).unwrap())],
+                )
+                .unwrap()
+            });
             provider.reset_telemetry();
-            let output = call_builtin("forward", &[network, input]).unwrap();
-            let Value::Object(output) = output else {
+            let output = network.with_owned(|network| {
+                input.with_owned(|input| call_builtin("forward", &[network, input]).unwrap())
+            });
+            let Value::Object(output) = output.value() else {
                 panic!("formatted dlarray output expected")
             };
             let Some(Value::GpuTensor(data)) = output.properties.get("Data") else {

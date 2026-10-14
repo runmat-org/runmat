@@ -1,14 +1,14 @@
-use runmat_value::{ObjectInstance, StructValue, Value};
+use runmat_value::ObjectInstance;
 
+use crate::execution::{RootedValue, RootedValues};
 use crate::BuiltinResult;
 
-pub(crate) fn finish(
+/// Publish a replacement table while every completed column remains rooted.
+/// Names and values come from the same plan traversal and must remain paired.
+pub(crate) fn finish_owned(
     source: &ObjectInstance,
-    variables: Vec<(String, Value)>,
-) -> BuiltinResult<Value> {
-    let mut output = StructValue::new();
-    for (name, value) in variables {
-        output.insert(name, value);
-    }
-    super::super::table_replace_variables_like(source, output)
+    names: Vec<String>,
+    columns: RootedValues,
+) -> BuiltinResult<RootedValue> {
+    super::super::table_replace_variables_like_owned(source, names, columns)
 }

@@ -1,8 +1,11 @@
+use runmat_process_host::private_bytes::PrivateByteLease;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 
+use runmat_process_host::shared_memory::SharedSnapshotParent;
+use runmat_process_host::{ProcessGroupPlacement, ProcessSpawnEvidence};
 use runmat_python::{
     discover_python, InstalledPythonArtifacts, PythonArtifactBundle, PythonCall,
     PythonCallbackInvocation, PythonDiscoveryRequest, PythonError, PythonExecutionMode,
@@ -15,24 +18,36 @@ use runmat_types::{
 };
 use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
+mod callback_admission;
+mod in_process;
 mod environment;
 mod isolated;
 mod prepared;
+mod project_replacement;
+mod project_retirement;
+use callback_admission::CallbackAdmission;
 #[cfg(test)]
 use environment::environment_metadata;
 use environment::{issued_python_status_value, validate_environment};
 use isolated::{IsolatedCallGuard, NestedCallLease};
 use prepared::{prepare_python_call, PreparedPythonCall};
+pub use project_replacement::{
+    PreparedPythonProjectReplacement, ReadyPythonProjectReplacement,
+    ReadyPythonProjectReplacementLocal,
+};
+pub use project_retirement::VerifiedPythonProjectRetirement;
 
+use super::super::project_retirement::ProjectRetirementAuthority;
 use super::super::{
     foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
     ForeignAdapterDescriptor, ForeignAdapterFuture, ForeignErrorKind, ForeignExecutionPolicy,
     ForeignHandleRegistry, ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{value_from_python, value_to_python};
-use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue};
+use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue, PythonClientRetirement};
 use crate::builtins::common::validation::value_text_scalar_string;
 use crate::context::{ForeignCall, RuntimeContext};
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, RuntimeError};
 
 #[derive(Debug, Default)]
@@ -40,7 +55,7 @@ struct ReleaseQueue(Mutex<Vec<u64>>);
 
 #[derive(Clone)]
 struct PythonCallbackRegistration {
-    callback: Value,
+    callback: RootedValue,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
 }
@@ -91,8 +106,14 @@ impl Default for PythonRuntimeConfiguration {
 
 pub struct PythonAdapter {
     handles: ForeignHandleRegistry,
+    self_weak: Weak<PythonAdapter>,
     host_identity: String,
     session: RefCell<Option<PythonSession>>,
+    selected_byte_lease: RefCell<Option<PrivateByteLease>>,
+    snapshot_parent: RefCell<Option<SharedSnapshotParent>>,
+    spawn_unverified: ProcessSpawnEvidence,
+    retirement_requested: Rc<Cell<bool>>,
+    project_retirement: Rc<ProjectRetirementAuthority>,
     isolated_client: Rc<RefCell<Option<IsolatedPythonClient>>>,
     isolated_call_active: Rc<Cell<bool>>,
     nested_isolated_calls: NestedPythonQueue,
@@ -104,6 +125,78 @@ pub struct PythonAdapter {
     next_callback: Cell<u64>,
     terminated: Rc<Cell<bool>>,
     installed_artifacts: RefCell<Option<InstalledPythonArtifacts>>,
+    process_group_placement: Cell<ProcessGroupPlacement>,
+}
+
+/// Borrowed evidence from the same owner that retains the installed wheel
+/// roots. A raw configuration alone cannot issue this evidence.
+pub struct PythonInstalledPathProvenance<'a> {
+    installed: std::cell::Ref<'a, InstalledPythonArtifacts>,
+}
+
+impl PythonInstalledPathProvenance<'_> {
+    pub fn module_paths(&self) -> &[std::path::PathBuf] {
+        self.installed.module_paths()
+    }
+
+    pub fn wheel_identities(&self) -> &BTreeSet<runmat_python::PythonArtifactIdentity> {
+        self.installed.wheel_identities()
+    }
+}
+
+fn installed_matches_configuration(
+    installed: &InstalledPythonArtifacts,
+    configuration: &PythonRuntimeConfiguration,
+) -> bool {
+    let mut roots = installed.module_paths().iter();
+    let mut next_root = roots.next();
+    for path in &configuration.module_paths {
+        if next_root.is_some_and(|root| root == path) {
+            next_root = roots.next();
+        }
+    }
+    next_root.is_none()
+        && installed
+            .artifact_identities()
+            .is_subset(&configuration.artifact_identities)
+}
+
+/// A joined helper proves only its own retirement; the outer Graph process
+/// owner must still verify the enclosing tree before deleting parent bytes.
+pub enum PythonAdapterRetirement {
+    Retained(RuntimeError),
+    Retired {
+        scope: Option<runmat_process_host::ContainedChildRetirement>,
+        result: Result<(), RuntimeError>,
+    },
+}
+
+impl Drop for PythonAdapter {
+    fn drop(&mut self) {
+        // Let the canonical ProcessHost guard retire the exact child before
+        // either selected archives or extracted wheels can leave this owner.
+        if let Ok(mut slot) = self.isolated_client.try_borrow_mut() {
+            let client = slot.take();
+            drop(slot);
+            drop(client);
+        }
+        if self.spawn_unverified.is_unverified() {
+            let mut leases = Vec::new();
+            if let Some(lease) = self.selected_byte_lease.get_mut().as_ref() {
+                leases.push(lease.clone());
+            }
+            if let Some(installed) = self.installed_artifacts.get_mut().as_ref() {
+                leases.push(installed.byte_lease());
+            }
+            for lease in leases {
+                if let Err(error) = lease
+                    .persist_unverified(None, "Python child retirement unverified at adapter drop")
+                {
+                    eprintln!("Python private bytes retained without recovery marker: {error}");
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -116,6 +209,12 @@ struct IsolatedPythonState {
     configuration: Rc<RefCell<PythonRuntimeConfiguration>>,
     released: Arc<ReleaseQueue>,
     terminated: Rc<Cell<bool>>,
+    process_group_placement: ProcessGroupPlacement,
+    snapshot_parent: Option<SharedSnapshotParent>,
+    spawn_unverified: ProcessSpawnEvidence,
+    retirement_requested: Rc<Cell<bool>>,
+    project_retirement: Rc<ProjectRetirementAuthority>,
+    byte_leases: Vec<PrivateByteLease>,
 }
 
 impl std::fmt::Debug for PythonAdapter {
@@ -132,6 +231,24 @@ impl std::fmt::Debug for PythonAdapter {
 impl PythonAdapter {
     pub fn new(handles: ForeignHandleRegistry) -> Result<Rc<Self>, RuntimeError> {
         Self::with_configuration(handles, PythonRuntimeConfiguration::default())
+    }
+
+    pub fn new_in_process_group(
+        handles: ForeignHandleRegistry,
+        placement: ProcessGroupPlacement,
+    ) -> Result<Rc<Self>, RuntimeError> {
+        Self::new_in_process_group_with_parent(handles, placement, None)
+    }
+
+    pub fn new_in_process_group_with_parent(
+        handles: ForeignHandleRegistry,
+        placement: ProcessGroupPlacement,
+        snapshot_parent: Option<SharedSnapshotParent>,
+    ) -> Result<Rc<Self>, RuntimeError> {
+        let adapter = Self::new(handles)?;
+        adapter.process_group_placement.set(placement);
+        *adapter.snapshot_parent.borrow_mut() = snapshot_parent;
+        Ok(adapter)
     }
 
     pub fn with_configuration(
@@ -155,10 +272,16 @@ impl PythonAdapter {
             policy: policy(configuration.execution_mode),
             release: released.clone(),
         })?;
-        Ok(Rc::new(Self {
+        Ok(Rc::new_cyclic(|self_weak| Self {
             handles,
+            self_weak: self_weak.clone(),
             host_identity,
             session: RefCell::new(None),
+            selected_byte_lease: RefCell::new(None),
+            snapshot_parent: RefCell::new(None),
+            spawn_unverified: ProcessSpawnEvidence::default(),
+            retirement_requested: Rc::new(Cell::new(false)),
+            project_retirement: Rc::new(ProjectRetirementAuthority::default()),
             isolated_client: Rc::new(RefCell::new(None)),
             isolated_call_active: Rc::new(Cell::new(false)),
             nested_isolated_calls: Rc::new(RefCell::new(std::collections::VecDeque::new())),
@@ -170,11 +293,15 @@ impl PythonAdapter {
             next_callback: Cell::new(1),
             terminated: Rc::new(Cell::new(false)),
             installed_artifacts: RefCell::new(None),
+            process_group_placement: Cell::new(ProcessGroupPlacement::OwnGroup),
         }))
     }
 
     pub fn configure(&self, configuration: PythonRuntimeConfiguration) -> Result<(), RuntimeError> {
-        if self.is_running() || self.isolated_call_active.get() {
+        if self.is_running()
+            || self.isolated_call_active.get()
+            || self.project_retirement.is_pending()
+        {
             return Err(invalid_call(
                 "Python configuration is immutable after the interpreter starts",
             ));
@@ -186,19 +313,155 @@ impl PythonAdapter {
         Ok(())
     }
 
+    /// Read the effective typed policy without copying its paths or identities.
+    pub fn configuration(&self) -> std::cell::Ref<'_, PythonRuntimeConfiguration> {
+        self.configuration.borrow()
+    }
+
+    pub fn installed_path_provenance(&self) -> Option<PythonInstalledPathProvenance<'_>> {
+        let installed =
+            std::cell::Ref::filter_map(self.installed_artifacts.borrow(), |slot| slot.as_ref())
+                .ok()?;
+        let configuration = self.configuration.borrow();
+        if installed.module_paths().is_empty()
+            || !installed_matches_configuration(&installed, &configuration)
+        {
+            return None;
+        }
+        drop(configuration);
+        Some(PythonInstalledPathProvenance { installed })
+    }
+
     pub fn is_running(&self) -> bool {
         self.session.borrow().is_some() || self.isolated_client.borrow().is_some()
+    }
+
+    pub fn attach_selected_byte_lease(&self, lease: PrivateByteLease) -> Result<(), RuntimeError> {
+        if self.is_running() || self.selected_byte_lease.borrow().is_some() {
+            return Err(invalid_call(
+                "Python selected byte owner may be attached only once before interpreter startup",
+            ));
+        }
+        *self.selected_byte_lease.borrow_mut() = Some(lease);
+        Ok(())
+    }
+
+    fn private_byte_leases(&self) -> Vec<PrivateByteLease> {
+        let mut leases = Vec::new();
+        if let Some(lease) = self.selected_byte_lease.borrow().clone() {
+            leases.push(lease);
+        }
+        if let Some(installed) = self.installed_artifacts.borrow().as_ref() {
+            leases.push(installed.byte_lease());
+        }
+        leases
+    }
+
+    pub async fn shutdown_selected_retirement(&self) -> PythonAdapterRetirement {
+        self.retirement_requested.set(true);
+        if self.isolated_call_active.get() {
+            return PythonAdapterRetirement::Retained(invalid_call(
+                "Python isolated call is still active during retirement",
+            ));
+        }
+        if self.configuration.borrow().execution_mode == PythonExecutionMode::InProcess {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let complete = {
+                    let session = self.session.borrow();
+                    session
+                        .as_ref()
+                        .is_none_or(PythonSession::request_retirement)
+                };
+                if complete {
+                    self.session.borrow_mut().take();
+                    let result = self.handles.restart_host(&self.host_identity).map(|_| ());
+                    self.resources.borrow_mut().clear();
+                    self.python_to_foreign.borrow_mut().clear();
+                    if let Ok(mut released) = self.released.0.lock() {
+                        released.clear();
+                    }
+                    self.terminated.set(true);
+                    self.selected_byte_lease.borrow_mut().take();
+                    return PythonAdapterRetirement::Retired {
+                        scope: None,
+                        result,
+                    };
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return PythonAdapterRetirement::Retained(invalid_call(
+                        "Python interpreter lane retirement could not be verified",
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+        if self.spawn_unverified.is_unverified() && self.isolated_client.borrow().is_none() {
+            return PythonAdapterRetirement::Retained(invalid_call(
+                "Python child spawn or containment remains unverified",
+            ));
+        }
+        if self.isolated_client.borrow().is_none() {
+            self.selected_byte_lease.borrow_mut().take();
+            return PythonAdapterRetirement::Retired {
+                scope: None,
+                result: Ok(()),
+            };
+        }
+        let state = self.isolated_state();
+        state.call_active.set(true);
+        let mut guard = IsolatedCallGuard::begin(state.clone());
+        let released = match take_releases(&state.released) {
+            Ok(released) => released,
+            Err(error) => {
+                guard.finish_running();
+                return PythonAdapterRetirement::Retained(error);
+            }
+        };
+        let outcome = guard
+            .client()
+            .as_mut()
+            .expect("isolated client slot was checked before retirement")
+            .shutdown_retirement(released)
+            .await;
+        match outcome {
+            PythonClientRetirement::Retained {
+                retirement,
+                prior_protocol,
+            } => {
+                guard.finish_running();
+                let error = super::isolation::runtime_error(retirement);
+                if let Some(prior) = prior_protocol {
+                    let prior = super::isolation::runtime_error(prior);
+                    return PythonAdapterRetirement::Retained(
+                        crate::runtime_error::complete_with_cleanup::<()>(Err(prior), Err(error))
+                            .expect_err("both Python retirement phases failed"),
+                    );
+                }
+                PythonAdapterRetirement::Retained(error)
+            }
+            PythonClientRetirement::Retired { scope, result } => {
+                let result = result.map_err(super::isolation::runtime_error);
+                let result = crate::runtime_error::complete_with_cleanup(
+                    result,
+                    state.handles.restart_host(&state.host_identity).map(|_| ()),
+                );
+                guard.finish_terminated();
+                self.selected_byte_lease.borrow_mut().take();
+                PythonAdapterRetirement::Retired {
+                    scope: Some(scope),
+                    result,
+                }
+            }
+        }
     }
 
     pub fn install_artifact_bundle(
         &self,
         bundle: &PythonArtifactBundle,
     ) -> Result<(), RuntimeError> {
-        self.install_artifact_bundle_with_configuration(
-            bundle,
-            self.configuration.borrow().clone(),
-            false,
-        )
+        let configuration = self.configuration.borrow().clone();
+        self.install_artifact_bundle_with_configuration(bundle, configuration, false)
     }
 
     fn install_artifact_bundle_with_configuration(
@@ -207,6 +470,9 @@ impl PythonAdapter {
         configuration: PythonRuntimeConfiguration,
         reset_terminated: bool,
     ) -> Result<(), RuntimeError> {
+        if self.project_retirement.is_pending() {
+            return Err(invalid_call("Python project interpreter is retiring"));
+        }
         if self.is_running() || self.isolated_call_active.get() {
             return Err(invalid_call(
                 "Python artifacts cannot change after the interpreter starts",
@@ -215,34 +481,11 @@ impl PythonAdapter {
         self.handles
             .admit_host_reconfiguration(&self.host_identity)?;
         bundle.validate().map_err(python_artifact_error)?;
-        let installation =
-            discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
-        if let Some(required) = &bundle.environment {
-            if required.implementation != "cpython"
-                || required.version != installation.version
-                || required.abi_tag != installation.abi_tag
-                || required.platform_tag != installation.platform_tag
-                || required.execution_mode != configuration.execution_mode
-            {
-                return Err(invalid_call(format!(
-                    "Python artifact environment requires {} {} ({}, {}) in {:?} mode, but this session resolved {} {} ({}, {}) in {:?} mode",
-                    required.implementation,
-                    required.version,
-                    required.abi_tag,
-                    required.platform_tag,
-                    required.execution_mode,
-                    installation.implementation,
-                    installation.version,
-                    installation.abi_tag,
-                    installation.platform_tag,
-                    configuration.execution_mode
-                )));
-            }
-        }
+        validate_bundle_environment(bundle, &configuration)?;
         let installed = bundle.install().map_err(python_artifact_error)?;
         let mut updated = configuration;
         updated.module_paths = installed.module_paths().to_vec();
-        updated.artifact_identities = bundle.artifact_identities();
+        updated.artifact_identities = installed.artifact_identities().clone();
         self.handles
             .reconfigure_host(&self.host_identity, policy(updated.execution_mode))?;
         *self.configuration.borrow_mut() = updated;
@@ -257,16 +500,9 @@ impl PythonAdapter {
         &self,
         bundle: &PythonArtifactBundle,
     ) -> Result<(), RuntimeError> {
-        if let Some(environment) = bundle.environment.as_ref() {
+        if bundle.environment.is_some() {
             let mut configuration = self.configuration.borrow().clone();
-            configuration.version = Some((environment.version.major, environment.version.minor));
-            configuration.minimum_version = (environment.version.major, environment.version.minor);
-            configuration.maximum_version =
-                Some((environment.version.major, environment.version.minor));
-            configuration.execution_mode = environment.execution_mode;
-            configuration.exact_version = Some(environment.version);
-            configuration.required_abi_tag = Some(environment.abi_tag.clone());
-            configuration.required_platform_tag = Some(environment.platform_tag.clone());
+            pin_configuration_to_bundle_environment(&mut configuration, bundle);
             configuration.module_paths.clear();
             configuration.artifact_identities.clear();
             return self.install_artifact_bundle_with_configuration(bundle, configuration, true);
@@ -275,7 +511,10 @@ impl PythonAdapter {
     }
 
     pub fn clear_artifact_bundle(&self) -> Result<(), RuntimeError> {
-        if self.is_running() || self.isolated_call_active.get() {
+        if self.is_running()
+            || self.isolated_call_active.get()
+            || self.project_retirement.is_pending()
+        {
             return Err(invalid_call(
                 "Python artifacts cannot be cleared after the interpreter starts",
             ));
@@ -290,6 +529,9 @@ impl PythonAdapter {
     }
 
     fn ensure_session(&self) -> Result<PythonSession, RuntimeError> {
+        if self.project_retirement.is_pending() {
+            return Err(invalid_call("Python project interpreter is retiring"));
+        }
         if let Some(session) = self.session.borrow().clone() {
             return Ok(session);
         }
@@ -297,32 +539,28 @@ impl PythonAdapter {
         debug_assert_eq!(configuration.execution_mode, PythonExecutionMode::InProcess);
         let installation =
             discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
-        let session = PythonSession::start(PythonSessionConfig {
-            installation,
-            module_paths: configuration.module_paths,
-        })
+        let byte_leases = self.private_byte_leases();
+        let installed = self.installed_artifacts.borrow();
+        let installed = installed.as_ref();
+        if installed
+            .is_some_and(|installed| !installed_matches_configuration(installed, &configuration))
+        {
+            return Err(invalid_call(
+                "installed Python wheel roots or identities differ from active configuration",
+            ));
+        }
+        let session = PythonSession::start_with_installed_artifacts(
+            PythonSessionConfig {
+                installation,
+                module_paths: configuration.module_paths,
+            },
+            byte_leases,
+            installed,
+        )
         .map_err(python_runtime_error)?;
         *self.session.borrow_mut() = Some(session.clone());
         self.terminated.set(false);
         Ok(session)
-    }
-
-    fn drain_releases(&self) -> Result<(), RuntimeError> {
-        let handles = self.take_releases()?;
-        let Some(session) = self.session.borrow().clone() else {
-            return Ok(());
-        };
-        for foreign_handle in handles {
-            if let Some(python_handle) = self.resources.borrow_mut().remove(&foreign_handle) {
-                self.python_to_foreign.borrow_mut().remove(&python_handle);
-                session
-                    .invoke(PythonCall::Release {
-                        handle: python_handle,
-                    })
-                    .map_err(python_runtime_error)?;
-            }
-        }
-        Ok(())
     }
 
     fn take_releases(&self) -> Result<Vec<u64>, RuntimeError> {
@@ -335,41 +573,38 @@ impl PythonAdapter {
         Ok(std::mem::take(&mut *released))
     }
 
-    fn invoke_now(
+    fn invoke_control_now(
         &self,
-        context: &RuntimeContext,
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         match call.symbol.as_str() {
-            "status" => {
-                return self
-                    .status_value()
-                    .and_then(super::super::single_output_sequence)
-            }
-            "configure" => {
-                return self
-                    .configure_value(call.arguments)
-                    .and_then(super::super::single_output_sequence)
-            }
-            "terminate" => {
-                return self
-                    .terminate_value(call.arguments)
-                    .and_then(super::super::single_output_sequence)
-            }
-            _ => {}
+            "status" => self
+                .status_value()
+                .and_then(super::super::single_output_sequence),
+            "configure" => self
+                .configure_value(call.arguments)
+                .and_then(super::super::single_output_sequence),
+            "terminate" => self
+                .terminate_value(call.arguments)
+                .and_then(super::super::single_output_sequence),
+            _ => Err(invalid_call(
+                "unsupported synchronous Python control operation",
+            )),
         }
-        let prepared = prepare_python_call(&call.symbol, call.arguments)?;
-        let session = self.ensure_session()?;
-        self.drain_releases()?;
+    }
+
+    fn prepare_invocation(
+        &self,
+        context: &RuntimeContext,
+        prepared: PreparedPythonCall,
+    ) -> Result<(PythonCall, Option<ForeignRef>), RuntimeError> {
         let mut assigned_receiver = None;
+        let mut callback_admission = CallbackAdmission::new(&self.callbacks);
         let python_call = match prepared {
             PreparedPythonCall::InvokeQualified { name, arguments } => {
                 PythonCall::InvokeQualified {
                     name,
-                    arguments: arguments
-                        .into_iter()
-                        .map(|value| self.argument_to_python(context, value))
-                        .collect::<Result<_, _>>()?,
+                    arguments: callback_admission.convert_arguments(self, context, arguments)?,
                 }
             }
             PreparedPythonCall::GetMember { receiver, name } => PythonCall::GetMember {
@@ -385,7 +620,7 @@ impl PythonAdapter {
                 PythonCall::SetMember {
                     receiver: self.python_handle(&receiver)?,
                     name,
-                    value: self.argument_to_python(context, value)?,
+                    value: callback_admission.convert(self, context, value)?,
                 }
             }
             PreparedPythonCall::InvokeMember {
@@ -395,10 +630,7 @@ impl PythonAdapter {
             } => PythonCall::InvokeMember {
                 receiver: self.python_handle(&receiver)?,
                 name,
-                arguments: arguments
-                    .into_iter()
-                    .map(|value| self.argument_to_python(context, value))
-                    .collect::<Result<_, _>>()?,
+                arguments: callback_admission.convert_arguments(self, context, arguments)?,
             },
             PreparedPythonCall::GetItem { receiver, index } => PythonCall::GetItem {
                 receiver: self.python_handle(&receiver)?,
@@ -414,7 +646,7 @@ impl PythonAdapter {
                 PythonCall::SetItem {
                     receiver: handle,
                     index,
-                    value: self.argument_to_python(context, value)?,
+                    value: callback_admission.convert(self, context, value)?,
                 }
             }
             PreparedPythonCall::Iterate { receiver } => PythonCall::Iterate {
@@ -426,7 +658,7 @@ impl PythonAdapter {
                 inputs,
             } => PythonCall::ExecutePersistent {
                 code,
-                inputs: self.convert_named_inputs(context, inputs)?,
+                inputs: callback_admission.convert_named_inputs(self, context, inputs)?,
                 outputs,
             },
             PreparedPythonCall::RunFile {
@@ -437,26 +669,19 @@ impl PythonAdapter {
             } => PythonCall::ExecuteFile {
                 path: path.into(),
                 arguments,
-                inputs: self.convert_named_inputs(context, inputs)?,
+                inputs: callback_admission.convert_named_inputs(self, context, inputs)?,
                 outputs,
             },
         };
-        let cancellation = context.cancellation();
-        let values = session
-            .invoke_with_callback_and_cancellation(
-                python_call,
-                Some(&|| cancellation.is_cancelled()),
-                |invocation| self.invoke_callback(&session, invocation),
-            )
-            .map_err(python_runtime_error)?;
-        if let Some(reference) = assigned_receiver {
-            return super::super::single_output_sequence(Value::Foreign(reference));
-        }
-        let values = values
-            .into_iter()
-            .map(|value| self.result_from_python(&session, value))
-            .collect::<Result<Vec<_>, _>>()?;
-        if values.len() == 1 && call.requested_outputs <= 1 {
+        callback_admission.publish();
+        Ok((python_call, assigned_receiver))
+    }
+
+    fn shape_python_outputs(
+        requested_outputs: usize,
+        values: Vec<Value>,
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+        if values.len() == 1 && requested_outputs <= 1 {
             return super::super::single_output_sequence(
                 values.into_iter().next().expect("one Python output"),
             );
@@ -482,10 +707,12 @@ impl PythonAdapter {
                     .checked_add(1)
                     .ok_or_else(|| invalid_call("Python callback identity space is exhausted"))?,
             );
+            let callback_value =
+                RootedValue::new(value).map_err(|error| error.into_runtime_error())?;
             self.callbacks.borrow_mut().insert(
                 callback,
                 PythonCallbackRegistration {
-                    callback: value,
+                    callback: callback_value,
                     context: context
                         .clone()
                         .with_service_ports(context.service_ports().clone().without_foreign()),
@@ -502,23 +729,11 @@ impl PythonAdapter {
         }
     }
 
-    fn result_from_python(
+    fn register_python_object(
         &self,
-        session: &PythonSession,
-        value: PythonValue,
+        handle: PythonObjectHandle,
+        metadata: runmat_python::PythonObjectMetadata,
     ) -> Result<Value, RuntimeError> {
-        let PythonValue::Object(handle) = value else {
-            return value_from_python(value);
-        };
-        if let Some(reference) = self
-            .python_to_foreign
-            .borrow()
-            .get(&handle)
-            .and_then(WeakForeignRef::upgrade)
-        {
-            return Ok(Value::Foreign(reference));
-        }
-        let metadata = session.metadata(handle).map_err(python_runtime_error)?;
         let qualified_type = if metadata.module == "builtins" {
             metadata.type_name
         } else {
@@ -558,26 +773,16 @@ impl PythonAdapter {
             })
     }
 
-    fn convert_named_inputs(
+    fn callback_context(
         &self,
-        context: &RuntimeContext,
-        inputs: Vec<(String, Value)>,
-    ) -> Result<Vec<(String, PythonValue)>, RuntimeError> {
-        inputs
-            .into_iter()
-            .map(|(name, value)| Ok((name, self.argument_to_python(context, value)?)))
-            .collect()
-    }
-
-    fn invoke_callback(
-        &self,
-        session: &PythonSession,
-        invocation: PythonCallbackInvocation,
-    ) -> Result<PythonValue, PythonError> {
+        callback: u64,
+        invocation_context: &RuntimeContext,
+        authority: Option<&runmat_python::PythonReentryAuthority>,
+    ) -> Result<(PythonCallbackRegistration, RuntimeContext), PythonError> {
         let registration = self
             .callbacks
             .borrow()
-            .get(&invocation.callback)
+            .get(&callback)
             .cloned()
             .ok_or_else(|| {
                 PythonError::host(
@@ -585,40 +790,54 @@ impl PythonAdapter {
                     "Python callback identity is stale or belongs to another session",
                 )
             })?;
+        if registration.context.local_identity() != invocation_context.local_identity() {
+            return Err(PythonError::host(
+                "PythonCallbackError",
+                "Python callback invocation belongs to another Runtime owner",
+            ));
+        }
         let foreign = registration.foreign.upgrade().ok_or_else(|| {
             PythonError::host(
                 "PythonCallbackError",
                 "callback's originating foreign runtime has ended",
             )
         })?;
-        let context = registration.context.clone().with_service_ports(
-            registration
-                .context
-                .service_ports()
-                .clone()
-                .with_foreign(foreign),
-        );
-        let arguments = invocation
-            .arguments
+        let mut context = registration
+            .context
+            .clone()
+            .with_service_ports(
+                registration
+                    .context
+                    .service_ports()
+                    .clone()
+                    .with_foreign(foreign),
+            )
+            .try_with_inherited_callback_invocation_authority_from(invocation_context)
+            .expect("callback Runtime owner checked before authority projection");
+        if let Some(authority) = authority {
+            context = context.with_python_reentry(authority.clone());
+        }
+        Ok((registration, context))
+    }
+
+    fn finish_callback(
+        &self,
+        context: &RuntimeContext,
+        sequence: crate::execution::RootedValueSequence,
+    ) -> Result<PythonValue, PythonError> {
+        sequence.with_owned_sequence(|sequence| {
+            let value = crate::sequence::ResolveValueSequence::resolve(
+                sequence,
+                runmat_types::SequenceUse::SelectPrefix { count: 1 },
+                crate::sequence::SequenceResolutionContext::default(),
+            )
+            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
             .into_iter()
-            .map(|value| self.result_from_python(session, value))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
-        let request = foreign_callback_request(&registration.callback, arguments, 1)
-            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
-        let sequence = pollster::block_on(invoke_foreign_callback(context.clone(), request))
-            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
-        let value = crate::sequence::ResolveValueSequence::resolve(
-            sequence,
-            runmat_types::SequenceUse::SelectPrefix { count: 1 },
-            crate::sequence::SequenceResolutionContext::default(),
-        )
-        .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
-        .into_iter()
-        .next()
-        .expect("one Python callback output was selected");
-        self.argument_to_python(&context, value)
-            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))
+            .next()
+            .expect("one Python callback output was selected");
+            self.argument_to_python(context, value)
+                .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))
+        })
     }
 
     fn status_value(&self) -> Result<Value, RuntimeError> {
@@ -716,6 +935,12 @@ impl PythonAdapter {
             configuration: Rc::clone(&self.configuration),
             released: Arc::clone(&self.released),
             terminated: Rc::clone(&self.terminated),
+            process_group_placement: self.process_group_placement.get(),
+            snapshot_parent: self.snapshot_parent.borrow().clone(),
+            spawn_unverified: self.spawn_unverified.clone(),
+            retirement_requested: Rc::clone(&self.retirement_requested),
+            project_retirement: Rc::clone(&self.project_retirement),
+            byte_leases: self.private_byte_leases(),
         }
     }
 }
@@ -724,7 +949,12 @@ async fn invoke_isolated(
     state: IsolatedPythonState,
     context: RuntimeContext,
     call: ForeignCall,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    if state.retirement_requested.get() || state.project_retirement.is_pending() {
+        return Err(invalid_call("Python selected adapter is retiring"));
+    }
+    let _input_roots = crate::execution::RootedValueLease::for_values(call.arguments.iter())
+        .map_err(|error| error.into_runtime_error())?;
     if state.call_active.replace(true) {
         let requested_outputs = call.requested_outputs;
         let (reply, response) = tokio::sync::oneshot::channel();
@@ -747,9 +977,15 @@ async fn invoke_isolated(
     if guard.client().is_none() {
         let configuration = state.configuration.borrow().clone();
         *guard.client() = Some(
-            IsolatedPythonClient::spawn(&configuration)
-                .await
-                .map_err(super::isolation::runtime_error)?,
+            IsolatedPythonClient::spawn(
+                &configuration,
+                state.process_group_placement,
+                state.snapshot_parent.clone(),
+                state.spawn_unverified.clone(),
+                state.byte_leases.clone(),
+            )
+            .await
+            .map_err(super::isolation::runtime_error)?,
         );
         state.terminated.set(false);
     }
@@ -790,23 +1026,30 @@ async fn invoke_isolated(
 }
 
 fn isolated_outputs(
-    mut outputs: Vec<Value>,
+    outputs: crate::execution::RootedValues,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    match (requested_outputs, outputs.len()) {
-        (1, 1) => {
-            runmat_value::ValueSequence::single(outputs.pop().expect("one isolated Python output"))
-                .map_err(|error| invalid_call(error.to_string()))
-        }
-        _ => runmat_value::ValueSequence::comma_separated(outputs)
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    outputs.with_owned_values(|mut values| {
+        let sequence = match (requested_outputs, values.len()) {
+            (1, 1) => runmat_value::ValueSequence::single(
+                values.pop().expect("one isolated Python output"),
+            )
             .map_err(|error| invalid_call(error.to_string())),
-    }
+            _ => runmat_value::ValueSequence::comma_separated(values)
+                .map_err(|error| invalid_call(error.to_string())),
+        }?;
+        crate::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
+    })
 }
 
 async fn terminate_isolated(
     state: IsolatedPythonState,
     arguments: Vec<Value>,
 ) -> Result<Value, RuntimeError> {
+    if state.retirement_requested.get() || state.project_retirement.is_pending() {
+        return Err(invalid_call("Python selected adapter is retiring"));
+    }
     validate_environment(&state.handles, &state.host_identity, &arguments)?;
     if state.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
         return Err(invalid_call(
@@ -820,17 +1063,41 @@ async fn terminate_isolated(
     }
     let mut guard = IsolatedCallGuard::begin(state.clone());
     let shutdown = if let Some(client) = guard.client().as_mut() {
-        let released = take_releases(&state.released)?;
-        client
-            .shutdown(released)
-            .await
-            .map_err(super::isolation::runtime_error)
+        let released = match take_releases(&state.released) {
+            Ok(released) => released,
+            Err(error) => {
+                guard.finish_running();
+                return Err(error);
+            }
+        };
+        Some(client.shutdown_retirement(released).await)
     } else {
-        Ok(())
+        None
     };
-    state.handles.restart_host(&state.host_identity)?;
+    let shutdown = match shutdown {
+        Some(PythonClientRetirement::Retained {
+            retirement,
+            prior_protocol,
+        }) => {
+            guard.finish_running();
+            let error = super::isolation::runtime_error(retirement);
+            return Err(match prior_protocol {
+                Some(prior) => crate::runtime_error::complete_with_cleanup::<()>(
+                    Err(super::isolation::runtime_error(prior)),
+                    Err(error),
+                )
+                .expect_err("both Python retirement phases failed"),
+                None => error,
+            });
+        }
+        Some(PythonClientRetirement::Retired { result, .. }) => {
+            result.map_err(super::isolation::runtime_error)
+        }
+        None => Ok(()),
+    };
+    let restart = state.handles.restart_host(&state.host_identity).map(|_| ());
     guard.finish_terminated();
-    shutdown?;
+    crate::runtime_error::complete_with_cleanup(shutdown, restart)?;
     let configuration = state.configuration.borrow().clone();
     issued_python_status_value(
         &state.handles,
@@ -899,23 +1166,37 @@ impl ForeignAdapter for PythonAdapter {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
+        if self.retirement_requested.get() || self.project_retirement.is_pending() {
+            let error = invalid_call("Python selected adapter is retiring");
+            return Box::pin(async move { Err(error) });
+        }
         let mode = self.configuration.borrow().execution_mode;
-        if mode == PythonExecutionMode::InProcess
-            || matches!(call.symbol.as_str(), "status" | "configure")
+        if matches!(call.symbol.as_str(), "status" | "configure")
+            || (mode == PythonExecutionMode::InProcess && call.symbol == "terminate")
         {
-            let result = self.invoke_now(&context, call);
+            let result =
+                crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
             return Box::pin(async move { result });
+        }
+        if mode == PythonExecutionMode::InProcess {
+            let Some(owner) = self.self_weak.upgrade() else {
+                let error = invalid_call("Python adapter owner is unavailable");
+                return Box::pin(async move { Err(error) });
+            };
+            return Box::pin(async move { owner.invoke_in_process(context, call).await });
         }
         if call.symbol == "terminate" {
             let state = self.isolated_state();
             let arguments = call.arguments;
             return Box::pin(async move {
-                terminate_isolated(state, arguments)
+                let result = terminate_isolated(state, arguments)
                     .await
-                    .and_then(super::super::single_output_sequence)
+                    .and_then(super::super::single_output_sequence);
+                crate::foreign::runtime::root_adapter_result(result)
             });
         }
-        Box::pin(invoke_isolated(self.isolated_state(), context, call))
+        let state = self.isolated_state();
+        Box::pin(invoke_isolated(state, context, call))
     }
 
     fn is_isolated(&self) -> bool {
@@ -943,6 +1224,53 @@ fn policy(mode: PythonExecutionMode) -> ForeignExecutionPolicy {
             isolation: super::super::ForeignIsolation::IsolatedProcess,
         },
     }
+}
+
+fn validate_bundle_environment(
+    bundle: &PythonArtifactBundle,
+    configuration: &PythonRuntimeConfiguration,
+) -> Result<(), RuntimeError> {
+    let installation =
+        discover_python(&discovery_request(configuration)).map_err(python_runtime_error)?;
+    if let Some(required) = &bundle.environment {
+        if required.implementation != "cpython"
+            || required.version != installation.version
+            || required.abi_tag != installation.abi_tag
+            || required.platform_tag != installation.platform_tag
+            || required.execution_mode != configuration.execution_mode
+        {
+            return Err(invalid_call(format!(
+                "Python artifact environment requires {} {} ({}, {}) in {:?} mode, but this session resolved {} {} ({}, {}) in {:?} mode",
+                required.implementation,
+                required.version,
+                required.abi_tag,
+                required.platform_tag,
+                required.execution_mode,
+                installation.implementation,
+                installation.version,
+                installation.abi_tag,
+                installation.platform_tag,
+                configuration.execution_mode
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn pin_configuration_to_bundle_environment(
+    configuration: &mut PythonRuntimeConfiguration,
+    bundle: &PythonArtifactBundle,
+) {
+    let Some(environment) = bundle.environment.as_ref() else {
+        return;
+    };
+    configuration.version = Some((environment.version.major, environment.version.minor));
+    configuration.minimum_version = (environment.version.major, environment.version.minor);
+    configuration.maximum_version = Some((environment.version.major, environment.version.minor));
+    configuration.execution_mode = environment.execution_mode;
+    configuration.exact_version = Some(environment.version);
+    configuration.required_abi_tag = Some(environment.abi_tag.clone());
+    configuration.required_platform_tag = Some(environment.platform_tag.clone());
 }
 
 fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
@@ -1115,7 +1443,7 @@ mod text_tests;
 
 #[cfg(test)]
 mod tests {
-    use runmat_value::ObjectInstance;
+    use runmat_value::{HandleRef, ObjectInstance};
 
     impl super::PythonAdapter {
         fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
@@ -1158,7 +1486,10 @@ mod tests {
         adapter.callbacks.borrow_mut().insert(
             1,
             super::PythonCallbackRegistration {
-                callback: runmat_value::Value::String("nested-capture".into()),
+                callback: crate::execution::RootedValue::new(runmat_value::Value::String(
+                    "nested-capture".into(),
+                ))
+                .expect("root callback test value"),
                 context: crate::context::RuntimeContext::new(std::rc::Rc::new(
                     crate::execution::RuntimeExecutionService::new(),
                 )),
@@ -1172,13 +1503,134 @@ mod tests {
         adapter.callbacks.borrow_mut().clear();
         assert_eq!(adapter.retained_values(), Some(vec![]));
     }
+
+    #[test]
+    fn in_process_callback_registration_roots_captures_until_last_owner_retires() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("captured".into()))
+                .expect("allocate rooted capture");
+            let handle = initial.handle();
+            let callback = Value::Closure(runmat_value::Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: "callback_target".into(),
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                    captures: vec![Value::HandleObject(HandleRef {
+                        class_name: "CallbackCapture".into(),
+                        target: handle,
+                        valid: true,
+                    })],
+                },
+            ));
+            let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
+            let adapter = PythonAdapter::new(foreign.handles().clone()).expect("create adapter");
+            let context = context(foreign);
+            let PythonValue::Callback(id) = adapter
+                .argument_to_python(&context, callback)
+                .expect("register callback")
+            else {
+                panic!("callable argument must publish a callback token");
+            };
+            initial.unroot().expect("transfer capture root to callback");
+
+            runmat_gc::gc_collect_major().expect("collect with registered callback");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            let registration = adapter
+                .callbacks
+                .borrow()
+                .get(&id)
+                .cloned()
+                .expect("registration");
+            let request = foreign_callback_request(registration.callback.value(), vec![], 1)
+                .expect("use rooted callable");
+            assert!(matches!(
+                request.arguments.as_slice(),
+                [Value::HandleObject(_)]
+            ));
+            drop(request);
+            drop(adapter);
+
+            runmat_gc::gc_collect_major().expect("collect with callback invocation owner");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(registration);
+            runmat_gc::gc_collect_major().expect("collect after callback owner retires");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn rejected_later_argument_retires_only_unpublished_callback_captures() {
+        runmat_gc::gc_test_context(|| {
+            let published = runmat_gc::gc_allocate_rooted(Value::String("published".into()))
+                .expect("allocate published capture");
+            let unpublished = runmat_gc::gc_allocate_rooted(Value::String("unpublished".into()))
+                .expect("allocate unpublished capture");
+            let published_handle = published.handle();
+            let unpublished_handle = unpublished.handle();
+            let callback = |handle| {
+                Value::Closure(runmat_value::Closure::from_data(
+                    runmat_value::ClosureData {
+                        lexical_environment: None,
+                        function_name: "callback_target".into(),
+                        binding: None,
+                        source_role: runmat_types::FunctionSourceRole::Unknown,
+                        source_file: None,
+                        captures: vec![Value::HandleObject(HandleRef {
+                            class_name: "CallbackCapture".into(),
+                            target: handle,
+                            valid: true,
+                        })],
+                    },
+                ))
+            };
+            let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
+            let adapter = PythonAdapter::new(foreign.handles().clone()).expect("create adapter");
+            let context = context(foreign);
+            let mut admitted = CallbackAdmission::new(&adapter.callbacks);
+            let published_arguments = admitted
+                .convert_arguments(&adapter, &context, vec![callback(published_handle)])
+                .expect("admit published callback");
+            let [PythonValue::Callback(published_id)] = published_arguments.as_slice() else {
+                panic!("expected callback token");
+            };
+            let published_id = *published_id;
+            admitted.publish();
+            published.unroot().expect("transfer published root");
+
+            let mut rejected = CallbackAdmission::new(&adapter.callbacks);
+            rejected
+                .convert_arguments(
+                    &adapter,
+                    &context,
+                    vec![callback(unpublished_handle), Value::OutputList(Vec::new())],
+                )
+                .expect_err("later transient argument must reject the call");
+            unpublished.unroot().expect("transfer unpublished root");
+            runmat_gc::gc_collect_major().expect("collect while admission still owns callback");
+            assert!(runmat_gc::gc_clone_value(&unpublished_handle).is_ok());
+            drop(rejected);
+
+            assert_eq!(adapter.callbacks.borrow().len(), 1);
+            assert!(adapter.callbacks.borrow().contains_key(&published_id));
+            runmat_gc::gc_collect_major().expect("collect after rejected admission");
+            assert!(runmat_gc::gc_clone_value(&unpublished_handle).is_err());
+            assert!(runmat_gc::gc_clone_value(&published_handle).is_ok());
+            drop(adapter);
+            runmat_gc::gc_collect_major().expect("collect after published adapter teardown");
+            assert!(runmat_gc::gc_clone_value(&published_handle).is_err());
+        });
+    }
     use super::*;
     use crate::execution::RuntimeExecutionService;
     use crate::foreign::{ForeignPlatform, ForeignRuntime};
 
-    fn only_output(sequence: runmat_value::ValueSequence) -> Value {
-        let [value] = sequence.into_values().try_into().expect("one output");
-        value
+    fn only_output(sequence: crate::execution::RootedValueSequence) -> Value {
+        sequence.with_owned_sequence(|sequence| {
+            let [value] = sequence.into_values().try_into().expect("one output");
+            value
+        })
     }
 
     #[test]
@@ -1235,48 +1687,45 @@ mod tests {
         };
         let context = context(foreign);
         let object = only_output(
-            adapter
-                .invoke_now(
-                    &context,
-                    ForeignCall {
-                        adapter: PYTHON_ADAPTER_ID.into(),
-                        symbol: "invoke_qualified".into(),
-                        arguments: vec![Value::String("py.types.SimpleNamespace".into())],
-                        requested_outputs: 1,
-                    },
-                )
-                .expect("construct Python object"),
+            futures::executor::block_on(adapter.invoke(
+                context.clone(),
+                ForeignCall {
+                    adapter: PYTHON_ADAPTER_ID.into(),
+                    symbol: "invoke_qualified".into(),
+                    arguments: vec![Value::String("py.types.SimpleNamespace".into())],
+                    requested_outputs: 1,
+                },
+            ))
+            .expect("construct Python object"),
         );
         let Value::Foreign(reference) = object else {
             panic!("expected Python foreign reference");
         };
-        adapter
-            .invoke_now(
-                &context,
+        futures::executor::block_on(adapter.invoke(
+            context.clone(),
+            ForeignCall {
+                adapter: PYTHON_ADAPTER_ID.into(),
+                symbol: "set_member".into(),
+                arguments: vec![
+                    Value::Foreign(reference.clone()),
+                    Value::String("answer".into()),
+                    Value::Int(runmat_value::IntValue::I32(42)),
+                ],
+                requested_outputs: 0,
+            },
+        ))
+        .expect("set Python attribute");
+        let answer = only_output(
+            futures::executor::block_on(adapter.invoke(
+                context,
                 ForeignCall {
                     adapter: PYTHON_ADAPTER_ID.into(),
-                    symbol: "set_member".into(),
-                    arguments: vec![
-                        Value::Foreign(reference.clone()),
-                        Value::String("answer".into()),
-                        Value::Int(runmat_value::IntValue::I32(42)),
-                    ],
-                    requested_outputs: 0,
+                    symbol: "get_member".into(),
+                    arguments: vec![Value::Foreign(reference), Value::String("answer".into())],
+                    requested_outputs: 1,
                 },
-            )
-            .expect("set Python attribute");
-        let answer = only_output(
-            adapter
-                .invoke_now(
-                    &context,
-                    ForeignCall {
-                        adapter: PYTHON_ADAPTER_ID.into(),
-                        symbol: "get_member".into(),
-                        arguments: vec![Value::Foreign(reference), Value::String("answer".into())],
-                        requested_outputs: 1,
-                    },
-                )
-                .expect("get Python attribute"),
+            ))
+            .expect("get Python attribute"),
         );
         assert_eq!(answer, Value::Int(runmat_value::IntValue::I64(42)));
     }
@@ -1399,6 +1848,7 @@ mod tests {
     #[test]
     fn failed_reconfiguration_preserves_ticket_and_real_python_resources_block_policy_change() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let prior_snapshot = adapter.configuration().clone();
         let environment = adapter.status_value().unwrap();
         let object = adapter
             .handles
@@ -1413,6 +1863,7 @@ mod tests {
                 .identifier(),
             Some("RunMat:Foreign:InvalidCall")
         );
+        assert_eq!(*adapter.configuration(), prior_snapshot);
         assert_eq!(
             adapter.clear_artifact_bundle().unwrap_err().identifier(),
             Some("RunMat:Foreign:InvalidCall")
@@ -1452,7 +1903,10 @@ mod tests {
             execution_mode: PythonExecutionMode::OutOfProcess,
         });
         assert!(adapter.install_portable_artifact_bundle(&bundle).is_err());
+        assert!(adapter.prepare_project_replacement(Some(&bundle)).is_err());
         assert_eq!(*adapter.configuration.borrow(), previous);
+        assert_eq!(*adapter.configuration(), previous);
+        assert!(adapter.installed_path_provenance().is_none());
         validate_environment(&adapter.handles, &adapter.host_identity, &[original]).unwrap();
     }
 
@@ -1553,6 +2007,32 @@ mod tests {
         assert!(!adapter.isolated_call_active.get());
         assert!(!adapter.terminated.get());
         validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
+    }
+
+    #[tokio::test]
+    async fn abandoned_project_retirement_restores_old_configuration_admission() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let old = adapter.configuration.borrow().clone();
+        let status = adapter.status_value().unwrap();
+        let identity = adapter.project_retirement.snapshot();
+        let ticket = adapter.retire_project_session(&identity).await.unwrap();
+        assert!(adapter.retire_project_session(&identity).await.is_err());
+        let mut updated = old.clone();
+        updated.execution_mode = PythonExecutionMode::OutOfProcess;
+        assert!(adapter.configure(updated.clone()).is_err());
+        assert_eq!(*adapter.configuration.borrow(), old);
+        validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
+        drop(ticket);
+        assert!(adapter.retire_project_session(&identity).await.is_err());
+        adapter.configure(updated).unwrap();
+        let first = adapter
+            .prepare_project_replacement_with_configuration(None, None)
+            .unwrap();
+        let stale = adapter
+            .prepare_project_replacement_with_configuration(None, None)
+            .unwrap();
+        first.admit_commit().unwrap().commit();
+        assert!(stale.admit_commit().is_err());
     }
 
     #[tokio::test]

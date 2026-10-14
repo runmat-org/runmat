@@ -55,7 +55,7 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
             memory_bytes: resources.request.memory_bytes,
             scratch_bytes: resources.request.scratch_bytes,
             accelerators: resources.accelerator_devices,
-            capabilities: Default::default(),
+            capabilities: super::worker_protocol::software_capabilities(),
         },
         host: resources.host,
     };
@@ -83,6 +83,10 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
             session_id: session_id(&run_id, &allocation_id),
             run_key,
             limits: FrameLimits::default(),
+            ready_v1: std::env::var("RUNMAT_EXECUTION_WORKER_READY_V1")
+                .ok()
+                .as_deref()
+                == Some("1"),
         },
         Some(bundle_cache),
     )

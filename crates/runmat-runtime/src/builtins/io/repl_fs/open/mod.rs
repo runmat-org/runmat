@@ -4,6 +4,7 @@ mod path;
 mod tests;
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::path_search::should_treat_as_path;
+use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use path::resolve_open_path;
 use runmat_builtins::BuiltinErrorDescriptor;
@@ -25,7 +26,7 @@ const BUILTIN_NAME: &str = "open";
 async fn open_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     if args.len() != 1 {
         return Err(open_error(
             &OPEN_ERROR_ARG_COUNT,
@@ -58,7 +59,7 @@ async fn open_builtin(
         )
         .await
         .map_err(|err| open_flow_error("open", err))?;
-        return Ok(empty_array());
+        return RootedValue::new(empty_array()).map_err(|error| error.into_runtime_error());
     }
 
     let path = resolve_open_path(&name).await?;
@@ -68,7 +69,7 @@ async fn open_builtin(
 async fn open_path(
     runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let extension = normalized_extension(path);
     let path_text = path_to_string(path);
 
@@ -89,10 +90,10 @@ async fn open_path(
         let eval = crate::builtins::io::mat::load::evaluate(&[Value::String(path_text)])
             .await
             .map_err(|err| open_flow_error("open", err))?;
-        return Ok(eval.first_output());
+        return eval.first_output();
     }
 
-    if let Some(handler_result) = call_extension_handler(&extension, path).await? {
+    if let Some(handler_result) = call_extension_handler(runtime, &extension, path).await? {
         return Ok(handler_result);
     }
 
@@ -105,7 +106,7 @@ async fn open_path(
         )
         .await
         .map_err(|err| open_flow_error("open", err))?;
-        return Ok(empty_array());
+        return RootedValue::new(empty_array()).map_err(|error| error.into_runtime_error());
     }
 
     Err(open_error(
@@ -132,14 +133,19 @@ fn open_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-async fn call_extension_handler(extension: &str, path: &Path) -> BuiltinResult<Option<Value>> {
+async fn call_extension_handler(
+    runtime: Option<&crate::context::RuntimeContext>,
+    extension: &str,
+    path: &Path,
+) -> BuiltinResult<Option<RootedValue>> {
     if extension.is_empty() {
         return Ok(None);
     }
     let handler_name = format!("open{extension}");
     let requested_outputs = crate::output_context::requested_output_count().unwrap_or(1);
     let requested_outputs = usize::from(requested_outputs > 0);
-    let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+    let Some(result) = crate::user_functions::try_call_semantic_function_by_name_in_context(
+        runtime,
         &handler_name,
         &[Value::String(path_to_string(path))],
         requested_outputs,
@@ -150,17 +156,24 @@ async fn call_extension_handler(extension: &str, path: &Path) -> BuiltinResult<O
     };
     result
         .and_then(|sequence| {
-            let mut values = sequence.into_values();
-            match values.len() {
-                0 => Ok(Some(empty_array())),
-                1 => Ok(values.pop()),
-                count => Err(crate::runtime_error::semantic_error(
-                    "RunMat:OpenHandlerOutputCount",
-                    format!(
+            sequence
+                .try_map_owned(
+                    |sequence| {
+                        let mut values = sequence.into_values();
+                        match values.len() {
+                            0 => Ok(empty_array()),
+                            1 => Ok(values.pop().expect("single output")),
+                            count => Err(crate::runtime_error::semantic_error(
+                                "RunMat:OpenHandlerOutputCount",
+                                format!(
                         "{handler_name} returned {count} outputs where at most one was requested"
                     ),
-                )),
-            }
+                            )),
+                        }
+                    },
+                    |error| error.into_runtime_error(),
+                )
+                .map(Some)
         })
         .map_err(|err| {
             let message = format!("{handler_name}: {}", err.message());

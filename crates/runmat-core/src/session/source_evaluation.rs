@@ -1,48 +1,114 @@
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use runmat_runtime::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeSourceEvaluationAuthority,
     RuntimeSourceEvaluationService, SessionSourceEvaluation,
 };
+use runmat_runtime::execution::RootedValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_value::ValueSequence;
+
+#[cfg(not(target_arch = "wasm32"))]
+type ForeignPreparation = crate::foreign_artifacts::SelectedForeignPreparation;
+#[cfg(not(target_arch = "wasm32"))]
+type ForeignIssuanceSource = crate::foreign_artifacts::ForeignIssuanceSource;
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+enum ForeignPreparation {}
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+enum ForeignIssuanceSource {}
 
 #[path = "source_evaluation/generation.rs"]
 mod generation;
+pub(in crate::session) use generation::SelectedDeclarationAdmission;
 use generation::{
     CallableArtifactIndex, CallableArtifactSelectionError, FunctionRegistryGeneration,
     GenerationRetirement, PreparedGenerationImport,
 };
 #[path = "source_evaluation/callable_artifacts.rs"]
 mod callable_artifacts;
+#[path = "source_evaluation/dynamic_identity.rs"]
+mod dynamic_identity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "source_evaluation/selected_foreign.rs"]
+mod selected_foreign;
+#[path = "source_evaluation/selected_graph.rs"]
+mod selected_graph;
+use dynamic_identity::ProjectSourceIdentityIndex;
+#[path = "source_evaluation/dynamic_admission.rs"]
+mod dynamic_admission;
+use dynamic_admission::CoreDynamicEvalAdmission;
+pub(in crate::session) use dynamic_admission::{
+    selected_static_imports, static_capture, SelectedStaticTarget,
+};
+pub(super) use selected_graph::{
+    SelectedGraphPrimary, SelectedGraphPublication, SelectedGraphSelection, SelectedGraphSnapshot,
+    SelectedGraphSource,
+};
 
 pub(super) use callable_artifacts::{
     admit_dynamic_callable, install_bound_invoker, service as callable_artifact_service,
+    DynamicCallableDependency,
 };
 
 pub(super) struct SessionSourceEvaluator {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
     runtime_owner: runmat_runtime::context::RuntimeContextLocalId,
     generation: RefCell<Rc<FunctionRegistryGeneration>>,
+    project_sources: RefCell<Option<Rc<ProjectSourceIdentityIndex>>>,
+    foreign_preparation: RefCell<Option<ForeignPreparation>>,
+    foreign_issuance_source: RefCell<Option<ForeignIssuanceSource>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    selected_foreign_hosts: selected_foreign::SelectedForeignHostCache,
+    self_weak: Weak<Self>,
 }
 
 pub(super) struct FunctionRegistryPublication {
     evaluator: Rc<SessionSourceEvaluator>,
     active: Rc<FunctionRegistryGeneration>,
     restore: Option<Rc<FunctionRegistryGeneration>>,
+    foreign_restore: Option<Option<ForeignPreparation>>,
+    foreign_source_restore: Option<Option<ForeignIssuanceSource>>,
 }
 
 impl FunctionRegistryPublication {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn set_foreign_preparation(&mut self, prepared: Option<ForeignPreparation>) {
+        let prior = self.evaluator.foreign_preparation.replace(prepared);
+        self.foreign_restore = Some(prior);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn set_foreign_issuance_source(&mut self, source: Option<ForeignIssuanceSource>) {
+        let prior = self.evaluator.foreign_issuance_source.replace(source);
+        self.foreign_source_restore = Some(prior);
+    }
+
+    pub(super) fn attach_selected_declaration(
+        &self,
+        product: Rc<SelectedDeclarationAdmission>,
+    ) -> Result<(), RuntimeError> {
+        self.active.attach_selected_declaration(product)
+    }
+
     pub(super) fn finish(mut self, committed: runmat_vm::FunctionRegistry) {
         self.active.commit(committed);
         self.restore = None;
+        self.foreign_restore = None;
+        self.foreign_source_restore = None;
     }
 }
 
 impl Drop for FunctionRegistryPublication {
     fn drop(&mut self) {
+        if let Some(prior) = self.foreign_restore.take() {
+            *self.evaluator.foreign_preparation.borrow_mut() = prior;
+        }
+        if let Some(prior) = self.foreign_source_restore.take() {
+            *self.evaluator.foreign_issuance_source.borrow_mut() = prior;
+        }
         if let Some(restore) = self.restore.take() {
             self.active.retain_escaped_into(&restore);
             self.active.invalidate();
@@ -53,10 +119,22 @@ impl Drop for FunctionRegistryPublication {
     }
 }
 
-#[derive(Debug)]
+impl runmat_vm::DynamicEvalPublication for FunctionRegistryPublication {}
+
 struct CapturedSourceEvaluationAuthority {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
     generation: Rc<FunctionRegistryGeneration>,
+    source_lease: runmat_runtime::source_context::RuntimeSourceLease,
+    evaluator: Weak<SessionSourceEvaluator>,
+    admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+}
+
+impl std::fmt::Debug for CapturedSourceEvaluationAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CapturedSourceEvaluationAuthority")
+            .finish_non_exhaustive()
+    }
 }
 
 impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
@@ -64,7 +142,7 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
         &self,
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<RootedValueSequence, RuntimeError>> {
         let registry = match self.generation.registry() {
             Ok(registry) => registry,
             Err(error) => return Box::pin(async move { Err(error) }),
@@ -72,13 +150,17 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
         let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
             self.base_workspace.clone(),
         ));
+        let source_lease = self.source_lease.clone();
+        let evaluator = self.evaluator.clone();
+        let admission = self.admission.clone();
         Box::pin(async move {
             let source_ref = request.runtime_source_ref().ok_or_else(|| {
                 build_runtime_error("source evaluation lacks authenticated runtime provenance")
                     .with_identifier("RunMat:SourceEvaluation:UnauthenticatedSource")
                     .build()
             })?;
-            if source_ref.resolve_in(&runtime).is_none() {
+            if source_ref != source_lease.source_ref() || source_ref.resolve_in(&runtime).is_none()
+            {
                 return Err(build_runtime_error(
                     "source evaluation provenance does not belong to this runtime session",
                 )
@@ -89,22 +171,43 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
             let source = request.source().to_string();
             let source_label = request.source_label().to_string();
             let requested_outputs = request.requested_outputs();
-            let runtime = runtime.with_language_policy(policy);
+            // Dynamic source is a newly compiled, separately admitted unit.
+            // It must not inherit the caller's selected V3 graph capability.
+            let runtime = runtime
+                .without_selected_graph_program()
+                .with_language_policy(policy);
             let services = runtime
                 .service_ports()
                 .clone()
                 .with_base_workspace(base_service);
             let runtime = runtime.with_service_ports(services);
+            let _evaluator = evaluator.upgrade().ok_or_else(|| {
+                build_runtime_error("source evaluation session has ended")
+                    .with_identifier("RunMat:SourceEvaluation:RetiredSession")
+                    .build()
+            })?;
+            let admission = admission.ok_or_else(|| {
+                build_runtime_error("selected source evaluation has no issuing admission")
+                    .with_identifier("RunMat:SourceEvaluation:MissingSelectedAdmission")
+                    .build()
+            })?;
+            let selected = runmat_vm::DynamicSessionEvalAdmission {
+                source_lease,
+                port: admission,
+            };
             runtime
                 .clone()
-                .scope(runmat_vm::evaluate_session_source_in_context(
-                    runtime,
-                    source,
-                    source_label,
-                    source_ref,
-                    requested_outputs,
-                    &registry,
-                ))
+                .scope(
+                    runmat_vm::evaluate_session_source_with_dynamic_admission_in_context(
+                        runtime,
+                        source,
+                        source_label,
+                        source_ref,
+                        requested_outputs,
+                        &registry,
+                        Some(selected),
+                    ),
+                )
                 .await
         })
     }
@@ -113,24 +216,147 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
 struct BoundSessionSourceEvaluator {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
     generation: Rc<FunctionRegistryGeneration>,
+    evaluator: Weak<SessionSourceEvaluator>,
+    admission_scope: AdmissionScope,
+}
+
+#[derive(Clone)]
+enum AdmissionScope {
+    Session {
+        project_sources: Option<Rc<ProjectSourceIdentityIndex>>,
+        foreign_preparation: Option<ForeignPreparation>,
+        foreign_issuance_source: Option<ForeignIssuanceSource>,
+    },
+    /// `None` permits pure imported code but refuses dynamic source demand.
+    Selected(Option<runmat_vm::DynamicEvalAdmissionPort>),
 }
 
 impl SessionSourceEvaluator {
     pub(super) fn new(
         base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
         runtime_owner: runmat_runtime::context::RuntimeContextLocalId,
-    ) -> Self {
-        Self {
+    ) -> Rc<Self> {
+        Rc::new_cyclic(|self_weak| Self {
             base_workspace,
             runtime_owner,
             generation: RefCell::new(Rc::new(FunctionRegistryGeneration::committed(
                 runmat_vm::FunctionRegistry::default(),
             ))),
-        }
+            project_sources: RefCell::new(None),
+            foreign_preparation: RefCell::new(None),
+            foreign_issuance_source: RefCell::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            selected_foreign_hosts: selected_foreign::SelectedForeignHostCache::default(),
+            self_weak: self_weak.clone(),
+        })
+    }
+
+    pub(super) fn set_project_sources(
+        &self,
+        handoff: Option<&runmat_package::FrozenProjectHandoff>,
+    ) {
+        *self.project_sources.borrow_mut() =
+            handoff.map(|handoff| Rc::new(ProjectSourceIdentityIndex::from_handoff(handoff)));
+    }
+
+    fn project_sources(&self) -> Option<Rc<ProjectSourceIdentityIndex>> {
+        self.project_sources.borrow().clone()
+    }
+
+    fn foreign_preparation(&self) -> Option<ForeignPreparation> {
+        self.foreign_preparation.borrow().clone()
+    }
+
+    fn foreign_issuance_source(&self) -> Option<ForeignIssuanceSource> {
+        self.foreign_issuance_source.borrow().clone()
     }
 
     fn current_generation(&self) -> Rc<FunctionRegistryGeneration> {
         self.generation.borrow().clone()
+    }
+
+    /// Snapshot exact class-only products from this generation before a new
+    /// constructor product is attached. These Rcs contain checked code/source
+    /// and static-target products, never a mutable class-name lookup.
+    pub(super) fn selected_declaration_products(
+        &self,
+    ) -> Result<Vec<Rc<runmat_vm::SelectedDeclarationProduct>>, RuntimeError> {
+        Ok(self
+            .current_generation()
+            .selected_declarations()?
+            .iter()
+            .map(|admission| Rc::clone(admission.product()))
+            .collect())
+    }
+
+    pub(super) fn dynamic_admission_port(self: &Rc<Self>) -> runmat_vm::DynamicEvalAdmissionPort {
+        self.dynamic_admission_port_for(
+            self.project_sources(),
+            self.foreign_preparation(),
+            self.foreign_issuance_source(),
+        )
+    }
+
+    pub(super) fn dynamic_admission_port_for_selected_body(
+        self: &Rc<Self>,
+        body: &runmat_vm::FunctionBytecode,
+    ) -> Result<Option<runmat_vm::DynamicEvalAdmissionPort>, RuntimeError> {
+        match (
+            body.selected_executable_product.as_ref(),
+            body.selected_source_owner.as_ref(),
+        ) {
+            (Some(product), Some(owner)) if product.source_owner().same_issuance(owner) => {
+                // A Graph/AOT-admitted product may be pure code/source with no
+                // local dynamic-source authority. It can still be invoked;
+                // only source evaluation at demand time needs an admission port.
+                Ok(product.dynamic_admission().cloned())
+            }
+            (None, None) => Ok(Some(self.dynamic_admission_port())),
+            _ => Err(
+                build_runtime_error("bound callback has no exact selected source")
+                    .with_identifier("RunMat:DynamicEval:SelectedForeignSource")
+                    .build(),
+            ),
+        }
+    }
+
+    pub(super) fn source_evaluation_for_selected_body(
+        self: &Rc<Self>,
+        admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+    ) -> Rc<dyn RuntimeSourceEvaluationService> {
+        Rc::new(BoundSessionSourceEvaluator {
+            base_workspace: self.base_workspace.clone(),
+            generation: self.current_generation(),
+            evaluator: Rc::downgrade(self),
+            admission_scope: AdmissionScope::Selected(admission),
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn dynamic_admission_port_for_invocation(
+        self: &Rc<Self>,
+        foreign_preparation: Option<ForeignPreparation>,
+        foreign_issuance_source: Option<ForeignIssuanceSource>,
+    ) -> runmat_vm::DynamicEvalAdmissionPort {
+        self.dynamic_admission_port_for(
+            self.project_sources(),
+            foreign_preparation,
+            foreign_issuance_source,
+        )
+    }
+
+    fn dynamic_admission_port_for(
+        self: &Rc<Self>,
+        project_sources: Option<Rc<ProjectSourceIdentityIndex>>,
+        foreign_preparation: Option<ForeignPreparation>,
+        foreign_issuance_source: Option<ForeignIssuanceSource>,
+    ) -> runmat_vm::DynamicEvalAdmissionPort {
+        runmat_vm::DynamicEvalAdmissionPort::new(Rc::new(CoreDynamicEvalAdmission::new(
+            Rc::downgrade(self),
+            project_sources,
+            foreign_preparation,
+            foreign_issuance_source,
+        )))
     }
 
     pub(super) fn ensure_runtime_owner(
@@ -151,18 +377,23 @@ impl SessionSourceEvaluator {
         &self,
         binding: &runmat_value::BoundFunctionBinding,
     ) -> Result<bool, RuntimeError> {
+        Ok(self.selected_binding_view(binding)?.is_some())
+    }
+
+    pub(in crate::session) fn selected_binding_view(
+        &self,
+        binding: &runmat_value::BoundFunctionBinding,
+    ) -> Result<Option<runmat_vm::FunctionRegistry>, RuntimeError> {
         let generation = self.current_generation();
         let registry = generation.registry()?;
-        Ok(registry
-            .owned_view(runmat_hir::FunctionId(binding.function), &binding.authority)
-            .is_some())
+        Ok(registry.owned_view(runmat_hir::FunctionId(binding.function), &binding.authority))
     }
 
     fn prepare_import(
         &self,
         registry: runmat_vm::FunctionRegistry,
         artifacts: CallableArtifactIndex,
-        source_owners: Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>,
+        source_owners: Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>,
     ) -> PreparedGenerationImport {
         PreparedGenerationImport::new(registry, artifacts, source_owners)
     }
@@ -213,24 +444,72 @@ impl SessionSourceEvaluator {
     pub(super) fn publish_for_execution(
         self: &Rc<Self>,
         active: runmat_vm::FunctionRegistry,
-        unit_bytes: Option<Vec<u8>>,
+        unit_bytes: Option<Arc<[u8]>>,
+    ) -> Result<FunctionRegistryPublication, RuntimeError> {
+        self.publish_for_execution_with_owner(active, unit_bytes, None)
+    }
+
+    /// Stage one dynamically compiled selected product only while its eval
+    /// frame executes. The ordinary publication guard restores the prior named
+    /// registry on Drop; only actual escaped definition handles retain this
+    /// code/source owner and its canonical V3 artifact.
+    pub(super) fn publish_selected_dynamic_for_execution(
+        self: &Rc<Self>,
+        active: runmat_vm::FunctionRegistry,
+        canonical_v3: Arc<[u8]>,
+        source_owner: runmat_runtime::source_context::SelectedProgramSourceOwner,
+    ) -> Result<FunctionRegistryPublication, RuntimeError> {
+        // The active registry and its code/source owner are authenticated in
+        // one operation. An independently constructed owner cannot certify a
+        // later or different provisional registry with the same names.
+        let owner = Rc::new(
+            runmat_vm::RetainedExecutableSourceOwner::from_selected_product(
+                Arc::clone(&canonical_v3),
+                source_owner,
+                &active,
+            )
+            .map_err(|message| {
+                build_runtime_error(message)
+                    .with_identifier("RunMat:CallableArtifact:InvalidSelectedProduct")
+                    .build()
+            })?,
+        );
+        self.publish_for_execution_with_owner(active, Some(canonical_v3), Some(owner))
+    }
+
+    fn publish_for_execution_with_owner(
+        self: &Rc<Self>,
+        active: runmat_vm::FunctionRegistry,
+        unit_bytes: Option<Arc<[u8]>>,
+        new_owner: Option<Rc<runmat_vm::RetainedExecutableSourceOwner>>,
     ) -> Result<FunctionRegistryPublication, RuntimeError> {
         let current = self.generation.borrow().clone();
         let inherited = current.registry()?;
         let mut artifacts = current.artifacts()?.as_ref().clone();
         let source_owners = current.source_owners()?;
+        let selected_declarations = current.selected_declarations()?;
         if let Some(bytes) = unit_bytes {
-            artifacts.insert_canonical_unit(bytes).map_err(|source| {
-                build_runtime_error(source.to_string())
-                    .with_identifier("RunMat:CallableArtifact:InvalidExecutable")
-                    .with_source(source)
-                    .build()
-            })?;
+            artifacts
+                .insert_canonical_arc_unit(bytes)
+                .map_err(|source| {
+                    build_runtime_error(source.to_string())
+                        .with_identifier("RunMat:CallableArtifact:InvalidExecutable")
+                        .with_source(source)
+                        .build()
+                })?;
         }
+        let source_owners = if let Some(owner) = new_owner {
+            let mut selected = source_owners.as_ref().clone();
+            selected.push(owner);
+            Rc::new(selected)
+        } else {
+            source_owners
+        };
         let active = Rc::new(FunctionRegistryGeneration::active(
             active,
             artifacts,
             source_owners,
+            selected_declarations,
             &inherited,
         ));
         let restore = self.replace_generation(active.clone());
@@ -238,6 +517,8 @@ impl SessionSourceEvaluator {
             evaluator: self.clone(),
             active,
             restore: Some(restore),
+            foreign_restore: None,
+            foreign_source_restore: None,
         })
     }
 
@@ -249,14 +530,17 @@ impl SessionSourceEvaluator {
         requested_outputs: usize,
         generation: Rc<FunctionRegistryGeneration>,
     ) -> Result<SessionSourceEvaluation, RuntimeError> {
-        capture_source(
-            runtime,
-            source,
-            source_label,
-            requested_outputs,
-            self.base_workspace.clone(),
+        let issuer = BoundSessionSourceEvaluator {
+            base_workspace: self.base_workspace.clone(),
             generation,
-        )
+            evaluator: self.self_weak.clone(),
+            admission_scope: AdmissionScope::Session {
+                project_sources: self.project_sources(),
+                foreign_preparation: self.foreign_preparation(),
+                foreign_issuance_source: self.foreign_issuance_source(),
+            },
+        };
+        capture_source(runtime, source, source_label, requested_outputs, &issuer)
     }
 }
 
@@ -267,6 +551,12 @@ impl RuntimeSourceEvaluationService for SessionSourceEvaluator {
         Ok(Rc::new(BoundSessionSourceEvaluator {
             base_workspace: self.base_workspace.clone(),
             generation: self.generation.borrow().clone(),
+            evaluator: self.self_weak.clone(),
+            admission_scope: AdmissionScope::Session {
+                project_sources: self.project_sources(),
+                foreign_preparation: self.foreign_preparation(),
+                foreign_issuance_source: self.foreign_issuance_source(),
+            },
         }))
     }
 
@@ -290,7 +580,7 @@ impl RuntimeSourceEvaluationService for SessionSourceEvaluator {
         &self,
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<RootedValueSequence, RuntimeError>> {
         let Some(authority) = request.evaluation_authority() else {
             return Box::pin(async {
                 Err(
@@ -311,6 +601,8 @@ impl RuntimeSourceEvaluationService for BoundSessionSourceEvaluator {
         Ok(Rc::new(Self {
             base_workspace: self.base_workspace.clone(),
             generation: self.generation.clone(),
+            evaluator: self.evaluator.clone(),
+            admission_scope: self.admission_scope.clone(),
         }))
     }
 
@@ -321,21 +613,14 @@ impl RuntimeSourceEvaluationService for BoundSessionSourceEvaluator {
         source_label: Arc<str>,
         requested_outputs: usize,
     ) -> Result<SessionSourceEvaluation, RuntimeError> {
-        capture_source(
-            runtime,
-            source,
-            source_label,
-            requested_outputs,
-            self.base_workspace.clone(),
-            self.generation.clone(),
-        )
+        capture_source(runtime, source, source_label, requested_outputs, self)
     }
 
     fn evaluate_session_source(
         &self,
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
-    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<RootedValueSequence, RuntimeError>> {
         let Some(authority) = request.evaluation_authority() else {
             return Box::pin(async {
                 Err(
@@ -354,10 +639,9 @@ fn capture_source(
     source: Arc<str>,
     source_label: Arc<str>,
     requested_outputs: usize,
-    base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
-    generation: Rc<FunctionRegistryGeneration>,
+    issuer: &BoundSessionSourceEvaluator,
 ) -> Result<SessionSourceEvaluation, RuntimeError> {
-    generation.registry()?;
+    issuer.generation.registry()?;
     let lease = runmat_runtime::source_context::lease_source_context_in_context(
         runtime,
         Arc::clone(&source_label),
@@ -370,13 +654,39 @@ fn capture_source(
             .with_source(error)
             .build()
     })?;
+    let authority_lease = lease.clone();
+    let admission = match &issuer.admission_scope {
+        AdmissionScope::Selected(selected) => selected.clone(),
+        AdmissionScope::Session {
+            project_sources,
+            foreign_preparation,
+            foreign_issuance_source,
+        } => Some(
+            issuer
+                .evaluator
+                .upgrade()
+                .ok_or_else(|| {
+                    build_runtime_error("source evaluation session has ended")
+                        .with_identifier("RunMat:SourceEvaluation:RetiredSession")
+                        .build()
+                })?
+                .dynamic_admission_port_for(
+                    project_sources.clone(),
+                    foreign_preparation.clone(),
+                    foreign_issuance_source.clone(),
+                ),
+        ),
+    };
     Ok(SessionSourceEvaluation::capture_with_authority(
         runtime,
         source,
         Rc::new(lease),
         Rc::new(CapturedSourceEvaluationAuthority {
-            base_workspace,
-            generation,
+            base_workspace: issuer.base_workspace.clone(),
+            generation: issuer.generation.clone(),
+            source_lease: authority_lease,
+            evaluator: issuer.evaluator.clone(),
+            admission,
         }),
         source_label,
         requested_outputs,
@@ -393,10 +703,7 @@ mod tests {
         let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let evaluator = Rc::new(SessionSourceEvaluator::new(
-            owner.clone(),
-            runtime.local_identity(),
-        ));
+        let evaluator = SessionSourceEvaluator::new(owner.clone(), runtime.local_identity());
         let base = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
             owner.clone(),
         ));
@@ -426,10 +733,7 @@ mod tests {
         let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let evaluator = Rc::new(SessionSourceEvaluator::new(
-            owner.clone(),
-            runtime.local_identity(),
-        ));
+        let evaluator = SessionSourceEvaluator::new(owner.clone(), runtime.local_identity());
         let publication = evaluator
             .publish_for_execution(runmat_vm::FunctionRegistry::default(), None)
             .expect("publish active generation");

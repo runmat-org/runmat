@@ -137,7 +137,7 @@ fn max_registered_single_row_vector_reduces_across_columns() {
         1,
     ))
     .expect("dispatch max");
-    match value {
+    match value.value() {
         Value::OutputList(values) => {
             assert_eq!(values.len(), 1);
             assert_eq!(
@@ -147,7 +147,7 @@ fn max_registered_single_row_vector_reduces_across_columns() {
         }
         other => assert_eq!(
             other,
-            Value::Tensor(Tensor::from_f32(vec![5.0], vec![1, 1]).unwrap())
+            &Value::Tensor(Tensor::from_f32(vec![5.0], vec![1, 1]).unwrap())
         ),
     }
 }

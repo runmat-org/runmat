@@ -700,14 +700,18 @@ async fn call_integrand(
     arguments[0] = Value::Num(x);
     let value = call_function(function, &*arguments).await?;
     cooperation.completed(1).await?;
-    let value = prepare_quad_floating_value(
-        "integrand result",
-        value,
-        &INTEGER_CALLBACK_EXTENSION,
-        cooperation,
-    )
-    .await?;
-    value_to_scalar(NAME, value)
+    value
+        .with_owned_async(|value| async move {
+            let value = prepare_quad_floating_value(
+                "integrand result",
+                value,
+                &INTEGER_CALLBACK_EXTENSION,
+                cooperation,
+            )
+            .await?;
+            value_to_scalar(NAME, value)
+        })
+        .await
 }
 
 struct QuadTrace;
@@ -799,7 +803,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected x, got {other:?}"),
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x * x)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x * x,
+                    ))
+                })
             },
         )));
 
@@ -964,7 +972,9 @@ mod tests {
                 let Value::Num(x) = args[0] else {
                     panic!("expected scalar quadrature point")
                 };
-                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(x))
+                })
             },
         )));
         let parameter =
@@ -1049,9 +1059,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scale, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(scale * x)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        scale * x,
+                    ))
+                })
             },
         )));
 
@@ -1098,9 +1110,11 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected x, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(x.sqrt())) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x.sqrt(),
+                    ))
+                })
             },
         )));
 

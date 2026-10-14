@@ -24,6 +24,7 @@ pub fn create_semantic_closure(
     display_name: String,
     capture_count: usize,
     source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<(), RuntimeError> {
     let mut captures = Vec::with_capacity(capture_count);
     for _ in 0..capture_count {
@@ -35,8 +36,60 @@ pub fn create_semantic_closure(
         display_name,
         captures,
         source_role,
+        lexical_environment,
     ));
     Ok(())
+}
+
+/// Issue a closure from a function-only selected product. The binding and
+/// source presentation were authenticated against that product before this
+/// stack is changed; ambient numeric lookup cannot replace either one.
+pub fn create_selected_semantic_closure(
+    stack: &mut Vec<Value>,
+    binding: runmat_value::BoundFunctionBinding,
+    display_name: String,
+    source_file: Option<String>,
+    capture_count: usize,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<(), RuntimeError> {
+    let mut captures = Vec::with_capacity(capture_count);
+    for _ in 0..capture_count {
+        captures.push(pop_value(stack)?);
+    }
+    captures.reverse();
+    create_selected_semantic_closure_with_captures(
+        stack,
+        binding,
+        display_name,
+        source_file,
+        captures,
+        source_role,
+        lexical_environment,
+    );
+    Ok(())
+}
+
+/// Publish compiler-ordered captures that were read and rooted at this exact
+/// issuance point. The caller holds their root lease until this pushes the
+/// closure into the traced VM stack.
+pub fn create_selected_semantic_closure_with_captures(
+    stack: &mut Vec<Value>,
+    binding: runmat_value::BoundFunctionBinding,
+    display_name: String,
+    source_file: Option<String>,
+    captures: Vec<Value>,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) {
+    stack.push(Value::Closure(runmat_value::Closure::new(
+        display_name,
+        Some(binding),
+        source_role,
+        source_file,
+        captures,
+        lexical_environment,
+    )));
 }
 
 pub fn collect_method_args(
@@ -83,8 +136,11 @@ mod tests {
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(2.0)]);
                 Box::pin(async {
-                    runmat_value::ValueSequence::single(Value::Num(3.0))
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                    runmat_runtime::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(Value::Num(3.0))
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             })),
         );
@@ -97,7 +153,7 @@ mod tests {
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect("classref external call should resolve through semantic resolver");
-        assert_eq!(value.into_values(), vec![Value::Num(3.0)]);
+        assert_eq!(value.value().as_slice(), &[Value::Num(3.0)]);
     }
 
     #[test]
@@ -214,6 +270,7 @@ mod tests {
                 access: MemberAccess::Public,
                 function_name: "inst".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         runmat_runtime::class_registry::register_class(

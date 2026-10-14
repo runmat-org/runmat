@@ -8,6 +8,7 @@ pub use contract::DISTANCES_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DISTANCES_CATALOG_ENTRY];
 
 pub const DISTANCES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "distances" },
     category: "graph",

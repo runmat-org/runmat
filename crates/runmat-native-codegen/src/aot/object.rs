@@ -110,6 +110,42 @@ pub fn emit_relocatable_object_for_runtime(
             "native object data symbols must be unique",
         ));
     }
+    let foreign_policy = embedded_data
+        .iter()
+        .find(|item| item.symbol == super::AOT_PROGRAM_SYMBOL)
+        .map(|item| {
+            let program = super::AotProgramManifest::from_canonical_bytes(&item.bytes)?;
+            if program.executable != assembly.executable_identity
+                || program.entrypoint != assembly.selected_entrypoint
+                || embedded_data
+                    .iter()
+                    .find(|data| data.symbol == super::AOT_NATIVE_IR_SYMBOL)
+                    .is_none_or(|data| {
+                        program.native_ir_digest != runmat_execution::Digest::sha256(&data.bytes)
+                    })
+            {
+                return Err(NativeCodegenError::new(
+                    "native.object.program",
+                    "embedded AOT program does not match Native IR",
+                ));
+            }
+            program
+                .foreign_policy
+                .as_ref()
+                .map(|policy| {
+                    runmat_execution_artifact::foreign_policy_ref(&policy.descriptor).map_err(
+                        |error| {
+                            NativeCodegenError::new(
+                                "native.object.foreign_policy",
+                                error.to_string(),
+                            )
+                        },
+                    )
+                })
+                .transpose()
+        })
+        .transpose()?
+        .flatten();
     let mut data = Vec::with_capacity(embedded_data.len());
     let mut linked_data = std::collections::BTreeMap::new();
     for item in embedded_data {
@@ -180,6 +216,7 @@ pub fn emit_relocatable_object_for_runtime(
         catalog_fingerprint: *assembly.program.catalog_fingerprint(),
         optimization,
         runtime_binding_mode,
+        foreign_policy,
         object_digest: runmat_execution::Digest::sha256(&bytes),
         object_bytes,
         entrypoint,

@@ -28,6 +28,32 @@ pub async fn run_remote_worker_quic(
         run_key,
         limits,
         None,
+        false,
+    )
+    .await
+}
+
+/// Explicit V5-compatible QUIC opt-in for a caller that owns this pinned
+/// allocation session and its run key. Old callers remain silent on V5.
+pub async fn run_remote_worker_quic_ready_v1(
+    listener: QuicOverlayListener,
+    run_identity: impl Into<String>,
+    worker: WorkerSpec,
+    driver_fence: u64,
+    session_id: [u8; 16],
+    run_key: RunKeyMaterial,
+    limits: FrameLimits,
+) -> NativeExecutionResult<()> {
+    run_remote_worker_quic_inner(
+        listener,
+        run_identity.into(),
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+        None,
+        true,
     )
     .await
 }
@@ -57,6 +83,7 @@ pub async fn run_remote_meshing_worker_quic(
             kernel,
             meshing_limits,
         )),
+        false,
     )
     .await
 }
@@ -71,6 +98,7 @@ async fn run_remote_worker_quic_inner(
     run_key: RunKeyMaterial,
     limits: FrameLimits,
     meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+    ready_v1: bool,
 ) -> NativeExecutionResult<()> {
     let connection = Arc::new(listener.accept().await.map_err(protocol)?);
     tokio::task::LocalSet::new()
@@ -85,6 +113,7 @@ async fn run_remote_worker_quic_inner(
                 limits,
                 bundle_cache: None,
                 meshing_host,
+                ready_v1,
             },
         ))
         .await
@@ -99,6 +128,7 @@ pub struct RemoteWorkerRelayRequest<'a> {
     pub session_id: [u8; 16],
     pub run_key: RunKeyMaterial,
     pub limits: FrameLimits,
+    pub ready_v1: bool,
 }
 
 pub async fn run_remote_worker_relay(
@@ -120,6 +150,7 @@ pub(crate) async fn run_remote_worker_relay_cached(
         session_id,
         run_key,
         limits,
+        ready_v1,
     } = request;
     let connection = WebSocketRelayConnection::connect(url, headers, limits)
         .await
@@ -136,6 +167,7 @@ pub(crate) async fn run_remote_worker_relay_cached(
                 limits,
                 bundle_cache,
                 meshing_host: None,
+                ready_v1,
             },
         ))
         .await

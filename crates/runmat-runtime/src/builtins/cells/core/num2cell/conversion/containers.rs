@@ -30,6 +30,12 @@ pub(super) fn objects(array: ObjectArray, dimensions: &[usize]) -> crate::Builti
     let shape = array.shape().to_vec();
     let class = array.class_name().clone();
     let plan = PartitionPlan::new(&shape, dimensions)?;
+    let (selected_provenance, unselected_provenance) = if plan.slice_shape.contains(&0) {
+        crate::indexing::object::empty_result_provenance(&array)
+            .map_err(|error| error::internal(error.to_string()))?
+    } else {
+        (Vec::new(), false)
+    };
     let mut values = options(array.into_data());
     let cells = plan
         .groups()
@@ -40,9 +46,17 @@ pub(super) fn objects(array: ObjectArray, dimensions: &[usize]) -> crate::Builti
                     .pop()
                     .ok_or_else(|| error::internal("object group is empty"));
             }
-            ObjectArray::new(class.clone(), group, plan.slice_shape.clone())
-                .map(Value::ObjectArray)
-                .map_err(error::internal)
+            let mut selected = ObjectArray::new(class.clone(), group, plan.slice_shape.clone())
+                .map_err(error::internal)?;
+            if selected.is_empty() {
+                selected = selected
+                    .with_selected_provenance(selected_provenance.iter().cloned())
+                    .map_err(error::internal)?;
+                if unselected_provenance {
+                    selected = selected.with_unselected_provenance();
+                }
+            }
+            Ok(Value::ObjectArray(selected))
         })
         .collect::<crate::BuiltinResult<Vec<_>>>()?;
     super::output(&plan, cells)

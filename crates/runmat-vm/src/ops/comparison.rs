@@ -3,6 +3,7 @@ use crate::ops::integer_comparison::{
     scalar_order, tensor_element_equals_scalar, tensor_elements_equal,
 };
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, Tensor, Value};
 use std::future::Future;
@@ -324,6 +325,10 @@ pub struct RelationInvertedSpec {
     pub predicate: fn(f64, f64) -> bool,
 }
 
+fn rooted_scalar(value: f64) -> Result<RootedValue, RuntimeError> {
+    RootedValue::new(Value::Num(value)).map_err(|error| error.into_runtime_error())
+}
+
 pub async fn relation<CM, CMFut, B, BFut>(
     stack: &mut Vec<Value>,
     name: &'static str,
@@ -334,11 +339,12 @@ pub async fn relation<CM, CMFut, B, BFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
-    BFut: Future<Output = Result<Value, RuntimeError>>,
+    BFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), name, b.clone()).await {
@@ -347,11 +353,11 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if scalar_relation(&a, &b, predicate)? {
+                        rooted_scalar(if scalar_relation(&a, &b, predicate)? {
                             1.0
                         } else {
                             0.0
-                        })
+                        })?
                     }
                 }
             }
@@ -363,11 +369,11 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if scalar_relation(&a, &b, predicate)? {
+                        rooted_scalar(if scalar_relation(&a, &b, predicate)? {
                             1.0
                         } else {
                             0.0
-                        })
+                        })?
                     }
                 }
             }
@@ -376,15 +382,15 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if scalar_relation(&a, &b, predicate)? {
+                rooted_scalar(if scalar_relation(&a, &b, predicate)? {
                     1.0
                 } else {
                     0.0
-                })
+                })?
             }
         }
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -397,13 +403,14 @@ pub async fn relation_inverted<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
-    BFut: Future<Output = Result<Value, RuntimeError>>,
+    BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), spec.name, b.clone()).await {
@@ -412,22 +419,27 @@ where
                     match call_method(Value::Object(obj.clone()), spec.inverse_name, b.clone())
                         .await
                     {
-                        Ok(v) => Value::Num(
-                            if !logical_truth(v, "comparison result".to_string()).await? {
+                        Ok(v) => rooted_scalar(
+                            if !v
+                                .with_owned_async(|value| {
+                                    logical_truth(value, "comparison result".to_string())
+                                })
+                                .await?
+                            {
                                 1.0
                             } else {
                                 0.0
                             },
-                        ),
+                        )?,
                         Err(_) => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
+                                rooted_scalar(if scalar_relation(&a, &b, spec.predicate)? {
                                     1.0
                                 } else {
                                     0.0
-                                })
+                                })?
                             }
                         }
                     }
@@ -445,22 +457,27 @@ where
                     )
                     .await
                     {
-                        Ok(v) => Value::Num(
-                            if !logical_truth(v, "comparison result".to_string()).await? {
+                        Ok(v) => rooted_scalar(
+                            if !v
+                                .with_owned_async(|value| {
+                                    logical_truth(value, "comparison result".to_string())
+                                })
+                                .await?
+                            {
                                 1.0
                             } else {
                                 0.0
                             },
-                        ),
+                        )?,
                         Err(_) => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
+                                rooted_scalar(if scalar_relation(&a, &b, spec.predicate)? {
                                     1.0
                                 } else {
                                     0.0
-                                })
+                                })?
                             }
                         }
                     }
@@ -471,15 +488,15 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(spec.name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
+                rooted_scalar(if scalar_relation(&a, &b, spec.predicate)? {
                     1.0
                 } else {
                     0.0
-                })
+                })?
             }
         }
     };
-    stack.push(result);
+    result.with_owned(|value| stack.push(value));
     Ok(())
 }
 
@@ -491,13 +508,14 @@ pub async fn equal<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
-    BFut: Future<Output = Result<Value, RuntimeError>>,
+    BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     if let Some(result) = typed_complex_integer_comparison(&a, &b, false)? {
         stack.push(result);
         return Ok(());
@@ -564,10 +582,12 @@ where
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
-                Ok(v) => stack.push(v),
+                Ok(v) => v.with_owned(|value| stack.push(value)),
                 Err(_) => {
                     if rel_binary_use_builtin(&a, &b) {
-                        stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+                        call_builtin("eq", a.clone(), b.clone())
+                            .await?
+                            .with_owned(|value| stack.push(value));
                     } else {
                         let aa: f64 = (&a).try_into()?;
                         let bb: f64 = (&b).try_into()?;
@@ -578,10 +598,12 @@ where
         }
         (_, Value::Object(obj)) => {
             match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
-                Ok(v) => stack.push(v),
+                Ok(v) => v.with_owned(|value| stack.push(value)),
                 Err(_) => {
                     if rel_binary_use_builtin(&a, &b) {
-                        stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+                        call_builtin("eq", a.clone(), b.clone())
+                            .await?
+                            .with_owned(|value| stack.push(value));
                     } else {
                         let aa: f64 = (&a).try_into()?;
                         let bb: f64 = (&b).try_into()?;
@@ -591,13 +613,17 @@ where
             }
         }
         (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
-            stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+            call_builtin("eq", a.clone(), b.clone())
+                .await?
+                .with_owned(|value| stack.push(value));
         }
         (Value::Symbolic(_), _)
         | (_, Value::Symbolic(_))
         | (Value::SymbolicArray(_), _)
         | (_, Value::SymbolicArray(_)) => {
-            stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+            call_builtin("eq", a.clone(), b.clone())
+                .await?
+                .with_owned(|value| stack.push(value));
         }
         (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
             if la.shape != lb.shape {
@@ -714,7 +740,9 @@ where
             // The scalar fast path below accepts only real Num/Int values.
             // Logical, complex, resident, and other representations retain
             // the canonical comparison builtin's conversion and output rules.
-            stack.push(call_builtin("eq", a, b).await?);
+            call_builtin("eq", a, b)
+                .await?
+                .with_owned(|value| stack.push(value));
         }
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
@@ -738,13 +766,14 @@ pub async fn not_equal<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
-    BFut: Future<Output = Result<Value, RuntimeError>>,
+    BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
     LTFut: Future<Output = Result<bool, RuntimeError>>,
 {
     let (a, b) = pop2(stack)?;
+    let _input_roots = crate::call::root_values([&a, &b])?;
     if let Some(result) = typed_complex_integer_comparison(&a, &b, true)? {
         stack.push(result);
         return Ok(());
@@ -752,10 +781,15 @@ where
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "ne", b.clone()).await {
-                Ok(v) => stack.push(v),
+                Ok(v) => v.with_owned(|value| stack.push(value)),
                 Err(_) => match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
                     Ok(v) => stack.push(Value::Num(
-                        if !logical_truth(v, "comparison result".to_string()).await? {
+                        if !v
+                            .with_owned_async(|value| {
+                                logical_truth(value, "comparison result".to_string())
+                            })
+                            .await?
+                        {
                             1.0
                         } else {
                             0.0
@@ -763,7 +797,9 @@ where
                     )),
                     Err(_) => {
                         if rel_binary_use_builtin(&a, &b) {
-                            stack.push(call_builtin("ne", a.clone(), b.clone()).await?);
+                            call_builtin("ne", a.clone(), b.clone())
+                                .await?
+                                .with_owned(|value| stack.push(value));
                         } else {
                             let aa: f64 = (&a).try_into()?;
                             let bb: f64 = (&b).try_into()?;
@@ -775,10 +811,15 @@ where
         }
         (_, Value::Object(obj)) => {
             match call_method(Value::Object(obj.clone()), "ne", a.clone()).await {
-                Ok(v) => stack.push(v),
+                Ok(v) => v.with_owned(|value| stack.push(value)),
                 Err(_) => match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
                     Ok(v) => stack.push(Value::Num(
-                        if !logical_truth(v, "comparison result".to_string()).await? {
+                        if !v
+                            .with_owned_async(|value| {
+                                logical_truth(value, "comparison result".to_string())
+                            })
+                            .await?
+                        {
                             1.0
                         } else {
                             0.0
@@ -786,7 +827,9 @@ where
                     )),
                     Err(_) => {
                         if rel_binary_use_builtin(&a, &b) {
-                            stack.push(call_builtin("ne", a.clone(), b.clone()).await?);
+                            call_builtin("ne", a.clone(), b.clone())
+                                .await?
+                                .with_owned(|value| stack.push(value));
                         } else {
                             let aa: f64 = (&a).try_into()?;
                             let bb: f64 = (&b).try_into()?;
@@ -797,7 +840,9 @@ where
             }
         }
         (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
-            stack.push(call_builtin("ne", a.clone(), b.clone()).await?)
+            call_builtin("ne", a.clone(), b.clone())
+                .await?
+                .with_owned(|value| stack.push(value))
         }
         (Value::Tensor(ta), Value::Tensor(tb)) => {
             if ta.shape() != tb.shape() {
@@ -886,7 +931,9 @@ where
             stack.push(Value::Num(if a_s != b_s { 1.0 } else { 0.0 }))
         }
         _ if rel_binary_use_builtin(&a, &b) => {
-            stack.push(call_builtin("ne", a, b).await?);
+            call_builtin("ne", a, b)
+                .await?
+                .with_owned(|value| stack.push(value));
         }
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
@@ -912,7 +959,7 @@ mod tests {
         _receiver: Value,
         _name: &'static str,
         _arg: Value,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         panic!("method dispatch should not be used by this test")
     }
 
@@ -920,7 +967,7 @@ mod tests {
         _name: &'static str,
         _lhs: Value,
         _rhs: Value,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         panic!("builtin dispatch should not be used by this test")
     }
 

@@ -9,7 +9,11 @@ pub async fn build_expanded_args_from_specs(
     specs: &[ArgumentSpec],
     sequence_state: &mut crate::interpreter::dispatch::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    // Captured windows and ordinary operands leave the registered VM stack
+    // before Runtime installs its expansion root. Retain their exact handles
+    // across that transfer, including all captures still waiting in a window.
+    let _input_roots = crate::call::root_values(stack.iter())?;
     let capture_slots = specs
         .iter()
         .filter_map(|spec| match spec {
@@ -224,6 +228,7 @@ mod tests {
                 access: MemberAccess::Public,
                 function_name: "subsref_impl".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         runmat_runtime::class_registry::register_class(
@@ -246,15 +251,13 @@ mod tests {
         );
 
         let child = Value::Object(runmat_value::ObjectInstance::new(child_name));
-        assert!(matches!(
-            runmat_runtime::object::protocol::resolve_object_protocol(
-                &child,
-                runmat_runtime::object::protocol::ObjectProtocol::Subsref,
-                &runmat_runtime::object::protocol::ObjectAccessContext::default(),
-            )
-            .unwrap(),
-            runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-        ));
+        assert!(runmat_runtime::object::protocol::resolve_object_protocol(
+            &child,
+            runmat_runtime::object::protocol::ObjectProtocol::Subsref,
+            &runmat_runtime::object::protocol::ObjectAccessContext::default(),
+        )
+        .unwrap()
+        .is_some());
     }
 
     #[test]
@@ -274,6 +277,7 @@ mod tests {
                 access: MemberAccess::Public,
                 function_name: "subsasgn_impl".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         runmat_runtime::class_registry::register_class(
@@ -296,15 +300,13 @@ mod tests {
         );
 
         let child = Value::Object(runmat_value::ObjectInstance::new(child_name));
-        assert!(matches!(
-            runmat_runtime::object::protocol::resolve_object_protocol(
-                &child,
-                runmat_runtime::object::protocol::ObjectProtocol::Subsasgn,
-                &runmat_runtime::object::protocol::ObjectAccessContext::default(),
-            )
-            .unwrap(),
-            runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-        ));
+        assert!(runmat_runtime::object::protocol::resolve_object_protocol(
+            &child,
+            runmat_runtime::object::protocol::ObjectProtocol::Subsasgn,
+            &runmat_runtime::object::protocol::ObjectAccessContext::default(),
+        )
+        .unwrap()
+        .is_some());
     }
 
     #[test]

@@ -38,8 +38,10 @@ fn effects() -> Vec<&'static str> {
 fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("fallback");
-        ValueSequence::single(Value::Num(17.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        let sequence = ValueSequence::single(Value::Num(17.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -67,15 +69,17 @@ fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("override");
-        ValueSequence::single(Value::Num(29.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        let sequence = ValueSequence::single(Value::Num(29.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
 fn sequence_override(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     let requested_outputs = invocation.requested_outputs;
     Box::pin(async move {
-        match requested_outputs {
+        let sequence = match requested_outputs {
             None => ValueSequence::single(Value::Num(7.0))
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
             Some(0) => Ok(ValueSequence::empty()),
@@ -85,7 +89,9 @@ fn sequence_override(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
                 (0..count).map(|index| Value::Num(index as f64)).collect(),
             )
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
-        }
+        }?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -105,8 +111,10 @@ fn observe_invocation(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
                 .borrow_mut()
                 .push((context.local_identity(), outputs))
         });
-        ValueSequence::single(Value::Num(1.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        let sequence = ValueSequence::single(Value::Num(1.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+        runmat_runtime::execution::RootedValueSequence::new(sequence)
+            .map_err(|error| error.into_runtime_error())
     })
 }
 
@@ -243,8 +251,10 @@ fn requested_gather_adapts_only_the_selected_implementation() {
                 )
             } else {
                 record("host-effect");
-                ValueSequence::single(Value::Num(31.0))
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                let sequence = ValueSequence::single(Value::Num(31.0))
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+                runmat_runtime::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())
             }
         })
     }

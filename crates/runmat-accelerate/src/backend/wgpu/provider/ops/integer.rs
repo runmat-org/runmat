@@ -8,6 +8,13 @@ use runmat_accelerate_api::{
 mod binary_frame;
 use binary_frame::{IntegerBinaryFrame, IntegerBinaryOperation};
 
+pub(super) fn integer_division_feasibility(
+    provider: &WgpuProvider,
+    query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+) -> Option<runmat_accelerate_api::ProviderFeasibility> {
+    binary_frame::integer_division_feasibility(provider, query)
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct IntegerBinaryParams {

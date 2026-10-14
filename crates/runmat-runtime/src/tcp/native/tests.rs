@@ -3,6 +3,8 @@ use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpConnect};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+mod profiling;
+
 struct LockCheckingWaker {
     registry: std::sync::Arc<std::sync::Mutex<Registry>>,
     unlocked: AtomicBool,
@@ -43,7 +45,7 @@ fn unpolled_bind_does_not_touch_network() {
     let port = initial.local_addr().expect("port").port();
     drop(initial);
     let pending = service.bind(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port,
@@ -61,7 +63,7 @@ fn unpolled_bind_does_not_touch_network() {
 fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
     let (_driver, service) = service();
     let server = futures::executor::block_on(service.bind(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -71,7 +73,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
     ))
     .expect("bind");
     let client = futures::executor::block_on(service.connect(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpConnect {
             host: "127.0.0.1".into(),
             port: server.local_addr.port(),
@@ -82,7 +84,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
     ))
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         server.authority.clone(),
         Some(Duration::from_secs(2)),
     ))
@@ -96,7 +98,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
         accepted.authority.lifetime,
     );
     let forged = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         fake,
         RuntimeTcpReadMode::Count(3),
     ));
@@ -106,7 +108,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
 
     assert_eq!(
         futures::executor::block_on(service.write(
-            RuntimeTcpIssuer::Process,
+            RuntimeTcpInvocation::from_context(None),
             client.authority.clone(),
             vec![1, 2, 3],
         ))
@@ -114,21 +116,22 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
         3
     );
     let abandoned = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         accepted.authority.clone(),
         RuntimeTcpReadMode::Count(3),
     ))
     .expect("first read");
     assert_eq!(abandoned.bytes(), &[1, 2, 3]);
     drop(abandoned);
-    let status = futures::executor::block_on(
-        service.describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone()),
-    )
+    let status = futures::executor::block_on(service.describe_client(
+        RuntimeTcpInvocation::from_context(None),
+        accepted.authority.clone(),
+    ))
     .expect("live status");
     assert!(status.connected);
     assert_eq!(status.bytes_available, 3);
     let retried = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         accepted.authority.clone(),
         RuntimeTcpReadMode::Count(3),
     ))
@@ -140,7 +143,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
     )
     .expect("close server"));
     let child = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         accepted.authority,
         RuntimeTcpReadMode::Available,
     ));
@@ -151,7 +154,7 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
 fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     let (driver, service) = service();
     let server = futures::executor::block_on(service.bind(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -161,7 +164,7 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     ))
     .expect("bind");
     let client = futures::executor::block_on(service.connect(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpConnect {
             host: "127.0.0.1".into(),
             port: server.local_addr.port(),
@@ -172,14 +175,14 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     ))
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         server.authority.clone(),
         Some(Duration::from_secs(2)),
     ))
     .expect("accept");
 
     let empty = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         accepted.authority.clone(),
         RuntimeTcpReadMode::Available,
     ))
@@ -189,7 +192,7 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     let payload = vec![0x5a; 8192];
     assert_eq!(
         futures::executor::block_on(service.write(
-            RuntimeTcpIssuer::Process,
+            RuntimeTcpInvocation::from_context(None),
             client.authority.clone(),
             payload.clone(),
         ))
@@ -200,7 +203,10 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let status = service
-                    .describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone())
+                    .describe_client(
+                        RuntimeTcpInvocation::from_context(None),
+                        accepted.authority.clone(),
+                    )
                     .await
                     .expect("status");
                 if status.bytes_available == payload.len() {
@@ -213,13 +219,14 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
         .expect("socket bytes observable")
     });
     assert!(observed.connected);
-    let unchanged = futures::executor::block_on(
-        service.describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone()),
-    )
+    let unchanged = futures::executor::block_on(service.describe_client(
+        RuntimeTcpInvocation::from_context(None),
+        accepted.authority.clone(),
+    ))
     .expect("repeat status");
     assert_eq!(unchanged.bytes_available, payload.len());
     let read = futures::executor::block_on(service.read(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         accepted.authority,
         RuntimeTcpReadMode::Available,
     ))
@@ -231,7 +238,7 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
 fn status_observes_peer_eof_without_consuming_socket_bytes() {
     let (driver, service) = service();
     let server = futures::executor::block_on(service.bind(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -241,7 +248,7 @@ fn status_observes_peer_eof_without_consuming_socket_bytes() {
     ))
     .expect("bind");
     let client = futures::executor::block_on(service.connect(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpConnect {
             host: "127.0.0.1".into(),
             port: server.local_addr.port(),
@@ -252,7 +259,7 @@ fn status_observes_peer_eof_without_consuming_socket_bytes() {
     ))
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
-        RuntimeTcpIssuer::Process,
+        RuntimeTcpInvocation::from_context(None),
         server.authority.clone(),
         None,
     ))
@@ -265,7 +272,10 @@ fn status_observes_peer_eof_without_consuming_socket_bytes() {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let status = service
-                    .describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone())
+                    .describe_client(
+                        RuntimeTcpInvocation::from_context(None),
+                        accepted.authority.clone(),
+                    )
                     .await
                     .expect("status");
                 if !status.connected {
@@ -287,7 +297,7 @@ fn closing_a_server_wakes_pending_accept_without_registry_lock() {
     let (_driver, service) = service();
     let issuer = RuntimeTcpIssuer::Process;
     let server = futures::executor::block_on(service.bind(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -320,7 +330,7 @@ fn authentic_repeated_close_is_zero_and_server_scope_closes_accepted_children() 
     let (_driver, service) = service();
     let issuer = RuntimeTcpIssuer::Process;
     let server = futures::executor::block_on(service.bind(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -330,7 +340,7 @@ fn authentic_repeated_close_is_zero_and_server_scope_closes_accepted_children() 
     ))
     .expect("bind");
     let client = futures::executor::block_on(service.connect(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpConnect {
             host: "127.0.0.1".into(),
             port: server.local_addr.port(),
@@ -341,7 +351,7 @@ fn authentic_repeated_close_is_zero_and_server_scope_closes_accepted_children() 
     ))
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         server.authority.clone(),
         Some(Duration::from_secs(2)),
     ))
@@ -414,7 +424,7 @@ fn dropping_last_server_value_closes_its_accepted_child_without_losing_close_ide
     let (_driver, service) = service();
     let issuer = RuntimeTcpIssuer::Process;
     let server = futures::executor::block_on(service.bind(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpBind {
             address: "127.0.0.1".into(),
             port: 0,
@@ -424,7 +434,7 @@ fn dropping_last_server_value_closes_its_accepted_child_without_losing_close_ide
     ))
     .expect("bind");
     let client = futures::executor::block_on(service.connect(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         RuntimeTcpConnect {
             host: "127.0.0.1".into(),
             port: server.local_addr.port(),
@@ -435,7 +445,7 @@ fn dropping_last_server_value_closes_its_accepted_child_without_losing_close_ide
     ))
     .expect("connect");
     let child = futures::executor::block_on(service.accept(
-        issuer.clone(),
+        RuntimeTcpInvocation::from_context(None),
         server.authority.clone(),
         Some(Duration::from_secs(2)),
     ))
@@ -474,7 +484,6 @@ fn ending_one_session_releases_its_retained_socket_without_closing_sibling_sessi
     service
         .register_session_cleanup(&runtime_b)
         .expect("register independent session");
-    let issuer_a = RuntimeTcpIssuer::from_context(Some(&runtime_a));
     let issuer_b = RuntimeTcpIssuer::from_context(Some(&runtime_b));
     let bind = || RuntimeTcpBind {
         address: "127.0.0.1".into(),
@@ -482,10 +491,14 @@ fn ending_one_session_releases_its_retained_socket_without_closing_sibling_sessi
         io_timeout: None,
         byte_order: RuntimeTcpByteOrder::Little,
     };
-    let server_a =
-        futures::executor::block_on(service.bind(issuer_a, bind())).expect("first session server");
-    let server_b = futures::executor::block_on(service.bind(issuer_b.clone(), bind()))
-        .expect("sibling session server");
+    let server_a = futures::executor::block_on(
+        service.bind(RuntimeTcpInvocation::from_context(Some(&runtime_a)), bind()),
+    )
+    .expect("first session server");
+    let server_b = futures::executor::block_on(
+        service.bind(RuntimeTcpInvocation::from_context(Some(&runtime_b)), bind()),
+    )
+    .expect("sibling session server");
     assert_eq!(registry::active_count(&service.registry), 2);
     drop(runtime_a);
     assert_eq!(registry::active_count(&service.registry), 1);

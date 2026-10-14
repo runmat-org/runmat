@@ -11,6 +11,7 @@ use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderOperationReceipt,
     ProviderOperationRecorder,
 };
+use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
 use runmat_execution::{
     cancellation::CancellationToken, PlacementFeedback, PlacementSignature,
     SelectedExecutionCandidate,
@@ -40,6 +41,7 @@ pub(crate) struct HostPresentationReceipt {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
     receipt: ProviderOperationReceipt,
+    command_contribution: Option<CommandProviderContribution>,
     upload_publication: UploadPublication,
 }
 
@@ -49,10 +51,14 @@ impl HostPresentationReceipt {
         selected: RuntimeWholeWorkSelection,
         receipt: ProviderOperationReceipt,
     ) -> Self {
+        let command_contribution = runtime
+            .command_profiling()
+            .and_then(|command| command.begin_provider_operation());
         Self {
             runtime,
             selected,
             receipt,
+            command_contribution,
             upload_publication: UploadPublication::NotApplicable,
         }
     }
@@ -144,6 +150,7 @@ impl HostPresentationReceipt {
         }
         let mut deferred = DeferredPresentationFeedback {
             receipt: self.receipt,
+            command_contribution: self.command_contribution.take(),
             signature: self.selected.decision.signature.clone(),
             selected: self.selected.decision.selected.clone(),
             // Exploration remains reserved until completion evidence or a
@@ -167,6 +174,7 @@ impl HostPresentationReceipt {
 
 struct DeferredPresentationFeedback {
     receipt: ProviderOperationReceipt,
+    command_contribution: Option<CommandProviderContribution>,
     signature: PlacementSignature,
     selected: SelectedExecutionCandidate,
     _probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
@@ -186,6 +194,9 @@ impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {
             .as_ref()
             .is_some_and(|permit| !permit.is_current())
         {
+            if let Some(contribution) = self.command_contribution.take() {
+                contribution.complete(ProviderObservationTerminal::Missing);
+            }
             self.terminal_without_feedback = true;
             return None;
         }
@@ -193,6 +204,23 @@ impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {
             self.receipt.fail(ProviderObservationFailure::Cancelled);
         }
         let observation = self.receipt.take_completed()?;
+        if let Some(contribution) = self.command_contribution.take() {
+            let terminal = match observation.status {
+                ProviderObservationStatus::Completed { .. } => {
+                    ProviderObservationTerminal::Completed {
+                        gpu_execution: observation.verified_wgpu_compute_elapsed,
+                        kernel_count: observation.verified_wgpu_dispatches,
+                    }
+                }
+                ProviderObservationStatus::Failed(ProviderObservationFailure::ProviderFailed) => {
+                    ProviderObservationTerminal::Failed
+                }
+                ProviderObservationStatus::Failed(_) | ProviderObservationStatus::Pending => {
+                    ProviderObservationTerminal::Missing
+                }
+            };
+            contribution.complete(terminal);
+        }
         let (elapsed, succeeded) = match observation.status {
             ProviderObservationStatus::Completed { total_elapsed, .. } => {
                 (duration_ns_saturating(total_elapsed), true)

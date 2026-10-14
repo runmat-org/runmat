@@ -17,12 +17,32 @@ pub(super) fn validate_all(
 ) -> Result<(), ContractError> {
     drain(ValuePayloadValidationCursor::new(values, limits))
 }
+pub(super) fn validate_graph_leaves<'a>(
+    leaves: &[(&'a ValuePayload, u16)],
+    limits: ValueLimits,
+    sources: Option<&'a crate::ExecutableSourceMapV2>,
+) -> Result<(), ContractError> {
+    drain(ValuePayloadValidationCursor::for_graph_leaves(
+        leaves, limits, sources,
+    ))
+}
 pub(super) fn validate_for_program_sources<'a>(
     value: &'a ValuePayload,
     limits: ValueLimits,
     sources: Option<&'a crate::ExecutableSourceMapV2>,
 ) -> Result<(), ContractError> {
     drain(ValuePayloadValidationCursor::for_program_sources(
+        std::slice::from_ref(value),
+        limits,
+        sources,
+    ))
+}
+pub(super) fn validate_for_graph_sources<'a>(
+    value: &'a ValuePayload,
+    limits: ValueLimits,
+    sources: Option<&'a crate::ExecutableSourceMapV2>,
+) -> Result<(), ContractError> {
+    drain(ValuePayloadValidationCursor::for_graph_sources(
         std::slice::from_ref(value),
         limits,
         sources,

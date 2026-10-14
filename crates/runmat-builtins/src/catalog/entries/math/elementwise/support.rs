@@ -36,6 +36,7 @@ pub(super) const fn unary_numeric_catalog_entry(
     spec: UnaryNumericCatalogSpec,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: spec.provenance,
         identity: spec.identity,
         category: "math/elementwise",

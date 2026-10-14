@@ -24,9 +24,9 @@ impl RuntimeAccelerationService for RecordingService {
         assert_eq!(request.admission().input_count, 4);
         assert_eq!(request.operands().len(), 1);
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -39,7 +39,6 @@ fn variadic_controls_are_parsed_once_and_only_data_reaches_service() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(calls.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
     let data = || Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap());
     let empty = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
     for config in [
@@ -47,16 +46,18 @@ fn variadic_controls_are_parsed_once_and_only_data_reaches_service() {
         &super::super::super::any::CONFIG,
     ] {
         let result = block_on(super::super::execute(
+            Some(&context),
             config,
             data(),
             vec![empty(), Value::Num(2.0), empty()],
         ))
         .unwrap();
-        let Value::LogicalArray(array) = result else {
+        let Value::LogicalArray(array) = result.value() else {
             panic!("logical array")
         };
         assert_eq!(array.shape, vec![2, 1]);
         assert!(block_on(super::super::execute(
+            Some(&context),
             config,
             data(),
             vec![empty(), Value::Num(0.0), empty()]
@@ -76,7 +77,6 @@ fn exact_any_route_skips_preparation_for_default_and_explicit_omit_nan() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(calls.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let config = &super::super::super::any::CONFIG;
     for options in [vec![], vec![Value::String("omitnan".into())]] {
@@ -93,12 +93,13 @@ fn exact_any_route_skips_preparation_for_default_and_explicit_omit_nan() {
             ),
         ] {
             let result = block_on(super::super::execute(
+                Some(&context),
                 config,
                 Value::Tensor(tensor),
                 options.clone(),
             ))
             .unwrap();
-            assert!(matches!(result, Value::Bool(value) if value == expected));
+            assert!(matches!(result.value(), Value::Bool(value) if *value == expected));
         }
     }
     assert_eq!(calls.get(), 0);
@@ -112,15 +113,36 @@ fn include_nan_any_remains_provider_eligible_after_option_admission() {
             RuntimeServicePorts::default()
                 .with_acceleration(Rc::new(RecordingService(calls.clone()))),
         );
-    let _context = RuntimeContextGuard::enter(context);
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let empty = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
     let result = block_on(super::super::execute(
+        Some(&context),
         &super::super::super::any::CONFIG,
         Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
         vec![empty(), Value::String("includenan".into()), empty()],
     ))
     .unwrap();
-    assert!(matches!(result, Value::Bool(true)));
+    assert!(matches!(result.value(), Value::Bool(true)));
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn absent_explicit_context_is_passthrough_even_with_ambient_service() {
+    let calls = Rc::new(Cell::new(0));
+    let ambient = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_acceleration(Rc::new(RecordingService(calls.clone()))),
+        );
+    let _ambient = RuntimeContextGuard::enter(ambient);
+    let value = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+    let result = block_on(super::super::execute(
+        None,
+        &super::super::super::all::CONFIG,
+        value,
+        Vec::new(),
+    ))
+    .expect("passthrough reduction");
+    assert!(matches!(result.value(), Value::Bool(false)));
+    assert_eq!(calls.get(), 0);
 }

@@ -93,10 +93,14 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
     let foreign_entry = foreign.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _, _| {
-        observed.set(observed.get() + 1);
-        Box::pin(async { Ok(ValueSequence::empty()) })
-    }));
+    let invoker =
+        install_local_bound_function_invoker(Rc::new(move |_, _, _, _, _lexical_environment| {
+            observed.set(observed.get() + 1);
+            Box::pin(async {
+                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
+            })
+        }));
     let result = futures::executor::block_on(try_call_bound_function(copied.clone(), &[], 0))
         .expect("bound route is installed");
     assert!(
@@ -207,10 +211,10 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
         Rc::new(|_| None),
         Rc::new(|_| None),
     ))));
-    let Value::BoundFunctionHandle { authority, .. } = bound_function_handle("reused".into(), 9)
-    else {
+    let Value::BoundFunctionHandle(handle) = bound_function_handle("reused".into(), 9) else {
         panic!("bound handle");
     };
+    let authority = handle.into_data().authority;
     assert!(authority.admits_local(&runtime.session_lease()));
     assert!(authority
         .local_lease(9)
@@ -226,10 +230,14 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
     let _next_entry = next.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let _invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _, _| {
-        observed.set(observed.get() + 1);
-        Box::pin(async { Ok(ValueSequence::empty()) })
-    }));
+    let _invoker =
+        install_local_bound_function_invoker(Rc::new(move |_, _, _, _, _lexical_environment| {
+            observed.set(observed.get() + 1);
+            Box::pin(async {
+                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
+            })
+        }));
     let result = futures::executor::block_on(try_call_bound_function(
         runmat_value::BoundFunctionBinding {
             function: 9,
@@ -253,7 +261,13 @@ fn legacy_entry_context_inherits_exact_bound_invoker() {
         |_,
          _binding: runmat_value::BoundFunctionBinding,
          _args: crate::execution::RootedValues,
-         _outputs: usize| { Box::pin(async { Ok(runmat_value::ValueSequence::empty()) }) },
+         _outputs: usize,
+         _lexical_environment: Option<runmat_value::LexicalEnvironment>| {
+            Box::pin(async {
+                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                    .map_err(|error| error.into_runtime_error())
+            })
+        },
     );
     let _guard = install_local_bound_function_invoker(exact);
     let context = crate::context::RuntimeContext::new(Rc::new(
@@ -287,12 +301,13 @@ fn selected_bound_future_roots_arguments_until_drop() {
         let observed = Rc::clone(&reached);
         let entry = runtime.enter();
         let _invoker = install_local_bound_function_invoker(Rc::new(
-            move |_, _binding, arguments, _outputs| {
+            move |_, _binding, arguments, _outputs, _lexical_environment| {
                 observed.set(true);
                 Box::pin(async move {
                     let _arguments = arguments;
                     std::future::pending::<()>().await;
-                    Ok(ValueSequence::empty())
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
                 })
             },
         ));

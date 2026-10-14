@@ -1,5 +1,6 @@
 use crate::interpreter::errors::mex;
 use runmat_runtime::builtins::common::tensor::is_scalar_tensor;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, SymbolicArray, SymbolicExpr, Tensor,
@@ -202,7 +203,7 @@ pub async fn create_matrix_dynamic<F, Fut>(
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Vec<Vec<Value>>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let mut row_lengths = Vec::new();
     for _ in 0..num_rows {
@@ -227,8 +228,10 @@ where
         rows_data.push(row_values);
     }
     rows_data.reverse();
-    let result = create_from_values(rows_data).await?;
-    stack.push(result);
+    let _rows_roots = crate::call::root_values(rows_data.iter().flatten())?;
+    create_from_values(rows_data)
+        .await?
+        .with_owned(|result| stack.push(result));
     Ok(())
 }
 
@@ -239,7 +242,7 @@ pub async fn create_range<F, Fut>(
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     if has_step {
         let end = stack
@@ -251,7 +254,11 @@ where
         let start = stack
             .pop()
             .ok_or(mex("StackUnderflow", "stack underflow"))?;
-        stack.push(call_colon(vec![start, step, end]).await?);
+        let arguments = vec![start, step, end];
+        let _roots = crate::call::root_values(&arguments)?;
+        call_colon(arguments)
+            .await?
+            .with_owned(|value| stack.push(value));
     } else {
         let end = stack
             .pop()
@@ -259,7 +266,11 @@ where
         let start = stack
             .pop()
             .ok_or(mex("StackUnderflow", "stack underflow"))?;
-        stack.push(call_colon(vec![start, end]).await?);
+        let arguments = vec![start, end];
+        let _roots = crate::call::root_values(&arguments)?;
+        call_colon(arguments)
+            .await?
+            .with_owned(|value| stack.push(value));
     }
     Ok(())
 }

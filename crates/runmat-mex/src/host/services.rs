@@ -32,6 +32,22 @@ pub trait MexCancellationScope {}
 
 impl MexCancellationScope for () {}
 
+/// Owns callback outputs until an exact MEX sink publishes them. The producer
+/// must keep any managed targets reachable while `publish` invokes the sink;
+/// returning an unowned `Vec<Value>` would permit collection before conversion.
+pub trait MexCallOutput {
+    fn publish(
+        self: Box<Self>,
+        sink: &mut dyn FnMut(Value) -> Result<(), MexDiagnostic>,
+    ) -> Result<(), MexDiagnostic>;
+}
+
+impl std::fmt::Debug for dyn MexCallOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MexCallOutput(..)")
+    }
+}
+
 /// Synchronous host operations available while a C gateway is active.
 ///
 /// Adapters must route these methods back into the same session and preserve
@@ -53,18 +69,26 @@ pub trait MexHostServices {
         function: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic>;
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic>;
     fn call_captured(
         &self,
         function: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> MexEngineCompletion<Vec<Value>> {
+    ) -> MexEngineCompletion<Box<dyn MexCallOutput>> {
         MexEngineCompletion::from_result(self.call(function, arguments, requested_outputs))
     }
-    fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic>;
+    fn get_variable(
+        &self,
+        workspace: &str,
+        name: &str,
+    ) -> Result<Option<Box<dyn MexCallOutput>>, MexDiagnostic>;
     fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic>;
-    fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {
+    fn get_object_property(
+        &self,
+        object: Value,
+        name: &str,
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         let _ = (object, name);
         Err(unavailable("C++ MEX getProperty"))
     }
@@ -73,7 +97,7 @@ pub trait MexHostServices {
         object: Value,
         index: usize,
         name: &str,
-    ) -> Result<Value, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         if index == 0 {
             self.get_object_property(object, name)
         } else {
@@ -85,7 +109,7 @@ pub trait MexHostServices {
         object: Value,
         name: &str,
         value: Value,
-    ) -> Result<Value, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         let _ = (object, name, value);
         Err(unavailable("C++ MEX setProperty"))
     }
@@ -95,7 +119,7 @@ pub trait MexHostServices {
         index: usize,
         name: &str,
         value: Value,
-    ) -> Result<Value, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         if index == 0 {
             self.set_object_property(object, name, value)
         } else {
@@ -117,11 +141,15 @@ impl MexHostServices for UnavailableMexHostServices {
         _function: &str,
         _arguments: Vec<Value>,
         _requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         Err(unavailable("mexCallMATLAB"))
     }
 
-    fn get_variable(&self, _workspace: &str, _name: &str) -> Result<Option<Value>, MexDiagnostic> {
+    fn get_variable(
+        &self,
+        _workspace: &str,
+        _name: &str,
+    ) -> Result<Option<Box<dyn MexCallOutput>>, MexDiagnostic> {
         Err(unavailable("mexGetVariable"))
     }
 

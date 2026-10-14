@@ -7,7 +7,7 @@ use super::super::{
     DynamicFunctionDependency,
 };
 
-pub(super) fn attach_dynamic_function_origins(
+pub(in crate::session) fn attach_dynamic_function_origins(
     bytecode: &mut runmat_vm::Bytecode,
     revision: &runmat_execution::ProgramRevision,
     source_map: &crate::ExecutableSourceMap,
@@ -37,7 +37,7 @@ pub(super) fn attach_dynamic_function_origins(
     Ok(())
 }
 
-pub(super) fn dynamic_executable_revision(
+pub(in crate::session) fn dynamic_executable_revision(
     source: &crate::ExecutableSource,
     source_map: &crate::ExecutableSourceMap,
     compatibility: runmat_parser::CompatMode,
@@ -76,6 +76,52 @@ pub(super) fn dynamic_executable_revision(
         program_revision,
         source_digest: source_digest.to_string(),
     })
+}
+
+/// A closure compiled after preceding runtime effects has a distinct
+/// executable revision for its exact body and observed static targets. The
+/// source text/revision remains unchanged; this domain contribution records
+/// the late selected product basis without manufacturing another source.
+pub(in crate::session) fn dynamic_pending_closure_revision(
+    mut base: crate::ExecutableRevision,
+    local_function: runmat_hir::FunctionId,
+    body_fingerprint: &str,
+    selected_basis: &[(runmat_hir::FunctionId, runmat_execution::Digest)],
+) -> Result<crate::ExecutableRevision, RuntimeError> {
+    let mut bytes = Vec::new();
+    let frame = |bytes: &mut Vec<u8>, value: &[u8]| {
+        bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(value);
+    };
+    frame(&mut bytes, b"runmat-eval-late-closure-v1");
+    frame(&mut bytes, &local_function.0.to_be_bytes());
+    frame(&mut bytes, body_fingerprint.as_bytes());
+    let mut selected_basis = selected_basis.to_vec();
+    selected_basis.sort_by_key(|(alias, _)| alias.0);
+    for (alias, product) in selected_basis {
+        frame(&mut bytes, &alias.0.to_be_bytes());
+        frame(&mut bytes, product.to_string().as_bytes());
+    }
+    let contribution = runmat_execution::DomainContribution::new(
+        "eval-late-closure-v1",
+        runmat_execution::Digest::sha256(&bytes),
+    )
+    .map_err(|error| {
+        build_runtime_error(error.to_string())
+            .with_identifier("RunMat:ExecutableRevision")
+            .with_source(error)
+            .build()
+    })?;
+    base.program_revision = base
+        .program_revision
+        .with_domain_contribution(contribution)
+        .map_err(|error| {
+            build_runtime_error(error.to_string())
+                .with_identifier("RunMat:ExecutableRevision")
+                .with_source(error)
+                .build()
+        })?;
+    Ok(base)
 }
 
 pub(super) fn dynamic_product_dependencies(

@@ -50,6 +50,7 @@ pub(super) fn ensure_containers_map_class_registered() {
                     access: MemberAccess::Public,
                     function_name: function_name.into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             );
         }

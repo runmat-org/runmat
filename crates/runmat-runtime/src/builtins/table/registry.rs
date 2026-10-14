@@ -73,6 +73,7 @@ fn register_tabular_class(name: runmat_types::StaticClassIdentity) {
                 access: MemberAccess::Public,
                 function_name: format!("{TABLE_CLASS}.{method_name}"),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
@@ -139,6 +140,7 @@ fn register_dictionary_class() {
                 access: MemberAccess::Public,
                 function_name: format!("{DICTIONARY_CLASS}.{method_name}"),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }

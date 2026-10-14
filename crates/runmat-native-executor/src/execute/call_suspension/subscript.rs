@@ -34,7 +34,10 @@ pub(in crate::execute) fn take_completed_subscript_path(
     }
     if matches!(
         &completed.payload,
-        CompletedPayload::PreparedReceiver { .. } | CompletedPayload::SequenceStage { .. }
+        CompletedPayload::PreparedReceiver { .. }
+            | CompletedPayload::SequenceRead(..)
+            | CompletedPayload::SequenceStage { .. }
+            | CompletedPayload::Terminator(..)
     ) {
         return Ok(None);
     }

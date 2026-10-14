@@ -5,13 +5,14 @@ use runmat_types::{ClassIdentity, MemberAccess};
 use runmat_value::{Closure, Value};
 
 pub fn closure_value(function_name: String, captures: Vec<Value>) -> Value {
-    Value::Closure(Closure {
+    Value::Closure(Closure::new(
         function_name,
-        binding: None,
-        source_role: runmat_types::FunctionSourceRole::Unknown,
-        source_file: None,
+        None,
+        runmat_types::FunctionSourceRole::Unknown,
+        None,
         captures,
-    })
+        None,
+    ))
 }
 
 pub fn semantic_closure_value(
@@ -19,16 +20,18 @@ pub fn semantic_closure_value(
     display_name: String,
     captures: Vec<Value>,
     source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Value {
-    Value::Closure(Closure {
-        function_name: display_name,
-        binding: Some(crate::user_functions::bound_function_binding_for(
+    Value::Closure(Closure::new(
+        display_name,
+        Some(crate::user_functions::bound_function_binding_for(
             function.0,
         )),
         source_role,
-        source_file: crate::user_functions::source_file_for(function.0),
+        crate::user_functions::source_file_for(function.0),
         captures,
-    })
+        lexical_environment,
+    ))
 }
 
 pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
@@ -101,13 +104,14 @@ pub fn load_method_closure(
                 external_qualified_display_name(object.class_name.display_name(), &name);
             let bound_function =
                 crate::user_functions::resolve_semantic_function_by_name(&function_name);
-            Ok(Value::Closure(Closure {
-                source_role: runmat_types::FunctionSourceRole::Method,
-                binding: bound_function.map(crate::user_functions::bound_function_binding_for),
-                source_file: bound_function.and_then(crate::user_functions::source_file_for),
+            Ok(Value::Closure(Closure::new(
                 function_name,
-                captures: vec![Value::Object(object)],
-            }))
+                bound_function.map(crate::user_functions::bound_function_binding_for),
+                runmat_types::FunctionSourceRole::Method,
+                bound_function.and_then(crate::user_functions::source_file_for),
+                vec![Value::Object(object)],
+                None,
+            )))
         }
         Value::ClassRef(class_name) => {
             let method_name = runmat_types::MethodName::from(name.as_str());
@@ -128,25 +132,27 @@ pub fn load_method_closure(
                 }
                 let bound_function =
                     resolve_method_semantic_function_id(&owner, &name, &method.function_name);
-                return Ok(Value::Closure(Closure {
-                    source_role: runmat_types::FunctionSourceRole::Method,
-                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
-                    source_file: bound_function.and_then(crate::user_functions::source_file_for),
-                    function_name: method.function_name,
-                    captures: vec![],
-                }));
+                return Ok(Value::Closure(Closure::new(
+                    method.function_name,
+                    bound_function.map(crate::user_functions::bound_function_binding_for),
+                    runmat_types::FunctionSourceRole::Method,
+                    bound_function.and_then(crate::user_functions::source_file_for),
+                    vec![],
+                    None,
+                )));
             }
             let qualified_name = external_qualified_display_name(class_name.display_name(), &name);
             if runmat_builtins::builtin_name_is_known(&qualified_name) {
                 let bound_function =
                     crate::user_functions::resolve_semantic_function_by_name(&qualified_name);
-                Ok(Value::Closure(Closure {
-                    source_role: runmat_types::FunctionSourceRole::Method,
-                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
-                    source_file: bound_function.and_then(crate::user_functions::source_file_for),
-                    function_name: qualified_name,
-                    captures: vec![],
-                }))
+                Ok(Value::Closure(Closure::new(
+                    qualified_name,
+                    bound_function.map(crate::user_functions::bound_function_binding_for),
+                    runmat_types::FunctionSourceRole::Method,
+                    bound_function.and_then(crate::user_functions::source_file_for),
+                    vec![],
+                    None,
+                )))
             } else {
                 Err(semantic_error(
                     "UnknownStaticMethod",

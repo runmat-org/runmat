@@ -21,6 +21,7 @@ pub use options::{ExportOnnxOptionKey, ExportOnnxOptionValueRole};
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&EXPORT_ONNX_CATALOG_ENTRY];
 
 pub const EXPORT_ONNX_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "exportONNXNetwork",

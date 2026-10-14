@@ -53,6 +53,7 @@ fn exact_cache_readiness_is_distinct_from_uncertain_compile_prior_and_fence_serv
         requested_peak_buffer_bytes: 16,
         clear_commands: 2,
         map_callbacks: 2,
+        wgpu_compute_query: None,
     });
     let measured_intent = wgpu_cost_estimate(&provider, &query).cost;
     assert_eq!(measured_intent.components.compile_or_prepare_ns, 200_000);
@@ -77,6 +78,40 @@ fn exact_cache_readiness_is_distinct_from_uncertain_compile_prior_and_fence_serv
         baseline.scratch_bytes.map(|bytes| bytes + 16)
     );
     assert_eq!(measured_intent.source, EstimateSource::StaticPrior);
+    query
+        .context
+        .observation
+        .as_mut()
+        .unwrap()
+        .wgpu_compute_query = Some(
+        runmat_accelerate_api::observation::WgpuEncoderQueryProspective {
+            max_compute_encoders: 2,
+            max_total_encoders: 2,
+            max_query_sets: 2,
+            max_timestamp_slots: 32,
+            requested_peak_buffer_bytes: 512,
+            max_map_callbacks: 2,
+        },
+    );
+    let with_optional_queries = wgpu_cost_estimate(&provider, &query).cost;
+    assert_eq!(
+        with_optional_queries.components.allocation_ns,
+        measured_intent.components.allocation_ns + 30_000
+    );
+    assert_eq!(
+        with_optional_queries.components.synchronization_ns,
+        measured_intent.components.synchronization_ns + 10_000
+    );
+    assert_eq!(
+        with_optional_queries.scratch_bytes,
+        measured_intent.scratch_bytes.map(|bytes| bytes + 512)
+    );
+    query
+        .context
+        .observation
+        .as_mut()
+        .unwrap()
+        .wgpu_compute_query = None;
     query.context.preparation.as_mut().unwrap().state = Some(CandidatePreparationState::Warm);
     assert_eq!(
         wgpu_cost_estimate(&provider, &query)

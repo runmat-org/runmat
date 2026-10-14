@@ -67,7 +67,7 @@ fn row_group_vector_preserves_trailing_dimensions() {
         vec![tensor(vec![1.0, 2.0], vec![1, 2])],
     )
     .unwrap();
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected tensor output");
     };
     assert_eq!(output.shape(), vec![2, 1, 2]);

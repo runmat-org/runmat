@@ -188,7 +188,8 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
             let tape = Rc::new(RefCell::new(Tape::new()));
             let _activation = TapeActivation::enter(tape);
             let traced =
-                crate::builtins::deep_learning::autodiff::tape::annotate_tree(net.clone()).unwrap();
+                crate::builtins::deep_learning::autodiff::tape::annotate_tree(net.value().clone())
+                    .unwrap();
             let Value::Object(network) = &traced else {
                 panic!("network")
             };

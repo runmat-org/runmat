@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::execution::RootedValue;
 use runmat_value::Value;
 
 use super::{AssignmentStepSpec, PreparedAssignmentStep};
@@ -71,7 +72,7 @@ pub(super) fn assign_path<'a>(
     endpoint: PreparedSequenceEndpoint,
     values: Vec<Value>,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
     Box::pin(async move {
         if steps.is_empty() {
             return match context {
@@ -85,8 +86,12 @@ pub(super) fn assign_path<'a>(
         }
         let step = steps.pop_front().expect("nonempty path checked above");
         let child = read_step(context, current.clone(), &step, caller).await?;
-        let updated = assign_path(context, child, steps, endpoint, values, caller).await?;
-        write_step(context, current, step, updated, caller).await
+        let updated = child
+            .with_owned_async(|child| assign_path(context, child, steps, endpoint, values, caller))
+            .await?;
+        updated
+            .with_owned_async(|updated| write_step(context, current, step, updated, caller))
+            .await
     })
 }
 
@@ -95,7 +100,7 @@ pub(super) async fn read_step(
     base: Value,
     step: &PreparedAssignmentStep,
     caller: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match step {
         PreparedAssignmentStep::Member(member) => {
             crate::object::resolve::load_member_with_context(
@@ -121,13 +126,15 @@ pub(super) async fn read_step(
                 Some(1),
             )
             .await?;
-            match values.as_slice() {
-                [value] => Ok(value.clone()),
+            values.with_owned_values(|mut values| match values.as_slice() {
+                [_] => {
+                    RootedValue::new(values.remove(0)).map_err(|error| error.into_runtime_error())
+                }
                 _ => Err(semantic_error(
                     "CommaSeparatedListRequiresSingleValue",
                     "a chained brace destination must select exactly one value",
                 )),
-            }
+            })
         }
     }
 }
@@ -138,7 +145,7 @@ pub(super) async fn write_step(
     step: PreparedAssignmentStep,
     rhs: Value,
     caller: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     match step {
         PreparedAssignmentStep::Member(member) => match context {
             Some(context) => {
@@ -173,12 +180,9 @@ async fn read_parentheses(
     base: Value,
     plan: &IndexPlan,
     selector_values: &[crate::object::indexing::ObjectIndexComponent],
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-    if matches!(
-        resolution,
-        crate::object::protocol::ProtocolResolution::Method(_)
-    ) {
+    if resolution.is_some() {
         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
             ObjectIndexSelector::IndexValues {
                 components: selector_values.to_vec(),
@@ -197,13 +201,19 @@ async fn read_parentheses(
             }
             None => invoke_resolved_object_index_path_method(&resolution, base, path, 1).await?,
         };
-        let mut values = sequence.resolve(
-            runmat_types::SequenceUse::RequireSingle,
-            crate::sequence::SequenceResolutionContext::default(),
-        )?;
-        return Ok(values.remove(0));
+        return sequence.try_map_owned(
+            |sequence| {
+                let mut values = sequence.resolve(
+                    runmat_types::SequenceUse::RequireSingle,
+                    crate::sequence::SequenceResolutionContext::default(),
+                )?;
+                Ok(values.remove(0))
+            },
+            |error| error.into_runtime_error(),
+        );
     }
     crate::indexing::value::read_with_plan(base, plan)
+        .and_then(|value| RootedValue::new(value).map_err(|error| error.into_runtime_error()))
 }
 
 async fn write_parentheses(
@@ -212,9 +222,9 @@ async fn write_parentheses(
     plan: &IndexPlan,
     selector_values: Vec<crate::object::indexing::ObjectIndexComponent>,
     rhs: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
-    if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
+    if let Some(method) = resolution {
         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
             ObjectIndexSelector::IndexValues {
                 components: selector_values,
@@ -242,5 +252,7 @@ async fn write_parentheses(
             }
         };
     }
-    crate::indexing::value::assign_with_plan(base, plan, rhs).await
+    crate::indexing::value::assign_with_plan(base, plan, rhs)
+        .await
+        .and_then(|value| RootedValue::new(value).map_err(|error| error.into_runtime_error()))
 }

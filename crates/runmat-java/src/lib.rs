@@ -26,7 +26,10 @@ pub use artifact::{
 pub use classpath::{ClasspathError, ClasspathLayer, ClasspathSnapshot, SessionClasspath};
 pub use exception::{JavaException, JavaStackFrame};
 #[cfg(not(target_family = "wasm"))]
-pub use invoke::{JavaCallbackInvocation, JavaInvocationError, JavaSession, JavaValue};
+pub use invoke::{
+    JavaCallbackCompletion, JavaCallbackEvent, JavaCallbackInvocation, JavaInvocationError,
+    JavaLane, JavaLaneOperation, JavaLaneSession, JavaReentryAuthority, JavaSession, JavaValue,
+};
 #[cfg(not(target_family = "wasm"))]
 pub use jvm::{discover_jvm, JavaDiscoveryRequest, JvmInstallation, JvmProcess};
 pub use jvm::{JvmConfig, JvmError, JvmVersion};

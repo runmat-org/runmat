@@ -6,6 +6,59 @@ use super::{conversion::WellKnownJavaClass, error::jni_error, JavaInvocationErro
 use crate::{ClasspathLayer, ClasspathSnapshot, SessionClasspath};
 
 impl JavaSession {
+    /// Close only this session's URLClassLoader. The process-wide JVM remains
+    /// running for unrelated sessions; a failed close retains its byte lease.
+    pub(super) fn close_classloader(
+        &self,
+        environment: &mut jni::JNIEnv<'_>,
+    ) -> Result<(), JavaInvocationError> {
+        {
+            let loader_guard = self.class_loader.borrow();
+            let Some(loader) = loader_guard.as_ref() else {
+                return Ok(());
+            };
+            environment
+                .call_method(loader.as_obj(), "close", "()V", &[])
+                .map_err(|error| jni_error(environment, error))?;
+            let thread = environment
+                .call_static_method(
+                    "java/lang/Thread",
+                    "currentThread",
+                    "()Ljava/lang/Thread;",
+                    &[],
+                )
+                .and_then(JValueOwned::l)
+                .map_err(|error| jni_error(environment, error))?;
+            let current = environment
+                .call_method(
+                    &thread,
+                    "getContextClassLoader",
+                    "()Ljava/lang/ClassLoader;",
+                    &[],
+                )
+                .and_then(JValueOwned::l)
+                .map_err(|error| jni_error(environment, error))?;
+            if environment
+                .is_same_object(&current, loader.as_obj())
+                .map_err(|error| jni_error(environment, error))?
+            {
+                // Reset only our own loader. Another selected session may
+                // have installed its distinct context loader on this thread.
+                let null_loader = JObject::null();
+                environment
+                    .call_method(
+                        thread,
+                        "setContextClassLoader",
+                        "(Ljava/lang/ClassLoader;)V",
+                        &[JValue::Object(&null_loader)],
+                    )
+                    .map_err(|error| jni_error(environment, error))?;
+            }
+        }
+        self.class_loader.borrow_mut().take();
+        Ok(())
+    }
+
     pub fn classpath(&self) -> ClasspathSnapshot {
         self.classpath.borrow().snapshot()
     }
@@ -118,8 +171,8 @@ impl JavaSession {
     ) -> Result<ClasspathSnapshot, JavaInvocationError> {
         let entries = loader_entries(&candidate);
         self.process.with_attached(|environment| {
-            let loader = build_class_loader(environment, &entries)?;
-            *self.class_loader.borrow_mut() = loader;
+            self.close_classloader(environment)?;
+            *self.class_loader.borrow_mut() = build_class_loader(environment, &entries)?;
             self.install_context_class_loader(environment)?;
             Ok::<(), JavaInvocationError>(())
         })?;

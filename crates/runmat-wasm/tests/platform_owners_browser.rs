@@ -21,6 +21,8 @@ fn caught_error_codec_and_rethrow_preserve_runtime_metadata() {
             function: "origin".into(),
             source_id: None,
             span: Some((2, 5)),
+            source_owner: None,
+            diagnostic_source: None,
         }])
         .build();
     let value = Value::MException(exception_from_error(error));

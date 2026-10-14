@@ -1,6 +1,7 @@
 //! Callback traversal across matching deep-learning parameter trees.
 
 use super::super::{deep_learning_error, model, unsupported_error};
+use crate::execution::{RootedValue, RootedValueLease, RootedValues, RootedValuesBuilder};
 use crate::BuiltinResult;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StructArray, StructValue, Value};
@@ -27,14 +28,14 @@ async fn dlupdate_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     dlupdate_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
 pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     dlupdate_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
 
@@ -42,7 +43,9 @@ async fn dlupdate_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
+    let _argument_roots =
+        RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
     let mut args = args.into_iter();
     let Some(function) = args.next() else {
         return Err(deep_learning_error(
@@ -67,13 +70,16 @@ async fn dlupdate_in_runtime(
     let requested_outputs = requested_outputs.unwrap_or(1);
     preflight::matching_trees(&trees)?;
     let outputs = dlupdate_node(runtime, &function, &trees, requested_outputs, 0).await?;
-    if requested_outputs == 0 {
-        Ok(Value::OutputList(Vec::new()))
-    } else if requested_outputs == 1 {
-        Ok(outputs.into_iter().next().unwrap())
-    } else {
-        Ok(Value::OutputList(outputs))
-    }
+    outputs.with_owned_values(|mut outputs| {
+        let result = if requested_outputs == 0 {
+            Value::OutputList(Vec::new())
+        } else if requested_outputs == 1 {
+            outputs.remove(0)
+        } else {
+            Value::OutputList(outputs)
+        };
+        RootedValue::new(result).map_err(|error| error.into_runtime_error())
+    })
 }
 
 fn is_function_handle(value: &Value) -> bool {
@@ -82,7 +88,7 @@ fn is_function_handle(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -94,7 +100,7 @@ async fn dlupdate_node(
     values: &[Value],
     requested_outputs: usize,
     depth: usize,
-) -> BuiltinResult<Vec<Value>> {
+) -> BuiltinResult<RootedValues> {
     if depth > DLUPDATE_MAX_DEPTH {
         return Err(deep_learning_error(
             "dlupdate",

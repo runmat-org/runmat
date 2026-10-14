@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod operations;
+pub(super) use operations::CopyOperationError;
 mod selection;
 
 #[derive(Clone, Copy)]

@@ -128,17 +128,17 @@ fn analytic_outputs_preserve_native_class_and_explicit_or_automatic_intent() {
                     let provider = Provider::new(mode, Upload::Good);
                     let _scope = ThreadProviderGuard::set(Some(provider));
                     let input = input(provider, element, explicit);
-                    let output = block_on(runmat_runtime::call_builtin_async(
+                    let owned_output = block_on(runmat_runtime::call_builtin_async(
                         name,
                         &[Value::GpuTensor(input.handle.clone())],
                     ))
                     .unwrap();
-                    let Value::GpuTensor(output) = output else {
+                    let Value::GpuTensor(output) = owned_output.value() else {
                         panic!("{name}: resident result required")
                     };
                     assert_eq!(output.shape(), &[4, 1]);
                     assert_eq!(output.physical().element_type(), element);
-                    assert_eq!(handle_is_explicit(&output), explicit);
+                    assert_eq!(handle_is_explicit(output), explicit);
                     assert_eq!(
                         output.physical().storage(),
                         if name == "hilbert" {
@@ -167,7 +167,7 @@ fn analytic_outputs_preserve_native_class_and_explicit_or_automatic_intent() {
                         .iter()
                         .find_map(|probe| {
                             probe
-                                .with_data(&output, |data| match data {
+                                .with_data(output, |data| match data {
                                     HostNumericDataView::F32(values) => {
                                         assert!(values.iter().all(|v| *v == 0.0))
                                     }
@@ -179,7 +179,7 @@ fn analytic_outputs_preserve_native_class_and_explicit_or_automatic_intent() {
                                 .ok()
                         })
                         .expect("actual output payload");
-                    drop(output);
+                    drop(owned_output);
                     provider.assert_retired();
                     assert_eq!(input.probe.retirements(), 0);
                 }
@@ -204,7 +204,8 @@ fn analytic_fallback_respects_typed_upload_failure_and_explicit_intent() {
                     &[Value::GpuTensor(input.handle.clone())],
                 ));
                 if matches!(upload, Upload::Unsupported) && !explicit {
-                    match result.unwrap() {
+                    let output = result.unwrap();
+                    match output.value() {
                         Value::Tensor(tensor) if name == "envelope" => {
                             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
                             assert_eq!(tensor.shape(), &[4, 1]);
@@ -252,12 +253,10 @@ fn analytic_call_cancellation_retires_provider_temporaries_not_callers() {
         assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
         let mut future = Box::pin(runmat_runtime::call_builtin_async(name, &args));
         let waker = noop_waker();
-        assert!(
-            future
-                .as_mut()
-                .poll(&mut Context::from_waker(&waker))
-                .is_pending()
-        );
+        assert!(future
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
         assert!(!provider.produced.lock().unwrap().is_empty());
         drop(future);
         provider.assert_retired();

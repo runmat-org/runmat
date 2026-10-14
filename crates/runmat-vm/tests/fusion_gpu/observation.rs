@@ -134,10 +134,10 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
             runmat_vm::interpret_resume_in_context(&bytecode, resume, None, runtime),
         )
         .expect("fused execution from host input");
-        let vars = completion.values;
+        let vars = &completion.values;
         assert_fusion_numeric_output(
             &bytecode,
-            &vars,
+            vars.as_slice(),
             &(1..=4096).map(f64::from).collect::<Vec<_>>(),
         );
         assert_provider_fusion_was_submitted();

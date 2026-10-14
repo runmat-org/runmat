@@ -14,6 +14,7 @@ runmat-accelerate = { workspace = true, features = ["cuda"] }
 runmat-accelerate-api = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-core = { workspace = true }
+runmat-config = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
@@ -39,7 +40,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
 uuid = { workspace = true }
 tempfile = "3.12"
 
@@ -59,4 +60,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 [[test]]
 name = "meshing_process_conformance"
 path = "tests/meshing_process_conformance.rs"
+harness = false
+
+[[test]]
+name = "graph_worker_roundtrip"
+path = "tests/graph_worker_roundtrip.rs"
 harness = false

@@ -3,8 +3,16 @@ use super::support::{attr, c_string, capture_error, checked};
 use crate::{PythonCall, PythonError, PythonValue};
 
 impl Interpreter {
-    pub(crate) fn invoke(&self, call: PythonCall) -> Result<Vec<PythonValue>, PythonError> {
-        self.with_gil(|this| this.invoke_with_gil(call))
+    pub(crate) fn invoke(
+        &self,
+        call: PythonCall,
+        managed_roots: &[std::path::PathBuf],
+    ) -> Result<Vec<PythonValue>, PythonError> {
+        self.with_gil(|this| {
+            let result = this.invoke_with_gil(call);
+            this.capture_owned_imports_with_gil(managed_roots);
+            result
+        })
     }
 
     pub(super) fn invoke_with_gil(

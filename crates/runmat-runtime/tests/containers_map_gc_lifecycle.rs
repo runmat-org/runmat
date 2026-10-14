@@ -1,6 +1,7 @@
 //! GC lifecycle checks run in their own test binary. Resetting the process-wide
 //! collector here cannot invalidate handles owned by parallel runtime unit tests.
 
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
@@ -26,12 +27,20 @@ fn subscript(key: &str) -> Value {
     .unwrap()
 }
 
-fn assign(map: Value, key: &str, value: Value) -> Value {
-    runmat_runtime::call_builtin("containers.Map.subsasgn", &[map, subscript(key), value]).unwrap()
+fn assign(map: &RootedValue, key: &str, value: Value) -> RootedValue {
+    runmat_runtime::call_builtin(
+        "containers.Map.subsasgn",
+        &[map.value().clone(), subscript(key), value],
+    )
+    .unwrap()
 }
 
-fn lookup(map: Value, key: &str) -> Value {
-    runmat_runtime::call_builtin("containers.Map.subsref", &[map, subscript(key)]).unwrap()
+fn lookup(map: &RootedValue, key: &str) -> RootedValue {
+    runmat_runtime::call_builtin(
+        "containers.Map.subsref",
+        &[map.value().clone(), subscript(key)],
+    )
+    .unwrap()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -40,12 +49,14 @@ fn aliases_share_map_storage_across_collection() {
     runmat_gc::gc_test_context(|| {
         let map = runmat_runtime::call_builtin("containers.Map", &[]).unwrap();
         let alias = map.clone();
-        let root = runmat_gc::gc_root(map_handle(&alias)).unwrap();
-        let map = assign(map, "answer", Value::Num(42.0));
-        assert_eq!(lookup(alias.clone(), "answer"), Value::Num(42.0));
+        let root = runmat_gc::gc_root(map_handle(alias.value())).unwrap();
+        let assigned = assign(&map, "answer", Value::Num(42.0));
+        assert_eq!(lookup(&alias, "answer").value(), &Value::Num(42.0));
+        drop(assigned);
         drop(map);
         runmat_gc::gc_collect_major().unwrap();
-        assert_eq!(lookup(alias, "answer"), Value::Num(42.0));
+        assert_eq!(lookup(&alias, "answer").value(), &Value::Num(42.0));
+        drop(alias);
         drop(root);
     });
 }
@@ -55,13 +66,14 @@ fn aliases_share_map_storage_across_collection() {
 fn self_referential_map_is_collected_after_last_root() {
     runmat_gc::gc_test_context(|| {
         let map = runmat_runtime::call_builtin("containers.Map", &[]).unwrap();
-        let target = map_handle(&map);
+        let target = map_handle(map.value());
         let root = runmat_gc::gc_root(target).unwrap();
-        let map = assign(map.clone(), "self", map);
-        let stored = lookup(map.clone(), "self");
-        assert_eq!(map_handle(&stored), target);
-        drop(stored);
+        let assigned = assign(&map, "self", map.value().clone());
         drop(map);
+        let stored = lookup(&assigned, "self");
+        assert_eq!(map_handle(stored.value()), target);
+        drop(stored);
+        drop(assigned);
         drop(root);
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_with_value(&target, |_| ()).is_err());

@@ -169,17 +169,16 @@ fn invalid_python_controls_do_not_discover_or_start_an_interpreter() {
         ),
     ];
     for (symbol, arguments) in invalid_calls {
-        let error = adapter
-            .invoke_now(
-                &context,
-                ForeignCall {
-                    adapter: PYTHON_ADAPTER_ID.into(),
-                    symbol: symbol.into(),
-                    arguments,
-                    requested_outputs: 1,
-                },
-            )
-            .expect_err("invalid control must precede interpreter discovery");
+        let error = futures::executor::block_on(adapter.invoke(
+            context.clone(),
+            ForeignCall {
+                adapter: PYTHON_ADAPTER_ID.into(),
+                symbol: symbol.into(),
+                arguments,
+                requested_outputs: 1,
+            },
+        ))
+        .expect_err("invalid control must precede interpreter discovery");
         assert_eq!(
             error.identifier(),
             Some("RunMat:Foreign:InvalidCall"),

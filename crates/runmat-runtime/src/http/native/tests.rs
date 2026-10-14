@@ -1,11 +1,18 @@
 use super::*;
+use crate::execution::RuntimeExecutionService;
+use runmat_execution::profiling::{CommandProfilingRoot, DeferredWorkCounts};
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
+
+fn runtime() -> RuntimeContext {
+    RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+}
 
 fn request(url: Url) -> HttpRequest {
     HttpRequest {
@@ -34,7 +41,7 @@ fn unpolled_and_invalid_header_requests_do_not_open_a_socket() {
     let service = NativeHttpService::new(driver.handle().clone());
     let (listener, url) = server();
     listener.set_nonblocking(true).unwrap();
-    drop(service.send(request(url.clone())));
+    drop(service.send(runtime(), request(url.clone())));
     assert!(
         service.clients.get().is_none(),
         "unpolled send has no client"
@@ -46,7 +53,8 @@ fn unpolled_and_invalid_header_requests_do_not_open_a_socket() {
 
     let mut invalid = request(url.clone());
     invalid.headers.push(("bad\nname".into(), "value".into()));
-    let error = futures::executor::block_on(service.send(invalid)).expect_err("invalid header");
+    let error =
+        futures::executor::block_on(service.send(runtime(), invalid)).expect_err("invalid header");
     assert!(matches!(error.kind, TransportErrorKind::InvalidHeader(_)));
     assert!(error
         .source()
@@ -63,8 +71,8 @@ fn unpolled_and_invalid_header_requests_do_not_open_a_socket() {
 
     let mut invalid_agent = request(url);
     invalid_agent.user_agent = "bad\nagent".into();
-    let error =
-        futures::executor::block_on(service.send(invalid_agent)).expect_err("invalid User-Agent");
+    let error = futures::executor::block_on(service.send(runtime(), invalid_agent))
+        .expect_err("invalid User-Agent");
     assert!(matches!(error.kind, TransportErrorKind::Other));
     assert!(error.source().is_some());
     assert!(
@@ -108,11 +116,22 @@ fn cloned_service_reuses_client_and_honors_request_user_agent_override() {
 
     let mut first = request(url.clone());
     first.user_agent = "RunMat first".into();
+    let command = CommandProfilingRoot::new();
     assert_eq!(
-        futures::executor::block_on(service.send(first))
-            .expect("first response")
-            .body,
+        futures::executor::block_on(
+            service.send(runtime().with_command_profiling(command.receipt()), first)
+        )
+        .expect("first response")
+        .body,
         b"ok"
+    );
+    assert_eq!(
+        command.seal().deferred_work,
+        Some(DeferredWorkCounts {
+            admitted: 1,
+            completed: 1,
+            ..DeferredWorkCounts::default()
+        })
     );
     let first_headers = received.recv().expect("first request headers");
     assert!(first_headers
@@ -126,7 +145,7 @@ fn cloned_service_reuses_client_and_honors_request_user_agent_override() {
         .headers
         .push(("User-Agent".into(), "RunMat override".into()));
     assert_eq!(
-        futures::executor::block_on(clone.send(second))
+        futures::executor::block_on(clone.send(runtime(), second))
             .expect("second response")
             .body,
         b"ok"
@@ -180,7 +199,7 @@ fn keep_alive_reuses_one_socket_and_applies_each_request_timeout() {
     let mut first = request(url.clone());
     first.user_agent = "RunMat first pooled".into();
     assert_eq!(
-        futures::executor::block_on(service.send(first))
+        futures::executor::block_on(service.send(runtime(), first))
             .expect("first keep-alive response")
             .body,
         b"ok"
@@ -195,7 +214,7 @@ fn keep_alive_reuses_one_socket_and_applies_each_request_timeout() {
     second.user_agent = "RunMat second pooled".into();
     second.timeout = Duration::from_secs(1);
     assert_eq!(
-        futures::executor::block_on(cloned.send(second))
+        futures::executor::block_on(cloned.send(runtime(), second))
             .expect("second response on the same socket")
             .body,
         b"ok"
@@ -208,7 +227,7 @@ fn keep_alive_reuses_one_socket_and_applies_each_request_timeout() {
 
     let mut third = request(url);
     third.timeout = Duration::from_millis(40);
-    let error = futures::executor::block_on(service.send(third))
+    let error = futures::executor::block_on(service.send(runtime(), third))
         .expect_err("third request must use its shorter timeout");
     assert!(matches!(error.kind, TransportErrorKind::Timeout));
     received
@@ -228,7 +247,7 @@ fn shared_client_initialization_failure_retains_typed_cause_without_network() {
     assert!(service.clients.set(Err(Arc::new(init_error))).is_ok());
     let (listener, url) = server();
     listener.set_nonblocking(true).unwrap();
-    let error = futures::executor::block_on(service.send(request(url)))
+    let error = futures::executor::block_on(service.send(runtime(), request(url)))
         .expect_err("shared client initialization failure");
     let shared = error
         .source()
@@ -271,7 +290,8 @@ fn post_preserves_auth_body_response_headers_and_status_error() {
     post.headers
         .push(("Authorization".into(), "Basic dHJ1c3RzZWNyZXQ=".into()));
     post.body = Some(b"ping".to_vec());
-    let response = futures::executor::block_on(service.send(post)).expect("POST response");
+    let response =
+        futures::executor::block_on(service.send(runtime(), post)).expect("POST response");
     assert_eq!(response.body, b"ok");
     assert!(response
         .headers
@@ -288,7 +308,8 @@ fn post_preserves_auth_body_response_headers_and_status_error() {
             .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .unwrap();
     });
-    let error = futures::executor::block_on(service.send(request(url))).expect_err("HTTP 403");
+    let error =
+        futures::executor::block_on(service.send(runtime(), request(url))).expect_err("HTTP 403");
     assert!(matches!(error.kind, TransportErrorKind::Status(403)));
     server.join().unwrap();
 }
@@ -306,7 +327,8 @@ fn timeout_covers_delayed_response_headers() {
     });
     let mut timed = request(url);
     timed.timeout = Duration::from_millis(20);
-    let error = futures::executor::block_on(service.send(timed)).expect_err("header timeout");
+    let error =
+        futures::executor::block_on(service.send(runtime(), timed)).expect_err("header timeout");
     assert!(matches!(error.kind, TransportErrorKind::Timeout));
     assert!(error
         .source()

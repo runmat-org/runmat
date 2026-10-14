@@ -468,19 +468,31 @@ pub(crate) fn wgpu_cost_estimate_with_geometry(
     let fence_allocations = observation.map_or(0, |work| u64::from(work.submissions));
     let completion_services = observation.map_or(0, |work| u64::from(work.map_callbacks));
     let clear_units = observation.map_or(0, |work| u64::from(work.clear_commands));
+    let optional_query = observation.and_then(|work| work.wgpu_compute_query);
+    // One QuerySet plus resolve and staging buffers per eligible encoder.
+    // QuerySet's native bytes are opaque; only buffer requests enter scratch.
+    let query_allocations = optional_query.map_or(0, |work| u64::from(work.max_query_sets) * 3);
+    let query_map_services = optional_query.map_or(0, |work| u64::from(work.max_map_callbacks));
     let scratch_bytes = scratch_bytes
-        .saturating_add(observation.map_or(0, |work| work.requested_peak_buffer_bytes));
+        .saturating_add(observation.map_or(0, |work| work.requested_peak_buffer_bytes))
+        .saturating_add(optional_query.map_or(0, |work| work.requested_peak_buffer_bytes));
     ProviderCostEstimate {
         cost: ExecutionCostEstimate {
             components: ExecutionCostComponents {
                 compile_or_prepare_ns,
                 upload_ns: transfer_prior_ns(upload_bytes),
-                allocation_ns: 5_000u64
-                    .saturating_mul(u64::from(allocations).saturating_add(fence_allocations)),
+                allocation_ns: 5_000u64.saturating_mul(
+                    u64::from(allocations)
+                        .saturating_add(fence_allocations)
+                        .saturating_add(query_allocations),
+                ),
                 queue_ns: 10_000u64.saturating_mul(u64::from(queue_submissions)),
                 execution_ns: execution_ns.saturating_add(clear_units.saturating_mul(2)),
-                synchronization_ns: 5_000u64
-                    .saturating_mul(synchronization_events.saturating_add(completion_services)),
+                synchronization_ns: 5_000u64.saturating_mul(
+                    synchronization_events
+                        .saturating_add(completion_services)
+                        .saturating_add(query_map_services),
+                ),
                 download_ns: transfer_prior_ns(download_bytes),
                 downstream_ns: if query.downstream_materialization && !fusion_empty {
                     5_000

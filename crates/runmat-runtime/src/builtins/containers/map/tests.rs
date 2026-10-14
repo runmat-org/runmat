@@ -31,7 +31,7 @@ pub(super) fn containers_map_subsref(
     map: Value,
     kind: String,
     payload: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     block_on(super::containers_map_subsref(map, subscript))
 }
@@ -41,7 +41,7 @@ pub(super) fn containers_map_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     block_on(super::containers_map_subsasgn(map, subscript, rhs))
 }

@@ -8,6 +8,7 @@ pub use contract::TOPOSORT_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TOPOSORT_CATALOG_ENTRY];
 
 pub const TOPOSORT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "toposort" },
     category: "graph",

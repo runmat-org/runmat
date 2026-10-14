@@ -331,13 +331,14 @@ mod tests {
             .unwrap(),
         );
 
-        let closure = Value::Closure(Closure {
+        let closure = Value::Closure(Closure::from_data(crate::ClosureData {
+            lexical_environment: None,
             function_name: "sequence_test".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![transient()],
-        });
+        }));
 
         for value in [cell, structure, struct_array, object, object_array, closure] {
             assert_eq!(

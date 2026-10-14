@@ -13,9 +13,10 @@ pub(crate) fn run(
     if workgroups_x == 0 {
         return Ok(());
     }
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor { label: Some(label) },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(label),

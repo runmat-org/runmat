@@ -5,6 +5,7 @@ use crate::*;
 pub use contract::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 pub const PATHSEP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pathsep" },
     category: "io/repl_fs",

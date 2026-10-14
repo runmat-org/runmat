@@ -6,7 +6,10 @@ use crate::BuiltinResult;
 
 use super::{callback, data, error, output, provider::MaterializedRequest, shape, subscripts};
 
-pub(super) async fn run(request: MaterializedRequest) -> BuiltinResult<Value> {
+pub(super) async fn run(
+    request: MaterializedRequest,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _request_root = request.roots;
     let index_rows = subscripts::parse(request.subscripts)?;
     let data = data::column(request.data, index_rows.len())?;
     let output_shape = shape::resolve(&index_rows, request.options.first())?;
@@ -40,7 +43,15 @@ pub(super) async fn run(request: MaterializedRequest) -> BuiltinResult<Value> {
         )
         .await;
     }
-    default_sum(data, groups, output_shape, output_len, fill, sparse)
+    crate::execution::RootedValue::new(default_sum(
+        data,
+        groups,
+        output_shape,
+        output_len,
+        fill,
+        sparse,
+    )?)
+    .map_err(|error| error.into_runtime_error())
 }
 
 fn build_groups(

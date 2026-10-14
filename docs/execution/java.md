@@ -73,7 +73,7 @@ operator = @(x) x + 2;
 stream = javaMethod("iterate", "java.util.stream.IntStream", int32(1), operator);
 ```
 
-Synchronous callbacks re-enter the originating RunMat session with its callable resolver, cancellation state, and foreign-runtime services. Java event objects remain Java objects and can be passed back to later Java calls. Reusing the same function handle for listener removal reuses the same Java proxy identity.
+Synchronous callbacks re-enter the originating RunMat session. The function retains its code and captured values, while cancellation and the caller workspace follow the active Java operation. Java event objects remain Java objects and can be passed back to later Java calls. Reusing the same function handle for listener removal reuses the same Java proxy identity.
 
 RunMat session values are thread-affine. A callback initiated on an unrelated Java worker thread returns an affinity error rather than accessing the session from that thread. Libraries that schedule callbacks on their own executors must marshal them to the RunMat host's supported callback thread.
 

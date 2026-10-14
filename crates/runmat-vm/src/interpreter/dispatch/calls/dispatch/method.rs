@@ -28,8 +28,8 @@ pub(super) async fn dispatch(
                 current_function_name,
             )
             .await?;
-            if let calls::MethodHandling::Outputs(sequence) = handling {
-                calls::publish_fixed_outputs(stack, sequence, *out_count)?;
+            if let Some(sequence) = handling {
+                calls::publish_rooted_fixed_outputs(stack, sequence, *out_count)?;
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -54,8 +54,8 @@ pub(super) async fn dispatch(
                 },
             )
             .await?;
-            if let calls::MethodHandling::Outputs(sequence) = handling {
-                calls::publish_fixed_outputs(stack, sequence, *out_count)?;
+            if let Some(sequence) = handling {
+                calls::publish_rooted_fixed_outputs(stack, sequence, *out_count)?;
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

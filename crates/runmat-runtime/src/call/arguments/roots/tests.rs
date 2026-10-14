@@ -6,7 +6,10 @@ use runmat_value::{HandleRef, ObjectInstance, ValueSequence};
 use std::{
     cell::Cell,
     future::Future,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -116,7 +119,7 @@ fn expansion_lifecycle(completion: Completion) {
                     (name == "expansion_root_subsref").then_some(91)
                 })));
             let _invoker = crate::user_functions::install_local_semantic_function_invoker(Rc::new(
-                move |function, _, _| {
+                move |_runtime, function, _, _| {
                     assert_eq!(function, 91);
                     let call = count.get();
                     count.set(call + 1);
@@ -126,7 +129,7 @@ fn expansion_lifecycle(completion: Completion) {
                         if call == 0 {
                             let (value, handle) = managed("fresh method result");
                             *fresh.borrow_mut() = Some(handle);
-                            return Ok(ValueSequence::single(value).unwrap());
+                            return crate::user_functions::test_support::rooted_single_value_sequence(value);
                         }
                         assert_eq!(call, 1);
                         // The first result has left its producer; only the runtime
@@ -140,7 +143,7 @@ fn expansion_lifecycle(completion: Completion) {
                             Completion::Error => {
                                 Err(crate::build_runtime_error("second expansion failed").build())
                             }
-                            _ => Ok(ValueSequence::single(Value::Num(7.0)).unwrap()),
+                            _ => crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0)),
                         }
                     })
                 },
@@ -153,6 +156,7 @@ fn expansion_lifecycle(completion: Completion) {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "expansion_root_subsref".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             };
             crate::class_registry::register_class(RuntimeClass {
                 events: Default::default(),
@@ -225,4 +229,43 @@ fn expanded_values_release_roots_on_later_error() {
 #[test]
 fn expanded_values_release_roots_on_pending_drop() {
     expansion_lifecycle(Completion::Cancel);
+}
+
+#[test]
+fn expansion_result_survives_collecting_source_registration_retirement() {
+    thread_local! {
+        static OBSERVED_HANDLE: Cell<Option<GcHandle>> = const { Cell::new(None) };
+    }
+    runmat_gc::gc_test_context(|| {
+        let (value, handle) = managed("returned argument");
+        OBSERVED_HANDLE.with(|selected| selected.set(Some(handle)));
+        let observed = Arc::new(AtomicBool::new(false));
+        let callback_observed = Arc::clone(&observed);
+        let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+            let Some(handle) = OBSERVED_HANDLE.with(Cell::get) else {
+                return;
+            };
+            if !matches!(event, runmat_gc::RootRetirement::Registration(_))
+                || callback_observed.swap(true, Ordering::SeqCst)
+            {
+                return;
+            }
+            runmat_gc::gc_collect_major().expect("collect during temporary-root retirement");
+            assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_ok());
+        }))
+        .expect("register collector observer");
+        let arguments = block_on(expand_arguments(
+            &crate::context::RuntimeContext::new(Rc::new(
+                crate::execution::RuntimeExecutionService::new(),
+            )),
+            vec![MaterializedArgument::Single(value)],
+        ))
+        .expect("return rooted argument batch");
+        assert!(observed.load(Ordering::SeqCst));
+        assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_ok());
+        drop(arguments);
+        runmat_gc::gc_collect_major().expect("collect after result retirement");
+        assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_err());
+        OBSERVED_HANDLE.with(|selected| selected.set(None));
+    });
 }

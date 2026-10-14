@@ -339,12 +339,12 @@ impl WgpuProvider {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-read-scalar-enc"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-read-scalar-enc"),
+                },
+            );
             encoder.copy_buffer_to_buffer(
                 entry.buffer.as_ref(),
                 total_bytes,
@@ -394,30 +394,26 @@ impl WgpuProvider {
                     NumericPrecision::F64 => {
                         let contents = cast_slice(host.data);
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-upload-buffer"),
-                                    contents,
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-upload-buffer"),
+                                contents,
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     }
                     NumericPrecision::F32 => {
                         let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
                         let contents = cast_slice(&data_f32);
                         runmat_accelerate_api::WgpuBufferOwner::new(
-                            emission.device().create_buffer_init(
-                                &wgpu::util::BufferInitDescriptor {
-                                    label: Some("runmat-upload-buffer"),
-                                    contents,
-                                    usage: wgpu::BufferUsages::STORAGE
-                                        | wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::COPY_SRC,
-                                },
-                            ),
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-upload-buffer"),
+                                contents,
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            }),
                         )
                     }
                 }
@@ -551,7 +547,7 @@ impl WgpuProvider {
                             .expect("integer numeric upload words"),
                     ),
                 };
-                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer_init(
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.create_initialized_buffer(
                     &wgpu::util::BufferInitDescriptor {
                         label: Some("runmat-numeric-upload-buffer"),
                         contents,
@@ -626,12 +622,12 @@ impl WgpuProvider {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-numeric-download-encoder"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-numeric-download-encoder"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(
                     entry.buffer.as_ref(),
                     0,
@@ -838,12 +834,12 @@ impl WgpuProvider {
                     None
                 };
                 let staging = ProbeStaging::new(buffer, resource_ticket);
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-download-encoder"),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-download-encoder"),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(
                     entry.buffer.as_ref(),
                     0,
@@ -1132,9 +1128,10 @@ mod tests {
                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     });
-                    let mut encoder = emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                    let mut encoder = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor { label: None },
+                    );
                     encoder.copy_buffer_to_buffer(
                         &entry.buffer,
                         0,

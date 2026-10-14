@@ -9,6 +9,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const GETPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "getpref" },
     category: "io/repl_fs",

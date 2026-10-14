@@ -1,5 +1,5 @@
 use super::*;
-use runmat_runtime::context::{RuntimeContext, RuntimeTcpByteOrder};
+use runmat_runtime::context::{RuntimeContext, RuntimeTcpByteOrder, RuntimeTcpInvocation};
 
 fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(
@@ -48,12 +48,14 @@ fn lazy_owner_teardown_releases_one_sessions_socket_without_closing_sibling() {
         byte_order: RuntimeTcpByteOrder::Little,
     };
     let first_server = futures::executor::block_on(
-        service.bind(RuntimeTcpIssuer::from_context(Some(&first)), bind()),
+        service.bind(RuntimeTcpInvocation::from_context(Some(&first)), bind()),
     )
     .expect("first session socket");
     let sibling_issuer = RuntimeTcpIssuer::from_context(Some(&sibling));
-    let sibling_server = futures::executor::block_on(service.bind(sibling_issuer.clone(), bind()))
-        .expect("sibling session socket");
+    let sibling_server = futures::executor::block_on(
+        service.bind(RuntimeTcpInvocation::from_context(Some(&sibling)), bind()),
+    )
+    .expect("sibling session socket");
     drop(first);
     let _rebound = std::net::TcpListener::bind(first_server.local_addr)
         .expect("teardown releases socket despite retained authority value");

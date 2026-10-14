@@ -62,6 +62,7 @@ pub const fn documentation(definition: ConstructorDocumentationDefinition) -> Bu
 
 pub const fn entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance: definition.provenance,
         identity: BuiltinCatalogIdentity {
             name: definition.name,

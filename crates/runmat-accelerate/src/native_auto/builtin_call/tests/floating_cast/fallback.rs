@@ -141,10 +141,10 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
             runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
         }))
         .unwrap();
-    let Value::GpuTensor(output) = output else {
+    let Value::GpuTensor(resident_output) = output.value() else {
         panic!("fallback must restore resident output");
     };
-    assert_eq!(output.shape(), &[1, 2, 2]);
+    assert_eq!(resident_output.shape(), &[1, 2, 2]);
     assert_eq!(provider.casts.load(Ordering::Relaxed), 1);
     assert_eq!(provider.receipts.load(Ordering::Relaxed), 1);
     assert_eq!(
@@ -166,7 +166,7 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
     assert_eq!(feedback[0].total_elapsed_ns, 0);
     drop(feedback);
     let HostNumericDataOwned::F32(actual) =
-        futures::executor::block_on(provider.inner.download_numeric(&output))
+        futures::executor::block_on(provider.inner.download_numeric(resident_output))
             .unwrap()
             .data
     else {

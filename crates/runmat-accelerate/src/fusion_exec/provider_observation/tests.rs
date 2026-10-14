@@ -1,6 +1,7 @@
 use super::*;
 use crate::placement::PlacementSession;
 use runmat_accelerate_api::observation::{ProviderObservationClock, ProviderObservationFailure};
+use runmat_execution::profiling::{CommandProfilingRoot, ProviderObservationCounts};
 use runmat_execution::{Digest, PlacementRevision, PlacementSignature};
 use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
 use std::rc::Rc;
@@ -48,6 +49,9 @@ fn selected(
     session: &PlacementSession,
     receipt: ProviderOperationReceipt,
 ) -> FusionPlacementSelection {
+    let command_contribution = runtime
+        .command_profiling()
+        .and_then(|command| command.begin_provider_operation());
     let signature = signature();
     let candidate = "provider.fusion";
     let kind = runmat_execution::ExecutionCandidateKind::ProviderFusion;
@@ -64,13 +68,15 @@ fn selected(
             permit: Some(permit),
         }),
         receipt: Some(receipt),
+        command_contribution,
     }
 }
 
 #[test]
 fn selected_fusion_defers_until_completion_and_keeps_full_staging_total() {
     let session = Rc::new(PlacementSession::default());
-    let runtime = runtime(session.clone());
+    let command = CommandProfilingRoot::new();
+    let runtime = runtime(session.clone()).with_command_profiling(command.receipt());
     let clock = Arc::new(Clock(AtomicU64::new(100)));
     let receipt = ProviderOperationReceipt::with_clock(clock.clone());
     let token = receipt.recorder().submission().unwrap();
@@ -88,6 +94,15 @@ fn selected_fusion_defers_until_completion_and_keeps_full_staging_total() {
     assert_eq!(profile.feedback[0].samples, 1);
     assert_eq!(profile.feedback[0].mean_ns(), Some(50));
     assert_eq!(session.profile_snapshot().feedback[0].samples, 1);
+    let snapshot = command.seal();
+    assert_eq!(
+        snapshot.observations,
+        Some(ProviderObservationCounts {
+            incomplete: 1,
+            ..ProviderObservationCounts::default()
+        })
+    );
+    assert_eq!(snapshot.gpu_execution, None);
 }
 
 #[test]
@@ -218,6 +233,7 @@ fn vm_full_call_custom_clock_receipt_cannot_publish_a_positive_sample() {
         observer: FusionPlacementObserver::new(None),
         feedback: Some(feedback),
         receipt: Some(receipt),
+        command_contribution: None,
         started: Instant::now(),
         drop_reports_failure: false,
     };
@@ -261,6 +277,7 @@ fn published_pending_receipt_survives_owner_drop_and_concurrent_same_code_instal
         observer: FusionPlacementObserver::new(None),
         feedback: Some(feedback),
         receipt: Some(receipt),
+        command_contribution: None,
         started: Instant::now(),
         drop_reports_failure: false,
     };
@@ -297,6 +314,7 @@ fn published_pending_receipt_survives_owner_drop_and_concurrent_same_code_instal
         observer: FusionPlacementObserver::new(None),
         feedback: Some(concurrent_feedback),
         receipt: Some(concurrent_receipt),
+        command_contribution: None,
         started: Instant::now(),
         drop_reports_failure: false,
     }
@@ -346,6 +364,7 @@ fn profile_replacement_retires_vm_pending_receipt_but_fresh_right_is_admitted() 
         observer: FusionPlacementObserver::new(None),
         feedback: Some(feedback),
         receipt: Some(receipt),
+        command_contribution: None,
         started: Instant::now(),
         drop_reports_failure: false,
     };

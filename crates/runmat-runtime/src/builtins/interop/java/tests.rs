@@ -16,7 +16,7 @@ mod native {
             _context: crate::context::RuntimeContext,
             call: crate::context::ForeignCall,
         ) -> crate::context::RuntimeServiceFuture<
-            Result<runmat_value::ValueSequence, crate::RuntimeError>,
+            Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
         > {
             let sink = matches!(
                 call.symbol.as_str(),
@@ -25,10 +25,14 @@ mod native {
             self.calls.borrow_mut().push(call);
             Box::pin(async move {
                 if sink {
-                    Ok(runmat_value::ValueSequence::empty())
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
                 } else {
-                    runmat_value::ValueSequence::single(Value::String("returned".into()))
-                        .map_err(|error| invalid_call(error.to_string()))
+                    let sequence =
+                        runmat_value::ValueSequence::single(Value::String("returned".into()))
+                            .map_err(|error| invalid_call(error.to_string()))?;
+                    crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
                 }
             })
         }
@@ -52,7 +56,10 @@ mod native {
             Some(runtime.clone()),
             vec![Value::String("java.lang.StringBuilder".into())],
         ));
-        assert_eq!(constructed.unwrap(), Value::String("returned".into()));
+        assert_eq!(
+            constructed.unwrap().value(),
+            &Value::String("returned".into())
+        );
         let invoked = futures::executor::block_on(java_method_builtin(
             Some(runtime),
             vec![
@@ -61,7 +68,7 @@ mod native {
                 Value::Int(runmat_value::IntValue::I32(4)),
             ],
         ));
-        assert_eq!(invoked.unwrap(), Value::String("returned".into()));
+        assert_eq!(invoked.unwrap().value(), &Value::String("returned".into()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].adapter, JAVA_ADAPTER);
@@ -105,17 +112,17 @@ mod native {
             vec![path.clone()],
         ))
         .unwrap();
-        assert_eq!(added, Value::OutputList(Vec::new()));
+        assert_eq!(added.value(), &Value::OutputList(Vec::new()));
         let removed = futures::executor::block_on(java_remove_path_builtin(
             Some(runtime.clone()),
             vec![path.clone()],
         ))
         .unwrap();
-        assert_eq!(removed, Value::OutputList(Vec::new()));
+        assert_eq!(removed.value(), &Value::OutputList(Vec::new()));
         let replaced =
             futures::executor::block_on(java_class_path_builtin(Some(runtime), vec![path]))
                 .unwrap();
-        assert_eq!(replaced, Value::OutputList(Vec::new()));
+        assert_eq!(replaced.value(), &Value::OutputList(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[0].symbol, "add_classpath");
@@ -185,13 +192,13 @@ mod native {
             vec![Value::String("-StAtIc".into())],
         ))
         .unwrap();
-        assert_eq!(query, Value::String("returned".into()));
+        assert_eq!(query.value(), &Value::String("returned".into()));
         let quiet = futures::executor::block_on(java_class_path_builtin(
             Some(runtime.clone()),
             vec![Value::String("-v1".into())],
         ))
         .unwrap();
-        assert_eq!(quiet, Value::OutputList(Vec::new()));
+        assert_eq!(quiet.value(), &Value::OutputList(Vec::new()));
         let appended = futures::executor::block_on(java_add_path_builtin(
             Some(runtime),
             vec![
@@ -200,7 +207,7 @@ mod native {
             ],
         ))
         .unwrap();
-        assert_eq!(appended, Value::OutputList(Vec::new()));
+        assert_eq!(appended.value(), &Value::OutputList(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].symbol, "classpath");

@@ -114,6 +114,26 @@ impl Bytecode {
         manifest: &ParallelManifest,
         compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
+        self.install_parallel_regions_for_product(
+            mir,
+            manifest,
+            compiled_functions,
+            compiled_functions,
+        )
+    }
+
+    /// Keep script entrypoint records on the program while decorating only
+    /// registered bodies proved to belong to this immutable product.
+    pub fn install_parallel_regions_for_product(
+        &mut self,
+        mir: &MirAssembly,
+        manifest: &ParallelManifest,
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
+    ) -> Result<(), String> {
+        if !registered_bodies.is_subset(compiled_functions) {
+            return Err("parallel body owners exceed compiled assembly".into());
+        }
         manifest
             .validate()
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
@@ -216,7 +236,7 @@ impl Bytecode {
         self.spmd_regions.clear();
         self.distributed_values.clear();
         self.collective_contracts.clear();
-        for function in compiled_functions {
+        for function in registered_bodies {
             if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
                 clear_parallel_metadata(bytecode);
             }
@@ -234,16 +254,15 @@ impl Bytecode {
             if is_entrypoint {
                 self.parfor_regions.push(region.clone());
             }
-            if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
-                bytecode.parfor_regions.push(region.clone());
+            if registered_bodies.contains(&function) {
+                if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
+                    bytecode.parfor_regions.push(region.clone());
+                }
+                if let Some(bytecode) = self.bound_functions.get_mut(&function) {
+                    bytecode.parfor_regions.push(region.clone());
+                }
             }
-            if let Some(bytecode) = self.bound_functions.get_mut(&function) {
-                bytecode.parfor_regions.push(region.clone());
-            }
-            if !is_entrypoint
-                && !self.function_registry.functions.contains_key(&function)
-                && !self.bound_functions.contains_key(&function)
-            {
+            if !is_entrypoint && !registered_bodies.contains(&function) {
                 return Err(format!(
                     "parallel region {:?} has no compiled owning function",
                     region.contract.id
@@ -259,16 +278,15 @@ impl Bytecode {
             if is_entrypoint {
                 self.spmd_regions.push(region.clone());
             }
-            if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
-                bytecode.spmd_regions.push(region.clone());
+            if registered_bodies.contains(&function) {
+                if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
+                    bytecode.spmd_regions.push(region.clone());
+                }
+                if let Some(bytecode) = self.bound_functions.get_mut(&function) {
+                    bytecode.spmd_regions.push(region.clone());
+                }
             }
-            if let Some(bytecode) = self.bound_functions.get_mut(&function) {
-                bytecode.spmd_regions.push(region.clone());
-            }
-            if !is_entrypoint
-                && !self.function_registry.functions.contains_key(&function)
-                && !self.bound_functions.contains_key(&function)
-            {
+            if !is_entrypoint && !registered_bodies.contains(&function) {
                 return Err(format!(
                     "SPMD region {:?} has no compiled owning function",
                     region.contract.id
@@ -284,16 +302,15 @@ impl Bytecode {
             if is_entrypoint {
                 self.distributed_values.push(contract.clone());
             }
-            if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
-                bytecode.distributed_values.push(contract.clone());
+            if registered_bodies.contains(&function) {
+                if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
+                    bytecode.distributed_values.push(contract.clone());
+                }
+                if let Some(bytecode) = self.bound_functions.get_mut(&function) {
+                    bytecode.distributed_values.push(contract.clone());
+                }
             }
-            if let Some(bytecode) = self.bound_functions.get_mut(&function) {
-                bytecode.distributed_values.push(contract.clone());
-            }
-            if !is_entrypoint
-                && !self.function_registry.functions.contains_key(&function)
-                && !self.bound_functions.contains_key(&function)
-            {
+            if !is_entrypoint && !registered_bodies.contains(&function) {
                 return Err(format!(
                     "distributed value {:?} has no compiled owning function",
                     contract.id
@@ -309,16 +326,15 @@ impl Bytecode {
             if is_entrypoint {
                 self.collective_contracts.push(contract.clone());
             }
-            if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
-                bytecode.collective_contracts.push(contract.clone());
+            if registered_bodies.contains(&function) {
+                if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
+                    bytecode.collective_contracts.push(contract.clone());
+                }
+                if let Some(bytecode) = self.bound_functions.get_mut(&function) {
+                    bytecode.collective_contracts.push(contract.clone());
+                }
             }
-            if let Some(bytecode) = self.bound_functions.get_mut(&function) {
-                bytecode.collective_contracts.push(contract.clone());
-            }
-            if !is_entrypoint
-                && !self.function_registry.functions.contains_key(&function)
-                && !self.bound_functions.contains_key(&function)
-            {
+            if !is_entrypoint && !registered_bodies.contains(&function) {
                 return Err(format!(
                     "collective {:?} has no compiled owning function",
                     contract.id
@@ -330,21 +346,31 @@ impl Bytecode {
         self.distributed_values.sort_by_key(|contract| contract.id);
         self.collective_contracts
             .sort_by_key(|contract| contract.id);
-        for function in self.function_registry.functions.values_mut() {
-            function
-                .parfor_regions
-                .sort_by_key(|region| region.contract.id);
-            function
-                .spmd_regions
-                .sort_by_key(|region| region.contract.id);
-            function
-                .distributed_values
-                .sort_by_key(|contract| contract.id);
-            function
-                .collective_contracts
-                .sort_by_key(|contract| contract.id);
+        if !registered_bodies.is_empty() {
+            // DerefMut invalidates the registry's exact selected-site overlay.
+            // A script-only product must never open a mutable inherited view.
+            for (id, function) in self.function_registry.functions.iter_mut() {
+                if !registered_bodies.contains(id) {
+                    continue;
+                }
+                function
+                    .parfor_regions
+                    .sort_by_key(|region| region.contract.id);
+                function
+                    .spmd_regions
+                    .sort_by_key(|region| region.contract.id);
+                function
+                    .distributed_values
+                    .sort_by_key(|contract| contract.id);
+                function
+                    .collective_contracts
+                    .sort_by_key(|contract| contract.id);
+            }
         }
-        for function in self.bound_functions.values_mut() {
+        for (id, function) in &mut self.bound_functions {
+            if !registered_bodies.contains(id) {
+                continue;
+            }
             function
                 .parfor_regions
                 .sort_by_key(|region| region.contract.id);

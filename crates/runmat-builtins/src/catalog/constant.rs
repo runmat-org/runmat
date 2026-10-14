@@ -12,6 +12,11 @@ use super::{BuiltinCatalogProvenance, BuiltinDocumentation};
 pub struct BuiltinConstantCatalogEntry {
     pub name: &'static str,
     pub kind: BuiltinConstantKind,
+    /// Exact scalar content when the constant has a portable literal value.
+    /// The execution fingerprint includes this field; documentation keeps its
+    /// existing catalog shape rather than exposing an additional wire field.
+    #[serde(skip)]
+    pub literal: Option<BuiltinConstantLiteral>,
     pub provenance: BuiltinCatalogProvenance,
     /// Canonical content for a constant-only public identity. Callable forms
     /// and alternate spellings share their canonical identity's documentation.
@@ -27,6 +32,11 @@ pub enum BuiltinConstantKind {
     Logical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinConstantLiteral {
+    Logical(bool),
+}
+
 impl BuiltinConstantCatalogEntry {
     pub(crate) const fn new(
         name: &'static str,
@@ -36,6 +46,7 @@ impl BuiltinConstantCatalogEntry {
         Self {
             name,
             kind,
+            literal: None,
             provenance,
             documentation: None,
         }
@@ -43,6 +54,15 @@ impl BuiltinConstantCatalogEntry {
 
     pub const fn with_documentation(mut self, documentation: BuiltinDocumentation) -> Self {
         self.documentation = Some(documentation);
+        self
+    }
+
+    pub const fn with_literal(mut self, literal: BuiltinConstantLiteral) -> Self {
+        match (self.kind, literal) {
+            (BuiltinConstantKind::Logical, BuiltinConstantLiteral::Logical(_)) => {}
+            _ => panic!("constant literal does not match its catalog kind"),
+        }
+        self.literal = Some(literal);
         self
     }
 

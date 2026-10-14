@@ -181,6 +181,7 @@ mod tests {
             ..BuiltinDocumentation::EMPTY
         };
         BuiltinCatalogEntry {
+            audience: crate::BuiltinCatalogAudience::Public,
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity {
                 name: "classification-test",

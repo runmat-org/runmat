@@ -43,6 +43,22 @@ pub use native_auto::{
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
+
+/// Read the already-registered WGPU façade for Core's private command proof.
+/// This never initializes a device and is absent in non-WGPU builds.
+pub fn registered_wgpu_provider_for_profiling(
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    #[cfg(feature = "wgpu")]
+    {
+        backend::wgpu::provider::registered_wgpu_provider()
+            .map(|provider| provider as &'static dyn runmat_accelerate_api::AccelProvider)
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        None
+    }
+}
+
 #[cfg(any(feature = "wgpu", all(feature = "cuda", not(target_arch = "wasm32"))))]
 use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
@@ -538,7 +554,10 @@ impl Accelerator {
         &self,
         a: &Value,
         b: &Value,
-    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_runtime::execution::RootedValue>
+    {
+        let _inputs = runmat_runtime::execution::RootedValueLease::for_values([a, b].into_iter())
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         match (a, b) {
             (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
                 let ha = self.gather_handle(ga).await?;
@@ -561,7 +580,8 @@ impl Accelerator {
         &self,
         a: &Value,
         b: &Value,
-    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_runtime::execution::RootedValue>
+    {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
@@ -577,7 +597,8 @@ impl Accelerator {
                     let db = bk.upload_matrix(mb)?;
                     let dc = bk.elem_add(da.as_ref(), db.as_ref())?;
                     let out = bk.download_matrix(dc.as_ref())?;
-                    Ok(Value::Tensor(out))
+                    runmat_runtime::execution::RootedValue::new(Value::Tensor(out))
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
             },
             _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
@@ -600,6 +621,30 @@ mod native_gather_tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage};
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn accelerator_host_add_publishes_rooted_scalar_and_tensor_results() {
+        let accelerator = Accelerator::new(Planner::new(None));
+        let tensor = |data| Value::Tensor(Tensor::new(data, vec![1, 2]).unwrap());
+        for (left, right, expected) in [
+            (Value::Num(2.0), Value::Num(3.0), Value::Num(5.0)),
+            (
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+                Value::Int(runmat_value::IntValue::U64(1)),
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+            ),
+            (
+                tensor(vec![1.0, 2.0]),
+                tensor(vec![3.0, 4.0]),
+                tensor(vec![4.0, 6.0]),
+            ),
+        ] {
+            let result = block_on(accelerator.elementwise_add(&left, &right)).expect("host add");
+            assert_eq!(result.value(), &expected);
+            result.with_owned(|value| assert_eq!(value, expected));
+        }
+    }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -22,6 +22,7 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
     &[&COMBVEC_CATALOG_ENTRY, &PADSEQUENCES_CATALOG_ENTRY];
 
 pub const COMBVEC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "combvec" },
     category: "deep_learning",
@@ -63,6 +64,7 @@ pub const COMBVEC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub const PADSEQUENCES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "padsequences",

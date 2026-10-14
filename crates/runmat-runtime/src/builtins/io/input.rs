@@ -14,6 +14,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 
+use crate::execution::RootedValue;
 use crate::interaction;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
@@ -56,7 +57,7 @@ fn input_error_with_source(
     binding_variant = "default",
     builtin_path = "crate::builtins::io::input"
 )]
-async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn input_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
         return Err(input_error(&INPUT_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -120,7 +121,8 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 )
             })?;
         if return_string {
-            return Ok(Value::CharArray(CharArray::new_row(&line)));
+            return RootedValue::new(Value::CharArray(CharArray::new_row(&line)))
+                .map_err(|error| error.into_runtime_error());
         }
         match parse_numeric_response(&line).await {
             Ok(value) => return Ok(value),
@@ -177,23 +179,24 @@ async fn parse_string_flag(value: &Value) -> Result<InputStringMode, RuntimeErro
     })
 }
 
-async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
+async fn parse_numeric_response(line: &str) -> Result<RootedValue, RuntimeError> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed == "[]" {
-        return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
+        return RootedValue::new(Value::Tensor(Tensor::zeros(vec![0, 0])))
+            .map_err(|error| error.into_runtime_error());
     }
 
     // Fast path 1: scalar literals, named constants, and logical keywords.
     // Handles the vast majority of input() use cases without touching the VM.
     if let Some(v) = parse_scalar_value(trimmed) {
-        return Ok(v);
+        return RootedValue::new(v).map_err(|error| error.into_runtime_error());
     }
 
     // Fast path 2: matrix/vector literals like `[1 2 3]`, `[1;2;3]`, `[true false]`.
     // Avoids recursive interpret() calls for this common case.
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
         if let Some(v) = parse_matrix_literal(trimmed) {
-            return Ok(v);
+            return RootedValue::new(v).map_err(|error| error.into_runtime_error());
         }
     }
 
@@ -227,7 +230,7 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
                 err,
             )
         })?;
-    if matches!(parsed, Value::Num(value) if value.is_nan()) {
+    if matches!(parsed.value(), Value::Num(value) if value.is_nan()) {
         let mut error = input_error_with(
             &INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
             INPUT_ERROR_INVALID_NUMERIC_EXPRESSION.message,

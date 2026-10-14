@@ -30,7 +30,8 @@ pub(super) async fn dispatch(
     let (identity, bound, fallback_policy, arg_count, out_count, publication) = match instr {
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => (
             runmat_hir::CallableIdentity::BoundFunction(*function),
-            function_registry.static_binding(*function),
+            calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
+                .or_else(|| function_registry.static_binding(*function)),
             runmat_hir::CallableFallbackPolicy::None,
             *arg_count,
             *out_count,
@@ -40,7 +41,8 @@ pub(super) async fn dispatch(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             (
                 runmat_hir::CallableIdentity::BoundFunction(*function),
-                function_registry.static_binding(*function),
+                calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
+                    .or_else(|| function_registry.static_binding(*function)),
                 runmat_hir::CallableFallbackPolicy::None,
                 *arg_count,
                 out_count,
@@ -52,14 +54,24 @@ pub(super) async fn dispatch(
             fallback_policy,
             arg_count,
             out_count,
-        } => (
-            identity.clone(),
-            None,
-            *fallback_policy,
-            *arg_count,
-            *out_count,
-            OutputPublication::Fixed(*out_count),
-        ),
+        } => {
+            let bound = match identity {
+                runmat_hir::CallableIdentity::BoundFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                | runmat_hir::CallableIdentity::ExternalFunction { function, .. } => {
+                    calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
+                }
+                _ => None,
+            };
+            (
+                identity.clone(),
+                bound,
+                *fallback_policy,
+                *arg_count,
+                *out_count,
+                OutputPublication::Fixed(*out_count),
+            )
+        }
         Instr::CallFunctionMultiUsingOutputSlot {
             identity,
             fallback_policy,
@@ -69,7 +81,19 @@ pub(super) async fn dispatch(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             (
                 identity.clone(),
-                None,
+                match identity {
+                    runmat_hir::CallableIdentity::BoundFunction(function)
+                    | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                    | runmat_hir::CallableIdentity::ExternalFunction { function, .. } => {
+                        calls::selected_static_call_binding(
+                            &context.runtime,
+                            instr,
+                            *pc,
+                            *function,
+                        )?
+                    }
+                    _ => None,
+                },
                 *fallback_policy,
                 *arg_count,
                 out_count,
@@ -82,6 +106,7 @@ pub(super) async fn dispatch(
         calls::UserCallContext {
             stack,
             runtime: &context.runtime,
+            process_driver: context.process_driver.clone(),
             identity,
             bound,
             fallback_policy,
@@ -104,10 +129,10 @@ pub(super) async fn dispatch(
     match result {
         UserCallHandling::Completed(sequence) => match publication {
             OutputPublication::Fixed(count) => {
-                calls::publish_fixed_outputs(stack, sequence, count)?
+                calls::publish_rooted_fixed_outputs(stack, sequence, count)?
             }
             OutputPublication::Sequence => {
-                sequence_register.stage_call_output_sequence(stack, sequence)?;
+                sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
             }
         },
         UserCallHandling::Caught => {

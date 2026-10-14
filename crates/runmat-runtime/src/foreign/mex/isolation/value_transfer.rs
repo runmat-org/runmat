@@ -4,7 +4,7 @@ use runmat_value::Value;
 use super::{
     MexValueTransfer, MexWireError, MEX_HOST_INLINE_VALUE_BYTES, MEX_HOST_MAX_SNAPSHOT_BYTES,
 };
-use crate::execution::value_codec::{decode_inline_value, encode_inline_value};
+use crate::execution::value_codec::{decode_inline_value_rooted, encode_inline_value};
 
 pub(super) fn encode_value_transfer(
     value: &Value,
@@ -45,10 +45,10 @@ pub(super) fn encode_value_transfer(
     }
 }
 
-pub(super) fn decode_value_transfer(
+pub(super) fn decode_value_transfer_rooted(
     transfer: &MexValueTransfer,
     store: &SharedSnapshotStore,
-) -> Result<Value, MexWireError> {
+) -> Result<crate::execution::RootedValueMember, MexWireError> {
     let payload = match transfer {
         MexValueTransfer::Inline(payload) => payload.clone(),
         MexValueTransfer::Snapshot(descriptor) => {
@@ -79,12 +79,34 @@ pub(super) fn decode_value_transfer(
                 format!("value payload violates the transfer contract: {error}"),
             )
         })?;
-    decode_inline_value(&payload).map_err(|error| {
+    decode_inline_value_rooted(&payload).map_err(|error| {
         wire_error(
             "RunMat:MEX:ValueDecode",
             format!("could not decode value: {error}"),
         )
     })
+}
+
+pub(super) fn decode_value_transfers_rooted(
+    transfers: &[MexValueTransfer],
+    store: &SharedSnapshotStore,
+) -> Result<crate::execution::RootedValues, MexWireError> {
+    let mut outputs = crate::execution::RootedValuesBuilder::with_capacity(transfers.len());
+    for transfer in transfers {
+        outputs.push_rooted(decode_value_transfer_rooted(transfer, store)?);
+    }
+    outputs
+        .finish()
+        .map_err(|error| wire_error("RunMat:MEX:ValueRoot", error.to_string()))
+}
+
+pub(super) fn decode_value_transfer_rooted_value(
+    transfer: &MexValueTransfer,
+    store: &SharedSnapshotStore,
+) -> Result<crate::execution::RootedValue, MexWireError> {
+    decode_value_transfer_rooted(transfer, store)?
+        .into_rooted_value()
+        .map_err(|error| wire_error("RunMat:MEX:ValueRoot", error.to_string()))
 }
 
 fn wire_error(identifier: &str, message: impl Into<String>) -> MexWireError {
@@ -113,6 +135,11 @@ mod tests {
         );
         let transfer = encode_value_transfer(&value, &store).unwrap();
         assert!(matches!(transfer, MexValueTransfer::Snapshot(_)));
-        assert_eq!(decode_value_transfer(&transfer, &store).unwrap(), value);
+        assert_eq!(
+            decode_value_transfer_rooted_value(&transfer, &store)
+                .unwrap()
+                .value(),
+            &value
+        );
     }
 }

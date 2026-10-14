@@ -19,7 +19,7 @@ fn uniform_output_preserves_all_integer_classes() {
             vec![cell(vec![Value::Int(value.clone())], &[1, 1])],
         )
         .unwrap();
-        let Value::Tensor(output) = result else {
+        let Value::Tensor(output) = result.value() else {
             panic!("expected integer tensor")
         };
         assert_eq!(output.numeric_dtype().class_name(), name);
@@ -38,7 +38,7 @@ fn uniform_output_preserves_single_and_complex_storage() {
         vec![cell(vec![single], &[1, 1])],
     )
     .unwrap();
-    let Value::Tensor(output) = result else {
+    let Value::Tensor(output) = result.value() else {
         panic!("expected single tensor")
     };
     assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
@@ -54,7 +54,7 @@ fn uniform_output_preserves_single_and_complex_storage() {
         vec![cell(vec![complex], &[1, 1])],
     )
     .unwrap();
-    let Value::ComplexTensor(output) = result else {
+    let Value::ComplexTensor(output) = result.value() else {
         panic!("expected complex tensor")
     };
     assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::U64);

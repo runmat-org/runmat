@@ -23,29 +23,12 @@ pub struct JvmProcess {
 
 impl JvmProcess {
     pub fn launch(installation: JvmInstallation, config: &JvmConfig) -> Result<Self, JvmError> {
-        config.validate()?;
-        if !config.accepts(&installation.version) {
-            let maximum = config
-                .maximum_major
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "newest available".into());
-            return Err(JvmError::UnsupportedVersion {
-                found: installation.version.raw.clone(),
-                required: format!("{} through {maximum}", config.minimum_major),
-            });
-        }
-        let launch_options = config.launch_options();
+        let launch_options = validate_launch_request(&installation, config)?;
         let mut state = process_state()
             .lock()
             .map_err(|_| JvmError::Startup("process JVM lock was poisoned".into()))?;
         if let Some(existing) = state.as_ref() {
-            if existing.installation.library != installation.library
-                || existing.launch_options != launch_options
-            {
-                return Err(JvmError::ConfigurationConflict(
-                    "JVM library and bootstrap options are immutable after startup".into(),
-                ));
-            }
+            validate_existing(existing, &installation, &launch_options)?;
             return Ok(Self {
                 state: Arc::clone(existing),
             });
@@ -70,6 +53,22 @@ impl JvmProcess {
         Ok(Self { state: process })
     }
 
+    /// Check a conflict known at this instant without launching or reserving
+    /// the process JVM. A later first launch still performs the same check.
+    pub fn validate_existing_compatibility(
+        installation: &JvmInstallation,
+        config: &JvmConfig,
+    ) -> Result<(), JvmError> {
+        let launch_options = validate_launch_request(installation, config)?;
+        let state = process_state()
+            .lock()
+            .map_err(|_| JvmError::Startup("process JVM lock was poisoned".into()))?;
+        if let Some(existing) = state.as_ref() {
+            validate_existing(existing, installation, &launch_options)?;
+        }
+        Ok(())
+    }
+
     pub fn installation(&self) -> &JvmInstallation {
         &self.state.installation
     }
@@ -89,4 +88,37 @@ impl JvmProcess {
             .map_err(E::from)?;
         operation(&mut environment)
     }
+}
+
+fn validate_launch_request(
+    installation: &JvmInstallation,
+    config: &JvmConfig,
+) -> Result<Vec<String>, JvmError> {
+    config.validate()?;
+    if !config.accepts(&installation.version) {
+        let maximum = config
+            .maximum_major
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "newest available".into());
+        return Err(JvmError::UnsupportedVersion {
+            found: installation.version.raw.clone(),
+            required: format!("{} through {maximum}", config.minimum_major),
+        });
+    }
+    Ok(config.launch_options())
+}
+
+fn validate_existing(
+    existing: &ProcessJvmState,
+    installation: &JvmInstallation,
+    launch_options: &[String],
+) -> Result<(), JvmError> {
+    if existing.installation.library != installation.library
+        || existing.launch_options != launch_options
+    {
+        return Err(JvmError::ConfigurationConflict(
+            "JVM library and bootstrap options are immutable after startup".into(),
+        ));
+    }
+    Ok(())
 }

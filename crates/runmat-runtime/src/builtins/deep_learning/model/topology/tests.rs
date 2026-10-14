@@ -55,11 +55,12 @@ fn constructor_and_resident_forward_reject_invalid_order_before_provider_access(
         let error = block_on(dlnetwork_builtin(vec![invalid.clone()])).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
 
-        let mut network = block_on(dlnetwork_builtin(vec![collection(vec![
+        let network_owner = block_on(dlnetwork_builtin(vec![collection(vec![
             input(),
             transform(),
         ])]))
         .unwrap();
+        let mut network = network_owner.value().clone();
         let Value::Object(object) = &mut network else {
             panic!("network expected")
         };

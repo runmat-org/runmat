@@ -52,7 +52,10 @@ pub(super) async fn dispatch(
         _ => unreachable!("feval route received another instruction"),
     };
     let args = match arguments {
-        FevalArguments::Plain(argc) => crate::call::builtins::collect_call_args(stack, argc)?,
+        FevalArguments::Plain(argc) => runmat_runtime::execution::RootedValues::new(
+            crate::call::builtins::collect_call_args(stack, argc)?,
+        )
+        .map_err(|error| error.into_runtime_error())?,
         FevalArguments::Expanded(specs) => {
             build_feval_expand_multi_args(stack, specs, sequence_register, &context.runtime).await?
         }
@@ -62,18 +65,23 @@ pub(super) async fn dispatch(
         source_id,
         call_arg_spans.as_ref().cloned(),
     );
-    let crate::call::feval::FevalDispatch::Completed(sequence) = crate::call::feval::execute_feval(
-        &context.runtime,
-        func_val,
-        args,
-        out_count,
-        function_registry,
-    )
-    .await?;
+    let crate::call::feval::FevalDispatch::Completed(sequence) = args
+        .with_owned_values_async(|args| {
+            crate::call::feval::execute_feval(
+                &context.runtime,
+                func_val,
+                args,
+                out_count,
+                function_registry,
+            )
+        })
+        .await?;
     match publication {
-        OutputPublication::Fixed(count) => calls::publish_fixed_outputs(stack, sequence, count)?,
+        OutputPublication::Fixed(count) => {
+            calls::publish_rooted_fixed_outputs(stack, sequence, count)?
+        }
         OutputPublication::Sequence => {
-            sequence_register.stage_call_output_sequence(stack, sequence)?;
+            sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
         }
     }
     Ok(Some(DispatchHandled::Generic(

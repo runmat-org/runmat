@@ -26,7 +26,7 @@ pub(crate) async fn accumarray_builtin(
     subscripts: Value,
     data: Value,
     options: Vec<Value>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let request = provider::materialize(subscripts, data, options).await?;
     execute::run(request).await
 }

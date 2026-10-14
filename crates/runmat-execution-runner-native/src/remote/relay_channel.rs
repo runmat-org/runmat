@@ -48,12 +48,35 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.worker()
     }
 
+    fn verified_software_capabilities(
+        &self,
+    ) -> Option<std::collections::BTreeSet<runmat_execution::resource::Capability>> {
+        self.protocol.verified_software_capabilities()
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,
         bundle: &[u8],
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
         self.protocol.install_bundle(bundle_digest, bundle).await
+    }
+
+    async fn stage_graph_program(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        encrypted_manifest: &[u8],
+        downloads: &[runmat_execution_transport_native::control::DriverArtifactDownload],
+        maximum_program_bytes: u64,
+    ) -> NativeExecutionResult<super::RemoteGraphProgramReceipt> {
+        self.protocol
+            .stage_graph_program(
+                attempt_id,
+                encrypted_manifest,
+                downloads,
+                maximum_program_bytes,
+            )
+            .await
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {

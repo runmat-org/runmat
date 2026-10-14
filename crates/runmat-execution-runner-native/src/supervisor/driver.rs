@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use super::model::{BatchDriverInvocation, DriverCompletion, ProgramBatchSubmission};
+use super::model::{
+    BatchDriverInvocation, DriverCompletion, GraphBatchSubmission, ProgramBatchSubmission,
+};
 use super::store::{load_driver_invocation, write_completion, write_driver_marker};
 use crate::protocol::WorkerResponse;
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -41,9 +43,9 @@ pub fn complete_batch_driver_with_response(
     response: WorkerResponse,
 ) -> NativeExecutionResult<()> {
     let (success, exit_code, message) = match &response {
-        WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. } => {
-            (true, Some(0), None)
-        }
+        WorkerResponse::Success { .. }
+        | WorkerResponse::GraphSuccess { .. }
+        | WorkerResponse::ExternalizedSuccess { .. } => (true, Some(0), None),
         WorkerResponse::SpmdSuccess { .. } => (
             false,
             None,
@@ -71,7 +73,7 @@ pub async fn execute_program_batch(
     let mut request = submission.program_request();
     request.job_id = Some(job_id);
     if request.artifact.form != runmat_execution_artifact::ExecutableForm::MeshingWorkload {
-        return crate::worker::execute(request).await;
+        return crate::worker::execute(crate::protocol::WorkerRequest::Direct(request)).await;
     }
     let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
         return WorkerResponse::Failure {
@@ -95,4 +97,13 @@ pub async fn execute_program_batch(
         &mut runmat_meshing_execution::NoopMeshingProgress,
         limits,
     )
+}
+
+pub async fn execute_graph_batch(
+    submission: GraphBatchSubmission,
+    job_id: runmat_execution::JobId,
+) -> WorkerResponse {
+    let mut request = submission.request;
+    request.job_id = Some(job_id);
+    crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
 }

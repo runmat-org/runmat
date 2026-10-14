@@ -81,17 +81,50 @@ fn native_metadata_finds_nonfirst_function_class_without_script_entrypoint() {
         FunctionId(3),
         bound_function(3, vec![native_class("VmNativeBoundOnly", None)]),
     );
-    let before = runmat_runtime::class_registry::class_registry_generation();
+    let runmat_runtime::class_registry::ClassRegistryRevision::Current(before) =
+        runmat_runtime::class_registry::class_registry_generation()
+    else {
+        panic!("metadata publication must observe the current registry");
+    };
     prepare_native_execution_metadata(&bytecode).expect("publish bound metadata");
     assert!(bytecode.instructions.is_empty());
     assert_eq!(
         runmat_runtime::class_registry::class_registry_generation(),
-        before + 2
+        runmat_runtime::class_registry::ClassRegistryRevision::Current(before + 2)
     );
     let identity = runmat_types::ClassIdentity::new("VmNativeSecondOnly").unwrap();
     assert!(runmat_runtime::class_registry::get_class(&identity).is_some());
     let bound_only = runmat_types::ClassIdentity::new("VmNativeBoundOnly").unwrap();
     assert!(runmat_runtime::class_registry::get_class(&bound_only).is_some());
+}
+
+#[test]
+fn metadata_scan_uses_a_separate_admitted_registry_component() {
+    let bytecode = Bytecode::empty();
+    let registry = FunctionRegistry::new(HashMap::from([(
+        FunctionId(17),
+        bound_function(
+            17,
+            vec![native_class("VmAdmittedComponentClass", Some("handle"))],
+        ),
+    )]));
+    let class = runmat_types::ClassIdentity::new("VmAdmittedComponentClass").unwrap();
+    assert!(bytecode.function_registry.functions.is_empty());
+    assert!(bytecode.bound_functions.is_empty());
+    super::native_metadata::prepare_execution_metadata(
+        &bytecode,
+        registry
+            .functions
+            .iter()
+            .map(|(id, function)| (id.0, 0, function)),
+    )
+    .expect("install class from the separate admitted registry");
+    assert_eq!(
+        runmat_runtime::class_registry::get_class(&class)
+            .expect("admitted registry class")
+            .parent,
+        Some(runmat_types::standard::HANDLE.owned())
+    );
 }
 
 #[test]
@@ -114,11 +147,15 @@ fn native_metadata_merges_partial_top_and_bound_classes_once_in_dependency_order
             bound_function(2, vec![native_class("VmNativePartialParent", None)]),
         ),
     ]));
-    let before = runmat_runtime::class_registry::class_registry_generation();
+    let runmat_runtime::class_registry::ClassRegistryRevision::Current(before) =
+        runmat_runtime::class_registry::class_registry_generation()
+    else {
+        panic!("metadata publication must observe the current registry");
+    };
     prepare_native_execution_metadata(&bytecode).expect("publish merged metadata");
     assert_eq!(
         runmat_runtime::class_registry::class_registry_generation(),
-        before + 3,
+        runmat_runtime::class_registry::ClassRegistryRevision::Current(before + 3),
         "duplicate top-level declaration must not be registered twice"
     );
     let child = runmat_types::ClassIdentity::new("VmNativePartialChild").unwrap();
@@ -178,5 +215,49 @@ fn native_metadata_rejects_superclass_cycle_before_publication() {
     assert_eq!(
         runmat_runtime::class_registry::class_registry_generation(),
         before
+    );
+}
+
+#[test]
+fn native_metadata_batch_does_not_publish_earlier_class_before_later_sealed_parent_failure() {
+    let mut bytecode = Bytecode::empty();
+    bytecode.function_registry = FunctionRegistry::new(HashMap::from([
+        (
+            FunctionId(1),
+            bound_function(1, vec![native_class("VmNativeAtomicEarlier", None)]),
+        ),
+        (
+            FunctionId(2),
+            bound_function(
+                2,
+                vec![native_class(
+                    "VmNativeAtomicLater",
+                    Some("VmNativeAtomicSealed"),
+                )],
+            ),
+        ),
+        (
+            FunctionId(3),
+            bound_function(3, {
+                let mut parent = native_class("VmNativeAtomicSealed", None);
+                if let Instr::RegisterClass { is_sealed, .. } = &mut parent {
+                    *is_sealed = true;
+                }
+                vec![parent]
+            }),
+        ),
+    ]));
+    let before = runmat_runtime::class_registry::class_registry_generation();
+    let error = prepare_native_execution_metadata(&bytecode).expect_err("sealed parent");
+    assert_eq!(error.identifier(), Some("RunMat:ClassSealed"));
+    assert_eq!(
+        runmat_runtime::class_registry::class_registry_generation(),
+        before
+    );
+    assert!(
+        runmat_runtime::class_registry::get_class(&runmat_types::ClassIdentity::from(
+            "VmNativeAtomicEarlier"
+        ))
+        .is_none()
     );
 }

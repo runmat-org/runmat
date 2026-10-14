@@ -126,7 +126,7 @@ fn retained_private_name_executes_old_body_after_same_id_republication() {
             runtime.clone(),
         ))
         .expect("leased caller executes private name");
-        assert_eq!(old.into_values(), vec![Value::Num(33.0)]);
+        assert_eq!(old.as_slice(), &[Value::Num(33.0)]);
         let current = futures::executor::block_on(invoke_semantic_function_value_in_context(
             2,
             &[],
@@ -135,6 +135,6 @@ fn retained_private_name_executes_old_body_after_same_id_republication() {
             runtime,
         ))
         .expect("numeric current body remains published");
-        assert_eq!(current.into_values(), vec![Value::Num(22.0)]);
+        assert_eq!(current.as_slice(), &[Value::Num(22.0)]);
     });
 }

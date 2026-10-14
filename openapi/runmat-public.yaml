@@ -7914,6 +7914,9 @@ components:
         runKeyEnvelope:
           type: string
           description: Base64url-encoded canonical run-key envelope for the verified worker.
+        readyV1:
+          type: boolean
+          description: Opt in this exact allocation to encrypted worker ReadyV1 discovery.
       additionalProperties: false
     BeginTransferRequest:
       type: object
@@ -8528,6 +8531,9 @@ components:
           type: string
         runId:
           type: string
+        readyV1:
+          type: boolean
+          description: This Server accepts allocation-bound ReadyV1 intent.
     DriverHeartbeatRequest:
       type: object
       required:
@@ -8592,6 +8598,11 @@ components:
           type: string
         driverResources:
           $ref: '#/components/schemas/ResourceRequestBody'
+        driverAcceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
+          nullable: true
         endpointFingerprint:
           type: string
         fencingToken:
@@ -14229,6 +14240,9 @@ components:
         relayTicket:
           type: string
           description: Single-use, short-lived capability for the allocation-owned worker.
+        readyV1:
+          type: boolean
+          description: Present only when the authoritative driver opted in this allocation.
         runId:
           type: string
         runKeyEnvelope:

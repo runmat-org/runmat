@@ -27,19 +27,20 @@ fn logical_trigonometry_uses_admitted_double_host_semantics_and_exact_owner() {
                     assert!(result.unwrap_err().message().contains("compatibility"));
                     continue;
                 }
-                let Value::GpuTensor(output) = result.unwrap() else {
+                let result = result.unwrap();
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("resident Double expected");
                 };
                 assert_eq!(output.device_id(), input.device_id());
                 assert_eq!(
-                    runmat_accelerate_api::handle_precision(&output),
+                    runmat_accelerate_api::handle_precision(output),
                     Some(ProviderPrecision::F64)
                 );
-                assert!(!runmat_accelerate_api::handle_is_logical(&output));
-                let Value::Tensor(host) = futures::executor::block_on(
-                    gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
-                )
-                .unwrap() else {
+                assert!(!runmat_accelerate_api::handle_is_logical(output));
+                let Value::Tensor(host) =
+                    futures::executor::block_on(gpu_helpers::gather_value_async(result.value()))
+                        .unwrap()
+                else {
                     panic!("Double tensor expected");
                 };
                 assert_eq!(host.shape(), vec![2, 1]);

@@ -151,6 +151,103 @@ fn foreground_participates_without_reentering_host_idle_driver() {
 }
 
 #[test]
+fn child_session_participates_in_parent_poll_with_distinct_task_owner() {
+    let parent = RuntimeLocalTaskSupervisor::new();
+    let factory = parent.child_scope_factory();
+    let child = factory.create().expect("parent admits child");
+    let parent_id = owner();
+    let child_id = owner();
+    let parent_port = parent.submission_port(parent_id);
+    let child_port = child.submission_port(child_id);
+    assert!(!parent.owner_token().same(&child.owner_token()));
+    assert!(child_port
+        .spawn_local(parent_id, Box::pin(async {}))
+        .is_err());
+    let lease = child_port
+        .spawn_local(child_id, Box::pin(async { tokio::task::yield_now().await }))
+        .expect("child task");
+    let outcome = host()
+        .block_on(parent.drive_until(async {
+            child
+                .participate_foreground(lease.join())
+                .await
+                .expect("child uses active parent driver")
+        }))
+        .expect("parent drive");
+    assert_eq!(outcome, RuntimeLocalTaskOutcome::Completed);
+    child.shutdown();
+    assert!(child_port
+        .spawn_local(child_id, Box::pin(async {}))
+        .is_err());
+    let parent_lease = parent_port
+        .spawn_local(parent_id, Box::pin(async {}))
+        .expect("child close does not close parent");
+    assert_eq!(
+        host()
+            .block_on(parent.drive_until(parent_lease.join()))
+            .unwrap(),
+        RuntimeLocalTaskOutcome::Completed
+    );
+}
+
+#[test]
+fn child_cannot_start_second_drive_while_parent_drive_is_pending() {
+    let parent = RuntimeLocalTaskSupervisor::new();
+    let child = parent
+        .child_scope_factory()
+        .create()
+        .expect("child admitted");
+    let mut idle = Box::pin(parent.drive_until(std::future::pending::<()>()));
+    let wake = futures::task::noop_waker();
+    let mut context = Context::from_waker(&wake);
+    assert!(idle.as_mut().poll(&mut context).is_pending());
+    assert!(futures::executor::block_on(child.participate_foreground(async {})).is_err());
+    drop(idle);
+    assert!(futures::executor::block_on(child.participate_foreground(async {})).is_ok());
+}
+
+#[test]
+fn parent_retirement_cancels_child_tasks_and_revokes_weak_factory() {
+    let parent = RuntimeLocalTaskSupervisor::new();
+    let factory = parent.child_scope_factory();
+    let child = factory.create().expect("child admitted");
+    let child_id = owner();
+    let port = child.submission_port(child_id);
+    let drops = Rc::new(Cell::new(0));
+    let lease = port
+        .spawn_local(
+            child_id,
+            Box::pin(PendingDrop {
+                drops: drops.clone(),
+                _pinned: PhantomPinned,
+            }),
+        )
+        .expect("pending child work");
+    parent.shutdown();
+    assert_eq!(drops.get(), 1);
+    assert_eq!(lease.outcome(), Some(RuntimeLocalTaskOutcome::Cancelled));
+    assert!(port.spawn_local(child_id, Box::pin(async {})).is_err());
+    assert!(factory.create().is_err());
+    drop(child);
+    drop(parent);
+    assert!(factory.create().is_err());
+}
+
+#[test]
+fn weak_child_factory_does_not_retain_parent_or_accumulate_retired_children() {
+    let parent = RuntimeLocalTaskSupervisor::new();
+    let factory = parent.child_scope_factory();
+    for _ in 0..3 {
+        let child = factory.create().expect("child admitted");
+        assert_eq!(parent.registered_child_count(), 1);
+        drop(child);
+        assert_eq!(parent.registered_child_count(), 0);
+    }
+    drop(parent);
+    assert!(factory.create().is_err());
+}
+
+#[test]
 fn callback_participates_under_the_exact_active_local_driver() {
     let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
     let owner = owner();
@@ -410,3 +507,5 @@ fn pending_task_does_not_keep_its_runtime_session_alive_after_shutdown() {
         "task must not cycle through its weak service port"
     );
 }
+
+mod deferred_admission;

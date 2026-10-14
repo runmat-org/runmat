@@ -8,6 +8,7 @@ pub use contract::*;
 pub(super) use inference::infer_insert;
 
 pub const INSERT_BEFORE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "insertBefore",

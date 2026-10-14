@@ -136,15 +136,11 @@ impl WgpuProvider {
                 self.create_storage_buffer(emission, packed.len(), "runmat-fft-host-fallback-out")?;
             match self.precision {
                 NumericPrecision::F64 => {
-                    emission
-                        .queue()
-                        .write_buffer(buffer.as_ref(), 0, cast_slice(&packed))
+                    emission.write_buffer(buffer.as_ref(), 0, cast_slice(&packed))
                 }
                 NumericPrecision::F32 => {
                     let packed32: Vec<f32> = packed.iter().map(|&v| v as f32).collect();
-                    emission
-                        .queue()
-                        .write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
+                    emission.write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
                 }
             }
             Ok(buffer)

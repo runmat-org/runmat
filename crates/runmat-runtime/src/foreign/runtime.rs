@@ -4,6 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
+use crate::execution::RootedValueSequence;
 use runmat_types::InteropManifest;
 use runmat_value::ValueSequence;
 
@@ -16,7 +17,15 @@ use crate::context::{ForeignCall, RuntimeContext, RuntimeForeignService};
 use crate::RuntimeError;
 
 pub type ForeignAdapterFuture =
-    Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>>;
+    Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static>>;
+
+pub(super) fn root_adapter_result(
+    result: Result<ValueSequence, RuntimeError>,
+) -> Result<RootedValueSequence, RuntimeError> {
+    result.and_then(|sequence| {
+        RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
+    })
+}
 
 pub trait ForeignAdapter {
     fn visit_retained_values(
@@ -114,16 +123,85 @@ impl ForeignRuntime {
     }
 
     pub fn admit(&self, manifest: &InteropManifest) -> Result<InteropAdmissionPlan, RuntimeError> {
-        let adapters = self
-            .adapters
+        let adapters = self.adapter_descriptors();
+        self.admit_with_descriptors(manifest, &adapters)
+    }
+
+    /// Admit against the exact staged MEX catalog without exposing its names
+    /// to the live owner before the caller's publication boundary.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn admit_with_prepared_mex_catalog(
+        &self,
+        manifest: &InteropManifest,
+        catalog: &super::PreparedMexArtifactCatalog,
+    ) -> Result<InteropAdmissionPlan, RuntimeError> {
+        let mut adapters = self.adapter_descriptors();
+        if let Some(mex) = adapters.get_mut(runmat_mex::MEX_ADAPTER_ID) {
+            mex.artifact_identities = catalog.artifact_identities().cloned().collect();
+        }
+        self.admit_with_descriptors(manifest, &adapters)
+    }
+
+    /// Admit an exact staged replacement inventory. Families without incoming
+    /// or prior project-owned artifacts keep their live adapter state intact.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn admit_with_prepared_selected_replacements(
+        &self,
+        manifest: &InteropManifest,
+        native: Option<&super::PreparedNativeProjectReplacement<'_>>,
+        mex: &super::PreparedMexArtifactCatalog,
+        java: Option<&super::PreparedJavaProjectReplacement<'_>>,
+        python: Option<&super::PreparedPythonProjectReplacement<'_>>,
+    ) -> Result<InteropAdmissionPlan, RuntimeError> {
+        let mut adapters = self.adapter_descriptors();
+        if let (Some(descriptor), Some(native)) = (
+            adapters.get_mut(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID),
+            native,
+        ) {
+            descriptor.artifact_identities = native.artifact_identities().cloned().collect();
+        }
+        if let Some(descriptor) = adapters.get_mut(runmat_mex::MEX_ADAPTER_ID) {
+            descriptor.artifact_identities = mex.artifact_identities().cloned().collect();
+        }
+        if let (Some(descriptor), Some(java)) =
+            (adapters.get_mut(runmat_java::JAVA_ADAPTER_ID), java)
+        {
+            descriptor.artifact_identities = java
+                .artifact_identities()
+                .map(|identity| {
+                    runmat_types::ForeignArtifactIdentity::new(identity.to_string()).map_err(
+                        |error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()),
+                    )
+                })
+                .collect::<Result<_, _>>()?;
+        }
+        if let (Some(descriptor), Some(python)) =
+            (adapters.get_mut(runmat_python::PYTHON_ADAPTER_ID), python)
+        {
+            descriptor.artifact_identities = python.artifact_identities().cloned().collect();
+        }
+        self.admit_with_descriptors(manifest, &adapters)
+    }
+
+    fn adapter_descriptors(
+        &self,
+    ) -> BTreeMap<runmat_types::ForeignAdapterId, ForeignAdapterDescriptor> {
+        self.adapters
             .borrow()
             .values()
             .map(|adapter| {
                 let descriptor = adapter.descriptor();
                 (descriptor.adapter.clone(), descriptor)
             })
-            .collect::<BTreeMap<_, _>>();
-        let plan = admit_interop_manifest(manifest, &adapters, self.platform)?;
+            .collect()
+    }
+
+    fn admit_with_descriptors(
+        &self,
+        manifest: &InteropManifest,
+        adapters: &BTreeMap<runmat_types::ForeignAdapterId, ForeignAdapterDescriptor>,
+    ) -> Result<InteropAdmissionPlan, RuntimeError> {
+        let plan = admit_interop_manifest(manifest, adapters, self.platform)?;
         for adapter in &plan.adapters {
             let isolated = self
                 .adapters
@@ -171,6 +249,12 @@ impl RuntimeForeignService for ForeignRuntime {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
+        if let Some(owner) = context.command_profiling() {
+            owner.mark_unproven_device_route();
+        }
+        runmat_accelerate_api::observe_execution_device_effect(
+            runmat_accelerate_api::ExecutionDeviceEffect::ForeignExecution,
+        );
         let adapter = self.adapters.borrow().get(call.adapter.as_str()).cloned();
         let telemetry = Rc::clone(&self.telemetry);
         Box::pin(async move {
@@ -257,8 +341,10 @@ mod tests {
 
         fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
             Box::pin(async {
-                ValueSequence::single(runmat_value::Value::Num(1.0))
-                    .map_err(|error| RuntimeError::new(error.to_string()))
+                root_adapter_result(
+                    ValueSequence::single(runmat_value::Value::Num(1.0))
+                        .map_err(|error| RuntimeError::new(error.to_string())),
+                )
             })
         }
     }
@@ -310,7 +396,7 @@ mod tests {
 
         fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
             self.invoked.set(true);
-            Box::pin(async { Ok(ValueSequence::empty()) })
+            Box::pin(async { root_adapter_result(Ok(ValueSequence::empty())) })
         }
     }
 

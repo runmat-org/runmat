@@ -1,3 +1,4 @@
+use runmat_gc::Trace;
 use runmat_value::{Value, ValueSequence};
 
 use super::ExecutionServiceError;
@@ -7,13 +8,16 @@ mod roots;
 use roots::RetainedValueRoots;
 pub(crate) use roots::{RootedValueChildren, RootedValueHandles, RootedValueMember};
 
-/// A completed executor-owned value sequence whose reachable managed handles
-/// remain GC roots until the completion record is discarded.
+/// A completed executor-owned value whose reachable managed handles remain GC
+/// roots until the completion record is discarded or transferred to a sink.
 #[derive(Clone, Debug)]
-pub struct RootedValueSequence {
-    value: ValueSequence,
+pub struct RootedResult<T: Trace> {
+    value: T,
     _roots: RootedValueHandles,
 }
+
+pub type RootedValueSequence = RootedResult<ValueSequence>;
+pub type RootedValue = RootedResult<Value>;
 
 /// Owned values whose reachable managed handles remain roots while an async
 /// operation retains the batch. This is the canonical input counterpart to
@@ -32,6 +36,15 @@ pub struct RootedValueLease {
 }
 
 impl RootedValueLease {
+    pub fn for_traced(value: &impl Trace) -> Result<Self, ExecutionServiceError> {
+        let roots = RootedValueHandles::for_traced(value).map_err(|error| {
+            ExecutionServiceError::Infrastructure(format!(
+                "could not root pending host result: {error}"
+            ))
+        })?;
+        Ok(Self { _roots: roots })
+    }
+
     pub fn for_values<'a>(
         values: impl Iterator<Item = &'a Value>,
     ) -> Result<Self, ExecutionServiceError> {
@@ -44,12 +57,7 @@ impl RootedValueLease {
     }
 
     pub fn for_sequence(value: &ValueSequence) -> Result<Self, ExecutionServiceError> {
-        let roots = RootedValueHandles::for_traced(value).map_err(|error| {
-            ExecutionServiceError::Infrastructure(format!(
-                "could not root pending host result: {error}"
-            ))
-        })?;
-        Ok(Self { _roots: roots })
+        Self::for_traced(value)
     }
 }
 
@@ -86,6 +94,14 @@ impl RootedValuesBuilder {
         self.member_roots.push(roots);
     }
 
+    /// Transfer a completed value's existing roots into this batch without
+    /// retiring them or registering a duplicate set of roots.
+    pub fn push_owned(&mut self, value: RootedValue) {
+        let RootedResult { value, _roots } = value;
+        self.values.push(value);
+        self.member_roots.push(RetainedValueRoots::direct(_roots));
+    }
+
     pub fn finish(self) -> Result<RootedValues, ExecutionServiceError> {
         Ok(RootedValues {
             values: self.values,
@@ -111,13 +127,45 @@ impl RootedValues {
         &self.values
     }
 
-    pub fn into_values(self) -> Vec<Value> {
-        self.values
+    /// Publish retained values into a registered sink before their temporary
+    /// root lease can notify retirement observers.
+    pub fn with_owned_values<R>(self, publish: impl FnOnce(Vec<Value>) -> R) -> R {
+        let Self { values, _roots } = self;
+        let result = publish(values);
+        drop(_roots);
+        result
+    }
+
+    /// Keep the input lease through an effectful consumer. The returned value
+    /// must itself be rooted before this future completes if it can contain
+    /// managed outputs; this method transfers only the argument ownership.
+    pub async fn with_owned_values_async<R, F>(self, consume: impl FnOnce(Vec<Value>) -> F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        let Self { values, _roots } = self;
+        let result = consume(values).await;
+        drop(_roots);
+        result
     }
 }
 
-impl RootedValueSequence {
-    pub fn new(value: ValueSequence) -> Result<Self, ExecutionServiceError> {
+impl std::ops::Deref for RootedValues {
+    type Target = [Value];
+
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
+
+impl PartialEq<Vec<Value>> for RootedValues {
+    fn eq(&self, other: &Vec<Value>) -> bool {
+        &self.values == other
+    }
+}
+
+impl<T: Trace> RootedResult<T> {
+    pub fn new(value: T) -> Result<Self, ExecutionServiceError> {
         let roots = RootedValueHandles::for_traced(&value).map_err(|error| {
             ExecutionServiceError::Infrastructure(format!(
                 "could not root completed future output: {error}"
@@ -129,44 +177,78 @@ impl RootedValueSequence {
         })
     }
 
-    pub fn value(&self) -> &ValueSequence {
+    pub fn value(&self) -> &T {
         &self.value
     }
 
-    /// Transfer the completed values to an immediate synchronous consumer.
-    /// No effectful work may occur between this handoff and adoption by that
-    /// consumer; the explicit roots retire only as the owned sequence moves
-    /// out of this completion record.
-    pub fn into_sequence(self) -> ValueSequence {
-        self.value
+    /// Transfer an owned value and its existing root registration separately
+    /// into an iterative effectful transformation. The raw value must remain
+    /// alongside this lease until a successor has been rooted or published.
+    pub(crate) fn into_value_and_lease(self) -> (T, RootedValueLease) {
+        let Self { value, _roots } = self;
+        (value, RootedValueLease { _roots })
     }
 
-    /// Let a synchronous output codec consume the sequence while its exact
-    /// managed roots remain live through all codec allocations and effects.
-    pub fn with_owned_sequence<R>(self, consume: impl FnOnce(ValueSequence) -> R) -> R {
+    /// Map an owned result while retaining its old managed roots. The new
+    /// result is rooted before old roots can retire or notify observers.
+    pub fn try_map_owned<U: Trace, E>(
+        self,
+        map: impl FnOnce(T) -> Result<U, E>,
+        root_error: impl FnOnce(ExecutionServiceError) -> E,
+    ) -> Result<RootedResult<U>, E> {
+        let Self { value, _roots } = self;
+        let mapped = map(value)?;
+        let rooted = RootedResult::new(mapped).map_err(root_error)?;
+        drop(_roots);
+        Ok(rooted)
+    }
+
+    /// Consume into a synchronous sink that publishes its own roots or fully
+    /// encodes the value before this closure returns. Returning a raw managed
+    /// value from the closure is not a valid ownership transfer.
+    pub fn with_owned<R>(self, consume: impl FnOnce(T) -> R) -> R {
         let Self { value, _roots } = self;
         let result = consume(value);
         drop(_roots);
         result
     }
+
+    /// Keep this result rooted while an effectful consumer awaits. The
+    /// consumer must complete a terminal codec or publish a new rooted owner
+    /// before its future resolves; returning raw managed output is invalid.
+    pub async fn with_owned_async<R, F>(self, consume: impl FnOnce(T) -> F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        let Self { value, _roots } = self;
+        let result = consume(value).await;
+        drop(_roots);
+        result
+    }
 }
 
-impl std::ops::Deref for RootedValueSequence {
-    type Target = ValueSequence;
+impl RootedResult<ValueSequence> {
+    pub fn with_owned_sequence<R>(self, consume: impl FnOnce(ValueSequence) -> R) -> R {
+        self.with_owned(consume)
+    }
+}
+
+impl<T: Trace> std::ops::Deref for RootedResult<T> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.value
     }
 }
 
-impl PartialEq for RootedValueSequence {
+impl<T: Trace + PartialEq> PartialEq for RootedResult<T> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl PartialEq<ValueSequence> for RootedValueSequence {
-    fn eq(&self, other: &ValueSequence) -> bool {
+impl<T: Trace + PartialEq> PartialEq<T> for RootedResult<T> {
+    fn eq(&self, other: &T) -> bool {
         &self.value == other
     }
 }
@@ -181,6 +263,8 @@ impl PartialEq<RootedValueSequence> for ValueSequence {
 mod tests {
     use super::*;
     use runmat_value::{HandleRef, Value};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn unmanaged_values_need_no_shared_root_owner() {
@@ -214,6 +298,126 @@ mod tests {
             drop(rooted);
             runmat_gc::gc_collect_major().expect("collect after completion discard");
             assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn mapped_completion_registers_new_owner_before_old_owner_retires() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("mapped".into()))
+                .expect("allocate rooted payload");
+            let handle = initial.handle();
+            let value = Value::HandleObject(HandleRef {
+                class_name: "MappedCompletionHandle".into(),
+                target: handle,
+                valid: true,
+            });
+            let source = RootedValue::new(value).expect("root source completion");
+            initial
+                .unroot()
+                .expect("transfer initial root to source completion");
+
+            let destination = source
+                .try_map_owned(
+                    |value| {
+                        runmat_gc::gc_collect_major().expect("collect during owner mapping");
+                        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                        ValueSequence::single(value)
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                )
+                .expect("map while source owner is live");
+            runmat_gc::gc_collect_major().expect("collect with destination owner");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("destination remains rooted"),
+                Value::String("mapped".into())
+            );
+
+            drop(destination);
+            runmat_gc::gc_collect_major().expect("collect after final owner retires");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn separated_value_and_lease_keep_managed_target_live_through_successor_rooting() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("leased".into()))
+                .expect("allocate rooted payload");
+            let handle = initial.handle();
+            let source = RootedValue::new(Value::HandleObject(HandleRef {
+                class_name: "LeasedCompletionHandle".into(),
+                target: handle,
+                valid: true,
+            }))
+            .expect("root source completion");
+            initial.unroot().expect("transfer setup root");
+
+            let (value, lease) = source.into_value_and_lease();
+            runmat_gc::gc_collect_major().expect("collect with separated lease");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("lease retains target"),
+                Value::String("leased".into())
+            );
+            let destination = RootedValue::new(value).expect("root successor");
+            drop(lease);
+            runmat_gc::gc_collect_major().expect("collect after source lease retires");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("successor retains target"),
+                Value::String("leased".into())
+            );
+            drop(destination);
+            runmat_gc::gc_collect_major().expect("collect after successor retires");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn mapped_completion_survives_collecting_root_retirement_observer() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("handoff".into()))
+                .expect("allocate rooted payload");
+            let handle = initial.handle();
+            let source = RootedValue::new(Value::HandleObject(HandleRef {
+                class_name: "MappedCompletionHandle".into(),
+                target: handle,
+                valid: true,
+            }))
+            .expect("root source completion");
+            initial.unroot().expect("transfer root to source");
+
+            let observed = Arc::new(AtomicBool::new(false));
+            let observed_in_callback = Arc::clone(&observed);
+            let identity = (handle.addr(), handle.epoch());
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                let runmat_gc::RootRetirement::Explicit(handle) = event else {
+                    return;
+                };
+                if (handle.addr(), handle.epoch()) != identity
+                    || observed_in_callback.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                runmat_gc::gc_collect_major().expect("collect during old-root retirement");
+                assert_eq!(
+                    runmat_gc::gc_clone_value(&handle).expect("destination root is live"),
+                    Value::String("handoff".into())
+                );
+            }))
+            .expect("install retirement observer");
+
+            let destination = source
+                .try_map_owned(
+                    |value| {
+                        ValueSequence::single(value)
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                )
+                .expect("map with overlapping roots");
+            assert!(observed.load(Ordering::SeqCst));
+            assert_eq!(destination.as_slice().len(), 1);
         });
     }
 
@@ -309,6 +513,44 @@ mod tests {
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());
             drop(clone);
             runmat_gc::gc_collect_major().expect("collect after final completion owner");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn completed_value_transfers_into_batch_without_root_retirement() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("owned member".into()))
+                .expect("allocate managed payload");
+            let handle = initial.handle();
+            let value = RootedValue::new(Value::HandleObject(HandleRef {
+                class_name: "CompletedHandle".into(),
+                target: handle,
+                valid: true,
+            }))
+            .expect("root completed value");
+            initial.unroot().expect("transfer allocation root");
+            let identity = (handle.addr(), handle.epoch());
+            let retirements = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count = std::sync::Arc::clone(&retirements);
+            let _observer =
+                runmat_gc::RootRetirementObserver::register(std::sync::Arc::new(move |event| {
+                    if let runmat_gc::RootRetirement::Explicit(handle) = event {
+                        if (handle.addr(), handle.epoch()) == identity {
+                            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                }))
+                .expect("observe exact root retirement");
+            let mut builder = RootedValuesBuilder::with_capacity(1);
+            builder.push_owned(value);
+            let values = builder.finish().expect("finish owned batch");
+            assert_eq!(retirements.load(std::sync::atomic::Ordering::SeqCst), 0);
+            runmat_gc::gc_collect_major().expect("collect with transferred owner");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(values);
+            assert_eq!(retirements.load(std::sync::atomic::Ordering::SeqCst), 1);
+            runmat_gc::gc_collect_major().expect("collect after batch retirement");
             assert!(runmat_gc::gc_clone_value(&handle).is_err());
         });
     }

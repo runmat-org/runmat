@@ -43,6 +43,7 @@ pub(super) const fn entry(
     integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "math/linalg/ops",

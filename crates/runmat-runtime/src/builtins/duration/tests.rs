@@ -2,7 +2,11 @@ use super::builtins::*;
 use super::*;
 use runmat_builtins::{BuiltinParamArity, BuiltinParamType};
 
-async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+async fn duration_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::builtins::duration_subsref(obj, subscript).await
 }
@@ -12,7 +16,7 @@ async fn duration_subsasgn(
     kind: String,
     payload: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::builtins::duration_subsasgn(obj, subscript, rhs).await
 }

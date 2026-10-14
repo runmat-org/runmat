@@ -354,6 +354,7 @@ fn exist_method_uses_registered_class_metadata_including_inheritance() {
             access: MemberAccess::Public,
             function_name: "parent_only_impl".into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {

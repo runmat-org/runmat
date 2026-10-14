@@ -3,16 +3,54 @@ use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::shared::build_expanded_args_from_specs;
-use crate::call::{execute_callable_descriptor, root_values};
+use crate::call::{execute_callable_descriptor, execute_callable_descriptor_owned, root_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
+use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor, CallableTarget};
 use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
 use runmat_value::{MException, Value};
+
+/// Select only a compiler-enumerated instruction reference. A selected graph
+/// may contain the same numeric FunctionId in several admitted V3 units; the
+/// site and current exact VM body, not that number, choose its bound target.
+pub(super) fn selected_static_call_binding(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    instruction: &crate::bytecode::Instr,
+    pc: usize,
+    function: runmat_hir::FunctionId,
+) -> Result<Option<runmat_value::BoundFunctionBinding>, RuntimeError> {
+    if !runtime.has_selected_static_site_resolver() {
+        return Ok(None);
+    }
+    let sites = crate::bytecode::program::instruction_reference_sites(instruction, pc)
+        .map_err(|message| crate::interpreter::errors::mex("StaticSiteInvalid", message))?;
+    let mut matching = sites
+        .into_iter()
+        .filter(|(_, referenced, _)| *referenced == function);
+    let Some((site, _, kind)) = matching.next() else {
+        return Ok(None);
+    };
+    if matching.next().is_some() {
+        return Err(crate::interpreter::errors::mex(
+            "StaticSiteAmbiguous",
+            "one instruction repeats a selected function reference",
+        ));
+    }
+    let selected = runtime
+        .selected_static_binding(site)
+        .map_err(|message| crate::interpreter::errors::mex("StaticImportUnavailable", message))?;
+    if selected.is_none() && kind == crate::bytecode::program::FunctionReferenceKind::External {
+        return Err(crate::interpreter::errors::mex(
+            "StaticImportUnavailable",
+            "external call has no exact selected graph target",
+        ));
+    }
+    Ok(selected)
+}
 
 #[path = "calls/dispatch.rs"]
 mod dispatch;
@@ -21,20 +59,26 @@ pub(super) use dispatch::{dispatch_call, CallDispatchContext};
 mod user_preparation;
 
 pub enum BuiltinHandling {
-    Completed(runmat_value::ValueSequence),
+    Completed(runmat_runtime::execution::RootedValueSequence),
     Caught,
     Uncaught(Box<RuntimeError>),
 }
 
-pub enum MethodHandling {
-    Completed,
-    Outputs(runmat_value::ValueSequence),
-}
+/// `None` means the method handled publication itself; `Some` transfers its
+/// existing rooted output without inflating a two-variant enum.
+pub type MethodHandling = Option<runmat_runtime::execution::RootedValueSequence>;
 
 pub enum UserCallHandling {
-    Completed(runmat_value::ValueSequence),
+    Completed(runmat_runtime::execution::RootedValueSequence),
     Caught,
     Uncaught(Box<RuntimeError>),
+}
+
+pub(super) fn root_sequence(
+    sequence: runmat_value::ValueSequence,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    runmat_runtime::execution::RootedValueSequence::new(sequence)
+        .map_err(|error| error.into_runtime_error())
 }
 
 pub(super) fn publish_fixed_outputs(
@@ -55,6 +99,15 @@ pub(super) fn publish_fixed_outputs(
     Ok(())
 }
 
+pub(super) fn publish_rooted_fixed_outputs(
+    stack: &mut Vec<Value>,
+    sequence: runmat_runtime::execution::RootedValueSequence,
+    requested_outputs: impl std::borrow::Borrow<usize>,
+) -> Result<(), RuntimeError> {
+    sequence
+        .with_owned_sequence(|sequence| publish_fixed_outputs(stack, sequence, requested_outputs))
+}
+
 pub struct MethodExpandCallContext<'a> {
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
@@ -73,6 +126,7 @@ pub struct ExceptionRouteContext<'a> {
 
 pub struct BuiltinCallContext<'a> {
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
+    pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub arg_count: usize,
@@ -88,6 +142,7 @@ pub struct BuiltinCallContext<'a> {
 pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
+    pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     pub identity: CallableIdentity,
     pub bound: Option<runmat_value::BoundFunctionBinding>,
     pub fallback_policy: CallableFallbackPolicy,
@@ -99,9 +154,27 @@ pub struct UserCallContext<'a> {
     pub exception: ExceptionRouteContext<'a>,
 }
 
+/// Only a catalog-proven non-callback builtin may stay on the caller's poll
+/// stack. Semantic and lexical targets can re-enter the VM through their
+/// selected invoker; unknown effects therefore take the sibling continuation.
+fn descriptor_needs_continuation(descriptor: &CallableDescriptor) -> bool {
+    let CallableTarget::Resolved {
+        identity: CallableIdentity::Builtin(id),
+        ..
+    } = &descriptor.target
+    else {
+        return true;
+    };
+    let semantics = runmat_builtins::builtin_catalog_entry_by_name(&id.0)
+        .map(runmat_builtins::BuiltinCatalogEntry::legacy_semantics)
+        .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0));
+    semantics.is_none_or(|semantics| semantics.effects.host_callback || semantics.effects.unknown)
+}
+
 pub struct WorkspaceFirstCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
+    pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     pub workspace_name: &'a str,
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
@@ -174,7 +247,7 @@ pub async fn build_builtin_expand_multi_args(
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
@@ -183,7 +256,7 @@ pub async fn build_feval_expand_multi_args(
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
@@ -192,12 +265,12 @@ pub async fn build_user_function_expand_multi_args(
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
 pub fn handle_builtin_outcome(
-    result: Result<runmat_value::ValueSequence, RuntimeError>,
+    result: Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>,
     imported: ImportedBuiltinResolution,
     _output_hint: usize,
     _stack: &mut Vec<Value>,
@@ -249,6 +322,7 @@ async fn handle_builtin_call_inner(
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
         runtime,
+        process_driver,
         stack,
         name,
         arg_count,
@@ -270,7 +344,9 @@ async fn handle_builtin_call_inner(
     if call_builtins::is_vm_intrinsic_builtin(name) {
         let result = call_builtins::vm_intrinsic_builtin(stack, name, arg_count, invocation_arity);
         return handle_builtin_outcome(
-            result.and_then(runmat_runtime::call::arguments::adapt_legacy_builtin_result),
+            result
+                .and_then(runmat_runtime::call::arguments::adapt_legacy_builtin_result)
+                .and_then(root_sequence),
             ImportedBuiltinResolution::NotFound,
             requested_outputs,
             stack,
@@ -279,18 +355,26 @@ async fn handle_builtin_call_inner(
         );
     }
     if call_builtins::is_vm_dynamic_workspace_builtin(name) {
-        let result = call_builtins::vm_dynamic_workspace_builtin(
+        let result = call_builtins::vm_dynamic_workspace_builtin_with_driver(
             runtime,
             stack,
             name,
             arg_count,
             requested_outputs,
             function_registry,
-            source_id,
+            call_builtins::DynamicBuiltinSource {
+                source_id,
+                driver: process_driver,
+            },
         )
         .await;
         return handle_builtin_outcome(
-            result.and_then(runmat_runtime::call::arguments::adapt_legacy_builtin_result),
+            result.and_then(|result| {
+                result.try_map_owned(
+                    runmat_runtime::call::arguments::adapt_legacy_builtin_result,
+                    |error| error.into_runtime_error(),
+                )
+            }),
             ImportedBuiltinResolution::NotFound,
             requested_outputs,
             stack,
@@ -309,20 +393,11 @@ async fn handle_builtin_call_inner(
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
     let result =
-        crate::call::call_builtin_async_with_outputs(runtime, name, &args, requested_outputs).await;
-    let _result_roots = root_values(
-        result
-            .as_ref()
-            .ok()
-            .into_iter()
-            .flat_map(|sequence| sequence.iter()),
-    )?;
-    let imported =
-        call_builtins::resolve_imported_builtin(runtime, name, imports, &args, requested_outputs)
-            .await?;
+        call_builtins::call_builtin_or_imported(runtime, name, imports, &args, requested_outputs)
+            .await;
     handle_builtin_outcome(
         result,
-        imported,
+        ImportedBuiltinResolution::NotFound,
         requested_outputs,
         stack,
         exception,
@@ -339,6 +414,7 @@ pub async fn handle_prepared_user_function_call(
     let UserCallContext {
         stack: _,
         runtime,
+        process_driver,
         identity,
         bound,
         fallback_policy,
@@ -351,8 +427,6 @@ pub async fn handle_prepared_user_function_call(
     } = ctx;
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
-    let _function_input_callsite_guard =
-        runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
     let ExceptionRouteContext {
         try_stack,
         vars,
@@ -360,6 +434,8 @@ pub async fn handle_prepared_user_function_call(
         pc,
     } = exception;
 
+    let preparation_callsite_guard =
+        runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans.clone());
     let prepared = user_preparation::prepare(
         identity,
         bound,
@@ -369,13 +445,56 @@ pub async fn handle_prepared_user_function_call(
         current_class_context.as_ref(),
         imports,
     )?;
-    let _access_guard = if prepared.route == user_preparation::UserCallRoute::StaticMethod {
-        None
+    drop(preparation_callsite_guard);
+    let result = if let Some(driver) =
+        process_driver.filter(|_| descriptor_needs_continuation(&prepared.descriptor))
+    {
+        let callsite = call_arg_spans.map(|arg_spans| runmat_runtime::callsite::CallsiteInfo {
+            source_id,
+            arg_spans,
+        });
+        let class_context = (prepared.route != user_preparation::UserCallRoute::StaticMethod)
+            .then_some(current_class_context)
+            .flatten();
+        let selected_runtime = runtime.clone();
+        let scoped_runtime = selected_runtime.clone();
+        let descriptor_future =
+            execute_callable_descriptor_owned(selected_runtime, prepared.descriptor);
+        // The descriptor owns its target and arguments. Polling it as a sibling
+        // keeps a nested semantic callback off the caller's interpreter stack.
+        let child = scoped_runtime.scope(async move {
+            let call = async move {
+                let output = descriptor_future.await?;
+                let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
+                    .map_err(|error| error.into_runtime_error())?;
+                Ok((output, captures))
+            };
+            let mut call = Box::pin(runmat_runtime::callsite::with_function_input_callsite(
+                callsite, call,
+            ));
+            std::future::poll_fn(move |context| {
+                let _access_guard = class_context
+                    .clone()
+                    .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+                std::future::Future::poll(call.as_mut(), context)
+            })
+            .await
+        });
+        match driver.enqueue(child) {
+            Ok(ticket) => ticket.await.map(|(output, _captures)| output),
+            Err(error) => Err(error),
+        }
     } else {
-        current_class_context
-            .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+        let _function_input_callsite_guard =
+            runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
+        let _access_guard = if prepared.route == user_preparation::UserCallRoute::StaticMethod {
+            None
+        } else {
+            current_class_context
+                .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+        };
+        execute_callable_descriptor(runtime, prepared.descriptor).await
     };
-    let result = execute_callable_descriptor(runtime, prepared.descriptor).await;
     if prepared.route == user_preparation::UserCallRoute::StaticMethod {
         return result.map(UserCallHandling::Completed);
     }
@@ -415,6 +534,7 @@ pub async fn handle_workspace_first_prepared_call(
     let WorkspaceFirstCallContext {
         stack,
         runtime,
+        process_driver,
         workspace_name,
         identity,
         fallback_policy,
@@ -430,10 +550,10 @@ pub async fn handle_workspace_first_prepared_call(
 
     if let Some(base) = crate::runtime::workspace::workspace_lookup(workspace_name) {
         if bare_identifier && args.is_empty() {
-            return Ok(UserCallHandling::Completed(
+            return Ok(UserCallHandling::Completed(root_sequence(
                 runmat_value::ValueSequence::single(base)
                     .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-            ));
+            )?));
         }
         let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
         let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
@@ -473,14 +593,17 @@ pub async fn handle_workspace_first_prepared_call(
         if call_builtins::is_vm_dynamic_workspace_builtin(&id.0) {
             let mut temp_stack = args;
             let arg_count = temp_stack.len();
-            let result = call_builtins::vm_dynamic_workspace_builtin(
+            let result = call_builtins::vm_dynamic_workspace_builtin_with_driver(
                 runtime,
                 &mut temp_stack,
                 &id.0,
                 arg_count,
                 out_count,
                 function_registry,
-                source_id,
+                call_builtins::DynamicBuiltinSource {
+                    source_id,
+                    driver: process_driver,
+                },
             )
             .await;
             let ExceptionRouteContext {
@@ -490,11 +613,10 @@ pub async fn handle_workspace_first_prepared_call(
                 pc,
             } = exception;
             return match result {
-                Ok(value) => {
-                    let sequence =
-                        runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?;
-                    Ok(UserCallHandling::Completed(sequence))
-                }
+                Ok(value) => Ok(UserCallHandling::Completed(value.try_map_owned(
+                    runmat_runtime::call::arguments::adapt_legacy_builtin_result,
+                    |error| error.into_runtime_error(),
+                )?)),
                 Err(err) => Ok(
                     match redirect_exception_to_catch(
                         err,
@@ -516,6 +638,7 @@ pub async fn handle_workspace_first_prepared_call(
         UserCallContext {
             stack,
             runtime,
+            process_driver,
             identity,
             bound: None,
             fallback_policy,
@@ -581,7 +704,7 @@ async fn handle_method_or_member_index_call_inner(
         ),
     )
     .await?;
-    Ok(MethodHandling::Outputs(outputs))
+    Ok(Some(outputs))
 }
 
 pub async fn handle_method_or_member_index_expand_multi_call(
@@ -589,7 +712,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     sequence_state: &mut super::SequenceState,
     context: MethodExpandCallContext<'_>,
 ) -> Result<MethodHandling, RuntimeError> {
-    let mut args = build_user_function_expand_multi_args(
+    let args = build_user_function_expand_multi_args(
         stack,
         context.specs,
         sequence_state,
@@ -602,27 +725,31 @@ pub async fn handle_method_or_member_index_expand_multi_call(
             "method/member-index call requires a base receiver",
         ));
     }
-    let base = args.remove(0);
-    let _roots = root_values(args.iter().chain(std::iter::once(&base)))?;
     let _output_guard =
         runmat_runtime::output_context::push_output_count(context.requested_outputs);
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(context.current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let outputs = Box::pin(
-        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
-            context.runtime,
-            base,
-            context.identity,
-            args,
-            context.requested_outputs,
-            (!context.current_function_name.is_empty()).then_some(context.current_function_name),
-            context.fallback_policy,
-        ),
-    )
-    .await?;
-    Ok(MethodHandling::Outputs(outputs))
+    let outputs = args
+        .with_owned_values_async(|mut args| async move {
+            let base = args.remove(0);
+            Box::pin(
+                runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
+                    context.runtime,
+                    base,
+                    context.identity,
+                    args,
+                    context.requested_outputs,
+                    (!context.current_function_name.is_empty())
+                        .then_some(context.current_function_name),
+                    context.fallback_policy,
+                ),
+            )
+            .await
+        })
+        .await?;
+    Ok(Some(outputs))
 }
 
 pub fn handle_load_method(
@@ -637,7 +764,7 @@ pub fn handle_load_method(
         (!current_function_name.is_empty()).then_some(current_function_name),
     )?;
     stack.push(value);
-    Ok(MethodHandling::Completed)
+    Ok(None)
 }
 
 pub fn handle_create_closure(
@@ -646,7 +773,7 @@ pub fn handle_create_closure(
     capture_count: usize,
 ) -> Result<MethodHandling, RuntimeError> {
     call_closures::create_closure(stack, func_name, capture_count)?;
-    Ok(MethodHandling::Completed)
+    Ok(None)
 }
 
 pub fn handle_create_semantic_closure(
@@ -655,6 +782,7 @@ pub fn handle_create_semantic_closure(
     display_name: String,
     capture_count: usize,
     source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<MethodHandling, RuntimeError> {
     call_closures::create_semantic_closure(
         stack,
@@ -662,8 +790,9 @@ pub fn handle_create_semantic_closure(
         display_name,
         capture_count,
         source_role,
+        lexical_environment,
     )?;
-    Ok(MethodHandling::Completed)
+    Ok(None)
 }
 
 pub fn handle_load_static_property(
@@ -673,12 +802,20 @@ pub fn handle_load_static_property(
 ) -> Result<MethodHandling, RuntimeError> {
     let value = obj_resolve::load_static_member(class_identity, prop, None)?;
     stack.push(value);
-    Ok(MethodHandling::Completed)
+    Ok(None)
 }
 
 pub fn handle_register_class(
     registration: obj_class_def::ClassRegistration<crate::bytecode::instr::BytecodeClassProperty>,
 ) -> Result<MethodHandling, RuntimeError> {
+    let checked = checked_class_registration(registration);
+    runmat_runtime::class_registry::register_open_class_declarations(vec![checked])?;
+    Ok(None)
+}
+
+pub(crate) fn checked_class_registration(
+    registration: obj_class_def::ClassRegistration<crate::bytecode::instr::BytecodeClassProperty>,
+) -> runmat_runtime::class_registry::CheckedClassRegistration {
     let registration = registration.map_properties(|property| {
         let default_value = property.default_literal.map(|literal| match literal {
             PropertyDefaultLiteral::Num(value) => Value::Num(value),
@@ -696,16 +833,34 @@ pub fn handle_register_class(
             set_access: property.set_access,
         }
     });
-    obj_class_def::register_class(registration)?;
-    Ok(MethodHandling::Completed)
+    obj_class_def::checked_class_registration(registration)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_builtin_outcome, publish_fixed_outputs, ExceptionRouteContext};
+    use super::{
+        descriptor_needs_continuation, handle_builtin_outcome, publish_fixed_outputs,
+        ExceptionRouteContext,
+    };
     use crate::call::builtins::ImportedBuiltinResolution;
     use crate::interpreter::errors::mex;
     use runmat_value::Value;
+
+    #[test]
+    fn only_catalog_proven_noncallback_builtins_stay_inline() {
+        let builtin = |name: &str| {
+            runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId(name.into())),
+                Vec::new(),
+                1,
+                runmat_hir::CallableFallbackPolicy::None,
+                runmat_runtime::call::descriptor::CallableCallKind::Direct,
+            )
+        };
+        assert!(!descriptor_needs_continuation(&builtin("zeros")));
+        assert!(descriptor_needs_continuation(&builtin("feval")));
+        assert!(descriptor_needs_continuation(&builtin("not_catalogued")));
+    }
 
     #[test]
     fn fixed_outputs_publish_values_without_a_transient_carrier() {

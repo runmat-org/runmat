@@ -150,6 +150,23 @@ impl MexLoadError {
     }
 }
 
+/// Exact module state after a native shutdown attempt. An at-exit diagnostic
+/// can be an error even though the module has already been unloaded; a
+/// reentrant or poisoned pre-unload lock leaves the module live instead.
+pub enum MexModuleRetirement {
+    Retained(MexLoadError),
+    Retired(Result<(), MexLoadError>),
+}
+
+impl MexModuleRetirement {
+    pub fn into_result(self) -> Result<(), MexLoadError> {
+        match self {
+            Self::Retained(error) => Err(error),
+            Self::Retired(result) => result,
+        }
+    }
+}
+
 fn missing_dependency_from_loader_message(module: &str, message: &str) -> Option<String> {
     if let Some((_, remainder)) = message.split_once("Library not loaded:") {
         return remainder
@@ -703,29 +720,46 @@ impl MexModule {
         &self,
         services: std::sync::Arc<dyn ConcurrentMexBoundaryHostServices>,
     ) -> Result<(), MexLoadError> {
+        self.shutdown_with_boundary_services_retirement(services)
+            .into_result()
+    }
+
+    /// The worker must not discard a module or its origin-thread token roots
+    /// when shutdown was rejected before native unload began.
+    #[doc(hidden)]
+    pub fn shutdown_with_boundary_services_retirement(
+        &self,
+        services: std::sync::Arc<dyn ConcurrentMexBoundaryHostServices>,
+    ) -> MexModuleRetirement {
         let _process_guard = MEX_PROCESS_GATE.lock();
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
-            Err(std::sync::TryLockError::WouldBlock) => return Err(MexLoadError::ReentrantModule),
-            Err(std::sync::TryLockError::Poisoned(_)) => return Err(MexLoadError::Poisoned),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return MexModuleRetirement::Retained(MexLoadError::ReentrantModule)
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return MexModuleRetirement::Retained(MexLoadError::Poisoned)
+            }
         };
-        let lifecycle_error = if let Some(call_state) = state.as_mut() {
+        let lifecycle_result = if let Some(call_state) = state.as_mut() {
             call_state.call.set_boundary_services(services);
             // SAFETY: lifecycle is serialized and the state remains alive.
             unsafe { self.unload_bound(Some(call_state)) };
-            let mut call = call_state.call.lock().map_err(|_| MexLoadError::Poisoned)?;
-            call.error.take().map(|diagnostic| {
-                let source = call.take_gpu_failure(&diagnostic);
-                invocation_error(diagnostic, source)
-            })
+            match call_state.call.lock() {
+                Ok(mut call) => call.error.take().map_or(Ok(()), |diagnostic| {
+                    let source = call.take_gpu_failure(&diagnostic);
+                    Err(invocation_error(diagnostic, source))
+                }),
+                Err(_) => Err(MexLoadError::Poisoned),
+            }
         } else {
             // SAFETY: no state exists, so no registered callback can reach a
             // host allocation owned by this loader.
             unsafe { self.unload_bound(None) };
-            None
+            Ok(())
         };
         *state = None;
-        lifecycle_error.map_or(Ok(()), Err)
+        MexModuleRetirement::Retired(lifecycle_result)
     }
 }
 

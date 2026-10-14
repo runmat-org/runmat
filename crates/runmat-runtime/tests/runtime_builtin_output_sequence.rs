@@ -4,6 +4,12 @@
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity};
 use runmat_macros::runtime_builtin;
 use runmat_runtime::builtin::{runtime_builtin_bindings_by_name, RuntimeBuiltinInvocation};
+use runmat_runtime::execution::RootedValueSequence;
+
+// The attribute expansion refers to the receiving crate's execution owner.
+pub mod execution {
+    pub use runmat_runtime::execution::RootedValues;
+}
 use runmat_value::{Value, ValueSequence, ValueSequenceKind};
 
 // Attribute expansion is relative to the crate receiving the macro. These
@@ -74,7 +80,7 @@ fn binding(name: &'static str) -> runmat_runtime::builtin::RuntimeBuiltinBinding
     *binding
 }
 
-fn invoke(name: &'static str, requested_outputs: Option<usize>) -> ValueSequence {
+fn invoke(name: &'static str, requested_outputs: Option<usize>) -> RootedValueSequence {
     let binding = binding(name);
     futures::executor::block_on((binding.implementation)(RuntimeBuiltinInvocation::new(
         &[],

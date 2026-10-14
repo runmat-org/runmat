@@ -225,6 +225,8 @@ pub struct BytecodeClassProperty {
 pub struct BytecodeClassMethod {
     pub name: MethodName,
     pub function_name: String,
+    /// Compiler-sealed role; older bytecode component revisions are rejected.
+    pub role: runmat_types::ClassMethodRole,
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_sealed: bool,

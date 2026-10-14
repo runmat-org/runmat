@@ -30,6 +30,9 @@ pub struct NativeAssembly {
     pub selected_entrypoint_body: Digest,
     pub entrypoints: Vec<runmat_types::ProgramFunctionId>,
     pub functions: Vec<NativeFunction>,
+    /// Immutable class parent and constructor declarations lowered from the
+    /// same canonical MIR product as these functions.
+    pub class_declarations: Vec<super::NativeClassDeclaration>,
 }
 
 const MAX_NATIVE_IR_BYTES: usize = 256 * 1024 * 1024;

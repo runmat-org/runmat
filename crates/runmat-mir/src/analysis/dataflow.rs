@@ -22,6 +22,10 @@ use super::{
     InitFact,
 };
 
+#[cfg(test)]
+#[path = "dataflow/workspace_binding_tests.rs"]
+mod workspace_binding_tests;
+
 #[derive(Debug, Clone)]
 struct InitDataflowResult {
     in_states: Vec<Option<Vec<InitFact>>>,
@@ -474,7 +478,10 @@ fn dynamic_value() -> ValueFact {
 pub(crate) fn diagnostics_for_assembly(assembly: &MirAssembly) -> Vec<MirDiagnostic> {
     let mut diagnostics = Vec::new();
     for body in assembly.bodies.values() {
-        diagnostics.extend(diagnose_uninitialized_reads(body));
+        diagnostics.extend(diagnose_uninitialized_reads(
+            body,
+            super::constructor_entry::instance_output_local(assembly, body),
+        ));
         diagnostics.extend(diagnose_semantic_misuse(body));
     }
     let boundaries = analyze_assembly_spawn_boundaries(assembly);
@@ -484,8 +491,11 @@ pub(crate) fn diagnostics_for_assembly(assembly: &MirAssembly) -> Vec<MirDiagnos
     diagnostics
 }
 
-pub(super) fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
-    let result = compute_init_dataflow(body);
+pub(super) fn diagnose_uninitialized_reads(
+    body: &MirBody,
+    constructor_instance: Option<MirLocalId>,
+) -> Vec<MirDiagnostic> {
+    let result = compute_init_dataflow(body, constructor_instance);
     let mut diagnostics = Vec::new();
 
     for (idx, block) in body.blocks.iter().enumerate() {
@@ -627,7 +637,10 @@ fn hir_diagnostic(
         .with_category(category)
 }
 
-fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
+fn compute_init_dataflow(
+    body: &MirBody,
+    constructor_instance: Option<MirLocalId>,
+) -> InitDataflowResult {
     let local_count = body.locals.len();
     if body.blocks.is_empty() {
         return InitDataflowResult {
@@ -647,6 +660,9 @@ fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
         if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) {
             initial[local.id.0] = InitFact::DefinitelyAssigned;
         }
+    }
+    if let Some(local) = constructor_instance {
+        initial[local.0] = InitFact::DefinitelyAssigned;
     }
 
     let mut in_states: Vec<Option<Vec<InitFact>>> = vec![None; body.blocks.len()];
@@ -708,10 +724,12 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
                 };
                 mark_place_assigned(base, &mut state);
             }
+            MirStmtKind::WorkspaceEffect { effect, bindings } => {
+                mark_declared_storage(effect, bindings, &mut state);
+            }
             MirStmtKind::CaptureSequence { .. } => {}
             MirStmtKind::Expr(_)
             | MirStmtKind::PlaceMutation(_)
-            | MirStmtKind::WorkspaceEffect { .. }
             | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
@@ -844,10 +862,26 @@ fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<M
         MirStmtKind::CaptureSequence { source, .. } => {
             diagnose_expansion_source_reads(source, state, stmt.span, diagnostics);
         }
+        MirStmtKind::WorkspaceEffect { effect, bindings } => {
+            mark_declared_storage(effect, bindings, state);
+        }
         MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
-        MirStmtKind::PlaceMutation(_)
-        | MirStmtKind::WorkspaceEffect { .. }
-        | MirStmtKind::EnvironmentEffect(_) => {}
+        MirStmtKind::PlaceMutation(_) | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+}
+
+fn mark_declared_storage(
+    effect: &runmat_hir::WorkspaceEffect,
+    bindings: &[MirLocalId],
+    state: &mut [InitFact],
+) {
+    if matches!(
+        effect,
+        runmat_hir::WorkspaceEffect::MutatesGlobal | runmat_hir::WorkspaceEffect::MutatesPersistent
+    ) {
+        for binding in bindings {
+            state[binding.0] = InitFact::DefinitelyAssigned;
+        }
     }
 }
 

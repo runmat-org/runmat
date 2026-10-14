@@ -49,7 +49,10 @@ impl NativeExecutionConfig {
             max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024 * 1024,
             store_root,
-            worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            worker_capabilities: BTreeSet::from([
+                Capability::ProcessIsolation,
+                Capability::GraphSelectedValuesV11,
+            ]),
             host_inventory,
             accelerator_devices,
         })

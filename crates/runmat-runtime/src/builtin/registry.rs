@@ -74,7 +74,7 @@ fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
         .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
-/// Borrow all compiled bindings for a public dispatch spelling, retaining
+/// Borrow all compiled bindings for an executable dispatch spelling, retaining
 /// duplicates and their registration order without allocating a result vector.
 pub fn with_runtime_builtin_bindings_by_name<R>(
     name: &str,

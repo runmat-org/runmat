@@ -6,11 +6,13 @@ mod calendar_duration;
 mod construction;
 mod duration;
 mod legacy;
+mod indexing;
 
 pub use self::business_days::*;
 pub use self::calendar_duration::*;
 pub use self::construction::*;
 pub use self::duration::*;
+pub use self::indexing::*;
 pub use self::legacy::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -19,4 +21,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     construction::extend_entries(values);
     values.extend(duration::ENTRIES.iter().copied());
     legacy::extend_entries(values);
+    values.extend(indexing::ENTRIES.iter().copied());
 }

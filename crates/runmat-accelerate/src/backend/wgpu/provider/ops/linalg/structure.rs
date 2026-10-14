@@ -122,13 +122,11 @@ impl WgpuProvider {
         let (staging, staging_size) = self.with_emission(|emission, pending| -> Result<_> {
             let output_init = [1u32];
             let output_buffer =
-                emission
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-issymmetric-output"),
-                        contents: cast_slice(&output_init),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    });
+                emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                    label: Some("runmat-issymmetric-output"),
+                    contents: cast_slice(&output_init),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                });
 
             let pipeline = self.pipelines.symmetry.get(emission)?;
             match entry.precision {
@@ -226,12 +224,12 @@ impl WgpuProvider {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-issymmetric-copy"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-issymmetric-copy"),
+                },
+            );
             encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, staging_size);
             self.submit(emission, pending, encoder)?;
 
@@ -313,13 +311,11 @@ impl WgpuProvider {
             let pipeline = self.pipelines.bandwidth.get(emission)?;
             let output_init = [0u32, 0u32];
             let output_buffer =
-                emission
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-bandwidth-output"),
-                        contents: cast_slice(&output_init),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    });
+                emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                    label: Some("runmat-bandwidth-output"),
+                    contents: cast_slice(&output_init),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                });
             let params = BandwidthParams {
                 rows: rows as u32,
                 cols: cols as u32,
@@ -365,12 +361,12 @@ impl WgpuProvider {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-bandwidth-copy"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-bandwidth-copy"),
+                },
+            );
             encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, staging_size);
             self.submit(emission, pending, encoder)?;
 

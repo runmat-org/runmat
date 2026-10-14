@@ -14,7 +14,8 @@ pub const IFFTSHIFT_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All integer classes are reordered exactly with class, shape, and complexity preserved.",
+        notes:
+            "All integer classes are reordered exactly with class, shape, and complexity preserved.",
     },
 ];
 pub const IFFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
@@ -25,15 +26,15 @@ pub const IFFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "The documented DIM form is one positive scalar parsed from authoritative storage.",
     }];
-pub const IFFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [
-    BuiltinIntegerInputCapability {
+pub const IFFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
         name: "DIMS",
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-        notes: "RunMat-only numeric vectors are decoded exactly; logical masks share the same gate.",
-    },
-];
+        notes:
+            "RunMat-only numeric vectors are decoded exactly; logical masks share the same gate.",
+    }];
 pub const IFFTSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "Y = ifftshift(integer_X)",
@@ -150,7 +151,8 @@ pub const IFFTSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescrip
 pub const IFFTSHIFT_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IFFTSHIFT.PROVIDER_INTEGRITY",
     identifier: Some("RunMat:ifftshift:ProviderIntegrity"),
-    when: "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
     message: "ifftshift: provider integrity error",
 };
 

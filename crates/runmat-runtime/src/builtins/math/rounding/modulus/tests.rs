@@ -5,7 +5,7 @@ use futures::executor::block_on;
 use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor};
 
 fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    block_on(super::mod_builtin(lhs, rhs))
+    block_on(super::mod_builtin(None, lhs, rhs)).map(|owned| owned.value().clone())
 }
 
 #[test]
@@ -55,10 +55,11 @@ fn mod_maps_table_variables_and_preserves_container() {
         ],
     )
     .unwrap();
-    let Value::Object(output) = mod_builtin(table, Value::Num(3.0)).unwrap() else {
+    let output = block_on(super::mod_builtin(None, table, Value::Num(3.0))).unwrap();
+    let Value::Object(output) = output.value() else {
         panic!("expected table output")
     };
-    let variables = crate::builtins::table::table_variables(&output).unwrap();
+    let variables = crate::builtins::table::table_variables(output).unwrap();
     assert_eq!(
         variables.fields["A"].clone(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![2, 1]).unwrap())
@@ -81,9 +82,12 @@ fn mod_duration_returns_duration_in_source_format() {
         "hh:mm:ss",
     )
     .unwrap();
-    let result = mod_builtin(duration, divisor).unwrap();
-    assert!(crate::builtins::duration::is_duration_object(&result));
-    let days = crate::builtins::duration::duration_tensor_from_duration_value(&result).unwrap();
+    let result = block_on(super::mod_builtin(None, duration, divisor)).unwrap();
+    assert!(crate::builtins::duration::is_duration_object(
+        result.value()
+    ));
+    let days =
+        crate::builtins::duration::duration_tensor_from_duration_value(result.value()).unwrap();
     let expected = [1.0 / 24.0, 2.0 / 24.0];
     for (actual, expected) in days.materialize_f64().iter().zip(expected) {
         assert!((actual - expected).abs() < 1e-12);

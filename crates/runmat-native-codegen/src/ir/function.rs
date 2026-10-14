@@ -55,6 +55,40 @@ pub enum NativeLocalKind {
     Capture,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeLexicalBindingKind {
+    Owned,
+    Inherited,
+    Transit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeLexicalBinding {
+    pub binding: BindingId,
+    pub local: NativeLocalId,
+    pub kind: NativeLexicalBindingKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeInheritedStorageKind {
+    Global,
+    Persistent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeInheritedStorageBinding {
+    pub binding: BindingId,
+    pub local: NativeLocalId,
+    pub owner: ProgramFunctionId,
+    pub name: String,
+    pub owner_function: String,
+    pub kind: NativeInheritedStorageKind,
+}
+
 impl From<&runmat_mir::MirLocalKind> for NativeLocalKind {
     fn from(kind: &runmat_mir::MirLocalKind) -> Self {
         match kind {
@@ -74,6 +108,8 @@ pub struct NativeFunction {
     pub source: ProgramSourceId,
     pub name: String,
     pub source_role: runmat_types::FunctionSourceRole,
+    /// Portable ordinal of the lexical parent, if this is nested.
+    pub lexical_parent: Option<ProgramFunctionId>,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     /// Whole-function requirements derived by canonical MIR analysis. Native
     /// executors use this contract when a function becomes an async target;
@@ -82,6 +118,11 @@ pub struct NativeFunction {
     pub abi: NativeFunctionAbi,
     pub argument_validations: Vec<NativeFunctionArgumentValidation>,
     pub locals: Vec<NativeLocalMetadata>,
+    /// Projected once from canonical MIR binding ownership, not rediscovered
+    /// from display names or native frame snapshots.
+    pub lexical_bindings: Vec<NativeLexicalBinding>,
+    pub inherited_storage_bindings: Vec<NativeInheritedStorageBinding>,
+    pub creates_lexical_environment: bool,
     pub entry: NativeBlockId,
     pub blocks: Vec<NativeBlock>,
     pub expected_sites: Vec<NativeMirSite>,

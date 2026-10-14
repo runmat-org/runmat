@@ -1,3 +1,4 @@
+use crate::execution::{RootedValue, RootedValueLease};
 use runmat_value::Value;
 
 use super::{PreparedDestinationKind, PreparedSequenceDestination, SequenceDestinationBuilder};
@@ -11,7 +12,7 @@ impl PreparedSequenceDestination {
         steps: Vec<AssignmentStepSpec>,
         endpoint: SequenceEndpointSpec,
     ) -> Result<Self, RuntimeError> {
-        let mut builder = SequenceDestinationBuilder::new(root);
+        let mut builder = SequenceDestinationBuilder::new(root)?;
         for step in steps {
             builder.push_step(step, None).await?;
         }
@@ -30,7 +31,7 @@ impl PreparedSequenceDestination {
         root: Value,
         values: Vec<Value>,
         caller: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         self.assign_with_context(None, root, values, caller).await
     }
 
@@ -40,7 +41,7 @@ impl PreparedSequenceDestination {
         root: Value,
         values: Vec<Value>,
         caller: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<RootedValue, RuntimeError> {
         self.assign_with_context(Some(context), root, values, caller)
             .await
     }
@@ -51,8 +52,15 @@ impl PreparedSequenceDestination {
         root: Value,
         values: Vec<Value>,
         caller: Option<&str>,
-    ) -> Result<Value, RuntimeError> {
-        match self.kind {
+    ) -> Result<RootedValue, RuntimeError> {
+        let Self {
+            kind,
+            _retained_roots,
+            _source_roots,
+        } = self;
+        let _inputs = RootedValueLease::for_values(std::iter::once(&root).chain(values.iter()))
+            .map_err(|error| error.into_runtime_error())?;
+        match kind {
             PreparedDestinationKind::Structural { steps, endpoint } => {
                 super::structural::assign_path(
                     context,

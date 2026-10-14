@@ -134,14 +134,14 @@ fn failed_and_cancelled_downloads_restore_borrowed_residency_without_free_or_ret
         Value::GpuTensor(handle.clone()),
         Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![1, 4]).unwrap()),
     ];
-    let output = block_on(runmat_runtime::call_builtin_async_with_outputs(
+    let owned_output = block_on(runmat_runtime::call_builtin_async_with_outputs(
         "discretize",
         &args,
         1,
     ))
     .unwrap();
-    let output = match output {
-        Value::OutputList(mut values) => values.remove(0),
+    let output = match owned_output.value() {
+        Value::OutputList(values) => &values[0],
         other => other,
     };
     let Value::Tensor(output) = output else {

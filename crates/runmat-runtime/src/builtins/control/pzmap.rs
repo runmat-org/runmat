@@ -424,7 +424,7 @@ mod tests {
         });
     }
 
-    fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
+    fn tf(num: Vec<f64>, den: Vec<f64>) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async(
             "tf",
             &[
@@ -435,12 +435,12 @@ mod tests {
         .expect("tf")
     }
 
-    fn ss(a: Value, b: Value, c: Value, d: Value) -> Value {
+    fn ss(a: Value, b: Value, c: Value, d: Value) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async("ss", &[a, b, c, d])).expect("ss")
     }
 
-    fn run_pzmap(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(pzmap_builtin(sys, rest))
+    fn run_pzmap(sys: crate::execution::RootedValue, rest: Vec<Value>) -> BuiltinResult<Value> {
+        sys.with_owned(|sys| block_on(pzmap_builtin(sys, rest)))
     }
 
     fn tensor(value: &Value) -> &Tensor {
@@ -535,7 +535,7 @@ mod tests {
         let first = tf(vec![1.0], vec![1.0, 1.0]);
         let second = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
         let _guard = crate::output_count::push_output_count(Some(0));
-        let result = run_pzmap(first, vec![second]).expect("pzmap");
+        let result = run_pzmap(first, vec![second.value().clone()]).expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
@@ -546,8 +546,11 @@ mod tests {
         let first = tf(vec![1.0, 2.0], vec![1.0, 3.0]);
         let second = tf(vec![1.0, 4.0], vec![1.0, 5.0]);
         let _guard = crate::output_count::push_output_count(Some(0));
-        let result =
-            run_pzmap(first, vec![Value::from("r"), second, Value::from("b--")]).expect("pzmap");
+        let result = run_pzmap(
+            first,
+            vec![Value::from("r"), second.value().clone(), Value::from("b--")],
+        )
+        .expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
@@ -604,7 +607,11 @@ mod tests {
 
     #[test]
     fn non_model_input_uses_pzmap_invalid_model_identifier() {
-        let err = run_pzmap(Value::Num(1.0), Vec::new()).expect_err("should fail");
+        let err = run_pzmap(
+            crate::execution::RootedValue::new(Value::Num(1.0)).expect("scalar fixture"),
+            Vec::new(),
+        )
+        .expect_err("should fail");
         assert!(err.message().contains("expected a tf or ss object"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_MODEL.identifier);
     }

@@ -1205,33 +1205,46 @@ fn integer_matrix_from_value(target: IntegerClass, value: &Value) -> BuiltinResu
 
 /// Create a matrix from a 2D array of Values with proper concatenation semantics
 /// This handles the case where matrix elements can be variables, not just literals
-pub async fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
+pub async fn create_matrix_from_values(
+    rows: &[Vec<Value>],
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _inputs_root =
+        crate::execution::RootedValueLease::for_values(rows.iter().flat_map(|row| row.iter()))
+            .map_err(|error| error.into_runtime_error())?;
     if rows.is_empty() {
-        return Ok(Value::Tensor(
+        return crate::execution::RootedValue::new(Value::Tensor(
             Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
-        ));
+        ))
+        .map_err(|error| error.into_runtime_error());
     }
 
     // Build each row using horzcat builtin to preserve canonical semantics
-    let mut row_matrices: Vec<Value> = Vec::with_capacity(rows.len());
+    let mut row_matrices = crate::execution::RootedValuesBuilder::with_capacity(rows.len());
     for row in rows {
         let row_value = if row.is_empty() {
-            Value::Tensor(Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?)
+            crate::execution::RootedValue::new(Value::Tensor(
+                Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+            ))
+            .map_err(|error| error.into_runtime_error())?
         } else {
             crate::call_builtin_async("horzcat", row).await?
         };
-        row_matrices.push(row_value);
+        row_value
+            .with_owned(|value| row_matrices.push(value))
+            .map_err(|error| error.into_runtime_error())?;
     }
+    let row_matrices = row_matrices
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
 
     // Stack rows using vertcat builtin
-    if row_matrices.is_empty() {
-        Ok(Value::Tensor(
-            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
-        ))
-    } else if row_matrices.len() == 1 {
-        Ok(row_matrices.into_iter().next().unwrap())
+    if row_matrices.len() == 1 {
+        row_matrices.with_owned_values(|mut values| {
+            crate::execution::RootedValue::new(values.remove(0))
+                .map_err(|error| error.into_runtime_error())
+        })
     } else {
-        Ok(crate::call_builtin_async("vertcat", &row_matrices).await?)
+        crate::call_builtin_async("vertcat", row_matrices.values()).await
     }
 }
 

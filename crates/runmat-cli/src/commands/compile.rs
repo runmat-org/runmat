@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -62,28 +63,93 @@ pub async fn execute(
     let mut session =
         super::session::create_session(false, false, config, "failed to create compile session")?;
     let project = install_project_for_source(&mut session, &file, cli).await?;
-    let source = runmat_core::ExecutableSource::new("root", file.to_string_lossy(), source_text);
+    let source = super::package::executable_source(
+        project.as_ref().map(|project| &project.resolved.frozen),
+        &file,
+        source_text,
+    )?;
     let unit = session
         .compile_executable_unit(source, None)
         .await
         .map_err(|error| anyhow::anyhow!(error))?;
-    let python_required = unit.requires_python_runtime();
+    let report = unit.reachability_report();
+    let inferred = unit.inferred_interop_manifest();
+    let mut selected = inferred
+        .adapters
+        .iter()
+        .map(|item| item.adapter.clone())
+        .collect::<BTreeSet<_>>();
+    let mut selected_mex_names = BTreeSet::new();
+    if let Some(project) = project.as_ref() {
+        for node in &report.nodes {
+            if node.kind == runmat_mir::analysis::ReachabilityNodeKind::ExternalCallable {
+                for declaration in &project.resolved.frozen.mex_artifacts {
+                    if declaration.name == node.symbol {
+                        selected_mex_names.insert(declaration.name.clone());
+                    }
+                }
+            }
+        }
+        if !selected_mex_names.is_empty() {
+            selected.insert(runmat_types::ForeignAdapterId::new(
+                runmat_mex::MEX_ADAPTER_ID,
+            )?);
+        }
+    }
+    if report.has_unknown_edges {
+        // An unbounded dynamic target may resolve any installed foreign call.
+        // Grant the four supported runtime families and this frozen project's
+        // declared artifacts, explicitly in the authenticated interop
+        // manifest, never by receiver discovery.
+        for adapter in [
+            runmat_native_ffi::NATIVE_FFI_ADAPTER_ID,
+            runmat_mex::MEX_ADAPTER_ID,
+            runmat_java::JAVA_ADAPTER_ID,
+            runmat_python::PYTHON_ADAPTER_ID,
+        ] {
+            selected.insert(runmat_types::ForeignAdapterId::new(adapter)?);
+        }
+    }
     let foreign_artifacts = if let Some(project) = project.as_ref() {
-        super::package::prepare_foreign_artifacts(
+        super::package::prepare_foreign_artifacts_for_selection(
             &project.resolved.frozen,
             config,
-            python_required,
+            &selected,
+            (!report.has_unknown_edges).then_some(&selected_mex_names),
         )?
-    } else if python_required {
+    } else if selected.contains(&runmat_types::ForeignAdapterId::new(
+        runmat_python::PYTHON_ADAPTER_ID,
+    )?) {
         super::package::prepare_python_runtime(config)?
     } else {
         super::package::PreparedForeignArtifacts::empty()
     };
-    let program_link_plan = runmat_aot::compile::build_program_link_plan_with_interop(
-        &unit,
-        &runtime,
-        policy,
+    let closed_grant = runmat_types::InteropManifest {
+        schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+        foreign_types: Vec::new(),
+        adapters: selected
+            .iter()
+            .cloned()
+            .map(|adapter| runmat_types::ForeignAdapterRequirement {
+                adapter,
+                minimum_version: 1,
+                capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: Vec::new(),
+            })
+            .collect(),
+        adapter_contracts: Vec::new(),
+    };
+    let interop = runmat_types::InteropManifest::merge([
+        inferred,
+        closed_grant,
         foreign_artifacts.interop.clone(),
+    ])
+    .map_err(|error| anyhow::anyhow!("{}: {}", error.path, error.message))?;
+    let program_link_plan = runmat_aot::compile::build_program_link_plan_with_interop(
+        &unit, &runtime, policy, interop,
     )?;
     if explain_link {
         print_link_explanation(&program_link_plan);
@@ -108,6 +174,10 @@ pub async fn execute(
             },
             retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
             interop: program_link_plan.interop.clone(),
+            foreign_policy: Some(
+                runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)
+                    .map_err(anyhow::Error::msg)?,
+            ),
             native_interfaces: foreign_artifacts.native_interfaces,
             mex_artifacts: foreign_artifacts.mex_artifacts,
             java_artifacts: foreign_artifacts.java_artifacts,

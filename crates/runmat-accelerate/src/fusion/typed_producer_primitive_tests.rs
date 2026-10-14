@@ -29,22 +29,19 @@ fn tensor(single: bool, data: &[f64], shape: &[usize]) -> Value {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     })
 }
-fn host(name: &str, inputs: &[Value]) -> Value {
-    let result = futures::executor::block_on(runmat_runtime::call_builtin_async_with_outputs(
+fn host(name: &str, inputs: &[Value]) -> runmat_runtime::execution::RootedValue {
+    futures::executor::block_on(runmat_runtime::call_builtin_async_with_outputs(
         name, inputs, 1,
     ))
-    .unwrap();
-    match result {
-        Value::OutputList(mut values) => {
-            assert_eq!(values.len(), 1);
-            values.remove(0)
-        }
-        value => value,
-    }
+    .unwrap()
 }
-fn host_values(value: Value) -> Vec<f64> {
+fn host_values(output: runmat_runtime::execution::RootedValue) -> Vec<f64> {
+    let value = match output.value() {
+        Value::OutputList(values) if values.len() == 1 => &values[0],
+        value => value,
+    };
     match value {
-        Value::Num(value) => vec![value],
+        Value::Num(value) => vec![*value],
         Value::Tensor(value) => value.materialize_f64(),
         value => panic!("unexpected numerical carrier {value:?}"),
     }

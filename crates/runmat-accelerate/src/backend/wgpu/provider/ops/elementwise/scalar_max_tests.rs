@@ -42,7 +42,7 @@ async fn host_max(values: &[f64], scalar: f64, single: bool, scalar_left: bool) 
     let expected = runmat_runtime::call_builtin_async("max", &args)
         .await
         .unwrap();
-    let Value::Tensor(expected) = expected else {
+    let Value::Tensor(expected) = expected.value() else {
         panic!("host Max tensor oracle")
     };
     if single {

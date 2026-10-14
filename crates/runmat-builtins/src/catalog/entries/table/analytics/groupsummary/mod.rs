@@ -17,6 +17,7 @@ pub use extensions::{
 pub use integer::GROUPSUMMARY_INTEGER_CAPABILITIES;
 
 pub(super) const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "groupsummary",

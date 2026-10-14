@@ -1,11 +1,18 @@
 use super::*;
+use crate::context::call_projection::{self, CallProjectionGuard};
+
+fn active_projection() -> Option<Rc<RefCell<crate::context::call_projection::CallProjection>>> {
+    crate::context::legacy::active().map(|runtime| Rc::clone(runtime.call_projection()))
+}
 
 pub struct FunctionInvokerGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Rc<FunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct BoundFunctionInvokerGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Rc<BoundFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
@@ -21,36 +28,45 @@ pub struct LexicalFunctionInvokerGuard {
 }
 
 pub struct FunctionResolverGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Arc<FunctionResolver>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct ScopedNameTargetResolverGuard {
-    previous: Option<Arc<ScopedNameTargetResolver>>,
+    projection: Option<CallProjectionGuard>,
+    previous: Option<Rc<ScopedNameTargetResolver>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct SemanticNameCandidatesGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Arc<SemanticNameCandidates>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct SourceFunctionCatalogGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Arc<Vec<SourceFunctionInfo>>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct ExecutionSourceResolverGuard {
+    projection: Option<CallProjectionGuard>,
     previous: Option<Rc<ExecutionSourceResolver>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct ActiveSemanticFunctionGuard {
+    projection: Option<CallProjectionGuard>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for FunctionInvokerGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().semantic_invoker = previous;
@@ -64,6 +80,9 @@ impl Drop for FunctionInvokerGuard {
 
 impl Drop for BoundFunctionInvokerGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().bound_invoker = previous;
@@ -103,6 +122,9 @@ impl Drop for LexicalFunctionInvokerGuard {
 
 impl Drop for FunctionResolverGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().semantic_resolver = previous;
@@ -116,6 +138,9 @@ impl Drop for FunctionResolverGuard {
 
 impl Drop for ScopedNameTargetResolverGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().scoped_name_target_resolver = previous;
@@ -127,6 +152,9 @@ impl Drop for ScopedNameTargetResolverGuard {
 
 impl Drop for SemanticNameCandidatesGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().semantic_name_candidates = previous;
@@ -138,6 +166,9 @@ impl Drop for SemanticNameCandidatesGuard {
 
 impl Drop for SourceFunctionCatalogGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().source_functions = previous;
@@ -151,6 +182,9 @@ impl Drop for SourceFunctionCatalogGuard {
 
 impl Drop for ExecutionSourceResolverGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         let previous = self.previous.take();
         if let Some(state) = &self.state {
             state.call.borrow_mut().execution_source_resolver = previous;
@@ -162,6 +196,9 @@ impl Drop for ExecutionSourceResolverGuard {
 
 impl Drop for ActiveSemanticFunctionGuard {
     fn drop(&mut self) {
+        if self.projection.take().is_some() {
+            return;
+        }
         if let Some(state) = &self.state {
             state.call.borrow_mut().active_functions.pop();
         } else {
@@ -173,12 +210,14 @@ impl Drop for ActiveSemanticFunctionGuard {
 }
 
 pub fn install_semantic_function_invoker(
-    invoker: Option<Arc<FunctionInvoker>>,
+    invoker: Option<Arc<UnscopedFunctionInvoker>>,
 ) -> FunctionInvokerGuard {
     replace_semantic_function_invoker(invoker.map(|invoker| {
-        Rc::new(move |function, arguments: &[Value], requested_outputs| {
-            invoker(function, arguments, requested_outputs)
-        }) as Rc<FunctionInvoker>
+        Rc::new(
+            move |_runtime, function, arguments: &[Value], requested_outputs| {
+                invoker(function, arguments, requested_outputs)
+            },
+        ) as Rc<FunctionInvoker>
     }))
 }
 
@@ -193,15 +232,24 @@ pub fn install_local_semantic_function_invoker(
 pub fn install_local_bound_function_invoker(
     invoker: Rc<BoundFunctionInvoker>,
 ) -> BoundFunctionInvokerGuard {
+    if let Some(owner) = active_projection() {
+        return BoundFunctionInvokerGuard {
+            projection: Some(call_projection::push_bound_invoker(&owner, Some(invoker))),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = state.call.borrow_mut().bound_invoker.replace(invoker);
         return BoundFunctionInvokerGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
     }
     let previous = BOUND_FUNCTION_INVOKER.with(|slot| slot.borrow_mut().replace(invoker));
     BoundFunctionInvokerGuard {
+        projection: None,
         previous,
         state: None,
     }
@@ -212,9 +260,17 @@ pub fn clear_semantic_function_invoker() -> FunctionInvokerGuard {
 }
 
 fn replace_semantic_function_invoker(invoker: Option<Rc<FunctionInvoker>>) -> FunctionInvokerGuard {
+    if let Some(owner) = active_projection() {
+        return FunctionInvokerGuard {
+            projection: Some(call_projection::push_semantic_invoker(&owner, invoker)),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().semantic_invoker, invoker);
         return FunctionInvokerGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -222,16 +278,19 @@ fn replace_semantic_function_invoker(invoker: Option<Rc<FunctionInvoker>>) -> Fu
     let previous =
         SEMANTIC_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
     FunctionInvokerGuard {
+        projection: None,
         previous,
         state: None,
     }
 }
 
 pub fn install_external_function_invoker(
-    invoker: Option<Arc<ExternalFunctionInvoker>>,
+    invoker: Option<Arc<UnscopedExternalFunctionInvoker>>,
 ) -> ExternalFunctionInvokerGuard {
     replace_external_function_invoker(
-        invoker.map(|invoker| Rc::new(move |call| invoker(call)) as Rc<ExternalFunctionInvoker>),
+        invoker.map(|invoker| {
+            Rc::new(move |_runtime, call| invoker(call)) as Rc<ExternalFunctionInvoker>
+        }),
     )
 }
 
@@ -260,10 +319,12 @@ fn replace_external_function_invoker(
 }
 
 pub fn install_lexical_function_invoker(
-    invoker: Option<Arc<LexicalFunctionInvoker>>,
+    invoker: Option<Arc<UnscopedLexicalFunctionInvoker>>,
 ) -> LexicalFunctionInvokerGuard {
     replace_lexical_function_invoker(
-        invoker.map(|invoker| Rc::new(move |call| invoker(call)) as Rc<LexicalFunctionInvoker>),
+        invoker.map(|invoker| {
+            Rc::new(move |_runtime, call| invoker(call)) as Rc<LexicalFunctionInvoker>
+        }),
     )
 }
 
@@ -294,9 +355,17 @@ fn replace_lexical_function_invoker(
 pub fn install_semantic_function_resolver(
     resolver: Option<Arc<FunctionResolver>>,
 ) -> FunctionResolverGuard {
+    if let Some(owner) = active_projection() {
+        return FunctionResolverGuard {
+            projection: Some(call_projection::push_semantic_resolver(&owner, resolver)),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().semantic_resolver, resolver);
         return FunctionResolverGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -304,20 +373,29 @@ pub fn install_semantic_function_resolver(
     let previous = SEMANTIC_FUNCTION_RESOLVER
         .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
     FunctionResolverGuard {
+        projection: None,
         previous,
         state: None,
     }
 }
 
 pub fn install_scoped_name_target_resolver(
-    resolver: Option<Arc<ScopedNameTargetResolver>>,
+    resolver: Option<Rc<ScopedNameTargetResolver>>,
 ) -> ScopedNameTargetResolverGuard {
+    if let Some(owner) = active_projection() {
+        return ScopedNameTargetResolverGuard {
+            projection: Some(call_projection::push_scoped_name_resolver(&owner, resolver)),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(
             &mut state.call.borrow_mut().scoped_name_target_resolver,
             resolver,
         );
         return ScopedNameTargetResolverGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -325,6 +403,7 @@ pub fn install_scoped_name_target_resolver(
     let previous = SCOPED_NAME_TARGET_RESOLVER
         .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
     ScopedNameTargetResolverGuard {
+        projection: None,
         previous,
         state: None,
     }
@@ -333,12 +412,20 @@ pub fn install_scoped_name_target_resolver(
 pub fn install_semantic_name_candidates(
     observer: Option<Arc<SemanticNameCandidates>>,
 ) -> SemanticNameCandidatesGuard {
+    if let Some(owner) = active_projection() {
+        return SemanticNameCandidatesGuard {
+            projection: Some(call_projection::push_semantic_candidates(&owner, observer)),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(
             &mut state.call.borrow_mut().semantic_name_candidates,
             observer,
         );
         return SemanticNameCandidatesGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -346,6 +433,7 @@ pub fn install_semantic_name_candidates(
     let previous =
         SEMANTIC_NAME_CANDIDATES.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), observer));
     SemanticNameCandidatesGuard {
+        projection: None,
         previous,
         state: None,
     }
@@ -354,9 +442,17 @@ pub fn install_semantic_name_candidates(
 pub fn install_source_function_catalog(
     catalog: Option<Arc<Vec<SourceFunctionInfo>>>,
 ) -> SourceFunctionCatalogGuard {
+    if let Some(owner) = active_projection() {
+        return SourceFunctionCatalogGuard {
+            projection: Some(call_projection::push_source_functions(&owner, catalog)),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().source_functions, catalog);
         return SourceFunctionCatalogGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -364,6 +460,7 @@ pub fn install_source_function_catalog(
     let previous =
         SOURCE_FUNCTION_CATALOG.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), catalog));
     SourceFunctionCatalogGuard {
+        projection: None,
         previous,
         state: None,
     }
@@ -372,12 +469,22 @@ pub fn install_source_function_catalog(
 pub fn install_execution_source_resolver(
     resolver: Option<Rc<ExecutionSourceResolver>>,
 ) -> ExecutionSourceResolverGuard {
+    if let Some(owner) = active_projection() {
+        return ExecutionSourceResolverGuard {
+            projection: Some(call_projection::push_execution_source_resolver(
+                &owner, resolver,
+            )),
+            previous: None,
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         let previous = std::mem::replace(
             &mut state.call.borrow_mut().execution_source_resolver,
             resolver,
         );
         return ExecutionSourceResolverGuard {
+            projection: None,
             previous,
             state: Some(state),
         };
@@ -385,32 +492,53 @@ pub fn install_execution_source_resolver(
     let previous =
         EXECUTION_SOURCE_RESOLVER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
     ExecutionSourceResolverGuard {
+        projection: None,
         previous,
         state: None,
     }
 }
 
 pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionGuard {
+    if let Some(owner) = active_projection() {
+        return ActiveSemanticFunctionGuard {
+            projection: Some(call_projection::push_active_function(&owner, function)),
+            state: None,
+        };
+    }
     if let Some(state) = active_state() {
         state.call.borrow_mut().active_functions.push(function);
-        return ActiveSemanticFunctionGuard { state: Some(state) };
+        return ActiveSemanticFunctionGuard {
+            projection: None,
+            state: Some(state),
+        };
     }
     ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
         slot.borrow_mut().push(function);
     });
-    ActiveSemanticFunctionGuard { state: None }
+    ActiveSemanticFunctionGuard {
+        projection: None,
+        state: None,
+    }
 }
 
 pub fn current_semantic_function_invoker() -> Option<Rc<FunctionInvoker>> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().semantic_invoker.clone();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .semantic_invoker()
+            .unwrap_or_else(|| runtime.state().call.borrow().semantic_invoker.clone());
     }
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_bound_function_invoker() -> Option<Rc<BoundFunctionInvoker>> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().bound_invoker.clone();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .bound_invoker()
+            .unwrap_or_else(|| runtime.state().call.borrow().bound_invoker.clone());
     }
     BOUND_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
@@ -430,29 +558,67 @@ pub fn current_lexical_function_invoker() -> Option<Rc<LexicalFunctionInvoker>> 
 }
 
 pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().semantic_resolver.clone();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .semantic_resolver()
+            .unwrap_or_else(|| runtime.state().call.borrow().semantic_resolver.clone());
     }
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
-pub fn current_scoped_name_target_resolver() -> Option<Arc<ScopedNameTargetResolver>> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().scoped_name_target_resolver.clone();
+pub fn current_scoped_name_target_resolver() -> Option<Rc<ScopedNameTargetResolver>> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .scoped_name_resolver()
+            .unwrap_or_else(|| {
+                runtime
+                    .state()
+                    .call
+                    .borrow()
+                    .scoped_name_target_resolver
+                    .clone()
+            });
     }
     SCOPED_NAME_TARGET_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_semantic_name_candidates() -> Option<Arc<SemanticNameCandidates>> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().semantic_name_candidates.clone();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .semantic_candidates()
+            .unwrap_or_else(|| {
+                runtime
+                    .state()
+                    .call
+                    .borrow()
+                    .semantic_name_candidates
+                    .clone()
+            });
     }
     SEMANTIC_NAME_CANDIDATES.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_active_semantic_function() -> Option<usize> {
-    if let Some(state) = active_state() {
-        return state.call.borrow().active_functions.last().copied();
+    if let Some(runtime) = crate::context::legacy::active() {
+        return runtime
+            .call_projection()
+            .borrow()
+            .active_function()
+            .or_else(|| {
+                runtime
+                    .state()
+                    .call
+                    .borrow()
+                    .active_functions
+                    .last()
+                    .copied()
+            });
     }
     ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().last().copied())
 }

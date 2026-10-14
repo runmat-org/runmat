@@ -12,9 +12,8 @@ fn uniform_output_preserves_single_and_exact_integer_classes() {
         "b",
         Value::Tensor(Tensor::from_f32(vec![2.5], vec![1, 1]).unwrap()),
     );
-    let Value::Tensor(single) =
-        call(Value::FunctionHandle("single".into()), singles, Vec::new()).unwrap()
-    else {
+    let result = call(Value::FunctionHandle("single".into()), singles, Vec::new()).unwrap();
+    let Value::Tensor(single) = result.value() else {
         panic!("expected tensor")
     };
     assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
@@ -22,9 +21,8 @@ fn uniform_output_preserves_single_and_exact_integer_classes() {
     let mut integers = StructValue::new();
     integers.insert("a", Value::Int(runmat_value::IntValue::U64(u64::MAX)));
     integers.insert("b", Value::Int(runmat_value::IntValue::U64(u64::MAX - 1)));
-    let Value::Tensor(integer) =
-        call(Value::FunctionHandle("uint64".into()), integers, Vec::new()).unwrap()
-    else {
+    let result = call(Value::FunctionHandle("uint64".into()), integers, Vec::new()).unwrap();
+    let Value::Tensor(integer) = result.value() else {
         panic!("expected tensor")
     };
     assert_eq!(integer.numeric_dtype(), runmat_value::NumericDType::U64);
@@ -44,9 +42,8 @@ fn uniform_output_preserves_integer_complex_storage() {
         "value",
         Value::ComplexTensor(ComplexTensor::new_integer(storage, vec![1, 1]).unwrap()),
     );
-    let Value::ComplexTensor(output) =
-        call(Value::FunctionHandle("conj".into()), structure, Vec::new()).unwrap()
-    else {
+    let result = call(Value::FunctionHandle("conj".into()), structure, Vec::new()).unwrap();
+    let Value::ComplexTensor(output) = result.value() else {
         panic!("expected complex tensor")
     };
     assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::I16);

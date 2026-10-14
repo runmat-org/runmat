@@ -6,7 +6,7 @@ pub(super) async fn try_pol2cart_gpu(
     inputs: &[Value],
     final_shape: &[usize],
     requested_outputs: Option<usize>,
-) -> BuiltinResult<Option<Value>> {
+) -> BuiltinResult<Option<RootedValue>> {
     let Some(anchor) = inputs.iter().find_map(|value| match value {
         Value::GpuTensor(handle) => Some(handle),
         _ => None,
@@ -61,14 +61,19 @@ pub(super) async fn try_pol2cart_gpu(
                 .into_iter()
                 .map(|handle| outputs.publish(handle))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            Ok(Some(if requested_outputs.is_none() {
+            let published = if requested_outputs.is_none() {
                 values
                     .into_iter()
                     .next()
                     .expect("implicit first coordinate")
             } else {
                 Value::OutputList(values)
-            }))
+            };
+            // Register the exact coordinate/list graph before Outputs retires
+            // its remaining temporary and borrowed allocation authorities.
+            RootedValue::new(published)
+                .map(Some)
+                .map_err(|cause| cause.into_runtime_error())
         }
         Err(AttemptError::Unsupported) => Ok(None),
         Err(AttemptError::Failure(error)) => Err(*error),

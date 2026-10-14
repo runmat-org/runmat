@@ -11,7 +11,6 @@ use runmat_runtime::builtins::image::filters::kernel::{
     apply_imfilter_native, build_imfilter_plan, floating_accumulation, FilterAccumulation,
 };
 use runmat_value::Tensor;
-use wgpu::util::DeviceExt;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "imfilter/tests.rs"]
@@ -200,34 +199,28 @@ impl WgpuProvider {
         };
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let kernel_offsets_buffer =
-                emission
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-imfilter-kernel-offsets"),
-                        contents: bytemuck::cast_slice(&kernel_offsets),
-                        usage: wgpu::BufferUsages::STORAGE,
-                    });
+                emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                    label: Some("runmat-imfilter-kernel-offsets"),
+                    contents: bytemuck::cast_slice(&kernel_offsets),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
 
             let kernel_values_buffer = match accumulation_precision {
                 NumericPrecision::F64 => {
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-imfilter-kernel-values-f64"),
-                            contents: bytemuck::cast_slice(&kernel_values_f64),
-                            usage: wgpu::BufferUsages::STORAGE,
-                        })
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-imfilter-kernel-values-f64"),
+                        contents: bytemuck::cast_slice(&kernel_values_f64),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    })
                 }
                 NumericPrecision::F32 => {
                     let kernel_values_f32: Vec<f32> =
                         kernel_values_f64.iter().map(|&v| v as f32).collect();
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-imfilter-kernel-values-f32"),
-                            contents: bytemuck::cast_slice(&kernel_values_f32),
-                            usage: wgpu::BufferUsages::STORAGE,
-                        })
+                    emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-imfilter-kernel-values-f32"),
+                        contents: bytemuck::cast_slice(&kernel_values_f32),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    })
                 }
             };
 
@@ -464,12 +457,12 @@ impl WgpuProvider {
             // completion fence is the last stage of the admitted host route.
             let checkpoint = recorder.submission_checkpoint();
             self.with_emission(|emission, pending| -> Result<()> {
-                let encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-imfilter-host-mediated-completion"),
-                        });
+                let encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-imfilter-host-mediated-completion"),
+                    },
+                );
                 self.submit(emission, pending, encoder)?;
                 Ok(())
             })??;

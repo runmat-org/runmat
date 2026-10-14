@@ -116,6 +116,7 @@ pub const SINPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const SINPI_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const SINPI_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const SINPI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sinpi" },
     category: "math/trigonometry",

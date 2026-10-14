@@ -35,6 +35,7 @@ pub(super) struct RemoteTestBackendConfig {
     pub max_workers: usize,
     pub project_handoff: FrozenProjectHandoff,
     pub interop: runmat_types::InteropManifest,
+    pub foreign_policy: LogicalObject,
     pub foreign_artifacts: Vec<LogicalObject>,
     pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
@@ -140,7 +141,10 @@ impl WorkerBackend for RemoteTestBackend {
             )
             .map_err(protocol)?;
             let program = workload
-                .program_request(self.config.interop.clone())
+                .program_request_with_policy(
+                    self.config.interop.clone(),
+                    Some(self.config.foreign_policy.descriptor.clone()),
+                )
                 .map_err(protocol)?;
             let mut builder = ExecutionBundleBuilder::native(
                 &self.config.project_handoff.project,
@@ -151,7 +155,10 @@ impl WorkerBackend for RemoteTestBackend {
                 program.recipe.clone(),
                 ExecutableForm::TestAttemptV1,
                 program.artifact.executable_bytes.clone(),
-            );
+            )
+            .with_foreign_policy_object(self.config.foreign_policy.clone())
+            .map_err(protocol)?;
+            drop(program);
             for artifact in &self.config.foreign_artifacts {
                 builder = builder
                     .with_foreign_object(artifact.clone())
@@ -178,7 +185,7 @@ impl WorkerBackend for RemoteTestBackend {
                 .first()
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
-            let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+            let selected_descriptor = ProgramExecutionDescriptor {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
@@ -187,13 +194,18 @@ impl WorkerBackend for RemoteTestBackend {
                     None,
                 ),
                 requested_outputs: 1,
-            })
-            .map_err(protocol)?;
-            let inputs = serde_json::to_vec(&ProgramExecutionInputs {
+            };
+            let selected_inputs = ProgramExecutionInputs {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: Vec::new(),
-            })
+            };
+            let descriptor = serde_json::to_vec(&selected_descriptor).map_err(protocol)?;
+            let inputs = serde_json::to_vec(&selected_inputs).map_err(protocol)?;
+            let response_contract = runmat_execution_artifact::ProgramExecutionRequest::from_parts(
+                selected_descriptor,
+                selected_inputs,
+            )
             .map_err(protocol)?;
             let active_run = Arc::clone(&session.active_run);
             let submitted = crate::commands::job::submit::submit_prepared(
@@ -243,7 +255,11 @@ impl WorkerBackend for RemoteTestBackend {
                 .active_run
                 .lock()
                 .expect("remote test session poisoned") = None;
-            match response? {
+            let response = response?;
+            response
+                .validate_against(&response_contract)
+                .map_err(protocol)?;
+            match response {
                 ProgramExecutionResponse::Success { outputs } => {
                     let [value] = outputs.as_slice() else {
                         return Err(protocol("test execution returned an invalid output count"));
@@ -253,6 +269,9 @@ impl WorkerBackend for RemoteTestBackend {
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(BackendError::new(
                     BackendErrorKind::Crashed,
                     "test execution returned unsupported externalized result objects",
+                )),
+                ProgramExecutionResponse::GraphSuccess { .. } => Err(protocol(
+                    "Direct test execution cannot consume a rooted Graph result",
                 )),
                 ProgramExecutionResponse::SpmdSuccess { .. } => Err(BackendError::new(
                     BackendErrorKind::Crashed,

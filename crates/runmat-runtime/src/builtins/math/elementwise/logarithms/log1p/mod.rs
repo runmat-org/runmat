@@ -3,6 +3,8 @@ mod specs;
 mod tests;
 
 use super::operation::LogarithmOperation;
+use crate::context::RuntimeContext;
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -16,13 +18,17 @@ pub(super) const OPERATION: LogarithmOperation = LogarithmOperation::OnePlus;
 #[runtime_builtin(
     name = "log1p",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::logarithms::log1p"
 )]
-async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+async fn log1p_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::LOG1P_DESCRIPTOR,
         &runmat_builtins::LOG1P_ERROR_TOO_MANY_OUTPUTS,
         "log1p",
     )?;
-    super::engine::execute(OPERATION, value).await
+    super::engine::execute(runtime.as_ref(), OPERATION, value).await
 }

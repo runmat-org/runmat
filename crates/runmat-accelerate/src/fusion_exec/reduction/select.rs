@@ -4,8 +4,8 @@ use super::{
     input_preparation::TypedInputPlan,
 };
 use crate::placement::{
-    LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementOutcome,
-    PlacementPolicy, TotalCandidateObservationContract, plan_local_multi,
+    plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
+    LocalPlacementOutcome, PlacementPolicy, TotalCandidateObservationContract,
 };
 use runmat_accelerate_api::reduction::ReductionSelection;
 use runmat_accelerate_api::{

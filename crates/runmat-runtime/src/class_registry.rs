@@ -20,11 +20,23 @@ use runmat_types::{
 use runmat_value::Value;
 
 mod retained;
+mod registration;
+mod revision;
+mod selected;
 mod event_data;
 pub use event_data::{
     default_event_data, is_event_data_value, prepare_event_data, EventDataError, PreparedEventData,
 };
+pub use registration::{
+    prepare_selected_class_projection, register_checked_class, register_checked_classes,
+    register_open_class_declarations, CheckedClassRegistration,
+};
 pub use retained::visit_static_property_retained_values;
+pub use revision::ClassRegistryRevision;
+pub(crate) use selected::{checked_receiver_facts, checked_receiver_projection};
+pub use selected::{
+    SelectedClassProjection, SelectedReceiverMethodDeclaration, SelectedReceiverView,
+};
 mod standard_methods;
 pub(crate) use standard_methods::standard_runtime_methods;
 
@@ -39,9 +51,25 @@ pub struct RuntimeProperty {
     pub default_value: Option<Value>,
 }
 
+/// Instance receiver queries never import a later class's default Value.
+/// This projection is also used for ordinary instances so both branches of
+/// one property read share the same non-owning metadata shape.
+pub(crate) fn receiver_property_declaration(
+    property: RuntimeProperty,
+) -> runmat_value::SelectedReceiverPropertyDeclaration {
+    runmat_value::SelectedReceiverPropertyDeclaration {
+        is_static: property.is_static,
+        is_constant: property.is_constant,
+        is_dependent: property.is_dependent,
+        get_access: property.get_access,
+        set_access: property.set_access,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeMethod {
     pub name: MethodName,
+    pub role: runmat_types::ClassMethodRole,
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_sealed: bool,
@@ -60,7 +88,7 @@ pub enum RuntimeMethodCallingConvention {
 
 #[derive(Debug, Clone)]
 pub struct BoundRuntimeMethod {
-    pub registry_generation: u64,
+    pub registry_generation: ClassRegistryRevision,
     pub declaration: RuntimeMethod,
     pub declaring_class: ClassIdentity,
     pub callable: CallableIdentity,
@@ -129,7 +157,7 @@ pub(crate) struct RuntimeClassState {
 impl Default for RuntimeClassState {
     fn default() -> Self {
         let classes = primitive_class_registry();
-        let method_bindings = bind_class_methods(&classes, 1);
+        let method_bindings = bind_class_methods(&classes, ClassRegistryRevision::Current(1));
         Self {
             generation: 1,
             classes,
@@ -293,10 +321,26 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
                 access: MemberAccess::Public,
                 function_name: "matlab.metadata.DynamicProperty.delete".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
     registry
+}
+
+/// Immutable built-in parent identities whose constructor is intrinsically
+/// implicit. This is a property of the standard registry, not its mutable
+/// session contents or a same-named user source file.
+pub fn has_intrinsic_implicit_constructor(name: &ClassIdentity) -> bool {
+    [
+        standard::HANDLE,
+        standard::DYNAMIC_PROPERTIES,
+        standard::EVENT_DATA,
+        standard::METADATA_PROPERTY,
+        standard::METADATA_DYNAMIC_PROPERTY,
+    ]
+    .into_iter()
+    .any(|class| name.is(class))
 }
 
 pub fn register_class(def: RuntimeClass) {
@@ -312,7 +356,9 @@ pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abst
     let class_name = def.name.clone();
     with_state_mut(|state| {
         state.generation = state.generation.wrapping_add(1).max(1);
-        let bindings = bind_methods_for_class(&def, state.generation).collect::<Vec<_>>();
+        let bindings =
+            bind_methods_for_class(&def, ClassRegistryRevision::Current(state.generation))
+                .collect::<Vec<_>>();
         state
             .method_bindings
             .retain(|(owner, _), _| owner != &class_name);
@@ -324,18 +370,36 @@ pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abst
     });
 }
 
-pub fn class_registry_generation() -> u64 {
-    with_state(|state| state.generation)
+pub fn class_registry_generation() -> ClassRegistryRevision {
+    selected_projection()
+        .map(|selected| selected.generation)
+        .unwrap_or_else(|| with_state(|state| ClassRegistryRevision::Current(state.generation)))
 }
 
 /// Resolve a legacy execution-frame spelling to its registered typed method.
 /// This is the only boundary where declaration text is interpreted as caller
 /// identity; protocol execution uses the returned identities exclusively.
 pub fn caller_method_for_function(function_name: &str) -> Option<(ClassIdentity, MethodName)> {
+    let selected = selected_projection();
+    if let Some(selected) = selected.as_deref() {
+        let mut matches = selected
+            .method_bindings
+            .iter()
+            .filter(|(_, bound)| bound.declaration.function_name == function_name)
+            .map(|((class, method), _)| (class.clone(), method.clone()));
+        if let Some(unique) = matches.next() {
+            return matches.next().is_none().then_some(unique);
+        }
+    }
     with_state(|state| {
         let mut matches = state
             .method_bindings
             .iter()
+            .filter(|((class, _), _)| {
+                selected
+                    .as_deref()
+                    .is_none_or(|projection| !projection.classes.contains_key(class))
+            })
             .filter(|(_, bound)| bound.declaration.function_name == function_name)
             .map(|((class, method), _)| (class.clone(), method.clone()));
         let unique = matches.next()?;
@@ -363,6 +427,14 @@ pub fn register_class_enumerations(
 }
 
 pub fn class_has_enumeration_member(class_name: &ClassIdentity, member: &str) -> bool {
+    if let Some(selected) = selected_projection() {
+        if selected.classes.contains_key(class_name) {
+            return selected
+                .enumerations
+                .get(class_name)
+                .is_some_and(|members| members.contains(member));
+        }
+    }
     with_state(|state| {
         state
             .enumerations
@@ -372,14 +444,17 @@ pub fn class_has_enumeration_member(class_name: &ClassIdentity, member: &str) ->
 }
 
 pub fn get_class(name: &ClassIdentity) -> Option<RuntimeClass> {
-    with_state(|state| state.classes.get(name).cloned())
+    let selected = selected_projection();
+    with_state(|state| effective_class(state, selected.as_deref(), name).cloned())
 }
 
 /// The registered constructor name admitted by both descriptor deferral and
 /// fallback dispatch. Filesystem class folders are not registry authority.
 pub fn registered_constructor_identity(name: &str) -> Option<ClassIdentity> {
     let identity = ClassIdentity::new(name).ok()?;
-    with_state(|state| state.classes.contains_key(&identity)).then_some(identity)
+    let selected = selected_projection();
+    with_state(|state| effective_class(state, selected.as_deref(), &identity).is_some())
+        .then_some(identity)
 }
 
 #[derive(Debug, Clone)]
@@ -410,7 +485,17 @@ pub fn registered_public_static_method(name: &str) -> Option<RegisteredStaticMet
 }
 
 pub fn class_names() -> Vec<ClassIdentity> {
-    with_state(|state| state.classes.keys().cloned().collect())
+    let mut names = with_state(|state| state.classes.keys().cloned().collect::<Vec<_>>());
+    if let Some(selected) = selected_projection() {
+        let extra = selected
+            .classes
+            .keys()
+            .filter(|name| !names.contains(name))
+            .cloned()
+            .collect::<Vec<_>>();
+        names.extend(extra);
+    }
+    names
 }
 
 /// Resolve the declaring class context for a runtime function name. Executors
@@ -420,10 +505,20 @@ pub fn class_context_for_function(function_name: &str) -> Option<ClassIdentity> 
 }
 
 pub fn is_class_sealed(name: &ClassIdentity) -> bool {
+    if let Some(selected) = selected_projection() {
+        if selected.classes.contains_key(name) {
+            return selected.sealed.contains(name);
+        }
+    }
     with_state(|state| state.sealed.contains(name))
 }
 
 pub fn is_class_abstract(name: &ClassIdentity) -> bool {
+    if let Some(selected) = selected_projection() {
+        if selected.classes.contains_key(name) {
+            return selected.abstract_classes.contains(name);
+        }
+    }
     with_state(|state| state.abstract_classes.contains(name))
 }
 
@@ -431,8 +526,8 @@ pub fn is_class_or_subclass(class_name: &ClassIdentity, ancestor_name: &ClassIde
     if class_name == ancestor_name {
         return true;
     }
+    let selected = selected_projection();
     with_state(|state| {
-        let registry = &state.classes;
         let mut current = Some(class_name.clone());
         let mut visited = HashSet::new();
         while let Some(name) = current {
@@ -442,20 +537,18 @@ pub fn is_class_or_subclass(class_name: &ClassIdentity, ancestor_name: &ClassIde
             if &name == ancestor_name {
                 return true;
             }
-            current = registry.get(&name).and_then(|class| class.parent.clone());
+            current = effective_class(state, selected.as_deref(), &name)
+                .and_then(|class| class.parent.clone());
         }
         false
     })
 }
 
 pub fn superclass_chain(class_name: &ClassIdentity) -> Option<Vec<ClassIdentity>> {
+    let selected = selected_projection();
     with_state(|state| {
-        let registry = &state.classes;
-        if !registry.contains_key(class_name) {
-            return None;
-        }
-        let mut current = registry
-            .get(class_name)
+        effective_class(state, selected.as_deref(), class_name)?;
+        let mut current = effective_class(state, selected.as_deref(), class_name)
             .and_then(|class| class.parent.clone());
         let mut visited = HashSet::from([class_name.clone()]);
         let mut result = Vec::new();
@@ -464,7 +557,8 @@ pub fn superclass_chain(class_name: &ClassIdentity) -> Option<Vec<ClassIdentity>
                 break;
             }
             result.push(name.clone());
-            current = registry.get(&name).and_then(|class| class.parent.clone());
+            current = effective_class(state, selected.as_deref(), &name)
+                .and_then(|class| class.parent.clone());
         }
         Some(result)
     })
@@ -523,6 +617,7 @@ pub fn lookup_bound_method(
     class_name: &ClassIdentity,
     method: &MethodName,
 ) -> Option<BoundRuntimeMethod> {
+    let selected = selected_projection();
     with_state(|state| {
         let mut current = Some(class_name.clone());
         let mut visited = HashSet::new();
@@ -530,8 +625,14 @@ pub fn lookup_bound_method(
             if !visited.insert(name.clone()) {
                 break;
             }
-            let class = state.classes.get(&name)?;
-            if let Some(binding) = state.method_bindings.get(&(name.clone(), method.clone())) {
+            let class = effective_class(state, selected.as_deref(), &name)?;
+            let binding = match selected.as_deref() {
+                Some(projection) if projection.classes.contains_key(&name) => projection
+                    .method_bindings
+                    .get(&(name.clone(), method.clone())),
+                _ => state.method_bindings.get(&(name.clone(), method.clone())),
+            };
+            if let Some(binding) = binding {
                 return Some(binding.clone());
             }
             current = class.parent.clone();
@@ -542,7 +643,7 @@ pub fn lookup_bound_method(
 
 fn bind_class_methods(
     classes: &HashMap<ClassIdentity, RuntimeClass>,
-    generation: u64,
+    generation: ClassRegistryRevision,
 ) -> HashMap<(ClassIdentity, MethodName), BoundRuntimeMethod> {
     classes
         .values()
@@ -552,7 +653,7 @@ fn bind_class_methods(
 
 fn bind_methods_for_class(
     class: &RuntimeClass,
-    generation: u64,
+    generation: ClassRegistryRevision,
 ) -> impl Iterator<Item = ((ClassIdentity, MethodName), BoundRuntimeMethod)> + '_ {
     class.methods.values().cloned().map(move |declaration| {
         let method = declaration.name.clone();
@@ -643,15 +744,15 @@ fn lookup_member<T>(
     class_name: &ClassIdentity,
     mut member: impl FnMut(&RuntimeClass) -> Option<T>,
 ) -> Option<(T, ClassIdentity)> {
+    let selected = selected_projection();
     with_state(|state| {
-        let registry = &state.classes;
         let mut current = Some(class_name.clone());
         let mut visited = HashSet::new();
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
             }
-            let class = registry.get(&name)?;
+            let class = effective_class(state, selected.as_deref(), &name)?;
             if let Some(value) = member(class) {
                 return Some((value, name));
             }
@@ -678,6 +779,21 @@ pub fn set_static_property_value(class_name: &ClassIdentity, property: &str, val
             .static_values
             .insert((class_name.clone(), property.to_owned()), value);
     });
+}
+
+fn selected_projection() -> Option<std::rc::Rc<SelectedClassProjection>> {
+    crate::context::legacy::active()
+        .and_then(|context| context.selected_class_projection().cloned())
+}
+
+fn effective_class<'a>(
+    state: &'a RuntimeClassState,
+    selected: Option<&'a SelectedClassProjection>,
+    name: &ClassIdentity,
+) -> Option<&'a RuntimeClass> {
+    selected
+        .and_then(|projection| projection.classes.get(name))
+        .or_else(|| state.classes.get(name))
 }
 
 fn with_state<R>(callback: impl FnOnce(&RuntimeClassState) -> R) -> R {
@@ -742,6 +858,7 @@ mod tests {
             access: MemberAccess::Public,
             function_name: function.into(),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         };
         class.methods.insert(declaration.name.clone(), declaration);
         class
@@ -811,7 +928,13 @@ mod tests {
 
         let before = class_registry_generation();
         register_class(empty_class(owner.clone(), Some(standard::HANDLE.owned())));
-        assert!(class_registry_generation() > before);
+        let after = class_registry_generation();
+        let (ClassRegistryRevision::Current(before), ClassRegistryRevision::Current(after)) =
+            (before, after)
+        else {
+            panic!("ordinary class registration must advance the current registry")
+        };
+        assert!(after > before);
         assert!(lookup_event(&child, &MemberName::from("Changed")).is_none());
     }
 
@@ -952,6 +1075,7 @@ mod tests {
                 access: MemberAccess::Public,
                 function_name: "parentOnly_impl".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         parent_class.properties.insert(

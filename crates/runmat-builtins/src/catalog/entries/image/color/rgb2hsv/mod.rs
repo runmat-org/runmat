@@ -13,6 +13,7 @@ fn infer(
 }
 
 pub const RGB2HSV_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rgb2hsv" },
     category: "image/color",

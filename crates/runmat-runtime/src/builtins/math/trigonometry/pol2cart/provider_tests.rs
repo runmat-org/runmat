@@ -224,7 +224,7 @@ fn inputs(provider: &Provider) -> (GpuTensorHandle, Vec<Value>) {
     ];
     (borrowed, args)
 }
-fn run(args: &[Value], outputs: usize) -> BuiltinResult<Value> {
+fn run(args: &[Value], outputs: usize) -> BuiltinResult<crate::execution::RootedValue> {
     block_on(crate::dispatcher::call_builtin_async_with_outputs(
         NAME, args, outputs,
     ))
@@ -256,25 +256,27 @@ fn provider_zero_through_three_outputs_expand_xy_with_z_and_release_discarded_ha
         let provider = provider(0, Fault::None);
         let _provider = ThreadProviderGuard::set(Some(provider));
         let (borrowed, args) = inputs(provider);
-        let Value::OutputList(values) = run(&args, count).unwrap() else {
-            panic!("outputs")
-        };
-        assert_eq!(values.len(), count);
-        provider.assert_reclaimed(count);
-        for (index, value) in values.into_iter().enumerate() {
-            let Value::GpuTensor(handle) = value else {
-                panic!("resident output")
+        run(&args, count).unwrap().with_owned(|value| {
+            let Value::OutputList(values) = value else {
+                panic!("outputs")
             };
-            assert_eq!(handle.shape(), vec![2, 3]);
-            let data = provider.inner.download(&handle).unwrap().data;
-            let expected = match index {
-                0 => vec![2.0; 6],
-                1 => vec![0.0; 6],
-                _ => vec![7.0, 7.0, 8.0, 8.0, 9.0, 9.0],
-            };
-            assert_eq!(data, expected);
-            handle.release().unwrap();
-        }
+            assert_eq!(values.len(), count);
+            provider.assert_reclaimed(count);
+            for (index, value) in values.into_iter().enumerate() {
+                let Value::GpuTensor(handle) = value else {
+                    panic!("resident output")
+                };
+                assert_eq!(handle.shape(), vec![2, 3]);
+                let data = provider.inner.download(&handle).unwrap().data;
+                let expected = match index {
+                    0 => vec![2.0; 6],
+                    1 => vec![0.0; 6],
+                    _ => vec![7.0, 7.0, 8.0, 8.0, 9.0, 9.0],
+                };
+                assert_eq!(data, expected);
+                handle.release().unwrap();
+            }
+        });
         provider.assert_reclaimed(0);
         assert_borrowed_live(provider, &borrowed);
     }
@@ -313,19 +315,21 @@ fn pol2cart_outputs_preserve_automatic_and_explicit_input_provenance() {
         let (borrowed, mut args) = inputs(provider);
         let borrowed = borrowed.with_provenance(provenance).unwrap();
         args[0] = Value::GpuTensor(borrowed.clone());
-        let Value::OutputList(outputs) = run(&args, 3).unwrap() else {
-            panic!("outputs")
-        };
-        for output in outputs {
-            let Value::GpuTensor(handle) = output else {
-                panic!("resident output")
+        run(&args, 3).unwrap().with_owned(|value| {
+            let Value::OutputList(outputs) = value else {
+                panic!("outputs")
             };
-            assert_eq!(
-                runmat_accelerate_api::handle_provenance(&handle),
-                Some(provenance)
-            );
-            handle.release().unwrap();
-        }
+            for output in outputs {
+                let Value::GpuTensor(handle) = output else {
+                    panic!("resident output")
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_provenance(&handle),
+                    Some(provenance)
+                );
+                handle.release().unwrap();
+            }
+        });
         provider.assert_reclaimed(0);
         assert_borrowed_live(provider, &borrowed);
     }
@@ -337,7 +341,8 @@ fn only_unsupported_hooks_fall_back_and_pending_drop_reclaims_owned_uploads() {
     let provider = provider(4, Fault::Unsupported);
     let _provider = ThreadProviderGuard::set(Some(provider));
     let (borrowed, args) = inputs(provider);
-    let Value::OutputList(values) = run(&args, 3).unwrap() else {
+    let output = run(&args, 3).unwrap();
+    let Value::OutputList(values) = output.value() else {
         panic!("outputs")
     };
     assert!(values.iter().all(|v| matches!(v, Value::Tensor(_))));

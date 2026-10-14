@@ -9,25 +9,57 @@ use crate::{CompatMode, RunMatSession};
 pub(crate) fn services(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::testing::RuntimeTestServices {
     let run_project = project.clone();
-    let run = move |args: Vec<Value>, coverage: Option<MatlabCoverageSelection>| {
+    #[cfg(not(target_arch = "wasm32"))]
+    let run_child_tasks = child_tasks.clone();
+    let run = move |caller: Option<runmat_runtime::context::RuntimeContext>,
+                    args: Vec<Value>,
+                    coverage: Option<MatlabCoverageSelection>| {
         let project = run_project.clone();
-        Box::pin(async move { run_arguments(compat, project, args, coverage).await })
-            as runmat_runtime::testing::RunSuiteFuture
+        #[cfg(not(target_arch = "wasm32"))]
+        let child_tasks = run_child_tasks.clone();
+        Box::pin(async move {
+            run_arguments(
+                compat,
+                project,
+                caller,
+                args,
+                coverage,
+                #[cfg(not(target_arch = "wasm32"))]
+                child_tasks,
+            )
+            .await
+        }) as runmat_runtime::testing::RunSuiteFuture
     };
     let suite_run = run.clone();
     let discover_project = project;
+    #[cfg(not(target_arch = "wasm32"))]
+    let discover_child_tasks = child_tasks;
     runmat_runtime::testing::RuntimeTestServices::new(
-        move |suite, plugins| {
+        move |caller, suite, plugins| {
             let args = suite_targets(suite);
             let coverage = plugins.iter().find_map(coverage_plugin_selection);
-            suite_run(args, coverage)
+            suite_run(caller, args, coverage)
         },
-        move |args| run(args, None),
-        move |args| {
+        move |caller, args| run(caller, args, None),
+        move |caller, args| {
             let project = discover_project.clone();
-            Box::pin(async move { discover_arguments(compat, project, args).await })
+            #[cfg(not(target_arch = "wasm32"))]
+            let child_tasks = discover_child_tasks.clone();
+            Box::pin(async move {
+                discover_arguments(
+                    compat,
+                    project,
+                    caller,
+                    args,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    child_tasks,
+                )
+                .await
+            })
         },
     )
 }
@@ -35,12 +67,22 @@ pub(crate) fn services(
 async fn run_arguments(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
     args: Vec<Value>,
     coverage: Option<MatlabCoverageSelection>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, requested_coverage) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
-    let mut session = configured_session(compat, project)?;
+    let mut session = configured_session(
+        compat,
+        project,
+        caller,
+        #[cfg(not(target_arch = "wasm32"))]
+        child_tasks,
+    )
+    .await?;
     let run = session
         .run_test_snapshot(
             &snapshot,
@@ -58,11 +100,21 @@ async fn run_arguments(
 async fn discover_arguments(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
     args: Vec<Value>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, _) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
-    let session = configured_session(compat, project)?;
+    let session = configured_session(
+        compat,
+        project,
+        caller,
+        #[cfg(not(target_arch = "wasm32"))]
+        child_tasks,
+    )
+    .await?;
     let discovery = session
         .discover_tests(&snapshot)
         .map_err(domain_error)?
@@ -164,17 +216,36 @@ async fn snapshot_from_arguments(
     Ok((snapshot, selected_names, coverage))
 }
 
-fn configured_session(
+async fn configured_session(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::BuiltinResult<RunMatSession> {
-    let mut session = RunMatSession::with_options(false, false).map_err(|error| {
-        runtime_error("RunMat:Testing:SessionInitialization", error.to_string())
+    let caller = caller.ok_or_else(|| {
+        runtime_error(
+            "RunMat:Testing:RequiresExecutor",
+            "test child requires the originating runtime context",
+        )
     })?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut session =
+        RunMatSession::with_options_on_parent_driver(false, false, &child_tasks, &caller).map_err(
+            |error| runtime_error("RunMat:Testing:SessionInitialization", error.to_string()),
+        )?;
+    #[cfg(target_arch = "wasm32")]
+    let mut session =
+        RunMatSession::with_options_for_test_child(false, false, &caller).map_err(|error| {
+            runtime_error("RunMat:Testing:SessionInitialization", error.to_string())
+        })?;
     session.set_compat_mode(compat);
     if let Some(project) = project {
-        session
-            .install_project_handoff(project)
+        #[cfg(not(target_arch = "wasm32"))]
+        let installed = session.install_project_handoff(project).await;
+        #[cfg(target_arch = "wasm32")]
+        let installed = session.install_project_handoff(project);
+        installed
             .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))?;
     }
     Ok(session)

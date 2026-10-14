@@ -99,6 +99,7 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                     executor: compiled.executor,
                     function: compiled.entrypoint,
                     captures: Vec::new(),
+                    lexical_environment: None,
                     arguments: vec![Value::GpuTensor(input.clone())],
                     requested_outputs,
                     runtime: session.runtime_context().clone(),
@@ -109,6 +110,7 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                     .inject(FaultInjection::Safepoint(safepoint)),
                     osr: None,
                     workspace: None,
+                    dynamic_admission: None,
                 },
             ));
             if fails {

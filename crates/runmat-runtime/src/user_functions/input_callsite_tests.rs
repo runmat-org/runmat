@@ -16,7 +16,7 @@ fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
             let callsite = current_function_input_callsite().expect("selected user caller facts");
             assert_eq!(callsite.source_id, Some(SourceId(13)));
             assert_eq!(callsite.arg_spans, vec![Span { start: 4, end: 9 }]);
-            crate::sequence::single_value_sequence(Value::Num(17.0))
+            crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(17.0))
         })
     })));
     let request = CallableRequest::resolved(
@@ -32,7 +32,7 @@ fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
     let result = futures::executor::block_on(try_call_semantic_descriptor(request))
         .expect("user function selected")
         .expect("user function completed");
-    assert_eq!(result.into_values(), vec![Value::Num(17.0)]);
+    assert_eq!(result.as_slice(), &[Value::Num(17.0)]);
     assert!(current_function_input_callsite().is_none());
 }
 
@@ -57,43 +57,51 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
             runmat_value::LocalExport::Ephemeral,
         ),
     };
-    let _scoped = install_scoped_name_target_resolver(Some(Arc::new(move |name| {
+    let _scoped = install_scoped_name_target_resolver(Some(Rc::new(move |name| {
         (name == "private_helper").then(|| ScopedSemanticNameTarget::Retained(binding.clone()))
     })));
-    let _numeric = install_local_semantic_function_invoker(std::rc::Rc::new(|function, _, _| {
-        assert_eq!(function, 17);
-        Box::pin(async { crate::sequence::single_value_sequence(Value::Num(22.0)) })
-    }));
-    let _bound = install_local_bound_function_invoker(std::rc::Rc::new(move |_, binding, _, _| {
-        assert_eq!(binding.function, 17);
-        let lease = binding.authority.local_lease(17).expect("selected lease");
-        assert!(lease.matches(&leased));
-        assert!(!lease.matches(&republished));
-        Box::pin(async { crate::sequence::single_value_sequence(Value::Num(33.0)) })
-    }));
+    let _numeric =
+        install_local_semantic_function_invoker(std::rc::Rc::new(|_runtime, function, _, _| {
+            assert_eq!(function, 17);
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(22.0))
+            })
+        }));
+    let _bound = install_local_bound_function_invoker(std::rc::Rc::new(
+        move |_, binding, _, _, _lexical_environment| {
+            assert_eq!(binding.function, 17);
+            let lease = binding.authority.local_lease(17).expect("selected lease");
+            assert!(lease.matches(&leased));
+            assert!(!lease.matches(&republished));
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
+            })
+        },
+    ));
     let named =
         futures::executor::block_on(try_call_semantic_function_by_name("private_helper", &[], 1))
             .expect("name route")
             .expect("leased name result");
-    assert_eq!(named.into_values(), vec![Value::Num(33.0)]);
+    assert_eq!(named.as_slice(), &[Value::Num(33.0)]);
     let numeric = futures::executor::block_on(try_call_semantic_function(17, &[], 1))
         .expect("numeric route")
         .expect("published numeric result");
-    assert_eq!(numeric.into_values(), vec![Value::Num(22.0)]);
-    let unbound_closure = runmat_value::Closure {
+    assert_eq!(numeric.as_slice(), &[Value::Num(22.0)]);
+    let unbound_closure = runmat_value::Closure::from_data(runmat_value::ClosureData {
+        lexical_environment: None,
         function_name: "private_helper".into(),
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
         captures: Vec::new(),
-    };
+    });
     let feval = futures::executor::block_on(crate::call_feval_sequence_async_with_outputs(
         Value::Closure(unbound_closure.clone()),
         &[],
         1,
     ))
     .expect("unbound feval keeps leased name selection");
-    assert_eq!(feval.into_values(), vec![Value::Num(33.0)]);
+    assert_eq!(feval.as_slice(), &[Value::Num(33.0)]);
     let mapped = futures::executor::block_on(
         crate::builtins::common::mapped_callable::MappedCallable::Closure(unbound_closure)
             .invoke_with_outputs(&[], 1),
@@ -114,7 +122,13 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
     runtime.set_dynamic_function_loader(Some(Rc::new(move |_, _, _, _, phase, _| {
         if phase == DynamicFunctionLoadPhase::BeforeSemantic {
             observed.set(observed.get() + 1);
-            Box::pin(async { Some(crate::sequence::single_value_sequence(Value::Num(44.0))) })
+            Box::pin(async {
+                Some(
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        44.0,
+                    )),
+                )
+            })
         } else {
             Box::pin(async { None })
         }
@@ -132,24 +146,30 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
             runmat_value::LocalExport::Ephemeral,
         ),
     };
-    let _scoped = install_scoped_name_target_resolver(Some(Arc::new(move |name| match name {
+    let _scoped = install_scoped_name_target_resolver(Some(Rc::new(move |name| match name {
         "private_current" => Some(ScopedSemanticNameTarget::Published(
             runmat_types::FunctionId(17),
         )),
         "private_leased" => Some(ScopedSemanticNameTarget::Retained(binding.clone())),
         _ => None,
     })));
-    let _numeric = install_local_semantic_function_invoker(Rc::new(|_, _, _| {
-        Box::pin(async { crate::sequence::single_value_sequence(Value::Num(33.0)) })
+    let _numeric = install_local_semantic_function_invoker(Rc::new(|_runtime, _, _, _| {
+        Box::pin(async {
+            crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
+        })
     }));
-    let _bound = install_local_bound_function_invoker(Rc::new(move |_, binding, _, _| {
-        assert!(binding
-            .authority
-            .local_lease(17)
-            .expect("lease")
-            .matches(&leased));
-        Box::pin(async { crate::sequence::single_value_sequence(Value::Num(55.0)) })
-    }));
+    let _bound = install_local_bound_function_invoker(Rc::new(
+        move |_, binding, _, _, _lexical_environment| {
+            assert!(binding
+                .authority
+                .local_lease(17)
+                .expect("lease")
+                .matches(&leased));
+            Box::pin(async {
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(55.0))
+            })
+        },
+    ));
     for (name, expected, loader_count) in [
         ("private_current", 33.0, 0),
         ("private_leased", 55.0, 0),
@@ -164,7 +184,131 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
         let result = futures::executor::block_on(try_call_semantic_descriptor(request))
             .expect("selected callable")
             .expect("call completed");
-        assert_eq!(result.into_values(), vec![Value::Num(expected)]);
+        assert_eq!(result.as_slice(), &[Value::Num(expected)]);
         assert_eq!(loader_calls.get(), loader_count);
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn registered_constructor_loads_only_an_unresolved_declared_source() {
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _entry = runtime.enter();
+    let phases = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = Rc::clone(&phases);
+    runtime.set_dynamic_function_loader(Some(Rc::new(move |_, name, _, _, phase, _| {
+        assert!(matches!(name.as_str(), "SourceCtor" | "pkg.SourceCtor"));
+        observed.borrow_mut().push(phase.clone());
+        Box::pin(async {
+            Some(crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0)))
+        })
+    })));
+    let register = |name: &str, constructor: bool| {
+        let identity = runmat_types::ClassIdentity::new(name).expect("class identity");
+        let leaf = identity
+            .qualified_name()
+            .0
+            .last()
+            .expect("class leaf")
+            .0
+            .clone();
+        let mut methods = std::collections::HashMap::new();
+        if constructor {
+            methods.insert(
+                runmat_types::MethodName::from(leaf.as_str()),
+                crate::class_registry::RuntimeMethod {
+                    name: runmat_types::MethodName::from(leaf.as_str()),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: runmat_types::MemberAccess::Public,
+                    function_name: format!("{name}.{leaf}"),
+                    implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Constructor,
+                },
+            );
+        }
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            name: identity,
+            parent: None,
+            properties: std::collections::HashMap::new(),
+            methods,
+            events: std::collections::HashMap::new(),
+        });
+    };
+    register("DefaultCtor", false);
+    let request = CallableRequest::resolved(
+        CallableIdentity::DynamicName(SymbolName("DefaultCtor".into())),
+        CallableFallbackPolicy::RuntimeNameResolution,
+        Vec::new(),
+        1,
+    );
+    assert!(futures::executor::block_on(try_call_semantic_descriptor(request)).is_none());
+    assert!(
+        phases.borrow().is_empty(),
+        "default classes must not consult source"
+    );
+
+    register("SourceCtor", true);
+    let request = CallableRequest::resolved(
+        CallableIdentity::DynamicName(SymbolName("SourceCtor".into())),
+        CallableFallbackPolicy::RuntimeNameResolution,
+        Vec::new(),
+        1,
+    );
+    let result = futures::executor::block_on(try_call_semantic_descriptor(request))
+        .expect("source constructor selected")
+        .expect("source constructor completed");
+    assert_eq!(result.as_slice(), &[Value::Num(7.0)]);
+    assert_eq!(
+        phases.borrow().as_slice(),
+        &[DynamicFunctionLoadPhase::RegisteredConstructorSource(
+            runmat_types::ClassIdentity::new("SourceCtor").expect("class identity")
+        )]
+    );
+
+    register("pkg.SourceCtor", true);
+    let request = CallableRequest::resolved(
+        crate::call::identity::external_qualified_identity("pkg", "SourceCtor"),
+        CallableFallbackPolicy::ExternalBoundary,
+        Vec::new(),
+        1,
+    );
+    let result = futures::executor::block_on(try_call_semantic_descriptor(request))
+        .expect("package source constructor selected")
+        .expect("package source constructor completed");
+    assert_eq!(result.as_slice(), &[Value::Num(7.0)]);
+    assert_eq!(
+        phases.borrow().last(),
+        Some(&DynamicFunctionLoadPhase::RegisteredConstructorSource(
+            runmat_types::ClassIdentity::new("pkg.SourceCtor").expect("class identity")
+        ))
+    );
+
+    let semantic = install_semantic_function_resolver(Some(Arc::new(|name| {
+        (name == "SourceCtor.SourceCtor").then_some(13)
+    })));
+    let request = CallableRequest::resolved(
+        CallableIdentity::DynamicName(SymbolName("SourceCtor".into())),
+        CallableFallbackPolicy::RuntimeNameResolution,
+        Vec::new(),
+        1,
+    );
+    assert!(futures::executor::block_on(try_call_semantic_descriptor(request)).is_none());
+    assert_eq!(
+        phases.borrow().len(),
+        2,
+        "semantic constructor retains priority"
+    );
+    drop(semantic);
+    runtime.set_dynamic_function_loader(None);
+    let request = CallableRequest::resolved(
+        CallableIdentity::DynamicName(SymbolName("SourceCtor".into())),
+        CallableFallbackPolicy::RuntimeNameResolution,
+        Vec::new(),
+        1,
+    );
+    assert!(futures::executor::block_on(try_call_semantic_descriptor(request)).is_none());
 }

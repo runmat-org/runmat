@@ -179,6 +179,7 @@ impl NodeControlPlane for HttpNodeControlPlane {
             fencing_token: to_u64(response.fencing_token, "driver fencing token")?,
             credential: response.credential,
             expires_at_millis: response.expires_at.timestamp_millis(),
+            ready_v1: response.ready_v1.unwrap_or(false),
         })
     }
 
@@ -214,6 +215,7 @@ impl NodeControlPlane for HttpNodeControlPlane {
             relay_path: response.relay_path,
             relay_protocol: response.relay_protocol,
             relay_ticket: response.relay_ticket,
+            ready_v1: response.ready_v1.unwrap_or(false),
         })
     }
 

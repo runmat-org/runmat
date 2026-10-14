@@ -62,6 +62,29 @@ fn native_object_artifact_retains_bounded_digest_checked_parts() {
 }
 
 #[test]
+fn legacy_pure_recipe_identity_remains_valid_and_policy_bytes_are_bounded() {
+    let (_temp, _project, revision) = support::frozen_project();
+    let mut legacy = support::recipe(revision);
+    legacy.schema_version =
+        runmat_execution_artifact::program::LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION;
+    let old_id = legacy.id().unwrap();
+    assert_ne!(old_id, {
+        legacy.schema_version = runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION;
+        legacy.id().unwrap()
+    });
+    assert!(runmat_execution_artifact::foreign_policy_object(vec![
+        b'x';
+        runmat_execution_artifact::MAX_FOREIGN_POLICY_BYTES
+            as usize
+            + 1
+    ])
+    .is_err());
+    assert!(
+        runmat_execution_artifact::foreign_policy_object(br#"{"z":1,"a":2}"#.to_vec()).is_err()
+    );
+}
+
+#[test]
 fn recipe_and_materialized_artifact_have_distinct_exact_identities() {
     let (_temp, project, revision) = support::frozen_project();
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
@@ -181,6 +204,13 @@ fn executable_interop_must_match_the_recipe() {
             .unwrap()],
         });
     recipe.interop.validate().unwrap();
+    recipe.foreign_policy = Some(
+        runmat_execution_artifact::foreign_policy_object(
+            br#"{"fixture":"interop-mismatch","schema_version":1}"#.to_vec(),
+        )
+        .unwrap()
+        .descriptor,
+    );
     let error = ProgramArtifact::materialize(
         &recipe,
         ExecutableForm::ExecutableUnitV3,

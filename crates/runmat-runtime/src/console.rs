@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
 
 mod diary;
+mod capture_projection;
+pub(crate) use capture_projection::{CaptureLease, ConsoleCaptureProjection};
 pub use diary::{
     diary_enabled, diary_filename, ensure_diary_writable, record_diary_command, set_diary_enabled,
     set_diary_enabled_checked, set_diary_filename, set_diary_filename_checked, take_diary_error,
@@ -41,6 +43,7 @@ static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new
 pub struct ConsoleCaptureGuard {
     active: bool,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    projection: Option<CaptureLease>,
 }
 
 #[derive(Debug, Default)]
@@ -63,6 +66,15 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
         text: text.into(),
         timestamp_ms: now_ms(),
     };
+    if let Some(runtime) = crate::context::legacy::active() {
+        if runtime
+            .console_capture_projection()
+            .borrow()
+            .record(entry.clone())
+        {
+            return;
+        }
+    }
     if with_console_state(|state| {
         if let Some(current) = state.captures.last_mut() {
             current.push(entry.clone());
@@ -200,6 +212,15 @@ pub fn take_last_value_output() -> Option<Value> {
 /// diary log. This matches MATLAB's `evalc` behavior, where `diary` is disabled
 /// inside the captured evaluation.
 pub fn begin_capture() -> ConsoleCaptureGuard {
+    if let Some(runtime) = crate::context::legacy::active() {
+        return ConsoleCaptureGuard {
+            active: true,
+            state: None,
+            projection: Some(ConsoleCaptureProjection::begin(
+                runtime.console_capture_projection(),
+            )),
+        };
+    }
     let state = active_state();
     if let Some(state) = &state {
         state.console.borrow_mut().captures.push(Vec::new());
@@ -209,6 +230,7 @@ pub fn begin_capture() -> ConsoleCaptureGuard {
     ConsoleCaptureGuard {
         active: true,
         state,
+        projection: None,
     }
 }
 
@@ -227,6 +249,9 @@ impl ConsoleCaptureGuard {
 
     fn take_entries(&mut self) -> Vec<ConsoleEntry> {
         self.active = false;
+        if let Some(projection) = self.projection.take() {
+            return projection.finish();
+        }
         if let Some(state) = &self.state {
             state
                 .console
@@ -243,6 +268,9 @@ impl ConsoleCaptureGuard {
 impl Drop for ConsoleCaptureGuard {
     fn drop(&mut self) {
         if self.active {
+            if self.projection.take().is_some() {
+                return;
+            }
             if let Some(state) = &self.state {
                 state.console.borrow_mut().captures.pop();
             } else {
@@ -301,6 +329,11 @@ fn inject_label_into_nd_page_headers(label: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
+    use std::future::Future;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
 
     fn entry(text: &str, timestamp_ms: u64) -> ConsoleEntry {
         ConsoleEntry {
@@ -322,6 +355,66 @@ mod tests {
             .map(|entry| entry.text)
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["early", "late", "same-time"]);
+    }
+
+    #[test]
+    fn pending_sibling_captures_do_not_exchange_streams_or_drop_state() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let make = |label: &'static str, release: futures::channel::oneshot::Receiver<()>| {
+            runtime.scope(async move {
+                let outer = begin_capture();
+                record_console_output(ConsoleStream::Stdout, format!("{label}:outer"));
+                let nested = begin_capture();
+                record_console_output(ConsoleStream::Stderr, format!("{label}:nested"));
+                release.await.expect("release sibling");
+                record_console_output(ConsoleStream::Stderr, format!("{label}:resumed"));
+                let nested = nested.finish_entries();
+                record_console_output(ConsoleStream::Stdout, format!("{label}:after"));
+                let outer = outer.finish_entries();
+                (outer, nested)
+            })
+        };
+        let (first_tx, first_rx) = futures::channel::oneshot::channel();
+        let (second_tx, second_rx) = futures::channel::oneshot::channel();
+        let mut first = Box::pin(make("first", first_rx));
+        let mut second = Box::pin(make("second", second_rx));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(matches!(first.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+        first_tx.send(()).expect("resume first");
+        let Poll::Ready((outer, nested)) = first.as_mut().poll(&mut cx) else {
+            panic!("first completes")
+        };
+        assert_eq!(
+            outer
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first:outer", "first:after"]
+        );
+        assert_eq!(
+            nested
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first:nested", "first:resumed"]
+        );
+        drop(second); // cancellation retires its nested and outer guards
+        drop(second_tx);
+        {
+            let _scope = runtime.enter();
+            record_console_output(ConsoleStream::Stdout, "post-cancel");
+            assert!(take_thread_buffer()
+                .iter()
+                .any(|entry| entry.text == "post-cancel"));
+        }
+        let unrelated = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let _scope = unrelated.enter();
+        record_console_output(ConsoleStream::Stdout, "unrelated");
+        assert!(take_thread_buffer()
+            .iter()
+            .any(|entry| entry.text == "unrelated"));
     }
 
     #[test]

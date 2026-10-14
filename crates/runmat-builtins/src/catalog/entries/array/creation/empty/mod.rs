@@ -20,6 +20,7 @@ pub use uint32::*;
 pub use uint64::*;
 pub use uint8::*;
 pub const EMPTY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "empty" },
     category: "array/creation",

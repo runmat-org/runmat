@@ -205,7 +205,7 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     );
     provider.reset_telemetry();
     let Value::Object(forward) = block_on(super::super::forward_builtin(
-        network.clone(),
+        network.value().clone(),
         formatted,
         vec![],
     ))
@@ -232,11 +232,11 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     assert!(!forward_data.shares_allocation_with(&input));
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
-    let Value::Object(network_object) = network else {
+    let Value::Object(network_object) = network.value() else {
         panic!("network object expected")
     };
     let predicted = block_on(super::super::predict_deep_learning_object(
-        network_object,
+        network_object.clone(),
         Value::GpuTensor(input.clone()),
         vec![],
     ))

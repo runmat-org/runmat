@@ -123,7 +123,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::Tensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape(), &[2, 1]);
@@ -147,7 +150,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::Tensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape(), &[2, 1]);
@@ -167,7 +173,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::ComplexTensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape(), &[2, 1]);
@@ -197,7 +206,10 @@ mod tests {
             ],
         ))
         .expect("ss");
-        let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::ComplexTensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape(), &[2, 1]);

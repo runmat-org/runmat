@@ -262,7 +262,7 @@ fn valid_covariance_output_adopts_explicit_intent_and_owns_only_its_result() {
         1,
     ))
     .unwrap();
-    let Value::GpuTensor(output) = &result else {
+    let Value::GpuTensor(output) = result.value() else {
         panic!("resident result")
     };
     assert_eq!(output.shape(), [2, 2]);
@@ -316,10 +316,10 @@ fn covariance_shape_admission_matches_host_vectors_matrices_and_empty_inputs() {
             1,
         ))
         .unwrap();
-        let Value::GpuTensor(output) = &resident else {
+        let Value::GpuTensor(output) = resident.value() else {
             panic!("resident covariance")
         };
-        let Value::Tensor(expected) = host else {
+        let Value::Tensor(expected) = host.value() else {
             panic!("covariance host result must be a dense tensor, got {host:?}");
         };
         let actual = block_on(provider.download(output)).unwrap();

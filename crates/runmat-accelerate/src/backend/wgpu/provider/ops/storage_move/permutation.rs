@@ -90,6 +90,11 @@ impl WgpuProvider {
         if storage_total > u32::MAX as usize {
             return Err(anyhow!("permute: tensor too large for GPU kernel"));
         }
+        let submission_geometry = crate::backend::wgpu_geometry::permutation_submission_geometry(
+            u64::try_from(storage_total).map_err(|_| anyhow!("permute: storage size overflow"))?,
+            self.workgroup_config.scalar,
+        )
+        .ok_or_else(|| anyhow!("permute: invalid provider workgroup or submission geometry"))?;
 
         let mut dst_shape = vec![0usize; logical_rank];
         let mut seen = vec![false; logical_rank];
@@ -187,12 +192,12 @@ impl WgpuProvider {
             };
             if storage_total > 0 {
                 let pipeline = bundle.get(emission)?;
-                let mut enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-permute-noop"),
-                        });
+                let mut enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-permute-noop"),
+                    },
+                );
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("runmat-permute-noop-pass"),
                     timestamp_writes: None,
@@ -221,20 +226,16 @@ impl WgpuProvider {
         self.with_emission(|emission, pending| -> Result<()> {
             let pipeline = bundle.get(emission)?;
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-permute-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-permute-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(
-                self.workgroup_config.scalar,
-            )
-            .ok_or_else(|| anyhow!("permute: invalid provider workgroup geometry"))?
-                as usize;
+            let chunk_capacity = submission_geometry.chunk_capacity as usize;
             let mut offset = 0usize;
             while offset < storage_total {
                 let remaining = storage_total - offset;

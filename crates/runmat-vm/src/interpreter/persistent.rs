@@ -32,14 +32,41 @@ impl PartialEq for PersistentBinding {
 impl Eq for PersistentBinding {}
 
 impl PersistentBinding {
+    pub(crate) fn matches_inherited_owner(&self, function: &str, name: &str) -> bool {
+        self.function == function
+            && matches!(&self.alias,
+                PersistentAlias::InheritedNamed(alias) if alias == name)
+    }
+
     pub fn from_native_continuation(
         continuation: runmat_runtime::workspace::session::PersistentBindingContinuation,
         authority: &SessionVariableAuthority,
         function: &str,
     ) -> Result<Self, RuntimeError> {
+        Self::from_native_continuation_with_role(continuation, authority, function, false)
+    }
+
+    pub fn from_inherited_native_continuation(
+        continuation: runmat_runtime::workspace::session::PersistentBindingContinuation,
+        authority: &SessionVariableAuthority,
+        function: &str,
+    ) -> Result<Self, RuntimeError> {
+        Self::from_native_continuation_with_role(continuation, authority, function, true)
+    }
+
+    fn from_native_continuation_with_role(
+        continuation: runmat_runtime::workspace::session::PersistentBindingContinuation,
+        authority: &SessionVariableAuthority,
+        function: &str,
+        inherited: bool,
+    ) -> Result<Self, RuntimeError> {
         continuation.validate_selected(authority, function)?;
         Ok(Self {
-            alias: PersistentAlias::Named(continuation.name),
+            alias: if inherited {
+                PersistentAlias::InheritedNamed(continuation.name)
+            } else {
+                PersistentAlias::Named(continuation.name)
+            },
             owner: continuation.owner,
             function: continuation.function,
             // Force the first resumed alias read to consult the selected
@@ -69,6 +96,10 @@ impl PersistentBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PersistentAlias {
     Named(String),
+    /// A child frame delegates to its ancestor's named storage. Its local slot
+    /// is not the declaring function's legacy slot and must never be used as
+    /// a fallback or a second publication key.
+    InheritedNamed(String),
     LegacySlot,
 }
 
@@ -83,6 +114,7 @@ fn canonical(
             Some(value) => Ok(Some(value)),
             None => authority.persistent_slot_value(function, slot),
         },
+        PersistentAlias::InheritedNamed(name) => authority.persistent_named_value(function, name),
         PersistentAlias::LegacySlot => authority.persistent_slot_value(function, slot),
     }
 }
@@ -97,6 +129,9 @@ fn publish(
     match alias {
         PersistentAlias::Named(name) => {
             authority.store_persistent_named_and_slot(function, name, slot, value)
+        }
+        PersistentAlias::InheritedNamed(name) => {
+            authority.store_persistent_named(function, name, value)
         }
         PersistentAlias::LegacySlot => authority.store_persistent_slot(function, slot, value),
     }
@@ -130,7 +165,7 @@ pub(crate) fn refresh(
     aliases: &PersistentAliases,
     vars: &mut Vec<Value>,
     authority: &SessionVariableAuthority,
-    function: &str,
+    _function: &str,
     slot: usize,
 ) -> Result<(), RuntimeError> {
     if let Some(binding) = aliases.get(&slot) {
@@ -138,6 +173,7 @@ pub(crate) fn refresh(
         if *binding.revision.borrow() == revision {
             return Ok(());
         }
+        let function = binding.function.as_str();
         let invalidation = authority.persistent_invalidation_revision(function)?;
         let was_cleared = *binding.invalidation.borrow() != invalidation;
         match canonical(authority, function, slot, &binding.alias)? {
@@ -161,10 +197,11 @@ pub(crate) fn publish_store(
     aliases: &PersistentAliases,
     vars: &[Value],
     authority: &SessionVariableAuthority,
-    function: &str,
+    _function: &str,
     slot: usize,
 ) -> Result<(), RuntimeError> {
     if let (Some(binding), Some(value)) = (aliases.get(&slot), vars.get(slot)) {
+        let function = binding.function.as_str();
         publish(authority, function, slot, &binding.alias, value.clone())?;
         binding.invalidated.set(false);
         *binding.revision.borrow_mut() = authority.persistent_revision()?;
@@ -180,12 +217,13 @@ pub(crate) fn finish_success(
     aliases: &PersistentAliases,
     vars: &mut Vec<Value>,
     authority: &SessionVariableAuthority,
-    function: &str,
+    _function: &str,
 ) -> Result<(), RuntimeError> {
     let mut slots = aliases.keys().copied().collect::<Vec<_>>();
     slots.sort_unstable();
     for slot in slots {
         let binding = &aliases[&slot];
+        let function = binding.function.as_str();
         let alias = &binding.alias;
         let value = canonical(authority, function, slot, alias)?;
         let invalidation = authority.persistent_invalidation_revision(function)?;
@@ -194,7 +232,8 @@ pub(crate) fn finish_success(
         match value {
             Some(value) => {
                 binding.invalidated.set(false);
-                if let PersistentAlias::Named(name) = alias {
+                if let PersistentAlias::Named(name) | PersistentAlias::InheritedNamed(name) = alias
+                {
                     if authority.persistent_named_value(function, name)?.is_none() {
                         publish(authority, function, slot, alias, value.clone())?;
                     }
@@ -238,3 +277,7 @@ mod tests;
 #[cfg(test)]
 #[path = "persistent/initialization_tests.rs"]
 mod initialization_tests;
+
+#[cfg(test)]
+#[path = "persistent/inherited_tests.rs"]
+mod inherited_tests;

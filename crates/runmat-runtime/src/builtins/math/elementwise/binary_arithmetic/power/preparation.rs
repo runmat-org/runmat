@@ -4,8 +4,10 @@ use super::domain::PowerResultDomain;
 use super::power_error_with_detail;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::context::preparation::{
-    execute_current_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_accelerate_api::NumericalDomainEvidence;
 use runmat_builtins::{
@@ -16,15 +18,18 @@ use runmat_value::{NumericDType, Value};
 use std::future::Future;
 
 pub(super) async fn execute<F, Fut>(
+    runtime: Option<&RuntimeContext>,
     input_count: usize,
     left: Value,
     right: Value,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value, Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
+        .map_err(|cause| cause.into_runtime_error())?;
     let admitted = input_count == 2 && [&left, &right].into_iter().all(|value| {
         matches!(value, Value::Tensor(t) if matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     });
@@ -45,7 +50,7 @@ where
         vec![left, right],
     )?
     .with_numerical_domain(classify)?;
-    execute_current_request(request, |mut values| {
+    execute_request(runtime, request, |mut values| {
         let right = values.remove(1);
         body(values.remove(0), right)
     })

@@ -1,4 +1,5 @@
 use super::*;
+mod foreign;
 
 impl RunMatSession {
     pub(crate) fn runtime_context(&self) -> &runmat_runtime::context::RuntimeContext {
@@ -367,131 +368,6 @@ impl RunMatSession {
         runmat_hir::set_error_namespace(&namespace);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_mex_config(&mut self, config: &runmat_config::runtime::MexConfig) {
-        let unmanifested = match config.unmanifested {
-            runmat_config::runtime::UnmanifestedMexPolicy::Isolate => {
-                runmat_runtime::foreign::UnmanifestedMexPolicy::Isolate
-            }
-            runmat_config::runtime::UnmanifestedMexPolicy::Deny => {
-                runmat_runtime::foreign::UnmanifestedMexPolicy::Deny
-            }
-        };
-        self.mex_runtime
-            .set_isolation_policy(runmat_runtime::foreign::MexIsolationPolicy {
-                unmanifested,
-                invocation_timeout: config
-                    .timeout_ms
-                    .map(|milliseconds| std::time::Duration::from_millis(milliseconds.get())),
-            });
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_native_ffi_config(
-        &mut self,
-        config: &runmat_config::runtime::NativeFfiConfig,
-    ) -> Result<(), RuntimeError> {
-        let timeout = config
-            .timeout_ms
-            .map(|milliseconds| std::time::Duration::from_millis(milliseconds.get()));
-        let policy = match config.isolation {
-            runmat_config::runtime::NativeFfiIsolation::Process => {
-                runmat_runtime::foreign::NativeFfiIsolationPolicy::isolated(timeout)
-            }
-            runmat_config::runtime::NativeFfiIsolation::InProcess => {
-                runmat_runtime::foreign::NativeFfiIsolationPolicy::in_process()
-            }
-        };
-        self.set_native_ffi_isolation_policy(policy)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_native_ffi_isolation_policy(
-        &mut self,
-        policy: runmat_runtime::foreign::NativeFfiIsolationPolicy,
-    ) -> Result<(), RuntimeError> {
-        self.native_ffi_adapter.set_isolation_policy(policy)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_java_config(
-        &mut self,
-        config: &runmat_config::runtime::JavaConfig,
-    ) -> Result<(), RuntimeError> {
-        self.java_adapter
-            .configure(runmat_runtime::foreign::JavaRuntimeConfiguration {
-                home: config.home.clone(),
-                minimum_version: config.minimum_version.get(),
-                maximum_version: config.maximum_version.map(|value| value.get()),
-                classpath: config.classpath.clone(),
-                options: config.options.clone(),
-            })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn configure_python_runtime(
-        &mut self,
-        configuration: runmat_runtime::foreign::PythonRuntimeConfiguration,
-    ) -> Result<(), RuntimeError> {
-        self.python_adapter.configure(configuration)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_python_config(
-        &mut self,
-        config: &runmat_config::runtime::PythonConfig,
-    ) -> Result<(), RuntimeError> {
-        fn version(value: &str, label: &str) -> Result<(u16, u16), RuntimeError> {
-            let mut parts = value.split('.');
-            let major = parts.next().and_then(|value| value.parse().ok());
-            let minor = parts.next().and_then(|value| value.parse().ok());
-            if parts.next().is_some() || major.is_none() || minor.is_none() {
-                return Err(
-                    build_runtime_error(format!("{label} must use major.minor form"))
-                        .with_builtin("python")
-                        .with_identifier("RunMat:Python:InvalidVersion")
-                        .build(),
-                );
-            }
-            Ok((major.expect("checked"), minor.expect("checked")))
-        }
-        let minimum_version = version(&config.minimum_version, "Python minimum_version")?;
-        let maximum_version = config
-            .maximum_version
-            .as_deref()
-            .map(|value| version(value, "Python maximum_version"))
-            .transpose()?;
-        let required_version = config
-            .version
-            .as_deref()
-            .map(|value| version(value, "Python version"))
-            .transpose()?;
-        self.configure_python_runtime(runmat_runtime::foreign::PythonRuntimeConfiguration {
-            executable: config.executable.clone(),
-            version: required_version,
-            minimum_version,
-            maximum_version,
-            exact_version: None,
-            required_abi_tag: None,
-            required_platform_tag: None,
-            execution_mode: match config.execution_mode {
-                runmat_config::runtime::PythonExecutionModeConfig::InProcess => {
-                    runmat_python::PythonExecutionMode::InProcess
-                }
-                runmat_config::runtime::PythonExecutionModeConfig::OutOfProcess => {
-                    runmat_python::PythonExecutionMode::OutOfProcess
-                }
-            },
-            module_paths: Vec::new(),
-            artifact_identities: std::collections::BTreeSet::new(),
-        })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_desktop_host_available(&mut self, available: bool) {
-        self.java_adapter.set_desktop_available(available);
-    }
-
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {
         gc_configure(config)
@@ -546,13 +422,29 @@ impl RunMatSession {
     pub async fn shutdown_foreign_runtime(&mut self) -> Result<(), RuntimeError> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let native_result = self.native_ffi_adapter.shutdown().await;
-            let mex_result = self
-                .mex_runtime
-                .shutdown_gracefully(self.runtime_context.clone())
-                .await;
-            native_result?;
-            mex_result?;
+            self.source_evaluator
+                .retire_selected_foreign_hosts(&self.runtime_context, &self.local_tasks)
+                .await?;
+            // Keep the canonical session MEX callback scope and retirement
+            // ordering after selected hosts have retired. A retained MEX
+            // callback must not drop native services or their byte roots.
+            let mex_retirement = self
+                .local_tasks
+                .participate_foreground(
+                    self.mex_runtime
+                        .shutdown_gracefully_retirement(self.runtime_context.clone()),
+                )
+                .await?;
+            match mex_retirement {
+                runmat_runtime::foreign::MexSessionRetirement::Retained(error) => {
+                    return Err(error);
+                }
+                runmat_runtime::foreign::MexSessionRetirement::Retired(mex_result) => {
+                    let native_result = self.native_ffi_adapter.shutdown().await;
+                    mex_result?;
+                    native_result?;
+                }
+            }
         }
         Ok(())
     }

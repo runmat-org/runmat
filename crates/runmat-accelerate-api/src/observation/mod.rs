@@ -10,6 +10,7 @@ mod activation;
 mod budget;
 mod resource_activation;
 mod state;
+mod wgpu_query;
 #[cfg(feature = "wgpu")]
 mod wgpu_progress;
 #[cfg(feature = "wgpu")]
@@ -21,12 +22,17 @@ pub use activation::{
     current_provider_observation, observe_provider_future, with_provider_observation,
 };
 pub use budget::ProviderObservationBudget;
+#[cfg(feature = "wgpu")]
+pub use budget::WgpuQueryPermit;
 pub use resource_activation::{current_provider_resource_scope, observe_provider_resource_future};
 pub use state::{
     ProviderCompletedSubmission, ProviderOperationReceipt, ProviderOperationRecorder,
     ProviderResourcePhasePlan, ProviderResourcePhaseToken, ProviderResourceScope,
     ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
     ProviderSubmission,
+};
+pub use wgpu_query::{
+    WgpuEncoderQueryProspective, WgpuQueryAllocationDisposition, WgpuQueryAllocationObservation,
 };
 
 use std::sync::Arc;
@@ -94,6 +100,11 @@ pub struct ProviderObservationOverhead {
     pub requested_peak_buffer_bytes: u64,
     pub clear_commands: u32,
     pub map_callbacks: u32,
+    /// One conditional encoder-query demand (compute passes and, when
+    /// supported, an outer whole-encoder interval). It is not a mandatory
+    /// fence resource ticket. Absent for unsupported routes/devices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wgpu_compute_query: Option<WgpuEncoderQueryProspective>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,10 +192,33 @@ pub struct ProviderOperationObservation {
     pub status: ProviderObservationStatus,
     pub route_outcome: Option<ProviderRouteOutcome>,
     pub stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
+    /// Aggregate device timestamp intervals for every registered WGPU
+    /// submission. None includes unsupported or incomplete readback.
+    pub verified_wgpu_compute_elapsed: Option<Duration>,
+    /// Actual encoded-and-submitted dispatch calls, never queue submissions.
+    /// None means at least one registered submission was not covered.
+    pub verified_wgpu_dispatches: Option<u64>,
+    /// Actual optional query allocations across completed submissions. None
+    /// means not all submitted routes supplied allocation disposition.
+    pub wgpu_query_allocations: Option<WgpuQueryAllocationObservation>,
     /// Actual selected pipeline events, not global cache-counter differences.
     pub pipelines: ProviderPipelineObservations,
     /// Explicitly issued resource tickets only; None means no coverage.
     pub resources: Option<ProviderResourceSnapshot>,
+}
+
+/// One physical WGPU submission, supplied only by its completion owner after
+/// queue submission and safe readback retirement. The two measurements fail
+/// independently: an unsupported timestamp query need not erase an exact
+/// dispatch count.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WgpuSubmissionMeasurement {
+    /// Whole submitted encoder interval, excluding telemetry resolve/fence work.
+    /// None is not a zero-duration transfer or a compute-only substitute.
+    pub device_elapsed: Option<Duration>,
+    pub compute_elapsed: Option<Duration>,
+    pub dispatches: Option<u64>,
+    pub query_allocation: Option<WgpuQueryAllocationDisposition>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

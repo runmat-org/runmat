@@ -33,7 +33,7 @@ async fn getfield_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     base: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let work = async {
         crate::output_count::validate_fixed_outputs(
             &runmat_builtins::GETFIELD_DESCRIPTOR,
@@ -52,6 +52,6 @@ pub(crate) async fn getfield_internal_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     execution::getfield(runtime, base, rest, false).await
 }

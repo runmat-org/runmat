@@ -21,7 +21,7 @@ pub(super) fn parse_trainnet_loss(value: &Value) -> BuiltinResult<LossKind> {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     ) {
         return Err(deep_learning_error(

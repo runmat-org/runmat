@@ -1,11 +1,15 @@
 use crate::builtins::common::uniform_scalar_output::{UniformScalarCollector, UniformScalarError};
+use crate::execution::{RootedValue, RootedValuesBuilder};
 use runmat_value::{StructValue, Value};
 
 use super::error;
 
 pub(super) enum Collector {
     Uniform(UniformScalarCollector),
-    Structure(StructValue),
+    Structure {
+        names: Vec<String>,
+        values: RootedValuesBuilder,
+    },
 }
 
 impl Collector {
@@ -13,31 +17,62 @@ impl Collector {
         if uniform {
             Self::Uniform(UniformScalarCollector::new())
         } else {
-            Self::Structure(StructValue::new())
+            Self::Structure {
+                names: Vec::new(),
+                values: RootedValuesBuilder::default(),
+            }
         }
     }
 
-    pub(super) fn push(&mut self, field: &str, value: Value) -> crate::BuiltinResult<()> {
+    pub(super) fn push(&mut self, field: &str, value: RootedValue) -> crate::BuiltinResult<()> {
         match self {
-            Self::Uniform(collector) => collector.push(&value).map_err(map_uniform_error),
-            Self::Structure(output) => {
-                output.insert(field, value);
+            Self::Uniform(collector) => collector.push(value.value()).map_err(map_uniform_error),
+            Self::Structure { names, values } => {
+                value
+                    .with_owned(|value| values.push(value))
+                    .map_err(|error| error.into_runtime_error())?;
+                names.push(field.to_string());
                 Ok(())
             }
         }
     }
 
-    pub(super) fn finish(self, field_count: usize) -> crate::BuiltinResult<Value> {
+    pub(super) fn finish(self, field_count: usize) -> crate::BuiltinResult<RootedValue> {
         match self {
             Self::Uniform(collector) => collector
                 .finish(&[field_count, 1])
-                .map_err(map_uniform_error),
-            Self::Structure(output) => Ok(Value::Struct(output)),
+                .map_err(map_uniform_error)
+                .and_then(|value| {
+                    RootedValue::new(value).map_err(|error| error.into_runtime_error())
+                }),
+            Self::Structure { names, values } => values
+                .finish()
+                .map_err(|error| error.into_runtime_error())?
+                .with_owned_values(|values| {
+                    let mut structure = StructValue::new();
+                    for (name, value) in names.into_iter().zip(values) {
+                        structure.insert(&name, value);
+                    }
+                    RootedValue::new(Value::Struct(structure))
+                        .map_err(|error| error.into_runtime_error())
+                }),
         }
     }
 }
 
-pub(super) fn normalize(value: Value, requested: usize) -> crate::BuiltinResult<Vec<Value>> {
+pub(super) fn normalize(
+    value: RootedValue,
+    requested: usize,
+) -> crate::BuiltinResult<Vec<RootedValue>> {
+    value.with_owned(|value| {
+        normalize_raw(value, requested)?
+            .into_iter()
+            .map(|value| RootedValue::new(value).map_err(|error| error.into_runtime_error()))
+            .collect()
+    })
+}
+
+fn normalize_raw(value: Value, requested: usize) -> crate::BuiltinResult<Vec<Value>> {
     match value {
         Value::OutputList(values) if values.len() == requested => Ok(values),
         Value::OutputList(values) => Err(error::function(format!(

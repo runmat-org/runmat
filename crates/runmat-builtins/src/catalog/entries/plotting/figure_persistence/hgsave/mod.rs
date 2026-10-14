@@ -73,6 +73,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     super::infer_fixed(request, entry, vec![super::status_fact()], 1, 3)
 }
 pub const HGSAVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "hgsave" },
     category: "plotting",

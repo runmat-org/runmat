@@ -158,6 +158,7 @@ mod tests {
                 catalog_fingerprint: catalog,
                 optimization: NativeOptimization::Speed,
                 runtime_binding_mode: mode,
+                foreign_policy: None,
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
                 entrypoint: function,

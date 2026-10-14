@@ -6,8 +6,8 @@ use std::rc::Rc;
 use std::sync::Mutex;
 
 use runmat_mex::{
-    MexApi, MexBuild, MexDiagnostic, MexHostServices, MexLoadError, MexModule, MexSourceLanguage,
-    MxApiMode,
+    MexApi, MexBuild, MexCallOutput, MexDiagnostic, MexHostServices, MexLoadError, MexModule,
+    MexSourceLanguage, MxApiMode,
 };
 use runmat_value::Value;
 
@@ -2262,6 +2262,28 @@ struct FixtureHost {
     workspace: Mutex<BTreeMap<String, Value>>,
 }
 
+struct FixtureNumericOutput(f64);
+
+struct FixtureValueOutput(Value);
+
+impl MexCallOutput for FixtureValueOutput {
+    fn publish(
+        self: Box<Self>,
+        sink: &mut dyn FnMut(Value) -> Result<(), MexDiagnostic>,
+    ) -> Result<(), MexDiagnostic> {
+        sink(self.0)
+    }
+}
+
+impl MexCallOutput for FixtureNumericOutput {
+    fn publish(
+        self: Box<Self>,
+        sink: &mut dyn FnMut(Value) -> Result<(), MexDiagnostic>,
+    ) -> Result<(), MexDiagnostic> {
+        sink(Value::Num(self.0))
+    }
+}
+
 impl MexHostServices for FixtureHost {
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
         if command == "accepted" {
@@ -2279,12 +2301,12 @@ impl MexHostServices for FixtureHost {
         function: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         if function == "plus_one" && requested_outputs == 1 {
             let Value::Num(value) = arguments[0] else {
                 panic!("fixture expected numeric scalar");
             };
-            return Ok(vec![Value::Num(value + 1.0)]);
+            return Ok(Box::new(FixtureNumericOutput(value + 1.0)));
         }
         Err(MexDiagnostic {
             identifier: Some("Fixture:Call".into()),
@@ -2292,8 +2314,18 @@ impl MexHostServices for FixtureHost {
         })
     }
 
-    fn get_variable(&self, _workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic> {
-        Ok(self.workspace.lock().unwrap().get(name).cloned())
+    fn get_variable(
+        &self,
+        _workspace: &str,
+        name: &str,
+    ) -> Result<Option<Box<dyn MexCallOutput>>, MexDiagnostic> {
+        Ok(self
+            .workspace
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .map(|value| Box::new(FixtureValueOutput(value)) as Box<dyn MexCallOutput>))
     }
 
     fn put_variable(
@@ -2498,7 +2530,7 @@ impl MexHostServices for ReentrantHost {
         function: &str,
         _arguments: Vec<Value>,
         _requested_outputs: usize,
-    ) -> Result<Vec<Value>, MexDiagnostic> {
+    ) -> Result<Box<dyn MexCallOutput>, MexDiagnostic> {
         assert_eq!(function, "recursive_entry");
         let module = self
             .module
@@ -2516,7 +2548,11 @@ impl MexHostServices for ReentrantHost {
         })
     }
 
-    fn get_variable(&self, _workspace: &str, _name: &str) -> Result<Option<Value>, MexDiagnostic> {
+    fn get_variable(
+        &self,
+        _workspace: &str,
+        _name: &str,
+    ) -> Result<Option<Box<dyn MexCallOutput>>, MexDiagnostic> {
         unreachable!("reentrancy fixture does not read workspace state")
     }
 

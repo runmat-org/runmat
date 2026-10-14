@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
-enum CopyCheckpointError {
+pub(in super::super) enum CopyOperationError {
     #[error(transparent)]
     Filesystem(#[from] io::Error),
     #[error(transparent)]
@@ -20,7 +20,7 @@ struct OwnerCheckpoint<'a> {
 
 #[async_trait(?Send)]
 impl vfs::FsCopyCheckpoint for OwnerCheckpoint<'_> {
-    type Error = CopyCheckpointError;
+    type Error = CopyOperationError;
 
     async fn checkpoint(&mut self, completed_bytes: u64) -> Result<(), Self::Error> {
         self.authority.check()?;
@@ -149,7 +149,11 @@ impl TransferFilesystem {
         result
     }
 
-    pub(in super::super) async fn copy_file(&mut self, from: &Path, to: &Path) -> io::Result<u64> {
+    pub(in super::super) async fn copy_file(
+        &mut self,
+        from: &Path,
+        to: &Path,
+    ) -> Result<u64, CopyOperationError> {
         self.check()?;
         let from = self.authority.path(from);
         let to = self.authority.path(to);
@@ -165,8 +169,8 @@ impl TransferFilesystem {
         )
         .await
         .map_err(|error| match error {
-            vfs::FsCopyError::Io(error) => error,
-            vfs::FsCopyError::Checkpoint(error) => io::Error::other(error),
+            vfs::FsCopyError::Io(error) => CopyOperationError::Filesystem(error),
+            vfs::FsCopyError::Checkpoint(error) => error,
         });
         if result.is_ok() {
             self.check()?;

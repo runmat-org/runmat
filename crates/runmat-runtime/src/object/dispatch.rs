@@ -5,6 +5,7 @@ use crate::call::descriptor::{
     CallableDescriptor,
 };
 use crate::call::identity::external_qualified_identity;
+use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::{ObjectIndexOp, ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
@@ -72,7 +73,7 @@ async fn call_identity_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let descriptor = CallableDescriptor::resolved(
         identity,
         args,
@@ -92,7 +93,7 @@ async fn try_call_identity_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     let descriptor = CallableDescriptor::resolved(
         identity,
         args,
@@ -115,19 +116,17 @@ async fn call_member_index_on_object_like(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     if args.is_empty() {
         let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
             caller_function_name,
         );
-        if let crate::object::protocol::ProtocolResolution::Method(method) =
-            crate::object::protocol::resolve_object_protocol(
-                &receiver,
-                crate::object::protocol::ObjectProtocol::Subsref,
-                &access,
-            )?
-        {
-            let resolution = crate::object::protocol::ProtocolResolution::Method(method);
+        if let Some(method) = crate::object::protocol::resolve_object_protocol(
+            &receiver,
+            crate::object::protocol::ObjectProtocol::Subsref,
+            &access,
+        )? {
+            let resolution = Some(method);
             let path = ObjectSubscriptPath::single(ObjectSubscript::member(name));
             return match runtime {
                 Some(runtime) => {
@@ -153,6 +152,63 @@ async fn call_member_index_on_object_like(
         }
     }
     let method_name = runmat_types::MethodName::from(name.as_str());
+    if crate::object::protocol::selected_receiver_has_authority(&receiver)? {
+        let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
+            caller_function_name,
+        );
+        let method = crate::object::protocol::resolve_declared_object_method(
+            &receiver,
+            &method_name,
+            &access,
+        )?;
+        let Some(method) = method else {
+            if crate::object::resolve::has_stored_member(&receiver, &name.as_str().into())?
+                == crate::object::resolve::MemberPresence::Present
+            {
+                return call_getfield_with_indices_with_context(
+                    runtime,
+                    receiver,
+                    name,
+                    args,
+                    requested_outputs,
+                )
+                .await?
+                .try_map_owned(
+                    |value| {
+                        runmat_value::ValueSequence::single(value)
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                );
+            }
+            return Err(semantic_error(
+                "UndefinedFunction",
+                "selected class has no admitted method for this member",
+            ));
+        };
+        let mut full_args = Vec::with_capacity(1 + args.len());
+        full_args.push(receiver);
+        full_args.extend(args);
+        return match runtime {
+            Some(runtime) => {
+                crate::object::protocol::invoke_resolved_object_method_in_context(
+                    runtime,
+                    &method,
+                    full_args,
+                    requested_outputs,
+                )
+                .await
+            }
+            None => {
+                crate::object::protocol::invoke_resolved_object_method(
+                    &method,
+                    full_args,
+                    requested_outputs,
+                )
+                .await
+            }
+        };
+    }
     if let Some(bound) = crate::class_registry::lookup_bound_method(class_name, &method_name) {
         let m = &bound.declaration;
         if m.is_static {
@@ -235,11 +291,14 @@ async fn call_member_index_on_object_like(
     }
 
     call_getfield_with_indices_with_context(runtime, receiver, name, args, requested_outputs)
-        .await
-        .and_then(|value| {
-            runmat_value::ValueSequence::single(value)
-                .map_err(crate::sequence::sequence_error_to_runtime)
-        })
+        .await?
+        .try_map_owned(
+            |value| {
+                runmat_value::ValueSequence::single(value)
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            },
+            |error| error.into_runtime_error(),
+        )
 }
 
 pub async fn call_rhs_operator_method_ordered_with_outputs(
@@ -248,7 +307,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
     name: String,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_rhs_operator_method_ordered_with_context(
         None,
         lhs,
@@ -267,7 +326,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs_in_context(
     name: String,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_rhs_operator_method_ordered_with_context(
         Some(runtime),
         lhs,
@@ -286,7 +345,7 @@ async fn call_rhs_operator_method_ordered_with_context(
     name: String,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let work = call_rhs_operator_method_ordered_in_scope(
         runtime,
         lhs,
@@ -308,7 +367,7 @@ async fn call_rhs_operator_method_ordered_in_scope(
     name: String,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let class_name = match &rhs {
         Value::Object(obj) => obj.class_name.clone(),
         Value::HandleObject(handle) => handle.class_name.clone(),
@@ -322,6 +381,41 @@ async fn call_rhs_operator_method_ordered_in_scope(
 
     let method_args = vec![lhs, rhs];
     let method_name = runmat_types::MethodName::from(name.as_str());
+    if crate::object::protocol::selected_receiver_has_authority(&method_args[1])? {
+        let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
+            caller_function_name,
+        );
+        let method = crate::object::protocol::resolve_declared_object_method(
+            &method_args[1],
+            &method_name,
+            &access,
+        )?
+        .ok_or_else(|| {
+            semantic_error(
+                "UndefinedFunction",
+                "selected class has no admitted operator method",
+            )
+        })?;
+        return match runtime {
+            Some(runtime) => {
+                crate::object::protocol::invoke_resolved_object_method_in_context(
+                    runtime,
+                    &method,
+                    method_args,
+                    requested_outputs,
+                )
+                .await
+            }
+            None => {
+                crate::object::protocol::invoke_resolved_object_method(
+                    &method,
+                    method_args,
+                    requested_outputs,
+                )
+                .await
+            }
+        };
+    }
     if let Some(bound) = crate::class_registry::lookup_bound_method(&class_name, &method_name) {
         let m = &bound.declaration;
         if m.is_static {
@@ -365,7 +459,7 @@ pub async fn call_getfield_with_indices(
     field: String,
     indices: Vec<Value>,
     _requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     call_getfield_with_indices_with_context(None, base, field, indices, _requested_outputs).await
 }
 
@@ -375,7 +469,7 @@ async fn call_getfield_with_indices_with_context(
     field: String,
     indices: Vec<Value>,
     _requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let mut getfield_args = Vec::with_capacity(2);
     getfield_args.push(Value::String(field));
     if !indices.is_empty() {
@@ -395,7 +489,7 @@ pub async fn call_object_operator_method(
     base: Value,
     method: &str,
     arg: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     require_single(
         call_method_or_member_index_with_outputs(
             base,
@@ -414,7 +508,7 @@ pub async fn call_object_operator_method_in_context(
     base: Value,
     method: &str,
     arg: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     require_single(
         call_method_or_member_index_with_outputs_in_context(
             runtime,
@@ -433,7 +527,7 @@ pub async fn call_rhs_object_operator_method_ordered(
     lhs: Value,
     rhs: Value,
     method: &str,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     require_single(
         call_rhs_operator_method_ordered_with_outputs(lhs, rhs, method.to_string(), 1, None)
             .await?,
@@ -445,7 +539,7 @@ pub async fn call_rhs_object_operator_method_ordered_in_context(
     lhs: Value,
     rhs: Value,
     method: &str,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     require_single(
         call_rhs_operator_method_ordered_with_outputs_in_context(
             runtime,
@@ -464,7 +558,7 @@ pub async fn call_object_named_method_with_outputs(
     method: String,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::Method(MethodId(method.clone())),
@@ -480,7 +574,7 @@ pub async fn call_object_property_getter_with_outputs(
     base: Value,
     field: &str,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
         crate::object_property_getter_name(field),
@@ -495,7 +589,7 @@ pub async fn call_object_property_getter_with_outputs_in_context(
     base: Value,
     field: &str,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_outputs_in_context(
         runtime,
         base,
@@ -513,7 +607,7 @@ pub async fn call_object_property_setter_with_outputs(
     field: &str,
     value: Value,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
         crate::object_property_setter_name(field),
@@ -529,7 +623,7 @@ pub async fn call_object_property_setter_with_outputs_in_context(
     field: &str,
     value: Value,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_outputs_in_context(
         runtime,
         base,
@@ -547,7 +641,7 @@ async fn call_object_member_method(
     op: ObjectIndexOp,
     field: String,
     rhs: Option<Value>,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     let resolution = resolve_object_index_protocol(&base, op, None)?;
     let path = ObjectSubscriptPath::single(ObjectSubscript::member(field));
     match op {
@@ -555,7 +649,7 @@ async fn call_object_member_method(
             invoke_resolved_object_index_path_method(&resolution, base, path, 1).await?,
         ),
         ObjectIndexOp::Subsasgn => {
-            let crate::object::protocol::ProtocolResolution::Method(method) = resolution else {
+            let Some(method) = resolution else {
                 return Err(semantic_error(
                     "MissingObjectProtocol",
                     "object does not define subsasgn",
@@ -578,7 +672,10 @@ async fn call_object_member_method(
     }
 }
 
-pub async fn call_object_member_subsref(base: Value, field: String) -> Result<Value, RuntimeError> {
+pub async fn call_object_member_subsref(
+    base: Value,
+    field: String,
+) -> Result<RootedValue, RuntimeError> {
     call_object_member_method(base, ObjectIndexOp::Subsref, field, None).await
 }
 
@@ -586,7 +683,7 @@ pub async fn call_object_member_subsasgn(
     base: Value,
     field: String,
     rhs: Value,
-) -> Result<Value, RuntimeError> {
+) -> Result<RootedValue, RuntimeError> {
     call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
 }
 
@@ -610,7 +707,7 @@ pub async fn invoke_resolved_object_index_path_method(
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     crate::object::protocol::invoke_resolved_object_protocol(
         resolution,
         base,
@@ -626,7 +723,7 @@ pub async fn invoke_resolved_object_index_path_method_in_context(
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     crate::object::protocol::invoke_resolved_object_protocol_in_context(
         runtime,
         resolution,
@@ -644,7 +741,7 @@ pub async fn call_method_or_member_index_with_outputs(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     _fallback_policy: CallableFallbackPolicy,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
         semantic_error(
             "MethodCallCalleeInvalid",
@@ -671,7 +768,7 @@ pub async fn call_method_or_member_index_with_outputs_in_context(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     _fallback_policy: CallableFallbackPolicy,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
         semantic_error(
             "MethodCallCalleeInvalid",
@@ -698,7 +795,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
     args: Vec<Value>,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_fallback(
         base,
         name,
@@ -719,7 +816,7 @@ pub async fn call_method_or_member_index_with_fallback(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_fallback_with_context(
         None,
         base,
@@ -740,7 +837,7 @@ pub async fn call_method_or_member_index_with_fallback_in_context(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     call_method_or_member_index_with_fallback_with_context(
         Some(runtime),
         base,
@@ -761,7 +858,7 @@ async fn call_method_or_member_index_with_fallback_with_context(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     let work = call_method_or_member_index_with_fallback_in_scope(
         runtime,
         base,
@@ -785,7 +882,7 @@ async fn call_method_or_member_index_with_fallback_in_scope(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
-) -> Result<runmat_value::ValueSequence, RuntimeError> {
+) -> Result<RootedValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
@@ -889,27 +986,35 @@ async fn call_method_or_member_index_with_fallback_in_scope(
                 .await;
             }
             call_getfield_with_indices_with_context(runtime, other, name, args, requested_outputs)
-                .await
-                .and_then(|value| {
-                    runmat_value::ValueSequence::single(value)
-                        .map_err(crate::sequence::sequence_error_to_runtime)
-                })
+                .await?
+                .try_map_owned(
+                    |value| {
+                        runmat_value::ValueSequence::single(value)
+                            .map_err(crate::sequence::sequence_error_to_runtime)
+                    },
+                    |error| error.into_runtime_error(),
+                )
         }
     }
 }
 
-fn require_single(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+fn require_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeError> {
     use crate::sequence::ResolveValueSequence;
-    let mut values = sequence.resolve(
-        runmat_types::SequenceUse::RequireSingle,
-        crate::sequence::SequenceResolutionContext::default(),
-    )?;
-    values.pop().ok_or_else(|| {
-        semantic_error(
-            "CommaSeparatedListRequiresSingleValue",
-            "object operation requires one value",
-        )
-    })
+    sequence.try_map_owned(
+        |sequence| {
+            let mut values = sequence.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                crate::sequence::SequenceResolutionContext::default(),
+            )?;
+            values.pop().ok_or_else(|| {
+                semantic_error(
+                    "CommaSeparatedListRequiresSingleValue",
+                    "object operation requires one value",
+                )
+            })
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 fn build_cell_array_with_shape(

@@ -8,20 +8,27 @@ use std::sync::{
 
 use super::*;
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
-use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
+use crate::sequence::{ResolveValueSequence, SequenceResolutionContext};
 
-fn single(sequence: ValueSequence) -> Value {
+fn single(sequence: crate::execution::RootedValueSequence) -> crate::execution::RootedValue {
     sequence
-        .resolve(
-            SequenceUse::RequireSingle,
-            SequenceResolutionContext::default(),
+        .try_map_owned(
+            |sequence| {
+                Ok(sequence
+                    .resolve(
+                        SequenceUse::RequireSingle,
+                        SequenceResolutionContext::default(),
+                    )
+                    .expect("single sequence")
+                    .pop()
+                    .expect("one value"))
+            },
+            |error| error.into_runtime_error(),
         )
-        .expect("single sequence")
-        .pop()
-        .expect("one value")
+        .expect("root single output")
 }
 
-fn read(path: ObjectSubscriptPath, base: Value) -> Value {
+fn read(path: ObjectSubscriptPath, base: Value) -> crate::execution::RootedValue {
     single(
         block_on(read_subscript_path_sequence_with_access(
             base,
@@ -253,6 +260,7 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
                 access: runmat_types::MemberAccess::Public,
                 function_name: "OwnedSuffixSession.subsref".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         )]),
     });
@@ -269,8 +277,7 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
             ));
             observed.fetch_add(1, Ordering::SeqCst);
             Box::pin(async {
-                ValueSequence::single(Value::Num(7.0))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0))
             })
         },
     )));
@@ -290,7 +297,7 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
                 first.kind(),
                 crate::object::indexing::ObjectIndexKind::Member
             );
-            Ok(child)
+            crate::execution::RootedValue::new(child).map_err(|error| error.into_runtime_error())
         },
         None,
     ))
@@ -312,8 +319,7 @@ fn object_array_without_member_keeps_whole_array_receiver_for_semantic_fallback(
             assert_eq!(arguments.len(), 2);
             assert!(matches!(&arguments[0], Value::ObjectArray(array) if array.len() == 2));
             Box::pin(async {
-                crate::sequence::ValueSequence::single(Value::Num(5.0))
-                    .map_err(crate::sequence::sequence_error_to_runtime)
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(5.0))
             })
         },
     )));

@@ -8,10 +8,10 @@ use crate::BuiltinResult;
 
 fn call(value: Value) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(super::log1p_builtin(value))
+    block_on(super::log1p_builtin(None, value)).map(|owned| owned.value().clone())
 }
 
 fn call_matlab(value: Value) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    block_on(super::log1p_builtin(value))
+    block_on(super::log1p_builtin(None, value)).map(|owned| owned.value().clone())
 }

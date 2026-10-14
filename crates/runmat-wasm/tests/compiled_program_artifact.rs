@@ -40,7 +40,21 @@ async fn request_for_source(
         &envelope.manifest.capabilities,
     )
     .unwrap();
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let function =
+        usize::try_from(envelope.manifest.identity.entrypoint_function.unwrap().0).unwrap();
+    let foreign_policy = if interop == runmat_types::InteropManifest::empty() {
+        None
+    } else {
+        let mut policy_config = runmat_config::runtime::ForeignConfig::default();
+        policy_config.mex.timeout_ms = Some(std::num::NonZeroU64::new(15_000).unwrap());
+        Some(
+            runmat_execution_artifact::foreign_policy_object_from_json_value(
+                serde_json::to_value(&policy_config).unwrap(),
+            )
+            .unwrap()
+            .descriptor,
+        )
+    };
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
@@ -51,6 +65,7 @@ async fn request_for_source(
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("portable-executable-unit-v3"),
         interop,
+        foreign_policy,
         accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use runmat_execution::executable::ExecutableStaticImport;
 use runmat_execution::FunctionBindingOrigin;
 use runmat_hir::FunctionId;
 use runmat_runtime::user_functions::{DefinitionOwnerGraph, SourceFunctionInfo};
@@ -19,11 +20,48 @@ mod types;
 pub use types::{
     PreparedRetainedCallableUnits, RetainedCallableStageError, RetainedCallableStageLimits,
 };
-#[path = "retained_artifacts/work_limits.rs"]
-mod work_limits;
+#[path = "retained_artifacts/class_declarations.rs"]
+mod class_declarations;
 #[path = "retained_artifacts/private_companions.rs"]
 mod private_companions;
+#[path = "retained_artifacts/work_limits.rs"]
+mod work_limits;
 use private_companions::PrivateCompanionGraphs;
+
+pub(super) fn selected_runtime_origin_fingerprints(
+    registry: &FunctionRegistry,
+) -> Result<HashMap<FunctionBindingOrigin, String>, RetainedCallableStageError> {
+    fingerprints::normalized_selected(registry)
+}
+
+pub(super) fn selected_runtime_body_fingerprint(
+    registry: &FunctionRegistry,
+    function: FunctionId,
+) -> Result<(FunctionBindingOrigin, String), RetainedCallableStageError> {
+    fingerprints::normalized_selected_body(registry, function)
+}
+
+pub(super) fn selected_runtime_body_fingerprints(
+    registry: &FunctionRegistry,
+    functions: &[FunctionId],
+) -> Result<HashMap<FunctionId, (FunctionBindingOrigin, String)>, RetainedCallableStageError> {
+    fingerprints::normalized_selected_bodies(registry, functions)
+}
+
+pub(super) fn selected_runtime_body_fingerprints_with_imports(
+    registry: &FunctionRegistry,
+    functions: &[FunctionId],
+    imports: &[ExecutableStaticImport],
+) -> Result<HashMap<FunctionId, (FunctionBindingOrigin, String)>, RetainedCallableStageError> {
+    fingerprints::normalized_selected_bodies_with_imports(registry, functions, imports)
+}
+
+pub(super) fn selected_runtime_body_fingerprints_by_product(
+    registry: &FunctionRegistry,
+    inputs: &[(FunctionId, &[ExecutableStaticImport])],
+) -> Result<HashMap<FunctionId, (FunctionBindingOrigin, String)>, RetainedCallableStageError> {
+    fingerprints::normalized_selected_bodies_by_product(registry, inputs)
+}
 
 /// Prepare imported executable definitions as retained-only bodies. The
 /// destination registry is cloned and changed only after every unit, origin,
@@ -58,6 +96,7 @@ pub fn prepare_retained_callable_units(
             }
         }
     }
+    let linked_constructorless_classes = class_declarations::constructorless_from_units(&units)?;
 
     let mut allocator = DestinationFunctionIds::new(destination);
     let mut origin_destinations = HashMap::<FunctionBindingOrigin, (FunctionId, String)>::new();
@@ -119,16 +158,30 @@ pub fn prepare_retained_callable_units(
                 continue;
             }
             let mut body = body.clone();
-            function_remap::remap_closed_function(&mut body, &remap);
+            if body.selected_class_product.is_some() {
+                return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            }
+            // Binding a cloned admitted unit may preserve the deserialized
+            // owner Arc across two selections with different dependencies.
+            // A new retained publication issues a new definition graph; its
+            // class seal and escaped handles must not mutate the prior one.
+            body.definition_owner = Arc::new(FunctionDefinitionOwner::default());
+            function_remap::remap_closed_function(&mut body, &remap)
+                .map_err(|_| RetainedCallableStageError::IncompleteDefinitionGraph)?;
             imported.insert(destination_id, body);
             imported_unit.insert(destination_id, unit_index);
         }
     }
 
-    // Build complete owner graphs in a private registry. It is never exposed
-    // for name or source lookup; it exists only to retain the admitted graph.
+    // The owner graph contains only the exact selected imported products.
+    // Current named definitions in the destination are not dependency
+    // authority for a retained callable.
     let graph_registry = FunctionRegistry::new(imported.clone());
-    let mut companion_graphs = PrivateCompanionGraphs::new(&graph_registry, &imported_unit);
+    let mut companion_graphs = PrivateCompanionGraphs::new(
+        &graph_registry,
+        &imported_unit,
+        &linked_constructorless_classes,
+    )?;
     let mut destination_ids = imported.keys().copied().collect::<Vec<_>>();
     destination_ids.sort_by_key(|function| function.0);
     let mut origin_facts = Vec::with_capacity(destination_ids.len());
@@ -182,17 +235,31 @@ pub fn prepare_retained_callable_units(
         Arc::new(origin_facts),
         staging_leases,
         units,
+        linked_constructorless_classes
+            .into_iter()
+            .map(|linked| linked.declaration)
+            .collect(),
     ))
 }
 
-/// Canonical per-origin definition fingerprints used by an artifact owner to
-/// admit alternate packaging of the same immutable callable body without
-/// treating envelope bytes or destination-local IDs as semantic identity.
-pub(crate) fn admitted_callable_origin_fingerprints(
+/// Canonical per-origin fingerprints with the admitted static-import sites.
+pub(crate) fn admitted_callable_origin_fingerprints_with_imports(
     registry: &FunctionRegistry,
     source_map: &runmat_execution::ExecutableSourceMapV2,
+    imports: &[ExecutableStaticImport],
 ) -> Result<HashMap<FunctionBindingOrigin, String>, RetainedCallableStageError> {
-    fingerprints::normalized_admitted(registry, source_map)
+    fingerprints::normalized_admitted_with_imports(registry, source_map, imports)
+}
+
+pub(crate) fn admitted_semantic_body_digests(
+    registry: &FunctionRegistry,
+    source_map: &runmat_execution::ExecutableSourceMapV2,
+    imports: &[ExecutableStaticImport],
+) -> Result<
+    HashMap<FunctionBindingOrigin, runmat_execution::executable::SelectedBodySemanticDigest>,
+    RetainedCallableStageError,
+> {
+    fingerprints::admitted_semantic_body_digests(registry, source_map, imports)
 }
 
 fn owners_graph(owners: &[(FunctionId, Arc<FunctionDefinitionOwner>)]) -> DefinitionOwnerGraph {

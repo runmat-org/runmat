@@ -29,6 +29,7 @@ pub const LIBISLOADED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer aliases are converted to text and the result is logical; no C ABI integer payload is accepted." };
 
 pub const LIBISLOADED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "libisloaded",

@@ -18,6 +18,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cosh";
@@ -79,9 +81,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cosh",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
-async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
+async fn cosh_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -99,9 +104,13 @@ async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     super::inverse_helpers::preparation::unary(
+        runtime.as_ref(),
         runmat_builtins::COSH_CATALOG_ENTRY.identity,
         value,
-        cosh_admitted,
+        |value| async move {
+            let output = cosh_admitted(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
     )
     .await
 }
@@ -255,7 +264,7 @@ pub(crate) mod tests {
 
     fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::cosh_builtin(value))
+        block_on(super::cosh_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     struct MalformedCoshProvider {
@@ -404,7 +413,11 @@ pub(crate) mod tests {
     #[test]
     fn cosh_integer_gate_boundary_and_single_precision() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        assert!(block_on(super::cosh_builtin(Value::Int(IntValue::I8(0)))).is_err());
+        assert!(
+            block_on(super::cosh_builtin(None, Value::Int(IntValue::I8(0))))
+                .map(|owned| owned.value().clone())
+                .is_err()
+        );
         drop(_strict);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         for value in [
@@ -417,23 +430,36 @@ pub(crate) mod tests {
             IntValue::U32(0),
             IntValue::U64(0),
         ] {
-            assert!(block_on(super::cosh_builtin(Value::Int(value))).is_ok());
+            assert!(block_on(super::cosh_builtin(None, Value::Int(value)))
+                .map(|owned| owned.value().clone())
+                .is_ok());
         }
-        assert!(block_on(super::cosh_builtin(Value::Int(IntValue::U64(
-            (1_u64 << 53) + 1
-        ))))
+        assert!(block_on(super::cosh_builtin(
+            None,
+            Value::Int(IntValue::U64((1_u64 << 53) + 1))
+        ))
+        .map(|owned| owned.value().clone())
         .is_err());
-        assert!(block_on(super::cosh_builtin(Value::Int(IntValue::U64(1_u64 << 54)))).is_ok());
-        let Value::Tensor(real) = block_on(super::cosh_builtin(Value::Tensor(
-            Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap(),
-        )))
+        assert!(block_on(super::cosh_builtin(
+            None,
+            Value::Int(IntValue::U64(1_u64 << 54))
+        ))
+        .map(|owned| owned.value().clone())
+        .is_ok());
+        let Value::Tensor(real) = block_on(super::cosh_builtin(
+            None,
+            Value::Tensor(Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+        ))
+        .map(|owned| owned.value().clone())
         .unwrap() else {
             panic!("expected single tensor")
         };
         assert_eq!(real.numeric_dtype(), NumericDType::F32);
-        let Value::ComplexTensor(complex) = block_on(super::cosh_builtin(Value::ComplexTensor(
-            ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap(),
-        )))
+        let Value::ComplexTensor(complex) = block_on(super::cosh_builtin(
+            None,
+            Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap()),
+        ))
+        .map(|owned| owned.value().clone())
         .unwrap() else {
             panic!("expected complex tensor")
         };
@@ -443,8 +469,9 @@ pub(crate) mod tests {
     #[test]
     fn cosh_rejects_excess_outputs() {
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let error =
-            block_on(super::cosh_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        let error = block_on(super::cosh_builtin(None, Value::Num(0.0)))
+            .map(|owned| owned.value().clone())
+            .expect_err("excess outputs must reject");
         assert_eq!(error.identifier(), Some("RunMat:cosh:TooManyOutputs"));
     }
 

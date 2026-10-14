@@ -26,13 +26,14 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
         Value::ObjectArray(
             ObjectArray::row("TestResidentContainer", vec![Value::Object(object)]).unwrap(),
         ),
-        Value::Closure(Closure {
+        Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
             function_name: "captured".into(),
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![resident.clone()],
-        }),
+        })),
         Value::OutputList(vec![resident.clone()]),
     ];
     for value in nested {
@@ -137,7 +138,7 @@ fn map_constructor_gathers_gpu_values() {
         .expect("map");
         let payload = crate::make_cell(vec![Value::from("alpha")], 1, 1).unwrap();
         let value = containers_map_subsref(map, "()".to_string(), payload).expect("lookup");
-        match value {
+        match value.value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), shape);
                 assert_eq!(t.materialize_f64(), data);
@@ -176,9 +177,8 @@ fn map_resident_integer_keys_and_values_gather_exactly() {
         ])
         .expect("resident value constructor");
         let payload = crate::make_cell(vec![Value::from("wide")], 1, 1).unwrap();
-        let Value::Tensor(gathered) =
-            containers_map_subsref(map, "()".to_string(), payload).unwrap()
-        else {
+        let gathered = containers_map_subsref(map, "()".to_string(), payload).unwrap();
+        let Value::Tensor(gathered) = gathered.value() else {
             panic!("expected exact integer tensor value");
         };
         assert_eq!(gathered.integer_storage(), value_tensor.integer_storage());

@@ -14,6 +14,7 @@ pub use contract::{DLFEVAL_DESCRIPTOR, DLFEVAL_INVALID_FUNCTION, DLFEVAL_UNSUPPO
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DLFEVAL_CATALOG_ENTRY];
 
 pub const DLFEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlfeval" },
     category: "deep_learning",

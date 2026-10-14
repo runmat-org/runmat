@@ -402,12 +402,12 @@ impl WgpuProvider {
         }
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-repmat-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-repmat-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-repmat-noop-pass"),
                 timestamp_writes: None,
@@ -420,12 +420,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-repmat-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-repmat-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -598,12 +598,12 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("cat: internal dimension overflow"))?;
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-cat-encoder"),
-                    });
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-cat-encoder"),
+                },
+            );
 
             let mut dst_offset_elems = 0usize;
             for outer_idx in 0..outer {
@@ -785,12 +785,12 @@ impl WgpuProvider {
         let out_shape = shape_out.clone();
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-kron-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-kron-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-kron-noop-pass"),
                 timestamp_writes: None,
@@ -803,12 +803,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-kron-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-kron-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -1090,12 +1090,12 @@ impl WgpuProvider {
         let out_shape = ext_shape.clone();
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-circshift-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-circshift-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-circshift-noop-pass"),
                 timestamp_writes: None,
@@ -1108,12 +1108,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-circshift-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-circshift-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -1238,12 +1238,12 @@ impl WgpuProvider {
         let out_shape = entry.shape.clone();
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-tril-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-tril-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-tril-noop-pass"),
                 timestamp_writes: None,
@@ -1256,12 +1256,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-tril-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-tril-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -1394,12 +1394,12 @@ impl WgpuProvider {
         let out_shape = entry.shape.clone();
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-triu-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-triu-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-triu-noop-pass"),
                 timestamp_writes: None,
@@ -1412,12 +1412,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-triu-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-triu-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 
@@ -1649,12 +1649,12 @@ impl WgpuProvider {
         }
 
         self.with_emission(|emission, pending| -> Result<()> {
-            let mut enc =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-flip-noop"),
-                    });
+            let mut enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flip-noop"),
+                },
+            );
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-flip-noop-pass"),
                 timestamp_writes: None,
@@ -1667,12 +1667,12 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         self.with_emission(|emission, pending| -> Result<()> {
             {
-                let enc =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-flip-flush-gap"),
-                        });
+                let enc = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-flip-flush-gap"),
+                    },
+                );
                 self.submit(emission, pending, enc)?;
             }
 

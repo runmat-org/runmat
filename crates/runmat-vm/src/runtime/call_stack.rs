@@ -11,6 +11,8 @@ pub fn callstack_limit() -> usize {
 pub fn attach_call_frames(
     current_function_name: &str,
     source_id: Option<runmat_types::SourceId>,
+    source_owner: Option<runmat_runtime::CallFrameSourceOwner>,
+    diagnostic_source: Option<runmat_runtime::CallFrameDiagnosticSource>,
     mut err: RuntimeError,
 ) -> RuntimeError {
     if !err.context.call_frames.is_empty() || !err.context.call_stack.is_empty() {
@@ -30,6 +32,8 @@ pub fn attach_call_frames(
             function: current_function_name.to_string(),
             source_id: source_id.map(|id| id.0),
             span,
+            source_owner,
+            diagnostic_source,
         });
     }
     err

@@ -175,7 +175,7 @@ pub(super) async fn dispatch(
     runtime: &crate::context::RuntimeContext,
     path: &str,
     outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<crate::execution::RootedValue, RuntimeError> {
     crate::call_builtin_async_with_outputs_in_context(
         runtime,
         "print",
@@ -185,6 +185,6 @@ pub(super) async fn dispatch(
     .await
 }
 
-pub(super) fn assert_no_outputs(value: Value) {
-    assert!(matches!(value, Value::OutputList(values) if values.is_empty()));
+pub(super) fn assert_no_outputs(value: crate::execution::RootedValue) {
+    assert!(matches!(value.value(), Value::OutputList(values) if values.is_empty()));
 }

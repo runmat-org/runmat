@@ -272,6 +272,7 @@ impl NativeAutoOffload {
                     args: processed,
                     observation: Some(observation),
                     uploads,
+                    request_input_root: None,
                 }),
                 Err(error) => {
                     // A completed preparation error is an operational failure;

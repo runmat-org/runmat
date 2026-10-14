@@ -2,7 +2,7 @@ use super::*;
 use futures::executor::block_on;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinIntegerOutputClassRule, REQUIRED_DEFAULT_BINDING, builtin_function_by_name,
+    builtin_function_by_name, BuiltinIntegerOutputClassRule, REQUIRED_DEFAULT_BINDING,
 };
 use runmat_value::{IntValue, IntegerStorage};
 
@@ -68,8 +68,8 @@ fn butter_rejects_non_finite_transfer_coefficients() {
 #[test]
 fn numerical_design_observes_invocation_cancellation() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-    use runmat_execution::CancellationReason;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::num::NonZeroU64;
     use std::rc::Rc;
 
@@ -174,20 +174,16 @@ fn butter_descriptor_signatures_and_errors() {
     assert!(labels.contains(&"[z, p, k] = butter(n, Wn, 's')"));
     assert!(labels.contains(&"[A, B, C, D] = butter(n, Wn)"));
     assert!(labels.contains(&"[A, B, C, D] = butter(n, Wn, 's')"));
-    assert!(
-        descriptor
-            .errors
-            .iter()
-            .any(|error| error.code == "RM.BUTTER.INVALID_FREQUENCY")
-    );
+    assert!(descriptor
+        .errors
+        .iter()
+        .any(|error| error.code == "RM.BUTTER.INVALID_FREQUENCY"));
     assert_eq!(builtin.extensions.len(), 9);
     assert_eq!(builtin.integer_capabilities.len(), 2);
-    assert!(
-        builtin
-            .integer_capabilities
-            .iter()
-            .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double)
-    );
+    assert!(builtin
+        .integer_capabilities
+        .iter()
+        .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double));
 }
 
 #[test]

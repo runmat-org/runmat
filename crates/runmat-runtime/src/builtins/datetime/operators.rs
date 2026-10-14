@@ -1,5 +1,6 @@
 use super::capabilities::{BUILTIN_NAME, DATETIME_CLASS, FORMAT_FIELD};
 use super::*;
+use crate::execution::RootedValue;
 
 #[runmat_macros::runtime_builtin(
     name = "datetick",
@@ -15,10 +16,13 @@ pub(super) async fn datetick_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsref",
-    descriptor(crate::builtins::datetime::DATETIME_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn datetime_subsref(
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(obj, path, datetime_read_step, None).await
 }
@@ -26,7 +30,7 @@ pub(super) async fn datetime_subsref(obj: Value, subscript: Value) -> crate::Bui
 pub(super) async fn datetime_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
     match step.kind() {
         crate::object::indexing::ObjectIndexKind::Paren => datetime_indexing(obj, payload).await,
@@ -38,7 +42,8 @@ pub(super) async fn datetime_read_step(
             };
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
-                FORMAT_FIELD => Ok(Value::String(format_for_object(&object))),
+                FORMAT_FIELD => RootedValue::new(Value::String(format_for_object(&object)))
+                    .map_err(|error| error.into_runtime_error()),
                 _ => Err(datetime_error(format!(
                     "datetime.subsref: unsupported datetime property '{field}'"
                 ))),
@@ -52,14 +57,14 @@ pub(super) async fn datetime_read_step(
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsasgn",
-    descriptor(crate::builtins::datetime::DATETIME_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn datetime_subsasgn(
     obj: Value,
     subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsasgn(
         obj,
@@ -81,14 +86,14 @@ pub(super) async fn datetime_write_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
     let Value::Object(mut object) = obj else {
         return Err(datetime_error(
             "datetime.subsasgn: receiver must be a datetime object",
         ));
     };
-    match step.kind() {
+    let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
@@ -107,7 +112,8 @@ pub(super) async fn datetime_write_step(
         _ => Err(datetime_error(
             "datetime.subsasgn: only member assignment is supported",
         )),
-    }
+    }?;
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 pub(super) fn datetime_binary_serials(

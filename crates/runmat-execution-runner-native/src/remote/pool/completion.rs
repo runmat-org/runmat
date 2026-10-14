@@ -14,7 +14,14 @@ type PendingTaskResolution = (
 );
 
 impl RemotePoolDriver {
-    pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
+    pub(super) fn apply_report(self: &Arc<Self>, mut report: BackendReport) {
+        if matches!(&report.report, AttemptReport::GraphRetiredCancelled) {
+            // Only the local process owner can issue this certificate. A
+            // remote worker cannot prove parent-owned process-tree cleanup.
+            report.report = AttemptReport::RetirementUnverified {
+                message: "remote Graph retirement certificate has no local process owner".into(),
+            };
+        }
         let task_id = report.task_id;
         let spmd_task = self.spmd_task_context(task_id);
         let (actions, terminal, committed_results) = {
@@ -55,6 +62,18 @@ impl RemotePoolDriver {
         }
         self.dispatch(actions);
         if let Some(state) = terminal {
+            if self.direct_bundle.is_none()
+                && state == TaskState::Indeterminate
+                && matches!(&report.report, AttemptReport::Succeeded { .. })
+            {
+                self.resolve_task(
+                    task_id,
+                    Err(crate::NativeProgramFailure::WorkerLost(
+                        "Graph attempt reported success without verified worker retirement".into(),
+                    )),
+                );
+                return;
+            }
             let outcome = match report.report {
                 AttemptReport::Succeeded { result } => Ok(result),
                 AttemptReport::Failed { kind, message } => match kind {
@@ -69,6 +88,10 @@ impl RemotePoolDriver {
                 AttemptReport::Lost { message } => {
                     Err(crate::NativeProgramFailure::WorkerLost(message))
                 }
+                AttemptReport::RetirementUnverified { message } => {
+                    Err(crate::NativeProgramFailure::WorkerLost(message))
+                }
+                AttemptReport::GraphRetiredCancelled => Err(crate::NativeProgramFailure::Cancelled),
                 AttemptReport::RuntimeFailed { failure } => {
                     Err(crate::NativeProgramFailure::Runtime(failure))
                 }
@@ -150,9 +173,16 @@ impl RemotePoolDriver {
             .lock()
             .expect("remote program catalog poisoned")
             .get(&task_id)
-            .and_then(|program| match &program.context {
-                runmat_execution::ProgramInvocationContext::SpmdTask { task } => Some(task.clone()),
-                _ => None,
+            .and_then(|program| match program.as_ref() {
+                runmat_execution_artifact::WorkerProgramRequest::Direct(direct) => {
+                    match &direct.context {
+                        runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
+                            Some(task.clone())
+                        }
+                        _ => None,
+                    }
+                }
+                runmat_execution_artifact::WorkerProgramRequest::Graph(_) => None,
             })
     }
 
@@ -177,6 +207,10 @@ impl RemotePoolDriver {
         self.programs
             .lock()
             .expect("remote program catalog poisoned")
+            .remove(&task_id);
+        self.graph_transfers
+            .lock()
+            .expect("remote Graph transfer registry poisoned")
             .remove(&task_id);
         self.progress
             .lock()

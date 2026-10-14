@@ -36,7 +36,7 @@ pub(crate) async fn send_request(
 ) -> Result<HttpResponse, TransportCallError> {
     let runtime = require_runtime(runtime)?;
     let service = http_service(runtime)?;
-    await_http(service.send(request), runtime).await
+    await_http(service.send(runtime.clone(), request), runtime).await
 }
 
 pub(crate) async fn open_bounded_request(
@@ -46,7 +46,11 @@ pub(crate) async fn open_bounded_request(
 ) -> Result<HttpBodyStream, TransportCallError> {
     let runtime = require_runtime(runtime)?;
     let service = http_service(runtime)?;
-    await_http(service.open_bounded(request, accepted_limit), runtime).await
+    await_http(
+        service.open_bounded(runtime.clone(), request, accepted_limit),
+        runtime,
+    )
+    .await
 }
 
 /// Cancellation drops the body owner, not just the borrowed chunk future.

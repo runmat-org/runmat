@@ -17,6 +17,7 @@ const EFFECTS: &[EffectKind] = &[
     EffectKind::Unknown,
 ];
 pub const GETFIELD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "getfield" },
     category: "structs/core",

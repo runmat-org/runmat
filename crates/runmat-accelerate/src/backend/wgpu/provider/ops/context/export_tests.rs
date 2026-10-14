@@ -67,9 +67,7 @@ fn read_f32(provider: &WgpuProvider, exported: &WgpuBufferRef) -> Vec<u32> {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let mut encoder = emission
-                .device()
-                .create_command_encoder(&Default::default());
+            let mut encoder = pending.profiled_encoder(emission, &Default::default());
             encoder.copy_buffer_to_buffer(exported.buffer(emission)?, 0, &staging, 0, bytes);
             provider.submit(emission, pending, encoder)?;
             Ok(staging)

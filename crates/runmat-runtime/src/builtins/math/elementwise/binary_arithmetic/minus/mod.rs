@@ -25,6 +25,8 @@ use crate::builtins::math::elementwise::integer_arithmetic::{
 use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::elementwise::sparse_integer::try_typed_sparse_integer_binary;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
@@ -106,9 +108,17 @@ fn minus_error_with_detail(
 #[runtime_builtin(
     name = "minus",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::minus"
 )]
-async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn minus_builtin(
+    runtime: Option<RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter().chain(rest.iter()))
+        .map_err(|cause| cause.into_runtime_error())?;
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::MINUS_DESCRIPTOR,
         &runmat_builtins::MINUS_ERROR_TOO_MANY_OUTPUTS,
@@ -134,6 +144,7 @@ async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
     super::preparation::execute(
+        runtime.as_ref(),
         MINUS_CATALOG_ENTRY.identity,
         2 + rest.len(),
         lhs,
@@ -145,7 +156,11 @@ async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
                 (lhs, Value::GpuTensor(rb)) => minus_gpu_host_right(lhs, rb).await,
                 (lhs, rhs) => minus_host(lhs, rhs),
             }?;
-            apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+            let base = RootedValue::new(base).map_err(|cause| cause.into_runtime_error())?;
+            let value =
+                apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)
+                    .await?;
+            RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
         },
     )
     .await

@@ -33,7 +33,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberOrInit(field) => {
@@ -56,7 +56,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamic => {
@@ -84,7 +84,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamicOrInit => {
@@ -112,11 +112,12 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(value);
+            value.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberSequence(field) => {
             let values = take_sequence_register(stack, sequence_register)?.into_values();
+            let _values_roots = crate::call::root_values(&values)?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -130,11 +131,12 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(updated);
+            updated.with_owned(|value| stack.push(value));
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamicSequence => {
             let values = take_sequence_register(stack, sequence_register)?.into_values();
+            let _values_roots = crate::call::root_values(&values)?;
             let name: String = (&stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -153,7 +155,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            stack.push(updated);
+            updated.with_owned(|value| stack.push(value));
             Ok(true)
         }
         _ => Ok(false),

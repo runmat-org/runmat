@@ -20,6 +20,36 @@ impl HostState {
         &mut self,
         slot: usize,
     ) -> NativeExecutorResult<NativeValueRef> {
+        if let (Some(environment), Some(binding)) = (
+            self.lexical_environment.clone(),
+            self.function
+                .lexical_bindings
+                .iter()
+                .find(|binding| binding.local.0 as usize == slot)
+                .copied(),
+        ) {
+            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Transit {
+                return self.locals.get(slot).copied().ok_or_else(|| {
+                    NativeExecutorError::Host("native transit local is out of bounds".into())
+                });
+            }
+            if let Some(value) =
+                runmat_runtime::call::lexical::read_binding(&environment, binding.binding)?
+            {
+                if let Some(workspace) = &self.workspace {
+                    workspace.observe_shared_local(slot, Some(value.clone()))?;
+                }
+                let refreshed = self.arena.insert(value);
+                self.locals[slot] = refreshed;
+                self.record_local_initialization(slot, refreshed);
+                return Ok(refreshed);
+            }
+            if let Some(workspace) = &self.workspace {
+                workspace.observe_shared_local(slot, None)?;
+            }
+            self.locals[slot] = NativeValueRef::NULL;
+            return Ok(NativeValueRef::NULL);
+        }
         let reference = self
             .locals
             .get(slot)
@@ -45,9 +75,10 @@ impl HostState {
                 return Ok(reference);
             }
             let name = binding.name.clone();
+            let owner_function = binding.function.clone();
             let previous_invalidation = binding.invalidation.clone();
-            let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
-            let value = authority.persistent_named_value(&self.function.name, &name)?;
+            let invalidation = authority.persistent_invalidation_revision(&owner_function)?;
+            let value = authority.persistent_named_value(&owner_function, &name)?;
             let absent = value.is_none();
             let refreshed = self.replace_local_from_canonical(slot, value)?;
             if let Some(binding) = self.persistent_bindings.get_mut(&slot) {
@@ -80,7 +111,7 @@ impl HostState {
         let value = value.unwrap_or_else(empty_workspace_value);
         let refreshed = self.arena.insert(value);
         if let Some(workspace) = &self.workspace {
-            workspace.synchronize_local(slot, self.arena.get(refreshed)?.clone())?;
+            workspace.refresh_local(slot, self.arena.get(refreshed)?.clone())?;
         }
         self.locals[slot] = refreshed;
         self.record_local_initialization(slot, refreshed);
@@ -137,7 +168,44 @@ impl HostState {
             self.persistent_seen_revision.remove(&slot);
         }
         self.record_local_initialization(slot, value);
-        self.synchronize_session_binding(slot, value)
+        self.synchronize_session_binding(slot, value)?;
+        if let (Some(environment), Some(binding)) = (
+            self.lexical_environment.as_ref(),
+            self.function
+                .lexical_bindings
+                .iter()
+                .find(|binding| binding.local.0 as usize == slot),
+        ) {
+            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Transit {
+                return Ok(());
+            }
+            if value.is_null() {
+                if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Owned {
+                    runmat_runtime::call::lexical::remove_owned_binding(
+                        environment,
+                        binding.binding,
+                    )?;
+                } else {
+                    runmat_runtime::call::lexical::remove_binding(environment, binding.binding)?;
+                }
+            } else {
+                let value = self.arena.get(value)?.clone();
+                if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Owned {
+                    runmat_runtime::call::lexical::write_owned_binding(
+                        environment,
+                        binding.binding,
+                        value,
+                    )?;
+                } else {
+                    runmat_runtime::call::lexical::write_binding(
+                        environment,
+                        binding.binding,
+                        value,
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// A block parameter transfers an already-evaluated SSA snapshot, not a
@@ -151,7 +219,12 @@ impl HostState {
     ) -> NativeExecutorResult<NativeValueRef> {
         if inherited_snapshot
             && (self.global_bindings.name_for_slot(slot).is_some()
-                || self.persistent_bindings.contains_key(&slot))
+                || self.persistent_bindings.contains_key(&slot)
+                || self
+                    .function
+                    .lexical_bindings
+                    .iter()
+                    .any(|binding| binding.local.0 as usize == slot))
         {
             return self.local_reference(slot);
         }
@@ -228,25 +301,35 @@ impl HostState {
     }
 
     pub fn declare_persistent(&mut self, slot: usize, name: String) -> NativeExecutorResult<()> {
+        let owner_function = self.function.name.clone();
+        self.declare_persistent_for_owner(slot, name, owner_function)
+    }
+
+    pub fn declare_persistent_for_owner(
+        &mut self,
+        slot: usize,
+        name: String,
+        owner_function: String,
+    ) -> NativeExecutorResult<()> {
         if self.global_bindings.name_for_slot(slot).is_some() {
             return Err(NativeExecutorError::Host(
                 "native local cannot be both global and persistent".into(),
             ));
         }
         let authority = self.runtime.session_variable_authority();
-        let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
+        let invalidation = authority.persistent_invalidation_revision(&owner_function)?;
         self.persistent_bindings.insert(
             slot,
             runmat_runtime::workspace::session::PersistentBindingContinuation {
                 name: name.clone(),
-                function: self.function.name.clone(),
+                function: owner_function.clone(),
                 owner: authority.clone(),
                 invalidation,
                 invalidated: false,
             },
         );
         let value = authority
-            .persistent_named_value(&self.function.name, &name)?
+            .persistent_named_value(&owner_function, &name)?
             .unwrap_or_else(empty_workspace_value);
         let reference = self.arena.insert(value);
         self.set_local(slot, reference)
@@ -269,10 +352,10 @@ impl HostState {
         }
         if let Some(binding) = self.persistent_bindings.get(&slot) {
             let authority = self.runtime.session_variable_authority();
-            authority.store_persistent_named(&self.function.name, &binding.name, value)?;
+            authority.store_persistent_named(&binding.function, &binding.name, value)?;
             self.persistent_seen_revision
                 .insert(slot, authority.persistent_revision()?);
-            let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
+            let invalidation = authority.persistent_invalidation_revision(&binding.function)?;
             if let Some(binding) = self.persistent_bindings.get_mut(&slot) {
                 binding.invalidation = invalidation;
                 binding.invalidated = false;

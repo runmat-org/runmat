@@ -9,6 +9,8 @@ macro_rules! define_integer_conversion_builtin {
             ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
         };
         use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+        use crate::context::RuntimeContext;
+        use crate::execution::RootedValue;
 
         #[runmat_macros::register_gpu_spec(builtin_path = $path)]
         pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,14 +42,16 @@ macro_rules! define_integer_conversion_builtin {
         #[runmat_macros::runtime_builtin(
             name = $name,
             binding_variant = "default",
+            context = true,
             builtin_path = $path
         )]
-        pub(crate) async fn $function(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        pub(crate) async fn $function(runtime: Option<RuntimeContext>, value: Value, rest: Vec<Value>) -> BuiltinResult<RootedValue> {
             if !rest.is_empty() {
                 return Err(error(&$argument_error, "too many input arguments"));
             }
             crate::output_count::validate_fixed_outputs($entry.descriptor, &$argument_error, $name)?;
             super::preparation::execute(
+                runtime.as_ref(),
                 runmat_builtins::BuiltinCatalogIdentity { name: $name },
                 value,
                 $target,

@@ -12,6 +12,7 @@ pub use contract::*;
 pub use option::FormatCommand;
 
 pub const FORMAT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "format" },
     category: "io",

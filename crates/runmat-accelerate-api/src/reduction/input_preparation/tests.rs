@@ -48,18 +48,25 @@ fn source_and_route_separate_inventory_identity() {
     let a = ProviderReductionInputInventory::new_checked(
         recipe,
         vec![exact.clone()],
-        &[selected.clone()],
+        std::slice::from_ref(&selected),
     )
     .unwrap();
-    let b = ProviderReductionInputInventory::new_checked(recipe, vec![cast], &[selected.clone()])
-        .unwrap();
+    let b = ProviderReductionInputInventory::new_checked(
+        recipe,
+        vec![cast],
+        std::slice::from_ref(&selected),
+    )
+    .unwrap();
     assert_ne!(a.identity(), b.identity());
     assert_eq!(a.recipe_identity(), recipe);
     assert_eq!(b.recipe_identity(), recipe);
     assert!(ProviderReductionInputInventory::new_checked(recipe, vec![exact], &[]).is_err());
-    assert!(
-        ProviderReductionInputInventory::new_checked(recipe, vec![], &[selected.clone()]).is_err()
-    );
+    assert!(ProviderReductionInputInventory::new_checked(
+        recipe,
+        vec![],
+        std::slice::from_ref(&selected)
+    )
+    .is_err());
 
     let unknown_source = ProviderReductionInputPreparation {
         source: representation(ProviderElementType::F32, ProviderResidency::Unknown),
@@ -70,7 +77,7 @@ fn source_and_route_separate_inventory_identity() {
     assert!(ProviderReductionInputInventory::new_checked(
         recipe,
         vec![unknown_source],
-        &[selected.clone()],
+        std::slice::from_ref(&selected),
     )
     .is_err());
 

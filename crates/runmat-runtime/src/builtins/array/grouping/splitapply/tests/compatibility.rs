@@ -20,7 +20,7 @@ fn fixed_width_group_numbers_are_gated_and_data_remains_exact() {
     }
     let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     let output = call("max", data, vec![groups]).unwrap();
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected integer output")
     };
     assert_eq!(

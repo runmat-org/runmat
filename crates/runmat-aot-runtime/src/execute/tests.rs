@@ -134,6 +134,8 @@ fn standalone_diagnostic_renders_bound_file_frame_span_and_original_cause() {
             function: "main".into(),
             source_id: Some(issued.0),
             span: Some((11, 5)),
+            source_owner: None,
+            diagnostic_source: None,
         }])
         .with_source(std::io::Error::other("typed source cause"))
         .build();

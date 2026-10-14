@@ -50,7 +50,7 @@ fn resolve_end_inner(
         "native_pending_subscript_end_receiver",
     )?;
     let runtime = state.runtime.clone();
-    let mut values = super::super::call_suspension::begin(
+    let mut values = super::super::call_suspension::begin_rooted_sequence(
         state,
         embedded.cloned(),
         Box::pin(async move {
@@ -65,8 +65,15 @@ fn resolve_end_inner(
                     ),
                 )
                 .await?;
-            Ok(vec![value])
+            value.try_map_owned(
+                |value| {
+                    runmat_value::ValueSequence::single(value)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            )
         }),
+        1,
     )?;
     if values.len() != 1 {
         return Err(NativeExecutorError::Host(

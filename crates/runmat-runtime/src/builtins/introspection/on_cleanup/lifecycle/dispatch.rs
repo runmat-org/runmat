@@ -1,6 +1,9 @@
 //! Host-supervised callback execution and exact typed completion receipts.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 use runmat_gc::RootId;
 
@@ -9,11 +12,162 @@ use crate::{BuiltinResult, RuntimeError};
 
 use super::registry::{CleanupAdmission, CleanupEntry, CleanupReceipt, CleanupRegistry};
 
-struct CallbackFutureRootRelease(Rc<CleanupEntry>);
+enum CleanupCallbackOutcome {
+    Skipped,
+    Completed,
+}
 
-impl Drop for CallbackFutureRootRelease {
+/// The outer owner destroys the scoped callback future, including its feval
+/// frame and captured Values, before retiring roots or profiling admission.
+/// TaskSlot may announce Cancelled while a poll is active; that announcement
+/// is deliberately not this future's retirement boundary.
+struct OwnedCleanupFuture {
+    inner: Option<Pin<Box<dyn Future<Output = BuiltinResult<CleanupCallbackOutcome>>>>>,
+    entry: Rc<CleanupEntry>,
+    registry: Option<Rc<CleanupRegistry>>,
+    runtime: Option<RuntimeContext>,
+}
+
+/// A captured resource can panic from Drop. Before destroying the inner
+/// future, transfer terminal authority here so an unwind cannot strand its
+/// callback roots or the admitted deferred lease. Only the inner destruction
+/// boundary is armed; the ordinary completion path takes over afterward.
+struct InnerDropRetirementGuard {
+    entry: Rc<CleanupEntry>,
+    registry: Rc<CleanupRegistry>,
+    runtime: RuntimeContext,
+    armed: bool,
+}
+
+impl Drop for InnerDropRetirementGuard {
     fn drop(&mut self) {
-        self.0.release_terminal_after_future_drop();
+        if !self.armed {
+            return;
+        }
+        let _selected = self.runtime.enter();
+        self.entry.abandon();
+        self.registry.mark_terminal(&self.entry);
+        self.entry.note_future_retired();
+        self.entry.release_terminal_after_future_drop();
+        self.entry.settle_deferred_from_receipt();
+    }
+}
+
+impl OwnedCleanupFuture {
+    fn retire(&mut self, result: Option<BuiltinResult<CleanupCallbackOutcome>>) {
+        let Some(inner) = self.inner.take() else {
+            return;
+        };
+        let registry = self
+            .registry
+            .take()
+            .expect("cleanup registry retained by future");
+        let runtime = self
+            .runtime
+            .take()
+            .expect("cleanup runtime retained by future");
+        let mut retirement = InnerDropRetirementGuard {
+            entry: Rc::clone(&self.entry),
+            registry,
+            runtime,
+            armed: true,
+        };
+        drop(inner);
+        retirement.armed = false;
+        // The scoped inner has retired; terminal root release and its
+        // synchronous GC observers still belong to the queue-time origin,
+        // including an explicit None that masks a later command drainer.
+        let _selected = retirement.runtime.enter();
+        let callback_result = match result {
+            Some(Ok(CleanupCallbackOutcome::Completed)) => Some(Ok(())),
+            Some(Err(error)) => Some(Err(error)),
+            Some(Ok(CleanupCallbackOutcome::Skipped)) | None => None,
+        };
+        if let Some(result) = callback_result {
+            if self
+                .entry
+                .lease()
+                .is_some_and(|lease| lease.outcome() == Some(RuntimeLocalTaskOutcome::Cancelled))
+            {
+                // TaskSlot may receive cancel during its current poll, then
+                // allow that poll to return Ready. The cancellation intent
+                // wins, but only this post-inner-Drop path retires roots.
+                self.entry.abandon();
+                retirement.registry.mark_terminal(&self.entry);
+            } else {
+                self.entry.complete(result);
+                retirement.registry.mark_terminal(&self.entry);
+            }
+        }
+        let settled = self.entry.note_future_retired();
+        if settled && self.entry.receipt().is_none() {
+            self.entry.abandon();
+            retirement.registry.mark_terminal(&self.entry);
+        }
+        self.entry.release_terminal_after_future_drop();
+        if matches!(
+            self.entry.phase(),
+            super::registry::CleanupPhase::Completed
+                | super::registry::CleanupPhase::Cancelled
+                | super::registry::CleanupPhase::Abandoned
+                | super::registry::CleanupPhase::DispatchFailed
+        ) {
+            // Any terminal root retirement, including cancellation, can
+            // expose a chained callback. The queue-origin runtime owns this
+            // safepoint; a later drainer cannot reattribute it.
+            schedule_eligible(&retirement.runtime, &retirement.registry, &[]);
+        }
+        if settled {
+            self.entry.settle_deferred_from_receipt();
+        }
+    }
+}
+
+impl Future for OwnedCleanupFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+        let result = this
+            .inner
+            .as_mut()
+            .expect("cleanup future polled after retirement")
+            .as_mut()
+            .poll(context);
+        match result {
+            Poll::Ready(result) => {
+                this.retire(Some(result));
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for OwnedCleanupFuture {
+    fn drop(&mut self) {
+        self.retire(None);
+    }
+}
+
+fn settle_retired_after_ack(
+    entry: &Rc<CleanupEntry>,
+    registry: &Rc<CleanupRegistry>,
+    runtime: &RuntimeContext,
+) {
+    let missing_receipt = entry.receipt().is_none();
+    let queue_runtime = runtime
+        .clone()
+        .with_cleanup_command_origin(entry.queued_command_origin());
+    let _selected = queue_runtime.enter();
+    if missing_receipt {
+        entry.abandon();
+        registry.mark_terminal(entry);
+    }
+    entry.release_terminal_after_future_drop();
+    entry.settle_deferred_from_receipt();
+    if missing_receipt {
+        schedule_eligible(&queue_runtime, registry, &[]);
     }
 }
 
@@ -54,32 +208,53 @@ pub(crate) fn start_queued(
         return receipt_result(registry, &entry);
     };
     let task_entry = Rc::clone(&entry);
-    let task_registry = Rc::clone(registry);
-    let task_runtime = runtime.clone();
-    let release_on_drop = CallbackFutureRootRelease(Rc::clone(&entry));
-    let future = runtime.clone().scope(async move {
-        let _release_on_drop = release_on_drop;
+    // Queue admission, not the eventual drain, fixed this callback's origin.
+    // Explicit None masks a drainer that belongs to a later command.
+    let task_runtime = runtime
+        .clone()
+        .with_cleanup_command_origin(entry.queued_command_origin());
+    let inner = task_runtime.clone().scope(async move {
         if !task_entry.begin_running() {
-            return;
+            return Ok(CleanupCallbackOutcome::Skipped);
         }
-        let result = crate::call_feval_async_with_outputs(callback, &[], 0)
+        crate::call_feval_async_with_outputs(callback, &[], 0)
             .await
-            .map(|_| ());
-        task_entry.complete(result);
-        task_registry.mark_terminal(&task_entry);
-        // After A releases its queued/running callback root, B may become
-        // eligible. This is a safepoint, not a second executor or timer.
-        schedule_eligible(&task_runtime, &task_registry, &[]);
+            .map(|_| CleanupCallbackOutcome::Completed)
     });
+    entry.prepare_future_handoff();
+    let future = OwnedCleanupFuture {
+        inner: Some(Box::pin(inner)),
+        entry: Rc::clone(&entry),
+        registry: Some(Rc::clone(registry)),
+        runtime: Some(task_runtime),
+    };
     match tasks.spawn_local(runtime.local_identity(), Box::pin(future)) {
         Ok(lease) => {
+            if entry.acknowledge_future_handoff(true) {
+                settle_retired_after_ack(&entry, registry, runtime);
+            }
             entry.attach_lease(lease);
             Ok(())
         }
         Err(error) => {
-            entry.dispatch_failed(error);
-            registry.mark_terminal(&entry);
-            receipt_result(registry, &entry)
+            let retired = entry.acknowledge_future_handoff(false);
+            if entry.phase() == super::registry::CleanupPhase::Queued {
+                entry.dispatch_failed(error);
+                registry.mark_terminal(&entry);
+                if retired {
+                    entry.settle_deferred_from_receipt();
+                }
+                receipt_result(registry, &entry)
+            } else {
+                // A custom port may have polled the callback through Ready
+                // before returning Err. The callback's completed receipt
+                // and linear retirement remain true; the submitter still
+                // receives the original typed port failure, never success.
+                if retired {
+                    entry.settle_deferred_from_receipt();
+                }
+                Err(error)
+            }
         }
     }
 }
@@ -92,7 +267,9 @@ pub(crate) fn schedule_eligible(
     registry: &Rc<CleanupRegistry>,
     temporary: &[RootId],
 ) {
-    if let CleanupAdmission::Queued(entries) = registry.admit_batch(temporary) {
+    if let CleanupAdmission::Queued(entries) =
+        registry.admit_batch(temporary, runtime.command_profiling())
+    {
         for entry in entries {
             let _ = start_queued(runtime, registry, entry);
         }
@@ -109,7 +286,7 @@ pub(crate) async fn wait_queued(
             registry.mark_terminal(entry);
             // A Cancelled lease is not proof that its future has been
             // destroyed: shutdown can race a currently polling callback.
-            // CallbackFutureRootRelease owns the actual release boundary.
+            // OwnedCleanupFuture owns the actual release boundary.
         }
     }
     receipt_result(registry, entry)
@@ -164,7 +341,7 @@ pub(crate) async fn drain_eligible(
             }
             continue;
         }
-        match registry.admit_batch(temporary) {
+        match registry.admit_batch(temporary, runtime.command_profiling()) {
             CleanupAdmission::Queued(entries) => {
                 for entry in entries {
                     if let Err(error) = start_queued(runtime, registry, Rc::clone(&entry)) {
@@ -190,3 +367,7 @@ pub(crate) async fn drain_eligible(
     }
     first_error.map_or(Ok(()), Err)
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "dispatch/tests.rs"]
+mod tests;

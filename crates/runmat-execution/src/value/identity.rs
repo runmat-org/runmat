@@ -1,8 +1,9 @@
 use minicbor::Encoder;
 
 use super::{
-    ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
-    InlineValue, RegisteredData, ValueLimits, ValuePayload,
+    ExceptionFailureOrigin, ExceptionFrameSource, ExceptionGpuGatherRetry,
+    ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData, ValueLimits,
+    ValuePayload,
 };
 use crate::{ContractError, Digest};
 
@@ -309,14 +310,37 @@ fn encode_exception_runtime(
         .map_err(encoding)?;
     for frame in &runtime.call_frames {
         encoder
-            .array(3)
+            .array(
+                if matches!(&frame.source, ExceptionFrameSource::Detached(_)) {
+                    6
+                } else {
+                    3
+                },
+            )
             .and_then(|encoder| encoder.str(&frame.function))
             .map_err(encoding)?;
-        match frame.program_source_id {
-            Some(source_id) => encoder.u32(source_id.0).map(|_| ()).map_err(encoding)?,
-            None => encoder.null().map(|_| ()).map_err(encoding)?,
+        match &frame.source {
+            ExceptionFrameSource::Admitted(source_id) => {
+                encoder.u32(source_id.0).map(|_| ()).map_err(encoding)?;
+            }
+            ExceptionFrameSource::Unknown | ExceptionFrameSource::Detached(_) => {
+                encoder.null().map(|_| ()).map_err(encoding)?;
+            }
         }
         encode_optional_span(encoder, frame.span)?;
+        if let ExceptionFrameSource::Detached(presentation) = &frame.source {
+            encoder.str(&presentation.display_name).map_err(encoding)?;
+            if let Some(line) = presentation.line {
+                encoder.u64(line).map_err(encoding)?;
+            } else {
+                encoder.null().map_err(encoding)?;
+            }
+            if let Some(column) = presentation.column {
+                encoder.u64(column).map_err(encoding)?;
+            } else {
+                encoder.null().map_err(encoding)?;
+            }
+        }
     }
     encoder.u64(runtime.call_frames_elided).map_err(encoding)?;
     encoder

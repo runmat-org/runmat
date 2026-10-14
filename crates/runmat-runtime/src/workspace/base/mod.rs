@@ -22,7 +22,9 @@ pub use owner::{
     BaseWorkspaceCommit, BaseWorkspaceOwner, BaseWorkspaceReconciliation, BaseWorkspaceSnapshot,
 };
 pub use projection::BaseWorkspaceProjection;
-pub use projection_service::BaseWorkspaceProjectionService;
+pub use projection_service::{
+    BaseWorkspaceProjectionService, WorkspacePublicationObserver, WorkspacePublicationOrigin,
+};
 pub use revision::WorkspaceRevision;
 pub use service::base_workspace_error_to_runtime;
 pub use service::BaseWorkspaceService;

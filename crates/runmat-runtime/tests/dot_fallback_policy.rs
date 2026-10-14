@@ -114,11 +114,11 @@ fn only_typed_unsupported_can_gather_dot_inputs() {
         assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
         if unsupported {
             let output = result.unwrap();
-            let value = match output {
-                Value::Num(value) => value,
+            let value = match output.value() {
+                Value::Num(value) => *value,
                 Value::Tensor(tensor) => tensor.materialize_f64()[0],
                 Value::GpuTensor(handle) => {
-                    futures::executor::block_on(provider.inner.download(&handle))
+                    futures::executor::block_on(provider.inner.download(handle))
                         .unwrap()
                         .data[0]
                 }
@@ -206,12 +206,12 @@ fn native_and_fallback_dot_preserve_input_driven_class_under_f64_preference() {
                     ],
                 ))
                 .unwrap();
-                let Value::GpuTensor(output) = result else {
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("actual native class is supported, including nonpreferred Single")
                 };
-                assert_eq!(handle_provenance(&output), Some(provenance));
+                assert_eq!(handle_provenance(output), Some(provenance));
                 assert_eq!(
-                    handle_precision(&output),
+                    handle_precision(output),
                     Some(if single_left && single_right {
                         ProviderPrecision::F32
                     } else {
@@ -222,7 +222,7 @@ fn native_and_fallback_dot_preserve_input_driven_class_under_f64_preference() {
                 assert!(!output.shares_allocation_with(&left));
                 assert!(!output.shares_allocation_with(&right));
                 let downloaded =
-                    futures::executor::block_on(provider.download_numeric(&output)).unwrap();
+                    futures::executor::block_on(provider.download_numeric(output)).unwrap();
                 match downloaded.data {
                     HostNumericDataOwned::F32(values) => assert_eq!(values, [1.]),
                     HostNumericDataOwned::F64(values) => assert_eq!(values, [1.]),
@@ -360,16 +360,16 @@ fn complex_single_host_route_restores_authentic_complex_single() {
         ],
     ))
     .unwrap();
-    let Value::GpuTensor(output) = result else {
+    let Value::GpuTensor(output) = result.value() else {
         panic!("explicit native complex result")
     };
-    assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
+    assert_eq!(handle_precision(output), Some(ProviderPrecision::F32));
     assert_eq!(
         output.physical().storage(),
         GpuTensorStorage::ComplexInterleaved
     );
     assert_eq!(output.shape(), &[1, 1]);
-    let result = futures::executor::block_on(provider.download_numeric(&output)).unwrap();
+    let result = futures::executor::block_on(provider.download_numeric(output)).unwrap();
     assert!(matches!(result.data, HostNumericDataOwned::F32(values) if values == [0.,1.]));
     assert!(!output.shares_allocation_with(&left));
     assert!(!output.shares_allocation_with(&right));

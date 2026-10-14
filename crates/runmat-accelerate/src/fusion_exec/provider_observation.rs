@@ -3,12 +3,14 @@ use super::*;
 use runmat_accelerate_api::observation::{
     ProviderObservationSupport, ProviderOperationReceipt, ProviderOperationRecorder,
 };
+use runmat_execution::profiling::CommandProviderContribution;
 use runmat_runtime::context::VmFusionCompletionRight;
 
 pub(super) struct FusionPlacementSelection {
     pub(super) observer: FusionPlacementObserver,
     feedback: Option<LocalPlacementFeedback>,
     receipt: Option<ProviderOperationReceipt>,
+    command_contribution: Option<CommandProviderContribution>,
     started: Instant,
     drop_reports_failure: bool,
 }
@@ -30,10 +32,18 @@ impl FusionPlacementSelection {
                 ProviderObservationSupport::Observed(receipt) => Some(receipt),
                 ProviderObservationSupport::Unsupported => None,
             });
+        let command_contribution = receipt.as_ref().and_then(|_| {
+            feedback
+                .as_ref()?
+                .runtime
+                .command_profiling()?
+                .begin_provider_operation()
+        });
         Self {
             observer,
             feedback,
             receipt,
+            command_contribution,
             started,
             drop_reports_failure: true,
         }
@@ -72,7 +82,7 @@ impl FusionPlacementSelection {
     ) -> Option<FusionProviderCompletion> {
         let receipt = self.receipt.take();
         let feedback = self.feedback.take();
-        FusionProviderCompletion::new(receipt?, feedback?, right)
+        FusionProviderCompletion::new(receipt?, feedback?, right, self.command_contribution.take())
     }
 
     pub(super) fn submitted(mut self) {
@@ -83,7 +93,11 @@ impl FusionPlacementSelection {
         let Some(feedback) = self.feedback.take() else {
             return;
         };
-        crate::placement::publish_provider_feedback(receipt, feedback);
+        crate::placement::publish_provider_feedback(
+            receipt,
+            feedback,
+            self.command_contribution.take(),
+        );
     }
 }
 

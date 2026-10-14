@@ -6,14 +6,14 @@ fn arrayfun_basic_sin() {
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
     let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
     let result = call(
-        Value::FunctionHandle("sin".to_string()),
+        Value::FunctionHandle("sin".into()),
         vec![Value::Tensor(tensor.clone())],
     )
     .expect("arrayfun");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), &[2, 3]);
-            assert_eq!(values(&out), expected);
+            assert_eq!(values(out), expected);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -33,19 +33,17 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(
-                async move { crate::sequence::single_value_sequence(Value::Num(value + 10.0)) },
-            )
+            Box::pin(async move { rooted_single(Value::Num(value + 10.0)) })
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
     let handle = crate::user_functions::test_support::exact_local_value("arrayfun_target", binding);
 
     let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), &[1, 2]);
-            assert_eq!(values(&out), vec![11.0, 12.0]);
+            assert_eq!(values(out), vec![11.0, 12.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -69,9 +67,7 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(
-                async move { crate::sequence::single_value_sequence(Value::Num(value + 20.0)) },
-            )
+            Box::pin(async move { rooted_single(Value::Num(value + 20.0)) })
         },
     )));
     drop(entry);
@@ -83,10 +79,10 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
         vec![Value::Tensor(tensor)],
     )))
     .expect("resolved name-only arrayfun");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), &[1, 2]);
-            assert_eq!(values(&out), vec![21.0, 22.0]);
+            assert_eq!(values(out), vec![21.0, 22.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -116,9 +112,7 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(
-                async move { crate::sequence::single_value_sequence(Value::Num(value + 30.0)) },
-            )
+            Box::pin(async move { rooted_single(Value::Num(value + 30.0)) })
         },
     )));
     drop(entry);
@@ -126,14 +120,14 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
 
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
-        Value::ExternalFunctionHandle("pkg.callback".to_string()),
+        Value::ExternalFunctionHandle("pkg.callback".into()),
         vec![Value::Tensor(tensor)],
     )))
     .expect("resolved external-handle arrayfun");
-    match result {
+    match result.value() {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), &[1, 2]);
-            assert_eq!(values(&out), vec![31.0, 32.0]);
+            assert_eq!(values(out), vec![31.0, 32.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }

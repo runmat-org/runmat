@@ -10,11 +10,12 @@ pub(crate) fn run(
     groups_x: u32,
     groups_y: u32,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-syrk-encoder"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-syrk-pass"),

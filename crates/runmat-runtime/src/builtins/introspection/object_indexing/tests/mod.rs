@@ -16,7 +16,11 @@ pub(super) fn cell(values: Vec<Value>) -> Value {
     Value::Cell(CellArray::new(values, 1, cols).expect("cell"))
 }
 
-pub(super) fn call(target: Value, subscript: Value, context: Value) -> Value {
+pub(super) fn call(
+    target: Value,
+    subscript: Value,
+    context: Value,
+) -> crate::execution::RootedValue {
     block_on(num_arguments_from_subscript_builtin(
         target, subscript, context,
     ))

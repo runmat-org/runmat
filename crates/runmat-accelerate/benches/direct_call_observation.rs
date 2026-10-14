@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use runmat_accelerate::placement::PlacementSession;
 use runmat_runtime::call_builtin_sequence_async_with_outputs_in_context;
 use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
-use runmat_runtime::execution::RuntimeExecutionService;
+use runmat_runtime::execution::{RootedValueSequence, RuntimeExecutionService};
 use runmat_value::{Tensor, Value, ValueSequence};
 use std::hint::black_box;
 use std::rc::Rc;
@@ -106,7 +106,7 @@ struct Case {
     phase: Phase,
 }
 
-fn invoke(case: Case, context: &RuntimeContext, args: &[Value]) -> ValueSequence {
+fn invoke(case: Case, context: &RuntimeContext, args: &[Value]) -> RootedValueSequence {
     block_on(call_builtin_sequence_async_with_outputs_in_context(
         context,
         case.workload.builtin(),
@@ -123,7 +123,7 @@ fn measure(case: Case, warm_iterations: u64) -> (u64, f64) {
     let args = case.workload.arguments();
     if matches!(case.phase, Phase::Warm) {
         for _ in 0..3 {
-            case.workload.check(&invoke(case, &context, &args));
+            case.workload.check(invoke(case, &context, &args).value());
         }
     }
     let iterations = if matches!(case.phase, Phase::ColdFirst) {
@@ -142,7 +142,7 @@ fn measure(case: Case, warm_iterations: u64) -> (u64, f64) {
     let elapsed = started.elapsed();
     // A second, untimed call validates the deterministic route. The cold row
     // still measured exactly the first call of this fresh session.
-    case.workload.check(&invoke(case, &context, &args));
+    case.workload.check(invoke(case, &context, &args).value());
     (iterations, elapsed.as_secs_f64() * 1e9 / iterations as f64)
 }
 
@@ -183,7 +183,7 @@ fn main() {
         let context = case.placement.context();
         let args = workload.arguments();
         for _ in 0..10 {
-            workload.check(&invoke(case, &context, &args));
+            workload.check(invoke(case, &context, &args).value());
         }
     }
     let mut cases = Vec::new();

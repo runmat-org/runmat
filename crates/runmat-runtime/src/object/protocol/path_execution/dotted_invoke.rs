@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use runmat_value::Value;
 
 use super::{resolve_single, SubscriptReadRequest};
+use crate::execution::RootedValueSequence;
 use crate::object::indexing::{
     ObjectIndexComponent, ObjectIndexKind, ObjectIndexSelector, ObjectSubscript,
     ObjectSubscriptOrigin,
@@ -17,7 +18,7 @@ pub(super) async fn try_execute(
     steps: &mut VecDeque<ObjectSubscript>,
     request: &SubscriptReadRequest,
     caller_function_name: Option<&str>,
-) -> Result<Option<ValueSequence>, RuntimeError> {
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     let Some((member, components, semantic_fallback)) = prefix(steps) else {
         return Ok(None);
     };
@@ -68,6 +69,12 @@ pub(super) async fn try_execute(
             Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) | Value::ClassRef(_)
         ) || semantic_fallback.is_some())
     {
+        if crate::object::protocol::selected_receiver_has_authority(&base)? {
+            return Err(semantic_error(
+                "UndefinedFunction",
+                "selected class has no admitted method for this member",
+            ));
+        }
         // This is a structural decision, not an exception-driven retry: a
         // missing member may use the established method-style callable route.
         let arguments = call_arguments(components)?;
@@ -110,7 +117,7 @@ pub(super) async fn try_execute(
             let arguments = call_arguments(components)?;
             let resolver = RuntimeFunctionResolver;
             let descriptor = crate::call::descriptor::CallableDescriptor::from_feval_value(
-                member_value,
+                member_value.value().clone(),
                 arguments,
                 requested_outputs,
                 &resolver,
@@ -127,11 +134,19 @@ pub(super) async fn try_execute(
         } else {
             let step =
                 ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components });
-            ValueSequence::single(
-                super::read_default_step(runtime, member_value, &step, caller_function_name)
-                    .await?,
+            super::read_default_step(
+                runtime,
+                member_value.value().clone(),
+                &step,
+                caller_function_name,
             )
-            .map_err(crate::sequence::sequence_error_to_runtime)?
+            .await?
+            .try_map_owned(
+                |value| {
+                    ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
+                },
+                |error| error.into_runtime_error(),
+            )?
         }
     };
     Ok(Some(result))
@@ -195,7 +210,7 @@ fn is_callable_value(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }

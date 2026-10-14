@@ -30,10 +30,18 @@ pub(in crate::execution::value_codec::decode::machine) struct ExceptionTask<'a> 
     call_stack: Vec<String>,
     phase: Option<String>,
     path: String,
+    frame_sources:
+        Option<&'a dyn crate::execution::value_codec::decode::InlineFrameSourceAuthority>,
 }
 
 impl<'a> ExceptionTask<'a> {
-    pub(super) fn new(source: &'a ExceptionValue, path: String) -> Self {
+    pub(super) fn new(
+        source: &'a ExceptionValue,
+        path: String,
+        frame_sources: Option<
+            &'a dyn crate::execution::value_codec::decode::InlineFrameSourceAuthority,
+        >,
+    ) -> Self {
         Self {
             source,
             stage: Stage::Identifier,
@@ -49,6 +57,7 @@ impl<'a> ExceptionTask<'a> {
             ),
             phase: None,
             path,
+            frame_sources,
         }
     }
 
@@ -142,10 +151,51 @@ impl<'a> ExceptionTask<'a> {
             Stage::Frame(index) => {
                 let metadata = self.metadata().expect("frame metadata");
                 let frame = &metadata.call_frames[index];
+                let (source_id, source_owner) =
+                    match (frame.program_source_id(), self.frame_sources) {
+                        (Some(ordinal), Some(sources)) => {
+                            let (source, owner) =
+                                sources.frame_source(ordinal).ok_or_else(|| {
+                                    ValueCodecError::invalid(
+                                &self.path,
+                                "exception frame source is absent from selected graph units",
+                            )
+                                })?;
+                            (Some(source.0), Some(owner))
+                        }
+                        _ => (None, None),
+                    };
                 self.frames.push(crate::CallFrame {
                     function: text,
-                    source_id: None,
+                    source_id,
                     span: local_span(frame.span, &self.path)?,
+                    source_owner,
+                    diagnostic_source: match &frame.source {
+                        runmat_execution::value::ExceptionFrameSource::Detached(presentation) => {
+                            match (presentation.line, presentation.column) {
+                                (Some(line), Some(column)) => {
+                                    Some(crate::CallFrameDiagnosticSource::detached(
+                                        std::sync::Arc::from(presentation.display_name.as_str()),
+                                        line,
+                                        column,
+                                    ))
+                                }
+                                (None, None) => {
+                                    Some(crate::CallFrameDiagnosticSource::detached_unknown(
+                                        std::sync::Arc::from(presentation.display_name.as_str()),
+                                    ))
+                                }
+                                _ => {
+                                    return Err(ValueCodecError::invalid(
+                                        &self.path,
+                                        "detached diagnostic coordinates must be present together",
+                                    ))
+                                }
+                            }
+                        }
+                        runmat_execution::value::ExceptionFrameSource::Admitted(_)
+                        | runmat_execution::value::ExceptionFrameSource::Unknown => None,
+                    },
                 });
                 Stage::Frame(index + 1)
             }

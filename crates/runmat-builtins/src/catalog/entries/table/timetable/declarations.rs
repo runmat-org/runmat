@@ -35,6 +35,7 @@ pub(super) const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
         filesystem_read,
     } = definition;
     BuiltinCatalogEntry {
+        audience: crate::BuiltinCatalogAudience::Public,
         provenance,
         identity: BuiltinCatalogIdentity { name },
         category,

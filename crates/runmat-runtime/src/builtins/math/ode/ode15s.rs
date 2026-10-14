@@ -168,9 +168,11 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(-15.0 * y)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -15.0 * y,
+                    ))
+                })
             },
         )));
         drop(entry);
@@ -211,9 +213,11 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(-1000.0 * y)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -1000.0 * y,
+                    ))
+                })
             },
         )));
         drop(entry);
@@ -257,9 +261,11 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(
-                    async move { crate::sequence::single_value_sequence(Value::Num(-15.0 * y)) },
-                )
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -15.0 * y,
+                    ))
+                })
             },
         )));
 

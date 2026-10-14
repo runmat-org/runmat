@@ -9,9 +9,14 @@ mod cleanup_lifecycle;
 mod callable_artifacts;
 mod graphics_presentation;
 mod graphics_callbacks;
+#[cfg(not(target_arch = "wasm32"))]
+mod foreign_callback_lineage;
 mod arity;
 mod catch;
+pub(crate) mod call_projection;
 mod local_tasks;
+mod local_task_admission;
+mod native_continuation;
 mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;
@@ -28,6 +33,7 @@ pub(crate) mod document_test_support;
 #[cfg(test)]
 pub(crate) mod physical_test_support;
 mod runtime;
+mod super_constructor;
 mod scope;
 mod source_evaluation;
 mod services;
@@ -69,15 +75,20 @@ pub use graphics_presentation::{
 pub(crate) use host_dialog::{select_directory, select_file_open, select_file_save};
 pub(crate) use host_document::request as request_document;
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
+pub(crate) use local_task_admission::LocalTaskCommandOrigin;
 #[cfg(target_arch = "wasm32")]
 pub use local_tasks::BrowserLocalTaskSupervisor;
-#[cfg(not(target_arch = "wasm32"))]
-pub use local_tasks::RuntimeLocalTaskSupervisor;
 pub use local_tasks::{
-    LocalTaskOwnerToken, RuntimeLocalTaskFuture, RuntimeLocalTaskLease, RuntimeLocalTaskOutcome,
-    RuntimeLocalTaskService,
+    CanonicalLocalTaskAdmission, LocalTaskOwnerToken, RuntimeLocalTaskFuture,
+    RuntimeLocalTaskLease, RuntimeLocalTaskOutcome, RuntimeLocalTaskService,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use local_tasks::{RuntimeLocalTaskChildFactory, RuntimeLocalTaskSupervisor};
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
+pub use native_continuation::{
+    run_native_continuation, run_owned_request_continuation, run_selected_callback_continuation,
+    NativeContinuationPlacement,
+};
 #[cfg(target_arch = "wasm32")]
 pub use preferences::BrowserPreferenceService;
 #[cfg(not(target_arch = "wasm32"))]
@@ -117,10 +128,15 @@ pub use source_evaluation::{
     SourceEvaluationPolicy, SourceEvaluationProvenance,
 };
 pub(crate) use state::{RuntimeContextState, SourceState};
+pub(crate) use super_constructor::RetainedSuperConstructorTarget;
+pub use super_constructor::{
+    RetainedClassDeclaration, RetainedConstructorDeclaration, RetainedSuperConstructorBinding,
+};
 pub use tcp::{
     RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpClient, RuntimeTcpClientStatus,
-    RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,
-    RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
+    RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpInvocation, RuntimeTcpIssuer,
+    RuntimeTcpReadMode, RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer,
+    RuntimeTcpService,
 };
 pub(crate) use timer::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
 pub use timing::RuntimeTimingService;
@@ -135,3 +151,6 @@ pub use vm_fusion_completion::{
     VmFusionSessionRegistration,
 };
 pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostRoute};
+
+#[cfg(test)]
+mod display_tests;

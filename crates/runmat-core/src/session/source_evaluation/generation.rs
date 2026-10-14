@@ -6,6 +6,131 @@ use std::sync::Arc;
 use runmat_execution::{Digest, FunctionBindingOrigin};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 
+use super::SelectedStaticTarget;
+
+/// A class-only product and the exact imported code leases selected with its
+/// sealed declaration sites. This lives in the existing generation, not in a
+/// name-keyed class registry; neither the product nor targets own runtime ports.
+#[derive(Debug)]
+pub(in crate::session) struct SelectedDeclarationAdmission {
+    product: Rc<runmat_vm::SelectedDeclarationProduct>,
+    // Retains the exact issuing definition leases through this generation;
+    // the VM product separately owns their port-free transitive code closure.
+    _static_targets: Vec<SelectedStaticTarget>,
+}
+
+impl SelectedDeclarationAdmission {
+    pub(in crate::session) fn new(
+        product: Rc<runmat_vm::SelectedDeclarationProduct>,
+        static_targets: Vec<SelectedStaticTarget>,
+    ) -> Result<Rc<Self>, RuntimeError> {
+        let admitted = runmat_vm::admit_executable_unit(product.canonical_bytes())
+            .map_err(|error| build_runtime_error(error.to_string()).build())?;
+        let imports = admitted.static_imports();
+        if imports.len() != static_targets.len()
+            || imports
+                .iter()
+                .zip(&static_targets)
+                .any(|(import, selected)| *import != selected.import)
+        {
+            return Err(build_runtime_error(
+                "selected declaration imports differ from exact target leases",
+            )
+            .with_identifier("RunMat:ClassProduct:StaticImportMismatch")
+            .build());
+        }
+        let portable_targets = static_targets
+            .iter()
+            .map(|selected| {
+                if !selected
+                    .product
+                    .source_owner()
+                    .same_issuance(&selected.source_owner)
+                {
+                    return Err(build_runtime_error(
+                        "selected declaration target changed its source issuance",
+                    )
+                    .with_identifier("RunMat:ClassProduct:StaticImportMismatch")
+                    .build());
+                }
+                let target = runmat_vm::SelectedStaticProductTarget::new(
+                    selected.import,
+                    Rc::clone(&selected.product),
+                )
+                .map_err(|error| {
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ClassProduct:StaticImportMismatch")
+                        .build()
+                })?;
+                let dependencies = capture_static_product_dependencies(selected)?;
+                target.with_dependencies(dependencies).map_err(|error| {
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ClassProduct:StaticImportMismatch")
+                        .build()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let product = product.with_static_targets(portable_targets)?;
+        Ok(Rc::new(Self {
+            product,
+            _static_targets: static_targets,
+        }))
+    }
+
+    pub(in crate::session) fn product(&self) -> &Rc<runmat_vm::SelectedDeclarationProduct> {
+        &self.product
+    }
+}
+
+pub(in crate::session) fn capture_static_product_dependencies(
+    selected: &SelectedStaticTarget,
+) -> Result<Vec<runmat_vm::SelectedStaticProductDependency>, RuntimeError> {
+    let mismatch = |message| {
+        build_runtime_error(message)
+            .with_identifier("RunMat:ClassProduct:StaticImportMismatch")
+            .build()
+    };
+    let body = selected
+        .view
+        .get_owned(selected.function, &selected.definition)
+        .ok_or_else(|| mismatch("selected static target lost its exact definition lease"))?;
+    if body.binding_origin != Some(selected.import.target)
+        || body
+            .selected_executable_product
+            .as_ref()
+            .is_none_or(|product| !Rc::ptr_eq(product, &selected.product))
+        || body
+            .selected_source_owner
+            .as_ref()
+            .is_none_or(|owner| !owner.same_issuance(&selected.source_owner))
+        || !selected
+            .product
+            .source_owner()
+            .same_issuance(&selected.source_owner)
+    {
+        return Err(mismatch(
+            "selected static target changed its exact body or source",
+        ));
+    }
+    match body.selected_static_capture.as_ref() {
+        Some(capture) if Rc::ptr_eq(capture.product(), &selected.product) => {
+            Ok(capture.dependencies().to_vec())
+        }
+        None if selected.product.static_imports().is_empty() => Ok(Vec::new()),
+        _ => Err(mismatch(
+            "selected static target lacks its exact captured imports",
+        )),
+    }
+}
+
+fn retain_latest_declaration(
+    declarations: &mut Vec<Rc<SelectedDeclarationAdmission>>,
+    incoming: Rc<SelectedDeclarationAdmission>,
+) {
+    declarations.retain(|prior| prior.product.class() != incoming.product.class());
+    declarations.push(incoming);
+}
+
 #[path = "generation/index_error.rs"]
 mod index_error;
 pub(super) use index_error::CallableArtifactIndexError;
@@ -28,16 +153,31 @@ pub(super) enum CallableArtifactSelectionError {
 }
 
 impl CallableArtifactIndex {
+    pub(super) fn canonical_unit_for_origin(
+        &self,
+        origin: &FunctionBindingOrigin,
+    ) -> Option<Arc<[u8]>> {
+        self.units.get(origin).map(|unit| Arc::clone(&unit.bytes))
+    }
+
     pub(super) fn insert_canonical_unit(
         &mut self,
         bytes: Vec<u8>,
+    ) -> Result<(), CallableArtifactIndexError> {
+        self.insert_canonical_arc_unit(Arc::from(bytes))
+    }
+
+    /// Share an already admitted immutable product with its retained source
+    /// owner rather than copying the full V3 envelope during publication.
+    pub(super) fn insert_canonical_arc_unit(
+        &mut self,
+        bytes: Arc<[u8]>,
     ) -> Result<(), CallableArtifactIndexError> {
         let admitted = runmat_vm::admit_executable_unit(&bytes)
             .map_err(CallableArtifactIndexError::InvalidUnit)?;
         let fingerprints = admitted
             .retained_callable_origin_fingerprints()
             .map_err(CallableArtifactIndexError::InvalidDefinitions)?;
-        let bytes = Arc::<[u8]>::from(bytes);
         for (origin, fingerprint) in fingerprints {
             match self.units.get(&origin) {
                 Some(existing) if existing.fingerprint != fingerprint => {
@@ -127,7 +267,8 @@ enum FunctionRegistryGenerationState {
 pub(super) struct FunctionRegistryGeneration {
     registry: RefCell<Rc<runmat_vm::FunctionRegistry>>,
     artifacts: RefCell<Rc<CallableArtifactIndex>>,
-    source_owners: RefCell<Rc<Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>>>,
+    source_owners: RefCell<Rc<Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>>>,
+    selected_declarations: RefCell<Rc<Vec<Rc<SelectedDeclarationAdmission>>>>,
     state: Cell<FunctionRegistryGenerationState>,
     epoch: RefCell<Rc<()>>,
 }
@@ -135,25 +276,28 @@ pub(super) struct FunctionRegistryGeneration {
 pub(super) struct PreparedGenerationImport {
     registry: Rc<runmat_vm::FunctionRegistry>,
     artifacts: Rc<CallableArtifactIndex>,
-    source_owners: Rc<Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>>,
+    source_owners: Rc<Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>>,
+    selected_declarations: Rc<Vec<Rc<SelectedDeclarationAdmission>>>,
 }
 
 pub(super) struct GenerationRetirement {
     _registry: Rc<runmat_vm::FunctionRegistry>,
     _artifacts: Rc<CallableArtifactIndex>,
-    _source_owners: Rc<Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>>,
+    _source_owners: Rc<Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>>,
+    _selected_declarations: Rc<Vec<Rc<SelectedDeclarationAdmission>>>,
 }
 
 impl PreparedGenerationImport {
     pub(super) fn new(
         registry: runmat_vm::FunctionRegistry,
         artifacts: CallableArtifactIndex,
-        source_owners: Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>,
+        source_owners: Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>,
     ) -> Self {
         Self {
             registry: Rc::new(registry),
             artifacts: Rc::new(artifacts),
             source_owners: Rc::new(source_owners),
+            selected_declarations: Rc::new(Vec::new()),
         }
     }
 }
@@ -164,6 +308,7 @@ impl FunctionRegistryGeneration {
             registry: RefCell::new(Rc::new(registry)),
             artifacts: RefCell::new(Rc::new(CallableArtifactIndex::default())),
             source_owners: RefCell::new(Rc::new(Vec::new())),
+            selected_declarations: RefCell::new(Rc::new(Vec::new())),
             state: Cell::new(FunctionRegistryGenerationState::Committed),
             epoch: RefCell::new(Rc::new(())),
         }
@@ -172,7 +317,8 @@ impl FunctionRegistryGeneration {
     pub(super) fn active(
         mut registry: runmat_vm::FunctionRegistry,
         artifacts: CallableArtifactIndex,
-        source_owners: Rc<Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>>,
+        source_owners: Rc<Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>>,
+        selected_declarations: Rc<Vec<Rc<SelectedDeclarationAdmission>>>,
         inherited: &runmat_vm::FunctionRegistry,
     ) -> Self {
         registry.retain_live_owned_definitions_from(inherited);
@@ -180,6 +326,7 @@ impl FunctionRegistryGeneration {
             registry: RefCell::new(Rc::new(registry)),
             artifacts: RefCell::new(Rc::new(artifacts)),
             source_owners: RefCell::new(source_owners),
+            selected_declarations: RefCell::new(selected_declarations),
             state: Cell::new(FunctionRegistryGenerationState::Active),
             epoch: RefCell::new(Rc::new(())),
         }
@@ -190,8 +337,48 @@ impl FunctionRegistryGeneration {
         Ok(self.registry.borrow().clone())
     }
 
+    /// Retain an already-admitted class-only product in the active generation.
+    /// No callable definition lease, name lookup, or second source issuance is
+    /// created. The active publication guard owns rollback if commit fails.
+    pub(super) fn attach_selected_declaration(
+        &self,
+        product: Rc<SelectedDeclarationAdmission>,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_available()?;
+        if self.state.get() != FunctionRegistryGenerationState::Active {
+            return Err(
+                build_runtime_error("selected declaration requires an active generation")
+                    .with_identifier("RunMat:ClassProduct:InactiveGeneration")
+                    .build(),
+            );
+        }
+        let current = self.selected_declarations.borrow().clone();
+        if current.iter().any(|prior| Rc::ptr_eq(prior, &product)) {
+            return Ok(());
+        }
+        let mut next = current.as_ref().clone();
+        retain_latest_declaration(&mut next, product);
+        let retired = self.selected_declarations.replace(Rc::new(next));
+        self.rotate_epoch();
+        drop(retired);
+        Ok(())
+    }
+
+    pub(super) fn selected_declarations(
+        &self,
+    ) -> Result<Rc<Vec<Rc<SelectedDeclarationAdmission>>>, RuntimeError> {
+        self.ensure_available()?;
+        Ok(self.selected_declarations.borrow().clone())
+    }
+
     pub(super) fn artifacts(&self) -> Result<Rc<CallableArtifactIndex>, RuntimeError> {
         self.ensure_available()?;
+        // A provisional eval can create its first escaping handle after an
+        // earlier artifact lookup. Prune only after publication settles; Drop
+        // copies precisely the origins whose definition leases escaped.
+        if self.state.get() == FunctionRegistryGenerationState::Active {
+            return Ok(self.artifacts.borrow().clone());
+        }
         let origins = self.registry.borrow().retained_callable_origins();
         let current = self.artifacts.borrow().clone();
         if current.units.keys().all(|origin| origins.contains(origin)) {
@@ -208,9 +395,12 @@ impl FunctionRegistryGeneration {
 
     pub(super) fn source_owners(
         &self,
-    ) -> Result<Rc<Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>>, RuntimeError> {
+    ) -> Result<Rc<Vec<Rc<runmat_vm::RetainedExecutableSourceOwner>>>, RuntimeError> {
         self.ensure_available()?;
         let current = self.source_owners.borrow().clone();
+        if self.state.get() == FunctionRegistryGenerationState::Active {
+            return Ok(current);
+        }
         if current
             .iter()
             .all(|owner| owner.has_live_definition_owners())
@@ -260,11 +450,19 @@ impl FunctionRegistryGeneration {
             registry,
             artifacts,
             source_owners,
+            selected_declarations: imported_declarations,
         } = prepared;
+        let mut selected_declarations = self.selected_declarations.borrow().as_ref().clone();
+        for product in imported_declarations.iter() {
+            retain_latest_declaration(&mut selected_declarations, Rc::clone(product));
+        }
         let retired = GenerationRetirement {
             _registry: self.registry.replace(registry),
             _artifacts: self.artifacts.replace(artifacts),
             _source_owners: self.source_owners.replace(source_owners),
+            _selected_declarations: self
+                .selected_declarations
+                .replace(Rc::new(selected_declarations)),
         };
         self.rotate_epoch();
         Ok(retired)
@@ -346,9 +544,11 @@ impl FunctionRegistryGeneration {
                 .artifacts
                 .replace(Rc::new(CallableArtifactIndex::default()));
             let retired_source_owners = self.source_owners.replace(Rc::new(Vec::new()));
+            let retired_declarations = self.selected_declarations.replace(Rc::new(Vec::new()));
             drop(retired_registry);
             drop(retired_artifacts);
             drop(retired_source_owners);
+            drop(retired_declarations);
         }
     }
 }
@@ -406,5 +606,30 @@ mod tests {
         assert_eq!(selected.len(), 2);
         assert!(selected.contains(&vec![1, 2, 3]));
         assert!(selected.contains(&vec![4, 5, 6]));
+    }
+
+    #[test]
+    fn active_generation_keeps_unescaped_artifact_until_rollback_decides_retention() {
+        let current = origin("dynamic", 0);
+        let mut artifacts = CallableArtifactIndex::default();
+        artifacts.units.insert(
+            current,
+            IndexedCallableUnit {
+                fingerprint: "selected".into(),
+                bytes: Arc::from([7_u8]),
+            },
+        );
+        let empty = runmat_vm::FunctionRegistry::default();
+        let active = FunctionRegistryGeneration::active(
+            empty.clone(),
+            artifacts,
+            Rc::new(Vec::new()),
+            Rc::new(Vec::new()),
+            &empty,
+        );
+        assert!(active.artifacts().unwrap().units.contains_key(&current));
+        let restore = FunctionRegistryGeneration::committed(empty);
+        active.retain_escaped_into(&restore);
+        assert!(!restore.artifacts().unwrap().units.contains_key(&current));
     }
 }

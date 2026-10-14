@@ -1,6 +1,6 @@
 use super::super::*;
 #[test]
-fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
+fn ldivide_uncertified_integer_scalar_refuses_before_upload() {
     test_support::with_test_provider(|provider| {
         let divisor =
             Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).expect("divisor");
@@ -8,17 +8,23 @@ fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
         let source = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("explicit view");
-        let result = ldivide_builtin(
+        provider.reset_telemetry();
+        let error = ldivide_builtin(
             Value::GpuTensor(source.clone()),
             Value::Num(10.0),
             Vec::new(),
         )
-        .expect("resident ldivide");
-        let Value::GpuTensor(output) = result else {
-            panic!("explicit gpuArray result must remain resident");
-        };
-        assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        assert!(!source.shares_allocation_with(&output));
+        .expect_err("uncertified integer scalar route must refuse before effects");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ExplicitProviderRequired")
+        );
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        source
+            .allocation_lease()
+            .validate_live()
+            .expect("source live");
         let original = test_support::gather(Value::GpuTensor(source)).expect("source survives");
         assert_eq!(
             original.integer_storage(),
@@ -28,7 +34,7 @@ fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
 }
 
 #[test]
-fn ldivide_fallback_prefers_explicit_second_resident_operand() {
+fn ldivide_uncertified_mixed_integer_fallback_refuses_before_download() {
     test_support::with_test_provider(|provider| {
         let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
         let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
@@ -42,25 +48,23 @@ fn ldivide_fallback_prefers_explicit_second_resident_operand() {
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("explicit view");
 
-        let result = ldivide_builtin(
+        provider.reset_telemetry();
+        let error = ldivide_builtin(
             Value::GpuTensor(automatic),
             Value::GpuTensor(explicit.clone()),
             Vec::new(),
         )
-        .expect("fallback ldivide");
-        let Value::GpuTensor(output) = result else {
-            panic!("explicit second operand must preserve resident output");
-        };
-        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        .expect_err("uncertified explicit integer fallback must refuse");
         assert_eq!(
-            runmat_accelerate_api::handle_integer_type(&output),
-            Some(runmat_accelerate_api::IntegerElementType::I32)
+            error.identifier(),
+            Some("RunMat:gpu:ExplicitProviderRequired")
         );
-        let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
-        assert_eq!(
-            gathered.integer_storage(),
-            Some(&IntegerStorage::I32(vec![3, 5]))
-        );
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        explicit
+            .allocation_lease()
+            .validate_live()
+            .expect("source live");
         let original = test_support::gather(Value::GpuTensor(explicit)).expect("source");
         assert_eq!(
             original.integer_storage(),

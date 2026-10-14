@@ -28,9 +28,9 @@ impl RuntimeAccelerationService for Recorder {
             request.operands().len()
         );
         Box::pin(async move {
-            Ok(PreparedBuiltinOperands::passthrough(
-                request.into_operands(),
-            ))
+            request
+                .into_operands()
+                .with_owned_values(PreparedBuiltinOperands::passthrough)
         })
     }
 }
@@ -75,13 +75,13 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
                     NumericDType::F64
                 };
                 if name == "complex" {
-                    let Value::ComplexTensor(value) = result else {
+                    let Value::ComplexTensor(value) = result.value() else {
                         panic!("complex tensor")
                     };
                     assert_eq!(value.shape(), &[1, 2]);
                     assert_eq!(value.numeric_dtype(), expected_class);
                 } else {
-                    let Value::Tensor(value) = result else {
+                    let Value::Tensor(value) = result.value() else {
                         panic!("real tensor")
                     };
                     assert_eq!(value.shape(), &[1, 2]);

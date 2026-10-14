@@ -147,11 +147,12 @@ impl WgpuProvider {
                 layout: &bgl,
                 entries: &bindings,
             });
-        let mut enc = emission
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("typed-reduction-encoder"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("typed-reduction-pass"),

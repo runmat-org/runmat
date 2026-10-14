@@ -1,5 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{execution::RootedValue, RuntimeError};
 use runmat_value::Value;
 
 pub(super) struct Executor<'a> {
@@ -133,7 +133,11 @@ impl<'a> Executor<'a> {
                         input,
                     )
                     .await?;
-                    create_worker_value(self.service, contract, input, None, context).await
+                    input
+                        .with_owned_async(|input| {
+                            create_worker_value(self.service, contract, input, None, context)
+                        })
+                        .await
                 }
             }
             crate::BytecodeCodistributedOverload::DesignatedWorkerWithCodistributor => {
@@ -157,7 +161,16 @@ impl<'a> Executor<'a> {
                 )
                 .await?;
                 ensure_same_context(&codistributor_context, &context)?;
-                create_worker_value(self.service, contract, input, Some(codistributor), context)
+                input
+                    .with_owned_async(|input| {
+                        create_worker_value(
+                            self.service,
+                            contract,
+                            input,
+                            Some(codistributor),
+                            context,
+                        )
+                    })
                     .await
             }
         }
@@ -284,7 +297,7 @@ async fn create_client_value(
     let input = if let Value::Distributed(handle) = input {
         service.materialize(*handle).await?
     } else {
-        input
+        RootedValue::new(input).map_err(|error| error.into_runtime_error())?
     };
     let shape = runmat_runtime::parallel::distribution::value_shape(&input).await?;
     let labs = runmat_types::LabCount(pool.workers);
@@ -294,7 +307,7 @@ async fn create_client_value(
         runmat_runtime::parallel::codistributor::default_scheme(&shape, labs)?
     };
     service
-        .create(contract, input, scheme, pool)
+        .create(contract, (*input).clone(), scheme, pool)
         .await
         .map(|handle| Value::Distributed(Box::new(handle)))
 }

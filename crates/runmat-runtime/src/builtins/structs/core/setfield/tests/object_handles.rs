@@ -48,8 +48,8 @@ fn setfield_updates_handle_target() {
     )
     .expect("setfield handle update");
 
-    match updated {
-        Value::HandleObject(h) => assert!(crate::is_handle_valid(&h)),
+    match updated.value() {
+        Value::HandleObject(h) => assert!(crate::is_handle_valid(h)),
         other => panic!("expected handle, got {other:?}"),
     }
 

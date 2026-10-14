@@ -159,10 +159,7 @@ pub(super) async fn write_data(
                 .await
                 .map_err(|source| {
                     write_error(
-                        FsMappedWriteFailure::indeterminate(
-                            end - committed,
-                            io::Error::other(source),
-                        ),
+                        FsMappedWriteFailure::indeterminate(end - committed, source),
                         committed,
                     )
                 })?
@@ -183,7 +180,7 @@ pub(super) async fn write_data(
                 .await
                 .map_err(|source| {
                     write_error(
-                        FsMappedWriteFailure::committed(committed, io::Error::other(source)),
+                        FsMappedWriteFailure::committed(committed, source),
                         committed,
                     )
                 })?;
@@ -195,7 +192,7 @@ pub(super) async fn write_data(
     if let Some(budget) = &mut budget {
         budget.checkpoint(0).await.map_err(|source| {
             write_error(
-                FsMappedWriteFailure::committed(committed, io::Error::other(source)),
+                FsMappedWriteFailure::committed(committed, source),
                 committed,
             )
         })?;

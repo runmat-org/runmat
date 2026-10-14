@@ -11,6 +11,8 @@ use runmat_value::Value;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+mod decoded;
+
 pub(super) struct CoreDistributedService {
     store: Rc<RefCell<DistributedStore>>,
     next_generation: Cell<u64>,
@@ -73,6 +75,10 @@ impl RuntimeDistributedService for CoreDistributedService {
             Ok(generation) => generation,
             Err(error) => return Box::pin(async move { Err(error) }),
         };
+        let input = match runmat_runtime::execution::RootedValue::new(input) {
+            Ok(input) => input,
+            Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+        };
         Box::pin(create_value(
             Rc::clone(&self.store),
             generation,
@@ -101,6 +107,10 @@ impl RuntimeDistributedService for CoreDistributedService {
                 ))
             });
         }
+        let input = match runmat_runtime::execution::RootedValue::new(input) {
+            Ok(input) => input,
+            Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+        };
         Box::pin(create_worker_value(
             Rc::clone(&self.store),
             contract,
@@ -129,6 +139,10 @@ impl RuntimeDistributedService for CoreDistributedService {
                 ))
             });
         }
+        let local_part = match runmat_runtime::execution::RootedValue::new(local_part) {
+            Ok(local_part) => local_part,
+            Err(error) => return Box::pin(async move { Err(error.into_runtime_error()) }),
+        };
         Box::pin(build_worker_value(
             Rc::clone(&self.store),
             contract,
@@ -171,14 +185,14 @@ impl RuntimeDistributedService for CoreDistributedService {
         &self,
         handle: DistributedValueHandle,
         rank: LabRank,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<runmat_runtime::execution::RootedValue, RuntimeError>> {
         let result = self
             .store
             .borrow()
             .local_part(&handle, rank)
             .map_err(error)
             .and_then(|part| {
-                runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                runmat_runtime::execution::value_codec::decode_inline_value_owned(&part.value)
                     .map_err(error)
             });
         Box::pin(async move { result })
@@ -187,7 +201,7 @@ impl RuntimeDistributedService for CoreDistributedService {
     fn materialize(
         &self,
         handle: DistributedValueHandle,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<runmat_runtime::execution::RootedValue, RuntimeError>> {
         let parts = self.store.borrow().cloned_parts(&handle).map_err(error);
         Box::pin(materialize(handle, parts))
     }
@@ -330,22 +344,27 @@ impl RuntimeDistributedService for CoreDistributedService {
                 .collect::<Vec<Vec<OwnedPartition>>>();
             for part in parts? {
                 let input =
-                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                    runmat_runtime::execution::value_codec::decode_inline_value_owned(&part.value)
                         .map_err(error)?;
                 let value = runmat_runtime::call_builtin_async_with_outputs(
                     &request.builtin.0,
-                    &[input],
+                    std::slice::from_ref(&*input),
                     request.requested_outputs,
                 )
                 .await?;
-                let values = split_partition_outputs(value, request.requested_outputs)?;
-                for (index, value) in values.into_iter().enumerate() {
-                    partition_outputs[index].push(OwnedPartition {
-                        layout: part.layout.clone(),
-                        value: runmat_runtime::execution::value_codec::encode_inline_value(&value)
+                value.with_owned(|value| {
+                    let values = split_partition_outputs(value, request.requested_outputs)?;
+                    for (index, value) in values.into_iter().enumerate() {
+                        partition_outputs[index].push(OwnedPartition {
+                            layout: part.layout.clone(),
+                            value: runmat_runtime::execution::value_codec::encode_inline_value(
+                                &value,
+                            )
                             .map_err(error)?,
-                    });
-                }
+                        });
+                    }
+                    Ok::<(), RuntimeError>(())
+                })?;
             }
             let layouts = layouts?;
             let mut values = Vec::with_capacity(request.requested_outputs);
@@ -398,7 +417,8 @@ impl RuntimeDistributedService for CoreDistributedService {
         &self,
         handle: runmat_execution::CompositeHandle,
         rank: LabRank,
-    ) -> RuntimeServiceFuture<Result<Option<Value>, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<Option<runmat_runtime::execution::RootedValue>, RuntimeError>>
+    {
         let result = self
             .store
             .borrow()
@@ -406,7 +426,7 @@ impl RuntimeDistributedService for CoreDistributedService {
             .map_err(error)
             .and_then(|entry| {
                 entry
-                    .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                    .map(runmat_runtime::execution::value_codec::decode_inline_value_owned)
                     .transpose()
                     .map_err(error)
             });
@@ -473,11 +493,11 @@ fn invoke_scalar_like_prototype(
                     .next()
                     .ok_or_else(|| error("distributed prototype has no partitions"))?;
                 let prototype =
-                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                    runmat_runtime::execution::value_codec::decode_inline_value_owned(&part.value)
                         .map_err(error)?;
                 runmat_runtime::call_builtin_async_with_outputs(
                     &request.builtin.0,
-                    &[keyword, prototype],
+                    &[keyword, (*prototype).clone()],
                     1,
                 )
                 .await?
@@ -497,11 +517,11 @@ fn invoke_scalar_like_prototype(
                     .cloned()
                     .map_err(error)?;
                 let prototype =
-                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                    runmat_runtime::execution::value_codec::decode_inline_value_owned(&part.value)
                         .map_err(error)?;
                 runmat_runtime::call_builtin_async_with_outputs(
                     &request.builtin.0,
-                    &[keyword, prototype],
+                    &[keyword, (*prototype).clone()],
                     1,
                 )
                 .await?
@@ -578,7 +598,7 @@ async fn create_value(
     store: Rc<RefCell<DistributedStore>>,
     generation: u64,
     contract: DistributedValueContract,
-    input: Value,
+    input: runmat_runtime::execution::RootedValue,
     scheme: DistributionScheme,
     pool: runmat_execution::PoolHandle,
     workers: u32,
@@ -625,7 +645,7 @@ async fn create_value(
 async fn create_worker_value(
     store: Rc<RefCell<DistributedStore>>,
     contract: DistributedValueContract,
-    input: Value,
+    input: runmat_runtime::execution::RootedValue,
     scheme: DistributionScheme,
     context: runmat_execution::SpmdTaskContext,
 ) -> Result<DistributedValueHandle, RuntimeError> {
@@ -676,7 +696,7 @@ async fn create_worker_value(
 async fn build_worker_value(
     store: Rc<RefCell<DistributedStore>>,
     contract: DistributedValueContract,
-    local_part: Value,
+    local_part: runmat_runtime::execution::RootedValue,
     global_shape: Vec<u64>,
     scheme: DistributionScheme,
     layouts: Vec<runmat_execution::DistributedPartitionLayout>,
@@ -744,7 +764,7 @@ async fn build_worker_value(
 async fn materialize(
     handle: DistributedValueHandle,
     parts: Result<Vec<OwnedPartition>, RuntimeError>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
     if !handle.materializable {
         return Err(error(
             "this distributed value contract forbids driver materialization",
@@ -757,8 +777,18 @@ async fn materialize(
             usize::try_from(*dimension).map_err(|_| error("distributed shape exceeds this host"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let parts = decode_parts(parts?)?;
-    runmat_runtime::parallel::distribution::materialize_partitions(&shape, &handle.scheme, &parts)
+    let parts = decoded::decode_parts(parts?)?;
+    parts
+        .with_owned_async(async |parts| {
+            let value = runmat_runtime::parallel::distribution::materialize_partitions(
+                &shape,
+                &handle.scheme,
+                &parts.0,
+            )
+            .await?;
+            runmat_runtime::execution::RootedValue::new(value)
+                .map_err(|error| error.into_runtime_error())
+        })
         .await
 }
 
@@ -778,21 +808,6 @@ fn split_partition_outputs(
             values.len()
         )))
     }
-}
-
-fn decode_parts(
-    parts: Vec<OwnedPartition>,
-) -> Result<Vec<DistributedPartitionValue>, RuntimeError> {
-    parts
-        .into_iter()
-        .map(|part| {
-            Ok(DistributedPartitionValue {
-                layout: part.layout,
-                value: runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
-                    .map_err(error)?,
-            })
-        })
-        .collect()
 }
 
 fn encode_parts(

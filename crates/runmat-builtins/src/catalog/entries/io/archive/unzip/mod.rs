@@ -19,6 +19,7 @@ pub const UNZIP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAud
 };
 
 pub const UNZIP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "unzip" },
     category: "io/archive",

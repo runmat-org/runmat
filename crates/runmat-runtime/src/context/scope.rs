@@ -14,36 +14,119 @@ pub(super) fn active_runtime_context() -> Option<RuntimeContext> {
 }
 
 pub(super) fn execution_provider_authorization(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
+    admission: runmat_accelerate_api::ExecutionProviderAdmission<'_>,
 ) -> runmat_accelerate_api::ExecutionProviderAuthorization {
-    let Some(context) = active_runtime_context() else {
-        return runmat_accelerate_api::ExecutionProviderAuthorization::Unrestricted;
-    };
-    let Some(assignment) = context.execution_assignment() else {
-        return runmat_accelerate_api::ExecutionProviderAuthorization::Unrestricted;
-    };
-    if assignment
-        .resources
-        .accelerator_leases
-        .iter()
-        .any(|lease| runmat_accelerate_api::provider_matches_execution_lease(provider, lease))
-    {
-        runmat_accelerate_api::ExecutionProviderAuthorization::Allowed
-    } else {
-        runmat_accelerate_api::ExecutionProviderAuthorization::Denied
+    use runmat_accelerate_api::ExecutionProviderAuthorization as Authorization;
+    use runmat_accelerate_api::{ExecutionDeviceEffect, ExecutionProviderAdmission};
+
+    let selected = runmat_execution::profiling::current_command_profiling();
+    let context = active_runtime_context();
+    if let Some(selected) = &selected {
+        let matching = context
+            .as_ref()
+            .and_then(RuntimeContext::command_profiling)
+            .is_some_and(|owner| selected.same_command(owner));
+        if !matching {
+            selected.mark_unproven_device_route();
+        }
+    }
+    if let Some(context) = &context {
+        if let Some(context_owner) = context.command_profiling() {
+            if !selected
+                .as_ref()
+                .is_some_and(|owner| owner.same_command(context_owner))
+            {
+                context_owner.mark_unproven_device_route();
+            }
+        }
+    }
+
+    match admission {
+        ExecutionProviderAdmission::CanonicalWgpuSubmit(access) => {
+            let matching = context
+                .as_ref()
+                .and_then(RuntimeContext::command_device_access)
+                .is_some_and(|expected| expected.same_device(access) && !access.has_raw_export());
+            if !matching {
+                if let Some(owner) = selected.or_else(|| {
+                    context
+                        .as_ref()
+                        .and_then(RuntimeContext::command_profiling)
+                        .cloned()
+                }) {
+                    owner.mark_unproven_device_route();
+                }
+            }
+            Authorization::Unrestricted
+        }
+        ExecutionProviderAdmission::DeviceEffect(effect) => {
+            if let Some(owner) = selected
+                .or_else(|| context.and_then(|context| context.command_profiling().cloned()))
+            {
+                match effect {
+                    ExecutionDeviceEffect::ImplicitQueueTransfer => {
+                        owner.mark_unproven_device_time()
+                    }
+                    ExecutionDeviceEffect::RawWgpuExport
+                    | ExecutionDeviceEffect::RawNativeExport
+                    | ExecutionDeviceEffect::PlotDeviceEmission
+                    | ExecutionDeviceEffect::ForeignExecution => owner.mark_unproven_device_route(),
+                }
+            }
+            Authorization::Unrestricted
+        }
+        ExecutionProviderAdmission::Provider(provider) => {
+            let authorization = context
+                .as_ref()
+                .and_then(RuntimeContext::execution_assignment)
+                .map_or(Authorization::Unrestricted, |assignment| {
+                    if assignment.resources.accelerator_leases.iter().any(|lease| {
+                        runmat_accelerate_api::provider_matches_execution_lease(provider, lease)
+                    }) {
+                        Authorization::Allowed
+                    } else {
+                        Authorization::Denied
+                    }
+                });
+            if authorization != Authorization::Denied {
+                if let Some(owner) = selected {
+                    let canonical = context
+                        .as_ref()
+                        .and_then(RuntimeContext::command_device_provider)
+                        .is_some_and(|expected| {
+                            runmat_accelerate_api::same_provider_instance(provider, expected)
+                        });
+                    if !canonical {
+                        owner.mark_unproven_device_route();
+                    }
+                }
+            }
+            authorization
+        }
     }
 }
 
 #[must_use]
 pub struct RuntimeContextGuard {
     state_identity: *const super::RuntimeContextState,
+    _display_format: runmat_value::DisplayFormatSelectionGuard,
+    _command_profiling: runmat_execution::profiling::CommandProfilingSelectionGuard,
 }
 
 impl RuntimeContextGuard {
     pub(crate) fn enter(context: RuntimeContext) -> Self {
         let state_identity = context.state_identity();
+        let display_format =
+            runmat_value::select_display_format_owner(context.display_format_owner());
+        let command_profiling = runmat_execution::profiling::select_command_profiling(
+            context.command_profiling().cloned(),
+        );
         ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(context));
-        Self { state_identity }
+        Self {
+            state_identity,
+            _display_format: display_format,
+            _command_profiling: command_profiling,
+        }
     }
 }
 
@@ -69,13 +152,15 @@ pub struct ContextFuture<F> {
 }
 
 impl<F> ContextFuture<F> {
-    pub(super) fn new(context: RuntimeContext, future: F) -> Self {
+    pub(super) fn new(context: RuntimeContext, future: Pin<Box<F>>) -> Self {
         Self {
             context: context
                 .with_poll_source_catalog()
                 .with_poll_debug_frames()
+                .with_poll_call_projection()
+                .with_poll_console_capture_projection()
                 .with_poll_output_projection(),
-            future: Some(Box::pin(future)),
+            future: Some(future),
         }
     }
 }
@@ -123,6 +208,9 @@ mod tests {
     use super::*;
     use crate::context::RuntimeExecutionStack;
     use crate::execution::RuntimeExecutionService;
+    use runmat_execution::profiling::{
+        current_command_profiling, CommandProfilingRoot, ProviderObservationTerminal,
+    };
     use runmat_types::SourceId;
     use std::rc::Rc;
     use std::sync::Arc;
@@ -199,6 +287,45 @@ mod tests {
     }
 
     #[test]
+    fn nested_runtime_guards_restore_exact_command_profiling_owner() {
+        let first_receipt = CommandProfilingRoot::new();
+        let second_receipt = CommandProfilingRoot::new();
+        let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_command_profiling(first_receipt.receipt());
+        let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_command_profiling(second_receipt.receipt());
+        let _first = first.enter();
+        let second_guard = second.enter();
+        current_command_profiling()
+            .expect("second selected")
+            .begin_provider_operation()
+            .expect("second contribution")
+            .complete(ProviderObservationTerminal::Failed);
+        drop(second_guard);
+        current_command_profiling()
+            .expect("first restored")
+            .begin_provider_operation()
+            .expect("first contribution")
+            .complete(ProviderObservationTerminal::Missing);
+        assert_eq!(
+            first_receipt
+                .seal()
+                .observations
+                .expect("first valid")
+                .missing,
+            1
+        );
+        assert_eq!(
+            second_receipt
+                .seal()
+                .observations
+                .expect("second valid")
+                .failed,
+            1
+        );
+    }
+
+    #[test]
     fn scheduled_context_authorizes_only_its_exact_accelerator_lease() {
         use runmat_accelerate_api::AccelProvider as _;
         use runmat_execution::identity::{AttemptId, ExecutionScopeId, PoolId, TaskId, WorkerId};
@@ -225,16 +352,22 @@ mod tests {
 
         let _context = runtime.enter();
         assert_eq!(
-            execution_provider_authorization(&LEASED_PROVIDER),
+            execution_provider_authorization(
+                runmat_accelerate_api::ExecutionProviderAdmission::Provider(&LEASED_PROVIDER)
+            ),
             runmat_accelerate_api::ExecutionProviderAuthorization::Unrestricted
         );
         let _assignment = runtime.enter_execution_assignment(Some(assignment));
         assert_eq!(
-            execution_provider_authorization(&LEASED_PROVIDER),
+            execution_provider_authorization(
+                runmat_accelerate_api::ExecutionProviderAdmission::Provider(&LEASED_PROVIDER)
+            ),
             runmat_accelerate_api::ExecutionProviderAuthorization::Allowed
         );
         assert_eq!(
-            execution_provider_authorization(&OTHER_PROVIDER),
+            execution_provider_authorization(
+                runmat_accelerate_api::ExecutionProviderAdmission::Provider(&OTHER_PROVIDER)
+            ),
             runmat_accelerate_api::ExecutionProviderAuthorization::Denied
         );
     }

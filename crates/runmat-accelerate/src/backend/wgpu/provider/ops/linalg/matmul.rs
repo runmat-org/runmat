@@ -670,9 +670,7 @@ impl WgpuProvider {
                     std::mem::size_of::<crate::backend::wgpu::params::SyrkParams>() as u64,
                     "runmat-syrk-params",
                 )?;
-                emission
-                    .queue()
-                    .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                 let bind_entries = [
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -869,9 +867,7 @@ impl WgpuProvider {
                         std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
                         "runmat-matmul-params",
                     )?;
-                    emission
-                        .queue()
-                        .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                    emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                     let bind_entries = [
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -995,9 +991,7 @@ impl WgpuProvider {
                 std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
                 "runmat-matmul-params",
             )?;
-            emission
-                .queue()
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let layout = if use_vec4 {
                 &self.pipelines.matmul_vec4.get(emission)?.layout
             } else {

@@ -75,20 +75,17 @@ impl AccelProvider for AdmissionProbe {
     }
 }
 
-fn network() -> runmat_value::ObjectInstance {
+fn network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
     let relu = block_on(relu_layer_builtin(vec![])).unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, normalization, relu], 3, 1).unwrap(),
     )]))
-    .unwrap() else {
-        panic!("dlnetwork constructor must return an object")
-    };
-    network
+    .unwrap()
 }
 
-fn dense_relu_network() -> runmat_value::ObjectInstance {
+fn dense_relu_network() -> crate::execution::RootedValue {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),
@@ -101,10 +98,14 @@ fn dense_relu_network() -> runmat_value::ObjectInstance {
     ))
     .unwrap();
     let relu = block_on(relu_layer_builtin(vec![])).unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, dense, relu], 3, 1).unwrap(),
     )]))
-    .unwrap() else {
+    .unwrap()
+}
+
+fn network_object(owner: &crate::execution::RootedValue) -> &runmat_value::ObjectInstance {
+    let Value::Object(network) = owner.value() else {
         panic!("dlnetwork constructor must return an object")
     };
     network
@@ -166,7 +167,8 @@ fn direct_forward_with_explicit_learnable_never_replays_on_host_after_route_chan
         .owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let error = block_on(execute_network(NetworkExecutionRequest {
@@ -206,7 +208,8 @@ fn direct_forward_with_explicit_learnable_rejects_unavailable_provider_without_u
     let scale = owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let result = block_on(execute_network(NetworkExecutionRequest {
@@ -241,7 +244,8 @@ fn direct_forward_requires_the_explicit_learnables_device_before_provider_query(
     let scale = owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let result = block_on(execute_network(NetworkExecutionRequest {
@@ -285,7 +289,8 @@ fn direct_forward_cancellation_retires_only_the_uploaded_input() {
         .owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let error = block_on(execute_network(NetworkExecutionRequest {
@@ -329,7 +334,8 @@ fn direct_forward_without_context_honors_scoped_interrupt() {
         .owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let error = block_on(execute_network(NetworkExecutionRequest {
@@ -353,9 +359,10 @@ fn direct_forward_without_context_honors_scoped_interrupt() {
 
 #[test]
 fn host_origin_admission_requires_whole_route_query_without_effects() {
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let unavailable = AdmissionProbe {
         effects: AtomicUsize::new(0),
         queries: AtomicUsize::new(0),
@@ -396,9 +403,10 @@ fn host_origin_admission_requires_whole_route_query_without_effects() {
 
 #[test]
 fn ordinary_dense_relu_is_an_effect_free_host_origin_candidate() {
-    let network = dense_relu_network();
+    let network_owner = dense_relu_network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     static PROVIDER: AdmissionProbe = AdmissionProbe {
         effects: AtomicUsize::new(0),
         queries: AtomicUsize::new(0),
@@ -451,7 +459,8 @@ fn explicit_dense_weights_require_a_provider_without_host_replay() {
     let weights = owner
         .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let mut network = dense_relu_network();
+    let network_owner = dense_relu_network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_weights(&mut network, weights.handle.clone());
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let result = block_on(execute_network(NetworkExecutionRequest {
@@ -473,10 +482,12 @@ fn explicit_dense_weights_require_a_provider_without_host_replay() {
 
 #[test]
 fn admitted_host_route_is_bound_to_the_exact_network_even_with_identical_geometry() {
-    let admitted_network = network();
-    let other_network = network();
+    let admitted_owner = network();
+    let other_owner = network();
+    let admitted_network = network_object(&admitted_owner);
+    let other_network = network_object(&other_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&admitted_network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(admitted_network, &input, "forward").unwrap();
     static PROVIDER: AdmissionProbe = AdmissionProbe {
         effects: AtomicUsize::new(0),
         queries: AtomicUsize::new(0),
@@ -489,11 +500,11 @@ fn admitted_host_route_is_bound_to_the_exact_network_even_with_identical_geometr
         .unwrap();
     assert!(std::ptr::eq(
         admitted.host.admitted_network(),
-        &admitted_network
+        admitted_network
     ));
     assert!(!std::ptr::eq(
         admitted.host.admitted_network(),
-        &other_network
+        other_network
     ));
     // Execution accepts only this admitted token; there is no independent
     // network argument with which a same-shaped object could be substituted.
@@ -516,7 +527,8 @@ fn explicit_resident_parameter_precision_rejects_before_query_or_upload() {
         ready: true,
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
         panic!("network must retain Layers")
     };
@@ -641,9 +653,10 @@ fn changed_live_capability_retires_the_uploaded_input_without_replay() {
         cancel_on_upload: None,
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let admitted = host_origin::admit_host_route(&host, host.output_axes(), provider)
         .unwrap()
         .expect("mixed route")
@@ -672,9 +685,10 @@ fn malformed_host_upload_retires_only_its_new_result_before_dispatch() {
         cancel_on_upload: None,
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let admitted = host_origin::admit_host_route(&host, host.output_axes(), provider)
         .unwrap()
         .unwrap()
@@ -707,9 +721,10 @@ fn cancellation_after_host_upload_retires_input_before_stage_dispatch() {
         cancel_on_upload: Some(cancellation),
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let admitted = host_origin::admit_host_route(&host, host.output_axes(), provider)
         .unwrap()
         .unwrap()
@@ -740,9 +755,10 @@ fn selected_host_origin_route_executes_native_single_without_a_host_replay() {
     )
     .expect("actual WGPU network route qualification requires a compatible adapter");
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let network = network();
+    let network_owner = network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let admitted = host_origin::admit_host_route(&host, host.output_axes(), provider)
         .unwrap()
         .expect("mixed normalization and activation route")
@@ -780,9 +796,10 @@ fn ordinary_dense_relu_host_origin_executes_the_selected_provider_route() {
     )
     .expect("actual WGPU network route qualification requires a compatible adapter");
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let network = dense_relu_network();
+    let network_owner = dense_relu_network();
+    let network = network_object(&network_owner);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
-    let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let admitted = host_origin::admit_host_route(&host, host.output_axes(), provider)
         .unwrap()
         .expect("ordinary dense and ReLU route")
@@ -819,7 +836,8 @@ fn direct_forward_preserves_explicit_learnable_output_presentation() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let mut network = network();
+    let network_owner = network();
+    let mut network = network_object(&network_owner).clone();
     with_explicit_scale(&mut network, scale);
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
     let outcome = block_on(execute_network(NetworkExecutionRequest {

@@ -136,6 +136,26 @@ impl DriverControlPlane for HttpDriverControlPlane {
         {
             return Err(TransportError::StaleAuthority);
         }
+        let driver_resources = worker_pool::resource_from_api(response.driver_resources)?;
+        // Older Direct bootstraps omit this additive field, including runs
+        // with accelerator requests. Direct retains its existing execution
+        // route; absence confers no concrete device grant to Graph.
+        let has_driver_accelerator_grant = response.driver_accelerator_devices.is_some();
+        let driver_accelerator_devices = response
+            .driver_accelerator_devices
+            .unwrap_or_default()
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_device_from_api)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        if has_driver_accelerator_grant
+            && !runmat_execution::resource::accelerator_devices_exactly_satisfy(
+                &driver_accelerator_devices,
+                &driver_resources.accelerators,
+            )
+        {
+            return Err(TransportError::Integrity);
+        }
         Ok(DriverBootstrap {
             project_revision: response.project_revision,
             endpoint_fingerprint: response.endpoint_fingerprint,
@@ -149,7 +169,8 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 .collect::<TransportResult<_>>()?,
             checkpoint: response.checkpoint.map(download_from_api).transpose()?,
             cancellation_requested: response.cancellation_requested,
-            driver_resources: worker_pool::resource_from_api(response.driver_resources)?,
+            driver_resources,
+            driver_accelerator_devices,
             desired_worker_count: u32::try_from(response.desired_worker_count)
                 .map_err(|_| TransportError::Overflow)?,
             worker_resources: worker_pool::resource_from_api(response.worker_resources)?,
@@ -378,6 +399,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         allocation_lease_id: &str,
         endpoint_fingerprint: &str,
         run_key_envelope: &[u8],
+        ready_v1: bool,
     ) -> TransportResult<()> {
         self.client
             .authorize_driver_worker(
@@ -389,6 +411,10 @@ impl DriverControlPlane for HttpDriverControlPlane {
                     endpoint_fingerprint: endpoint_fingerprint.to_string(),
                     run_key_envelope: base64::engine::general_purpose::URL_SAFE_NO_PAD
                         .encode(run_key_envelope),
+                    // An older Server rejects unknown request fields. The
+                    // NodeAgent forwards an explicit support bit from a new
+                    // Server's driver bootstrap; otherwise omit the field.
+                    ready_v1: ready_v1.then_some(true),
                 },
             )
             .await

@@ -247,7 +247,8 @@ fn wide_repeat_property_is_exact_without_a_large_file() {
         .unwrap()
     };
     assert_eq!(property("Repeat"), Value::Int(IntValue::U64(wide)));
-    let Value::Tensor(data) = property("Data") else {
+    let data_owner = property("Data");
+    let Value::Tensor(data) = data_owner.value() else {
         panic!("numeric payload");
     };
     assert_eq!(data.shape(), &[1, 1]);

@@ -118,7 +118,7 @@ fn arrayfun_rejects_every_typed_integer_uniform_output_control() {
             Value::Tensor(Tensor::new_integer(storage.clone(), vec![1, 1]).expect("typed control")),
         ] {
             let error = call(
-                Value::FunctionHandle("sin".to_string()),
+                Value::FunctionHandle("sin".into()),
                 vec![input.clone(), Value::from("UniformOutput"), control],
             )
             .expect_err("typed integer control must reject");

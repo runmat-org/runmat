@@ -6,7 +6,7 @@ pub(super) async fn dlupdate_leaf(
     function: &Value,
     values: &[Value],
     requested_outputs: usize,
-) -> BuiltinResult<Vec<Value>> {
+) -> BuiltinResult<RootedValues> {
     let call = match runtime {
         Some(runtime) => {
             crate::call_feval_async_with_outputs_in_context(
@@ -33,7 +33,17 @@ pub(super) async fn dlupdate_leaf(
     normalize_dlupdate_outputs(result, requested_outputs)
 }
 
-fn normalize_dlupdate_outputs(value: Value, requested_outputs: usize) -> BuiltinResult<Vec<Value>> {
+fn normalize_dlupdate_outputs(
+    value: RootedValue,
+    requested_outputs: usize,
+) -> BuiltinResult<RootedValues> {
+    value.with_owned(|value| {
+        let values = normalize_raw_outputs(value, requested_outputs)?;
+        RootedValues::new(values).map_err(|error| error.into_runtime_error())
+    })
+}
+
+fn normalize_raw_outputs(value: Value, requested_outputs: usize) -> BuiltinResult<Vec<Value>> {
     if requested_outputs == 0 {
         return Ok(Vec::new());
     }

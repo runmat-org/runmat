@@ -57,10 +57,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lt",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::logical::rel::lt"
 )]
-async fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    comparison::evaluate(lhs, rhs, RelationalOperator::LessThan).await
+async fn lt_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    comparison::evaluate(runtime.as_ref(), lhs, rhs, RelationalOperator::LessThan).await
 }
 
 #[cfg(test)]

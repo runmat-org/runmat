@@ -226,7 +226,8 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
                         assert!(error.source.is_some());
                     } else {
                         let expected = if name == "exp" { 1.0 } else { 0.0 };
-                        match result.unwrap() {
+                        let output = result.unwrap();
+                        match output.value() {
                             Value::GpuTensor(output) => {
                                 assert!(supports_double);
                                 assert_eq!(output.device_id(), input.device_id());
@@ -235,9 +236,9 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
                                     output.physical().element_type(),
                                     NumericElementType::F64
                                 );
-                                assert!(!runmat_accelerate_api::handle_is_logical(&output));
+                                assert!(!runmat_accelerate_api::handle_is_logical(output));
                                 let HostNumericDataOwned::F64(data) =
-                                    provider.read(&output).unwrap().data
+                                    provider.read(output).unwrap().data
                                 else {
                                     panic!("expected Double payload");
                                 };

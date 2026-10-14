@@ -54,24 +54,20 @@ fn response_precision_shape_and_frequency_class_follow_adapter() {
         })
     );
     assert!(!result.effects.0.contains(&EffectKind::UserInterface));
-    assert!(
-        !result
-            .capabilities
-            .0
-            .contains(&CapabilityRequirement::UserInterface)
-    );
+    assert!(!result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::UserInterface));
 }
 
 #[test]
 fn zero_output_plot_requires_ui_but_positive_outputs_do_not() {
     let plotted = infer(LiteralValue::Number(8.0), RequestedOutputCount::Exactly(0));
     assert!(plotted.effects.0.contains(&EffectKind::UserInterface));
-    assert!(
-        plotted
-            .capabilities
-            .0
-            .contains(&CapabilityRequirement::UserInterface)
-    );
+    assert!(plotted
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::UserInterface));
     assert!(plotted.outputs.is_empty());
     let unknown = infer(LiteralValue::Unknown, RequestedOutputCount::Exactly(2));
     assert_eq!(
@@ -83,12 +79,10 @@ fn zero_output_plot_requires_ui_but_positive_outputs_do_not() {
 #[test]
 fn invalid_point_count_and_empty_default_are_distinct() {
     let invalid = infer(LiteralValue::Number(1.0), RequestedOutputCount::One);
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FREQZ-N")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FREQZ-N"));
     let default = infer(LiteralValue::Empty, RequestedOutputCount::One);
     assert!(default.diagnostics.is_empty());
     assert_eq!(

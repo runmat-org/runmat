@@ -4,7 +4,8 @@ mod support;
 
 use runmat_execution_artifact::{
     archive::{read_bundle, write_bundle, ArchiveLimits},
-    ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject, ObjectNamespace,
+    foreign_policy_object, ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure,
+    LogicalObject, ObjectNamespace, PreparedForeignParentView, SelectedPreparedForeignMaterial,
 };
 
 #[test]
@@ -63,13 +64,16 @@ fn source_change_after_freeze_is_rejected() {
 fn complete_executable_unit_survives_package_archive_round_trip() {
     let (_temp, project, revision) = support::frozen_project();
     let bytes = executable_unit_support::bytes(revision.clone());
+    let policy =
+        foreign_policy_object(br#"{"fixture":"selected-unit","schema_version":1}"#.to_vec())
+            .unwrap();
+    let mut recipe = executable_unit_support::recipe(support::recipe(revision.clone()));
+    recipe.foreign_policy = Some(policy.descriptor.clone());
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
-        .with_materialized_program(
-            executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
-            bytes.clone(),
-        )
+        .with_foreign_policy_object(policy)
+        .unwrap()
+        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV3, bytes.clone())
         .build()
         .unwrap();
     let mut archive = Vec::new();
@@ -160,18 +164,21 @@ fn meshing_host_workload_form_survives_package_archive_round_trip() {
 fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
     let (_temp, project, revision) = support::frozen_project();
     let bytes = executable_unit_support::bytes(revision.clone());
+    let policy =
+        foreign_policy_object(br#"{"fixture":"compiled-unit","schema_version":1}"#.to_vec())
+            .unwrap();
+    let mut recipe = executable_unit_support::recipe(support::recipe(revision.clone()));
+    recipe.foreign_policy = Some(policy.descriptor.clone());
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
         .with_compiled_package_closure()
-        .with_materialized_program(
-            executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
-            bytes,
-        )
+        .with_foreign_policy_object(policy)
+        .unwrap()
+        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV3, bytes)
         .build()
         .unwrap();
 
-    assert!(bundle.objects.is_empty());
+    assert_eq!(bundle.objects.len(), 1); // only the authenticated policy, no source tree
     assert!(bundle.manifest.sources.is_empty());
     assert!(bundle.manifest.callables.is_empty());
     assert!(!bundle.requires_source_project());
@@ -197,6 +204,43 @@ fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
     assert!(decoded
         .project_handoff_at(std::path::Path::new("unused"))
         .is_err());
+
+    let parent_recipe = &decoded.manifest.recipes[0];
+    let policy_object = decoded
+        .objects
+        .iter()
+        .find(|object| object.descriptor.namespace == ObjectNamespace::ForeignPolicy)
+        .unwrap();
+    let foreign_objects: [&LogicalObject; 0] = [];
+    let foreign_closures: [&ForeignArtifactClosure; 0] = [];
+    assert!(PreparedForeignParentView::new(
+        &parent_recipe.interop,
+        None,
+        None,
+        &foreign_objects,
+        &foreign_closures
+    )
+    .is_err());
+    let parent = PreparedForeignParentView::new(
+        &parent_recipe.interop,
+        parent_recipe.foreign_policy.as_ref(),
+        Some(policy_object),
+        &foreign_objects,
+        &foreign_closures,
+    )
+    .unwrap();
+    let mut child = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
+        &executable_unit_support::bytes(decoded.manifest.program_revision.clone()),
+    )
+    .unwrap();
+    child.manifest.interop = runmat_types::InteropManifest::empty();
+    let selected = SelectedPreparedForeignMaterial::for_compiled_unit(
+        &child.canonical_bytes().unwrap(),
+        &parent,
+    )
+    .unwrap();
+    let (_, _, _, retained_policy) = selected.into_parts();
+    assert!(std::ptr::eq(retained_policy.unwrap(), policy_object));
 }
 
 #[test]
@@ -230,6 +274,13 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
             artifact_identities: vec![identity.clone()],
         });
     recipe.interop.validate().unwrap();
+    let mut legacy_foreign = recipe.clone();
+    legacy_foreign.schema_version =
+        runmat_execution_artifact::program::LEGACY_PROGRAM_BUILD_RECIPE_SCHEMA_VERSION;
+    assert!(legacy_foreign.validate().is_err());
+    let policy =
+        foreign_policy_object(br#"{"fixture":"native-ffi","schema_version":1}"#.to_vec()).unwrap();
+    recipe.foreign_policy = Some(policy.descriptor.clone());
     let closure = ForeignArtifactClosure::new(
         adapter,
         identity,
@@ -241,6 +292,8 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
         .with_foreign_object(sidecar)
         .unwrap()
         .with_foreign_object(library)
+        .unwrap()
+        .with_foreign_policy_object(policy)
         .unwrap()
         .with_foreign_artifact_closure(closure)
         .unwrap()
@@ -280,6 +333,28 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
         .sort();
     assert!(absent_object.validate().is_err());
 
+    let mut missing_policy = bundle.clone();
+    missing_policy
+        .objects
+        .retain(|object| object.descriptor.namespace != ObjectNamespace::ForeignPolicy);
+    assert!(missing_policy.validate().is_err());
+
+    let mut substituted_policy = bundle.clone();
+    let replacement =
+        foreign_policy_object(br#"{"fixture":"replacement","schema_version":1}"#.to_vec()).unwrap();
+    substituted_policy.manifest.recipes[0].foreign_policy = Some(replacement.descriptor.clone());
+    assert!(substituted_policy.validate().is_err());
+
+    let mut tampered_policy = bundle.clone();
+    tampered_policy
+        .objects
+        .iter_mut()
+        .find(|object| object.descriptor.namespace == ObjectNamespace::ForeignPolicy)
+        .unwrap()
+        .bytes
+        .push(b' ');
+    assert!(tampered_policy.validate().is_err());
+
     let mut tampered = bundle;
     let foreign = tampered
         .objects
@@ -294,14 +369,17 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
 fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
     let (_temp, project, revision) = support::frozen_project();
     let bytes = executable_unit_support::bytes(revision.clone());
+    let policy =
+        foreign_policy_object(br#"{"fixture":"compiled-reject","schema_version":1}"#.to_vec())
+            .unwrap();
+    let mut selected_recipe = executable_unit_support::recipe(support::recipe(revision.clone()));
+    selected_recipe.foreign_policy = Some(policy.descriptor.clone());
     let mut bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
         .with_compiled_package_closure()
-        .with_materialized_program(
-            executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
-            bytes,
-        )
+        .with_foreign_policy_object(policy)
+        .unwrap()
+        .with_materialized_program(selected_recipe, ExecutableForm::ExecutableUnitV3, bytes)
         .build()
         .unwrap();
     let recipe = bundle.manifest.recipes[0].clone();

@@ -36,8 +36,8 @@ pub(super) async fn eval_rhs(
             ));
         }
     }
-    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
-        || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    if matches!(value.value(), Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value.value(), Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             input.extensions.logical_numeric,
@@ -50,7 +50,9 @@ pub(super) async fn eval_rhs(
             name,
         )?;
     }
-    let rhs = super::super::values::real_vector(name, value).await?;
+    let rhs = value
+        .with_owned_async(|value| super::super::values::real_vector(name, value))
+        .await?;
     if rhs.len() != y.len() {
         return Err(ode_error(
             name,

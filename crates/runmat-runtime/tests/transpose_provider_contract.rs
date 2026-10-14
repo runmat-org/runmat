@@ -12,7 +12,10 @@ use std::sync::{
 mod fixture;
 use fixture::{Mode, Provider};
 
-fn invoke(name: &str, input: &GpuTensorHandle) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn invoke(
+    name: &str,
+    input: &GpuTensorHandle,
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(call_builtin_async(name, &[Value::GpuTensor(input.clone())])).map_err(Box::new)
 }
 
@@ -48,16 +51,17 @@ fn real_native_classes_transpose_without_conjugation_or_extra_transfers() {
                 .unwrap()
                 .with_provenance(GpuHandleProvenance::Explicit)
                 .unwrap();
-            let Value::GpuTensor(output) = invoke(name, &input).unwrap() else {
+            let output = invoke(name, &input).unwrap();
+            let Value::GpuTensor(handle) = output.value() else {
                 panic!("resident result")
             };
-            assert_eq!(output.shape(), [3, 2]);
+            assert_eq!(handle.shape(), [3, 2]);
             assert_eq!(
-                output.physical().element_type(),
+                handle.physical().element_type(),
                 input.physical().element_type()
             );
-            assert!(handle_is_explicit(&output));
-            let actual = block_on(provider.inner.download_numeric(&output)).unwrap();
+            assert!(handle_is_explicit(handle));
+            let actual = block_on(provider.inner.download_numeric(handle)).unwrap();
             match actual.data {
                 HostNumericDataOwned::F32(values) => assert_eq!(values, [1., 3., 5., 2., 4., 6.]),
                 HostNumericDataOwned::F64(values) => assert_eq!(values, [1., 3., 5., 2., 4., 6.]),
@@ -67,7 +71,7 @@ fn real_native_classes_transpose_without_conjugation_or_extra_transfers() {
                 other => panic!("wrong class: {other:?}"),
             }
             assert_eq!(provider.counts(), (1, 0, 0, 0));
-            let output_weak = output.allocation_lease().downgrade();
+            let output_weak = handle.allocation_lease().downgrade();
             drop(output);
             assert!(output_weak.acquire().is_none());
             input.allocation_lease().validate_live().unwrap();
@@ -146,18 +150,20 @@ fn unsupported_restoration_uses_original_owner_and_preserves_explicit_intent() {
                 let result = invoke(name, &input);
                 match mode {
                     Mode::Unsupported => {
-                        let Value::GpuTensor(output) = result.unwrap() else {
+                        let result = result.unwrap();
+                        let Value::GpuTensor(output) = result.value() else {
                             panic!("restored resident result")
                         };
                         assert_eq!(output.shape(), [3, 2]);
-                        assert_eq!(handle_is_explicit(&output), explicit);
+                        assert_eq!(handle_is_explicit(output), explicit);
                         assert_eq!(
-                            block_on(provider.inner.download(&output)).unwrap().data,
+                            block_on(provider.inner.download(output)).unwrap().data,
                             [1., 3., 5., 2., 4., 6.]
                         );
                     }
                     Mode::UploadUnsupported if !explicit => {
-                        let Value::Tensor(output) = result.unwrap() else {
+                        let result = result.unwrap();
+                        let Value::Tensor(output) = result.value() else {
                             panic!("automatic host fallback")
                         };
                         assert_eq!(output.shape(), &[3, 2]);
@@ -237,11 +243,12 @@ fn conjugation_is_real_and_retains_intermediates_until_pending_call_is_dropped()
                 GpuGatherRetry::Never
             );
         } else {
-            let Value::GpuTensor(output) = invoke("ctranspose", &input).unwrap() else {
+            let result = invoke("ctranspose", &input).unwrap();
+            let Value::GpuTensor(output) = result.value() else {
                 panic!("complex resident result")
             };
             assert_eq!(output.shape(), [3, 2]);
-            let actual = block_on(provider.inner.download_numeric(&output)).unwrap();
+            let actual = block_on(provider.inner.download_numeric(output)).unwrap();
             assert!(
                 matches!(actual.data, HostNumericDataOwned::F64(values) if values == [1., -2., 5., -6., 9., -10., 3., 4., 7., 8., 11., 12.])
             );
@@ -276,7 +283,8 @@ fn rank_one_fallback_and_rank_zero_unknown_owner_preserve_the_real_boundary() {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        let Value::GpuTensor(output) = invoke(name, &input).unwrap() else {
+        let result = invoke(name, &input).unwrap();
+        let Value::GpuTensor(output) = result.value() else {
             panic!("restored rank-one vector")
         };
         assert_eq!(output.shape(), [1, 3]);
@@ -308,12 +316,13 @@ fn real_aliases_are_lawful_and_complex_rank_zero_is_actually_conjugated() {
                 shape: &[2, 2],
             })
             .unwrap();
-        let Value::GpuTensor(output) = invoke(name, &input).unwrap() else {
+        let result = invoke(name, &input).unwrap();
+        let Value::GpuTensor(output) = result.value() else {
             panic!("resident view")
         };
         assert!(output.shares_allocation_with(&input));
         assert_eq!(provider.counts(), (1, 0, 0, 0));
-        drop(output);
+        drop(result);
         assert_eq!(
             block_on(provider.inner.download(&input)).unwrap().data,
             [1., 2., 2., 3.]
@@ -329,13 +338,14 @@ fn real_aliases_are_lawful_and_complex_rank_zero_is_actually_conjugated() {
             storage: GpuTensorStorage::ComplexInterleaved,
         })
         .unwrap();
-    let Value::GpuTensor(output) = invoke("ctranspose", &input).unwrap() else {
+    let result = invoke("ctranspose", &input).unwrap();
+    let Value::GpuTensor(output) = result.value() else {
         panic!("complex scalar result")
     };
     assert!(output.shape().is_empty());
     assert!(!output.shares_allocation_with(&input));
     assert!(
-        matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [3., 4.])
+        matches!(block_on(provider.inner.download_numeric(output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [3., 4.])
     );
     assert_eq!(provider.counts(), (0, 1, 0, 0));
     assert!(
@@ -357,20 +367,21 @@ fn logical_transpose_retains_producer_class_without_conjugation() {
             .unwrap();
         assert!(handle_is_logical(&input));
         assert_eq!(input.physical().element_type(), NumericElementType::F64);
-        let Value::GpuTensor(output) = invoke(name, &input).unwrap() else {
+        let result = invoke(name, &input).unwrap();
+        let Value::GpuTensor(output) = result.value() else {
             panic!("resident logical result")
         };
-        assert!(handle_is_logical(&output));
+        assert!(handle_is_logical(output));
         assert_eq!(output.shape(), [3, 2]);
         assert_eq!(
             output.physical().element_type(),
             input.physical().element_type()
         );
         assert!(
-            matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [1., 1., 0., 0., 1., 0.])
+            matches!(block_on(provider.inner.download_numeric(output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [1., 1., 0., 0., 1., 0.])
         );
         assert_eq!(provider.counts(), (1, 0, 0, 0));
-        drop(output);
+        drop(result);
         input.allocation_lease().validate_live().unwrap();
     }
 }

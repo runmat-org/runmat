@@ -1,9 +1,5 @@
 mod cache;
 mod credentials;
-mod foreign_artifacts;
-mod java_artifacts;
-mod mex_artifacts;
-mod native_interfaces;
 mod private_keys;
 mod publication;
 mod publication_artifact;
@@ -11,19 +7,19 @@ mod publication_manifest;
 mod publication_retry;
 #[cfg(test)]
 mod publication_tests;
-mod python_artifacts;
 mod registry_transport;
 mod resolve;
 mod server_transport;
 mod tree;
 mod vendor;
 
-pub(crate) use foreign_artifacts::{
-    prepare_foreign_artifacts, prepare_python_runtime, PreparedForeignArtifacts,
-};
 pub(crate) use resolve::{
-    install_project_for_source, resolve_for_source, resolve_for_test_manifest,
+    executable_source, install_project_for_source, resolve_for_source, resolve_for_test_manifest,
     NativeResolvedProject,
+};
+pub(crate) use runmat_core::foreign_artifacts::{
+    prepare_foreign_artifacts, prepare_foreign_artifacts_for_selection, prepare_python_runtime,
+    PreparedForeignArtifacts,
 };
 
 use crate::cli::{Cli, PackageCommand};

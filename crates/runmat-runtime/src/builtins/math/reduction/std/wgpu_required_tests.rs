@@ -3,13 +3,31 @@ use crate::builtins::common::gpu_helpers;
 use runmat_accelerate_api::{AccelProvider, ProviderPrecision, ThreadProviderGuard};
 use runmat_value::{NumericDType, Tensor, Value};
 
-async fn public_value(name: &str, arguments: &[Value]) -> Value {
+async fn public_value(name: &str, arguments: &[Value]) -> crate::execution::RootedValue {
     let outputs = crate::call_builtin_sequence_async_with_outputs(name, arguments, 1)
         .await
-        .expect("registered dispersion call")
-        .into_values();
-    let [value]: [Value; 1] = outputs.try_into().expect("one dispersion output");
-    value
+        .expect("registered dispersion call");
+    outputs
+        .try_map_owned(
+            |outputs| {
+                let [value]: [Value; 1] = outputs
+                    .into_values()
+                    .try_into()
+                    .expect("one dispersion output");
+                Ok::<Value, crate::RuntimeError>(value)
+            },
+            |error| error.into_runtime_error(),
+        )
+        .expect("root dispersion output")
+}
+
+fn release_resident_output(value: crate::execution::RootedValue) {
+    value.with_owned(|value| {
+        let Value::GpuTensor(output) = value else {
+            panic!("expected the inspected resident dispersion output");
+        };
+        output.release().expect("successful WGPU output release");
+    });
 }
 
 async fn compare_host_and_resident(provider: &'static dyn AccelProvider) {
@@ -43,7 +61,7 @@ async fn compare_host_and_resident(provider: &'static dyn AccelProvider) {
                 .chain(controls.iter().cloned())
                 .collect();
             let expected = public_value(name, &host_arguments).await;
-            let Value::Tensor(expected) = expected else {
+            let Value::Tensor(expected) = expected.value() else {
                 panic!("{name}: Single host result must remain a tensor");
             };
             assert_eq!(expected.numeric_dtype(), NumericDType::F32);
@@ -52,12 +70,12 @@ async fn compare_host_and_resident(provider: &'static dyn AccelProvider) {
                 .chain(controls.iter().cloned())
                 .collect();
             let actual = public_value(name, &gpu_arguments).await;
-            let Value::GpuTensor(output) = actual else {
+            let Value::GpuTensor(output) = actual.value() else {
                 panic!("{name}: supported Single reduction must remain resident");
             };
             assert_eq!(output.shape(), expected.shape(), "{name} shape");
             assert_eq!(
-                runmat_accelerate_api::handle_precision(&output),
+                runmat_accelerate_api::handle_precision(output),
                 Some(ProviderPrecision::F32)
             );
             assert!(
@@ -65,12 +83,12 @@ async fn compare_host_and_resident(provider: &'static dyn AccelProvider) {
                 "{name} output allocation"
             );
             assert!(
-                gpu_helpers::exact_provider_for_handle(&output).is_some_and(|owner| {
+                gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
                     runmat_accelerate_api::same_provider_instance(owner, provider)
                 }),
                 "{name} output owner"
             );
-            let gathered = gpu_helpers::gather_tensor_async(&output)
+            let gathered = gpu_helpers::gather_tensor_async(output)
                 .await
                 .expect("owning WGPU readback");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32, "{name} class");
@@ -85,7 +103,7 @@ async fn compare_host_and_resident(provider: &'static dyn AccelProvider) {
                 );
             }
             let weak_output = output.downgrade();
-            output.release().expect("successful WGPU output release");
+            release_resident_output(actual);
             assert!(weak_output.acquire().is_err(), "{name} output view retired");
             input
                 .allocation_lease()
@@ -139,7 +157,7 @@ async fn compare_required_f64_dim_one(provider: &'static dyn AccelProvider) {
             ],
         )
         .await;
-        let Value::Tensor(expected) = host else {
+        let Value::Tensor(expected) = host.value() else {
             panic!("{name}: expected Double dimensional host tensor");
         };
         let actual = public_value(
@@ -151,21 +169,21 @@ async fn compare_required_f64_dim_one(provider: &'static dyn AccelProvider) {
             ],
         )
         .await;
-        let Value::GpuTensor(output) = actual else {
+        let Value::GpuTensor(output) = actual.value() else {
             panic!("{name}: required F64 dimensional result must remain resident");
         };
         assert_eq!(output.shape(), expected.shape());
         assert_eq!(
-            runmat_accelerate_api::handle_precision(&output),
+            runmat_accelerate_api::handle_precision(output),
             Some(ProviderPrecision::F64)
         );
         assert!(
-            gpu_helpers::exact_provider_for_handle(&output).is_some_and(|owner| {
+            gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
                 runmat_accelerate_api::same_provider_instance(owner, provider)
             }),
             "{name} Double output owner"
         );
-        let gathered = gpu_helpers::gather_tensor_async(&output)
+        let gathered = gpu_helpers::gather_tensor_async(output)
             .await
             .expect("owning Double readback");
         assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
@@ -177,7 +195,7 @@ async fn compare_required_f64_dim_one(provider: &'static dyn AccelProvider) {
             assert!((*gpu - host).abs() < 1e-12, "{name} Double mismatch");
         }
         let weak_output = output.downgrade();
-        output.release().expect("successful Double output release");
+        release_resident_output(actual);
         assert!(
             weak_output.acquire().is_err(),
             "{name} Double output retired"

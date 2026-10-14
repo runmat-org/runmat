@@ -1,12 +1,14 @@
 use std::io;
 use std::path::Path;
 
+use super::super::authority::CopyOperationError;
+
 pub(super) async fn copy(
     fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
     directory: bool,
-) -> io::Result<()> {
+) -> Result<(), CopyOperationError> {
     if directory {
         copy_directory(fs, source, destination).await
     } else {
@@ -19,20 +21,21 @@ async fn copy_directory(
     fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
-) -> io::Result<()> {
+) -> Result<(), CopyOperationError> {
     require_existing_parent(fs, destination).await?;
     match fs.metadata(destination).await {
         Ok(metadata) if !metadata.is_dir() => {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "destination exists and is not a directory",
-            ));
+            )
+            .into());
         }
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             fs.create_dir_all(destination).await?;
         }
-        Err(error) => return Err(error),
+        Err(error) => return Err(error.into()),
     }
     preserve_readonly(fs, source, destination).await;
     for entry in fs.read_dir(source).await? {
@@ -52,7 +55,7 @@ async fn copy_file(
     fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
-) -> io::Result<()> {
+) -> Result<(), CopyOperationError> {
     require_existing_parent(fs, destination).await?;
     fs.copy_file(source, destination).await?;
     preserve_readonly(fs, source, destination).await;

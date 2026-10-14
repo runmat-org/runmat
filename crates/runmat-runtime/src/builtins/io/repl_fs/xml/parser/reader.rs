@@ -12,6 +12,13 @@ const SOURCE_CHUNK: usize = 4096;
 
 type XmlCheckpointFuture = Pin<Box<dyn Future<Output = Result<(), ExecutionServiceError>>>>;
 
+// AsyncBufRead requires a thread-safe I/O error even on the browser. Keep
+// the execution cause in this reader; only this typed marker crosses XML's
+// I/O interface, and the parser takes the original cause on failure.
+#[derive(Debug, thiserror::Error)]
+#[error("XML input checkpoint failed")]
+struct XmlCheckpointFailed;
+
 pub(super) struct CooperativeXmlBuf<'a> {
     source: &'a [u8],
     position: usize,
@@ -19,6 +26,7 @@ pub(super) struct CooperativeXmlBuf<'a> {
     completed: u64,
     budget: Option<XmlBudgetOwner>,
     pending: Option<XmlCheckpointFuture>,
+    failure: Option<ExecutionServiceError>,
 }
 
 impl<'a> CooperativeXmlBuf<'a> {
@@ -30,12 +38,20 @@ impl<'a> CooperativeXmlBuf<'a> {
             completed: 0,
             budget,
             pending: None,
+            failure: None,
         }
+    }
+
+    pub(super) fn take_execution_error(&mut self) -> Option<ExecutionServiceError> {
+        self.failure.take()
     }
 }
 
 impl AsyncBufRead for CooperativeXmlBuf<'_> {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
+        if self.failure.is_some() {
+            return Poll::Ready(Err(io::Error::other(XmlCheckpointFailed)));
+        }
         if self.position == self.exposed_end {
             if let Some(owner) = self.budget.clone() {
                 if self.pending.is_none() {
@@ -47,7 +63,8 @@ impl AsyncBufRead for CooperativeXmlBuf<'_> {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Err(error)) => {
                             self.pending = None;
-                            return Poll::Ready(Err(io::Error::other(error)));
+                            self.failure = Some(error);
+                            return Poll::Ready(Err(io::Error::other(XmlCheckpointFailed)));
                         }
                         Poll::Ready(Ok(())) => self.pending = None,
                     }
@@ -93,6 +110,54 @@ mod tests {
     use runmat_execution::cancellation::CancellationSource;
     use std::num::NonZeroU64;
     use std::task::Poll;
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn failed_refill_retains_the_original_execution_cause_without_replaying() {
+        let original = crate::runtime_error::RuntimeErrorOwner::new(
+            crate::build_runtime_error("selected failure")
+                .with_identifier("RunMat:Fixture:SelectedFailure")
+                .build(),
+        );
+        for expected in [
+            ExecutionServiceError::WorkerLost("fixture".into()),
+            ExecutionServiceError::LocalizedRuntimeFailure(original),
+        ] {
+            let failure = expected.clone();
+            let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+            let observed = turns.clone();
+            let source = CancellationSource::new();
+            let budget = CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+                source.token(),
+                move || {
+                    observed.set(observed.get() + 1);
+                    let failure = failure.clone();
+                    Box::pin(async move { Err(failure) })
+                },
+            );
+            let owner = std::rc::Rc::new(std::cell::RefCell::new(Some(budget)));
+            let bytes = vec![b'x'; SOURCE_CHUNK * 2];
+            let mut reader = CooperativeXmlBuf::new(&bytes, Some(owner.clone()));
+            let waker = futures::task::noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            assert!(matches!(
+                Pin::new(&mut reader).poll_fill_buf(&mut cx),
+                Poll::Ready(Ok(chunk)) if chunk.len() == SOURCE_CHUNK
+            ));
+            Pin::new(&mut reader).consume(SOURCE_CHUNK);
+            for _ in 0..2 {
+                assert!(matches!(
+                    Pin::new(&mut reader).poll_fill_buf(&mut cx),
+                    Poll::Ready(Err(error)) if error.get_ref().is_some_and(|cause| cause.is::<XmlCheckpointFailed>())
+                ));
+            }
+            assert_eq!(turns.get(), 1);
+            assert!(owner.borrow().is_some(), "failed turn returns its budget");
+            assert_eq!(reader.take_execution_error(), Some(expected));
+            assert!(reader.take_execution_error().is_none());
+        }
+    }
 
     #[test]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

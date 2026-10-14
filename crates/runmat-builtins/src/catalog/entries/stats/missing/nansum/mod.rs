@@ -21,6 +21,7 @@ const NANSUM_PREPARATION_FORMS: [BuiltinPreparationForm; 1] = [BuiltinPreparatio
 }];
 
 pub const NANSUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "nansum" },
     category: "missing",

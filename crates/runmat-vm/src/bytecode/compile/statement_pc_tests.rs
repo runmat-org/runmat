@@ -249,7 +249,8 @@ fn closed_unit_remap_keeps_portable_point_owner_distinct_from_runtime_function()
     crate::bytecode::program::function_remap::remap_closed_function(
         &mut function,
         &std::collections::HashMap::from([(source_function, FunctionId(88))]),
-    );
+    )
+    .expect("closed projection");
     assert_eq!(function.function, FunctionId(88));
     assert_eq!(function.portable_function, portable_origin);
     let ranges = function

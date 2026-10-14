@@ -52,6 +52,7 @@ pub const LOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer arguments are converted to library/header/option text; they are not C ABI data." };
 
 pub const LOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "loadlibrary",

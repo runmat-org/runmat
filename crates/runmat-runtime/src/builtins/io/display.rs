@@ -340,6 +340,7 @@ mod tests {
                     access: MemberAccess::Public,
                     function_name: "DisplayHookObject.customDisplayImpl".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
@@ -357,7 +358,10 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom display");
-                    Ok(crate::sequence::ValueSequence::empty())
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
         )));
@@ -390,6 +394,7 @@ mod tests {
                     access: MemberAccess::Public,
                     function_name: "DispFallbackObject.renderDisp".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
@@ -407,7 +412,10 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISP_FALLBACK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom disp");
-                    Ok(crate::sequence::ValueSequence::empty())
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
         )));
@@ -439,6 +447,7 @@ mod tests {
                     access: MemberAccess::Public,
                     function_name: "DisplayHookParent.renderDisplay".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
@@ -463,7 +472,10 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_CHILD))
                     );
                     record_console_line(ConsoleStream::Stdout, "inherited display");
-                    Ok(crate::sequence::ValueSequence::empty())
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
         )));

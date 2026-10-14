@@ -447,9 +447,7 @@ impl WgpuProvider {
                 } else {
                     frame.rows - 1 - step
                 } as u32;
-                emission
-                    .queue()
-                    .write_buffer(&params_buffer, 0, bytes_of(&params));
+                emission.write_buffer(&params_buffer, 0, bytes_of(&params));
                 let bind_group = self.triangular_solve_bind_group(
                     emission,
                     bind_group_layout,
@@ -508,12 +506,12 @@ impl WgpuProvider {
             )?;
             if bytes > 0 {
                 let copy_label = format!("{label}-gram-copy");
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some(copy_label.as_str()),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some(copy_label.as_str()),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(
                     matrix_entry.buffer.as_ref(),
                     0,
@@ -540,9 +538,7 @@ impl WgpuProvider {
                 std::mem::size_of::<QrPowerIterParams>() as u64,
                 "runmat-chol-params",
             )?;
-            emission
-                .queue()
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
 
             let layout = &self.pipelines.qr_power_iter.get(emission)?.layout;
             let bind_entries = [

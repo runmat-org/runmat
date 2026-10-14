@@ -6,6 +6,7 @@ use crate::*;
 pub use contract::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 pub const UIGETDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+ audience: crate::BuiltinCatalogAudience::Public,
  provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
  identity: BuiltinCatalogIdentity { name: "uigetdir" },
  category: "io/repl_fs",

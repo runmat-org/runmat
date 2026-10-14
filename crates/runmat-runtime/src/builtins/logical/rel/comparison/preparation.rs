@@ -1,4 +1,4 @@
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
 use crate::BuiltinResult;
 use runmat_builtins::*;
 use runmat_value::Value;
@@ -8,14 +8,15 @@ use std::future::Future;
 mod tests;
 
 pub(super) async fn execute<F, Fut>(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operator: RelationalOperator,
     body: F,
-) -> BuiltinResult<Value>
+) -> BuiltinResult<crate::execution::RootedValue>
 where
     F: FnOnce(Value, Value) -> Fut,
-    Fut: Future<Output = BuiltinResult<Value>>,
+    Fut: Future<Output = BuiltinResult<crate::execution::RootedValue>>,
 {
     let entry = match operator {
         RelationalOperator::Equal => &EQ_CATALOG_ENTRY,
@@ -25,7 +26,8 @@ where
         RelationalOperator::GreaterThan => &GT_CATALOG_ENTRY,
         RelationalOperator::GreaterThanOrEqual => &GE_CATALOG_ENTRY,
     };
-    execute_current_invocation(
+    execute_invocation(
+        context,
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: entry.identity,

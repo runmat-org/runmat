@@ -8,6 +8,7 @@ pub use contract::NUMEDGES_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&NUMEDGES_CATALOG_ENTRY];
 
 pub const NUMEDGES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "numedges" },
     category: "graph",

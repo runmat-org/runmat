@@ -1,10 +1,11 @@
 use std::ffi::{c_char, c_double, c_int, c_longlong, c_ulong, c_ulonglong, c_void, CString};
 use std::mem::ManuallyDrop;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use libloading::Library;
 
+use super::process_owner::PROCESS_INTERPRETER;
 use crate::value::PythonBufferOwner;
 use crate::PythonError;
 
@@ -48,7 +49,6 @@ pub(crate) struct PyMethodDef {
 }
 
 static CAPSULE_GET_POINTER: OnceLock<PyCapsuleGetPointer> = OnceLock::new();
-static PROCESS_INTERPRETER_LIBRARY: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 
 pub(crate) unsafe fn capsule_pointer(capsule: *mut PyObject, name: *const c_char) -> *mut c_void {
     CAPSULE_GET_POINTER
@@ -59,12 +59,17 @@ pub(crate) unsafe fn capsule_pointer(capsule: *mut PyObject, name: *const c_char
 pub(crate) struct CpythonApi {
     pub py_initialize_ex: unsafe extern "C" fn(c_int),
     pub py_is_initialized: unsafe extern "C" fn() -> c_int,
+    pub py_get_version: unsafe extern "C" fn() -> *const c_char,
     pub py_gil_state_ensure: unsafe extern "C" fn() -> PyGilState,
     pub py_gil_state_release: unsafe extern "C" fn(PyGilState),
     pub py_eval_save_thread: unsafe extern "C" fn() -> *mut c_void,
     pub py_import_import_module: unsafe extern "C" fn(*const c_char) -> *mut PyObject,
+    pub py_import_get_module_dict: unsafe extern "C" fn() -> *mut PyObject,
     pub py_object_get_attr_string:
         unsafe extern "C" fn(*mut PyObject, *const c_char) -> *mut PyObject,
+    pub py_object_type: unsafe extern "C" fn(*mut PyObject) -> *mut PyObject,
+    pub py_type_get_flags: unsafe extern "C" fn(*mut PyObject) -> c_ulong,
+    pub py_type_get_slot: unsafe extern "C" fn(*mut PyObject, c_int) -> *mut c_void,
     pub py_object_set_attr_string:
         unsafe extern "C" fn(*mut PyObject, *const c_char, *mut PyObject) -> c_int,
     pub py_object_call:
@@ -88,7 +93,19 @@ pub(crate) struct CpythonApi {
     pub py_list_set_item: unsafe extern "C" fn(*mut PyObject, PySsize, *mut PyObject) -> c_int,
     pub py_list_get_item: unsafe extern "C" fn(*mut PyObject, PySsize) -> *mut PyObject,
     pub py_list_size: unsafe extern "C" fn(*mut PyObject) -> PySsize,
+    pub py_list_set_slice:
+        unsafe extern "C" fn(*mut PyObject, PySsize, PySsize, *mut PyObject) -> c_int,
     pub py_dict_new: unsafe extern "C" fn() -> *mut PyObject,
+    pub py_dict_next: unsafe extern "C" fn(
+        *mut PyObject,
+        *mut PySsize,
+        *mut *mut PyObject,
+        *mut *mut PyObject,
+    ) -> c_int,
+    pub py_dict_get_item_string:
+        unsafe extern "C" fn(*mut PyObject, *const c_char) -> *mut PyObject,
+    pub py_dict_del_item_string: unsafe extern "C" fn(*mut PyObject, *const c_char) -> c_int,
+    pub py_module_get_dict: unsafe extern "C" fn(*mut PyObject) -> *mut PyObject,
     pub py_dict_set_item:
         unsafe extern "C" fn(*mut PyObject, *mut PyObject, *mut PyObject) -> c_int,
     pub py_dict_set_item_string:
@@ -106,6 +123,9 @@ pub(crate) struct CpythonApi {
     pub py_complex_imag_as_double: unsafe extern "C" fn(*mut PyObject) -> c_double,
     pub py_unicode_from_string_and_size:
         unsafe extern "C" fn(*const c_char, PySsize) -> *mut PyObject,
+    pub py_unicode_get_length: unsafe extern "C" fn(*mut PyObject) -> PySsize,
+    pub py_unicode_compare_with_ascii_string:
+        unsafe extern "C" fn(*mut PyObject, *const c_char) -> c_int,
     pub py_unicode_as_utf8_and_size:
         unsafe extern "C" fn(*mut PyObject, *mut PySsize) -> *const c_char,
     pub py_bytes_from_string_and_size:
@@ -168,11 +188,16 @@ impl CpythonApi {
             Ok(Self {
                 py_initialize_ex: symbol(&library, b"Py_InitializeEx\0")?,
                 py_is_initialized: symbol(&library, b"Py_IsInitialized\0")?,
+                py_get_version: symbol(&library, b"Py_GetVersion\0")?,
                 py_gil_state_ensure: symbol(&library, b"PyGILState_Ensure\0")?,
                 py_gil_state_release: symbol(&library, b"PyGILState_Release\0")?,
                 py_eval_save_thread: symbol(&library, b"PyEval_SaveThread\0")?,
                 py_import_import_module: symbol(&library, b"PyImport_ImportModule\0")?,
+                py_import_get_module_dict: symbol(&library, b"PyImport_GetModuleDict\0")?,
                 py_object_get_attr_string: symbol(&library, b"PyObject_GetAttrString\0")?,
+                py_object_type: symbol(&library, b"PyObject_Type\0")?,
+                py_type_get_flags: symbol(&library, b"PyType_GetFlags\0")?,
+                py_type_get_slot: symbol(&library, b"PyType_GetSlot\0")?,
                 py_object_set_attr_string: symbol(&library, b"PyObject_SetAttrString\0")?,
                 py_object_call: symbol(&library, b"PyObject_Call\0")?,
                 py_object_is_instance: symbol(&library, b"PyObject_IsInstance\0")?,
@@ -193,7 +218,12 @@ impl CpythonApi {
                 py_list_set_item: symbol(&library, b"PyList_SetItem\0")?,
                 py_list_get_item: symbol(&library, b"PyList_GetItem\0")?,
                 py_list_size: symbol(&library, b"PyList_Size\0")?,
+                py_list_set_slice: symbol(&library, b"PyList_SetSlice\0")?,
                 py_dict_new: symbol(&library, b"PyDict_New\0")?,
+                py_dict_next: symbol(&library, b"PyDict_Next\0")?,
+                py_dict_get_item_string: symbol(&library, b"PyDict_GetItemString\0")?,
+                py_dict_del_item_string: symbol(&library, b"PyDict_DelItemString\0")?,
+                py_module_get_dict: symbol(&library, b"PyModule_GetDict\0")?,
                 py_dict_set_item: symbol(&library, b"PyDict_SetItem\0")?,
                 py_dict_set_item_string: symbol(&library, b"PyDict_SetItemString\0")?,
                 py_float_from_double: symbol(&library, b"PyFloat_FromDouble\0")?,
@@ -215,6 +245,11 @@ impl CpythonApi {
                 py_unicode_from_string_and_size: symbol(
                     &library,
                     b"PyUnicode_FromStringAndSize\0",
+                )?,
+                py_unicode_get_length: symbol(&library, b"PyUnicode_GetLength\0")?,
+                py_unicode_compare_with_ascii_string: symbol(
+                    &library,
+                    b"PyUnicode_CompareWithASCIIString\0",
                 )?,
                 py_unicode_as_utf8_and_size: symbol(&library, b"PyUnicode_AsUTF8AndSize\0")?,
                 py_bytes_from_string_and_size: symbol(&library, b"PyBytes_FromStringAndSize\0")?,
@@ -280,13 +315,13 @@ impl CpythonApi {
                 ),
             )
         })?;
-        let mut process_library = PROCESS_INTERPRETER_LIBRARY.lock().map_err(|_| {
+        let mut process_owner = PROCESS_INTERPRETER.lock().map_err(|_| {
             PythonError::host(
                 "PythonInitializationError",
                 "the process CPython identity lock was poisoned",
             )
         })?;
-        if let Some(active_library) = process_library.as_ref() {
+        if let Some(active_library) = process_owner.library.as_ref() {
             if active_library != &requested_library {
                 return Err(PythonError::host(
                     "PythonConfigurationError",
@@ -304,7 +339,7 @@ impl CpythonApi {
         unsafe {
             if (self.py_is_initialized)() != 0 {
                 self.initialized = true;
-                *process_library = Some(requested_library);
+                process_owner.library = Some(requested_library);
                 return Ok(false);
             }
             self.program_name = self.decode_path(executable)?;
@@ -319,7 +354,7 @@ impl CpythonApi {
                 ));
             }
             self.initialized = true;
-            *process_library = Some(requested_library);
+            process_owner.library = Some(requested_library);
         }
         Ok(true)
     }

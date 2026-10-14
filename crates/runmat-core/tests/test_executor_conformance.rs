@@ -30,7 +30,7 @@ fn result_for<'a>(
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
-    let function = envelope.manifest.identity.entrypoint_function;
+    let function = envelope.manifest.identity.entrypoint_function.unwrap();
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
@@ -43,6 +43,7 @@ async fn execute_portable_envelope(
             "portable-executable-unit-v3-test",
         ),
         interop: envelope.manifest.interop.clone(),
+        foreign_policy: None,
         accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
@@ -315,7 +316,7 @@ async fn executable_unit_retains_exact_program_point_analysis() {
                 entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
                     unit.mir(),
                     *unit.mir().entrypoints.first().expect("fixture entrypoint"),
-                    envelope.manifest.identity.entrypoint_function,
+                    envelope.manifest.identity.entrypoint_function.unwrap(),
                 )
                 .unwrap(),
                 binding_names: Some(&binding_names),

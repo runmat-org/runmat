@@ -50,10 +50,10 @@ async fn host_max(
     let result = runmat_runtime::call_builtin_async("max", &args)
         .await
         .expect("ordinary host Max oracle");
-    let Value::Tensor(tensor) = result else {
+    let Value::Tensor(tensor) = result.value() else {
         panic!("nonscalar host Max result")
     };
-    tensor
+    tensor.clone()
 }
 
 fn upload(
@@ -227,10 +227,10 @@ async fn qualify(provider: &'static WgpuProvider, single: bool) {
                 let result = runmat_runtime::call_builtin_async("max", &args)
                     .await
                     .expect("public resident Max");
-                let Value::GpuTensor(output) = result else {
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("public native-class scalar Max must remain resident")
                 };
-                assert_output(provider, &output, &expected, single).await;
+                assert_output(provider, output, &expected, single).await;
             }
         }
     }

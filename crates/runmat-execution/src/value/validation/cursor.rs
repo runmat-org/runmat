@@ -2,8 +2,8 @@
 
 use super::super::{
     CallableOwner, DurableObjectArray, DurablePlainObject, DurableStructArray, ElementType,
-    ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField, ValueLimits,
-    ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
+    ExceptionFrameSource, ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField,
+    ValueLimits, ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 use std::{collections::HashSet, num::NonZeroUsize};
@@ -36,6 +36,7 @@ struct Budget<'a> {
     limits: ValueLimits,
     transport: Option<ValueTransportContext<'a>>,
     durable: bool,
+    detached_frames: bool,
     sources: Sources<'a>,
     nodes: u64,
     bytes: u64,
@@ -103,13 +104,35 @@ enum Task<'a> {
 }
 
 impl<'a> ValuePayloadValidationCursor<'a> {
+    pub(super) fn for_graph_leaves(
+        leaves: &[(&'a ValuePayload, u16)],
+        limits: ValueLimits,
+        map: Option<&'a crate::ExecutableSourceMapV2>,
+    ) -> Self {
+        let mut cursor = Self::make(
+            &[],
+            limits,
+            false,
+            map.map_or(Sources::Missing, Sources::Map),
+            None,
+            true,
+        );
+        cursor.tasks.clear();
+        cursor.tasks.extend(
+            leaves
+                .iter()
+                .rev()
+                .map(|(value, depth)| Task::Payload(value, *depth)),
+        );
+        cursor
+    }
     /// Validate execution payloads under one shared budget.
     pub fn new(values: &'a [ValuePayload], limits: ValueLimits) -> Self {
-        Self::make(values, limits, false, Sources::Local, None)
+        Self::make(values, limits, false, Sources::Local, None, true)
     }
     /// Validate durable payloads under one shared budget.
     pub fn for_durable_storage(values: &'a [ValuePayload], limits: ValueLimits) -> Self {
-        Self::make(values, limits, true, Sources::Local, None)
+        Self::make(values, limits, true, Sources::Local, None, true)
     }
     /// Validate exception source ordinals against the selected source map.
     pub fn for_program_sources(
@@ -123,6 +146,22 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             false,
             map.map_or(Sources::Missing, Sources::Map),
             None,
+            false,
+        )
+    }
+    /// The V8 graph source contract also admits detached presentation frames.
+    pub fn for_graph_sources(
+        values: &'a [ValuePayload],
+        limits: ValueLimits,
+        map: Option<&'a crate::ExecutableSourceMapV2>,
+    ) -> Self {
+        Self::make(
+            values,
+            limits,
+            false,
+            map.map_or(Sources::Missing, Sources::Map),
+            None,
+            true,
         )
     }
     /// Validate reference transport authority as well as payload structure.
@@ -131,7 +170,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         limits: ValueLimits,
         context: ValueTransportContext<'a>,
     ) -> Self {
-        Self::make(values, limits, false, Sources::Local, Some(context))
+        Self::make(values, limits, false, Sources::Local, Some(context), true)
     }
     fn make(
         values: &'a [ValuePayload],
@@ -139,12 +178,14 @@ impl<'a> ValuePayloadValidationCursor<'a> {
         durable: bool,
         sources: Sources<'a>,
         transport: Option<ValueTransportContext<'a>>,
+        detached_frames: bool,
     ) -> Self {
         Self {
             budget: Budget {
                 limits,
                 transport,
                 durable,
+                detached_frames,
                 sources,
                 nodes: 0,
                 bytes: 0,
@@ -321,12 +362,10 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             }
             InlineValue::Symbolic(x) | InlineValue::ImmutableValueClass(x) => {
                 self.budget.add_text(&x.type_identity)?;
-                if x.schema_version == 0 {
-                    return Err(invalid(
-                        "registered value",
-                        "schema version must be non-zero",
-                    ));
-                }
+                super::super::RegisteredData::validate_identity_parts(
+                    &x.type_identity,
+                    x.schema_version,
+                )?;
                 self.sorted(Fields::Registered(&x.fields), "registered fields", depth)?;
             }
             InlineValue::Exception(x) => {

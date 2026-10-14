@@ -4,14 +4,16 @@ pub const CHEB2ORD_INTEGER_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "cheb2ord-integer-frequency",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "cheb2ord with typed-integer passband or stopband frequencies is a RunMat extension",
+        description:
+            "cheb2ord with typed-integer passband or stopband frequencies is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:Cheb2ordIntegerFrequencyExtension"),
     };
 pub const CHEB2ORD_INTEGER_ATTENUATION_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "cheb2ord-integer-attenuation",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "cheb2ord with typed-integer ripple or attenuation values is a RunMat extension",
+        description:
+            "cheb2ord with typed-integer ripple or attenuation values is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:Cheb2ordIntegerAttenuationExtension"),
     };
 pub const CHEB2ORD_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor =

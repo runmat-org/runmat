@@ -2,8 +2,12 @@ mod adapter;
 mod conversion;
 mod isolation;
 
-pub use adapter::{PythonAdapter, PythonRuntimeConfiguration};
+pub use adapter::{
+    PreparedPythonProjectReplacement, PythonAdapter, PythonAdapterRetirement,
+    PythonInstalledPathProvenance, PythonRuntimeConfiguration, ReadyPythonProjectReplacement,
+    ReadyPythonProjectReplacementLocal, VerifiedPythonProjectRetirement,
+};
 pub use isolation::{
     run_python_extension_host, IsolatedPythonClient, NestedPythonCall, NestedPythonQueue,
-    PYTHON_HOST_KIND,
+    PythonClientRetirement, PYTHON_HOST_KIND,
 };

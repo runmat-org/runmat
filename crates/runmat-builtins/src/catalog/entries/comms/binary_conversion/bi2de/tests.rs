@@ -89,12 +89,10 @@ fn invalid_input_and_base_literals_are_diagnosed() {
         ),
         &BI2DE_CATALOG_ENTRY,
     );
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-BI2DE-DIGITS")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-BI2DE-DIGITS"));
     let base = super::super::inference::infer_bi2de(
         &call(
             input(NumericClass::Double, 1, 3),
@@ -103,11 +101,10 @@ fn invalid_input_and_base_literals_are_diagnosed() {
         ),
         &BI2DE_CATALOG_ENTRY,
     );
-    assert!(
-        base.diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-BI2DE-BASE")
-    );
+    assert!(base
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-BI2DE-BASE"));
     assert_eq!(BI2DE_CATALOG_ENTRY.bindings, &REQUIRED_DEFAULT_BINDING);
     assert_eq!(BI2DE_CATALOG_ENTRY.documentation.examples.len(), 6);
 }

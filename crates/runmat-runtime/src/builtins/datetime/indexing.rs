@@ -1,6 +1,7 @@
 use super::*;
+use crate::execution::RootedValue;
 
-pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
+pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<RootedValue> {
     let Value::Object(object) = obj else {
         return Err(datetime_error(
             "datetime.subsref: receiver must be a datetime object",
@@ -15,7 +16,8 @@ pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResu
         ));
     };
     if cell.data.is_empty() {
-        return datetime_object_from_serial_tensor(serials, format);
+        return RootedValue::new(datetime_object_from_serial_tensor(serials, format)?)
+            .map_err(|error| error.into_runtime_error());
     }
     if cell.data.len() != 1 {
         return Err(datetime_error(
@@ -55,5 +57,6 @@ pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResu
             )))
         }
     };
-    datetime_object_from_serial_tensor(indexed_serials, format)
+    RootedValue::new(datetime_object_from_serial_tensor(indexed_serials, format)?)
+        .map_err(|error| error.into_runtime_error())
 }

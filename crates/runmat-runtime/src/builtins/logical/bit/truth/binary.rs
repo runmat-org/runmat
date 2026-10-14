@@ -3,47 +3,68 @@ use runmat_value::Value;
 
 use crate::builtins::common::binary::BinaryInputPlan;
 use crate::builtins::common::broadcast::broadcast_shapes;
+use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use crate::BuiltinResult;
 
 use super::{contract, evaluate, operand, provider};
 
 pub(crate) async fn execute(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operation: LogicalBinaryOperator,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     let contract = contract::binary(operation);
+    let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter())
+        .map_err(|error| error.into_runtime_error())?;
     match crate::builtins::table::plan_binary(lhs, rhs)
         .map_err(|error| operand::error_with_detail(contract.name, contract.mismatch, error))?
     {
-        BinaryInputPlan::Values(values) => value(values.0, values.1, operation, &contract).await,
+        BinaryInputPlan::Values(values) => {
+            value(context, values.0, values.1, operation, &contract).await
+        }
         BinaryInputPlan::Structured(plan) => {
-            let (source, variables) = plan.variables();
-            let mut output = Vec::with_capacity(variables.len());
-            for (name, lhs, rhs) in variables {
-                let result = value(lhs, rhs, operation, &contract)
-                    .await
-                    .map_err(|error| {
-                        operand::error_with_detail(
-                            contract.name,
-                            contract.invalid,
-                            format!("table variable {name}: {}", error.message()),
-                        )
-                    })?;
-                output.push((name, result));
-            }
-            crate::builtins::table::finish_binary(&source, output)
-                .map_err(|error| operand::error_with_detail(contract.name, contract.invalid, error))
+            let crate::builtins::table::TabularBinaryPlan {
+                source,
+                variables,
+                right_values,
+            } = plan;
+            right_values
+                .with_owned_values_async(|right_values| async move {
+                    let mut names = Vec::with_capacity(variables.len());
+                    let mut output = RootedValuesBuilder::with_capacity(variables.len());
+                    for ((name, lhs), rhs) in variables.into_iter().zip(right_values) {
+                        let result = value(context, lhs, rhs, operation, &contract)
+                            .await
+                            .map_err(|error| {
+                                operand::error_with_detail(
+                                    contract.name,
+                                    contract.invalid,
+                                    format!("table variable {name}: {}", error.message()),
+                                )
+                            })?;
+                        output.push_owned(result);
+                        names.push(name);
+                    }
+                    let output = output
+                        .finish()
+                        .map_err(|error| error.into_runtime_error())?;
+                    crate::builtins::table::finish_binary_owned(&source, names, output).map_err(
+                        |error| operand::error_with_detail(contract.name, contract.invalid, error),
+                    )
+                })
+                .await
         }
     }
 }
 
 async fn value(
+    context: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     operation: LogicalBinaryOperator,
     contract: &contract::BinaryContract,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<RootedValue> {
     enforce_extensions(&lhs, &rhs, contract)?;
     let output_source = provider::select_binary_source([&lhs, &rhs], contract.name)?;
     let shape = broadcast_shapes(
@@ -53,12 +74,21 @@ async fn value(
     )
     .map_err(|error| operand::error_with_detail(contract.name, contract.mismatch, error))?;
     if matches!(lhs, Value::Tensor(_)) || matches!(rhs, Value::Tensor(_)) {
-        return super::preparation::binary(contract.entry, lhs, rhs, |lhs, rhs| async move {
-            admitted_value(lhs, rhs, operation, contract, output_source, shape).await
-        })
+        return super::preparation::binary(
+            context,
+            contract.entry,
+            lhs,
+            rhs,
+            |lhs, rhs| async move {
+                let output =
+                    admitted_value(lhs, rhs, operation, contract, output_source, shape).await?;
+                RootedValue::new(output).map_err(|error| error.into_runtime_error())
+            },
+        )
         .await;
     }
-    admitted_value(lhs, rhs, operation, contract, output_source, shape).await
+    let output = admitted_value(lhs, rhs, operation, contract, output_source, shape).await?;
+    RootedValue::new(output).map_err(|error| error.into_runtime_error())
 }
 
 async fn admitted_value(

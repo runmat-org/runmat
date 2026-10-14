@@ -13,12 +13,15 @@ use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
 use std::collections::{HashMap, HashSet};
 
-#[cfg(all(test, feature = "native-accel"))]
-#[path = "compile/fusion_admission_tests.rs"]
-mod fusion_admission_tests;
 #[cfg(feature = "native-accel")]
 #[path = "compile/function_fusion.rs"]
 mod function_fusion;
+#[cfg(feature = "native-accel")]
+#[path = "compile/fusion_windows.rs"]
+pub(crate) mod fusion_windows;
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "compile/fusion_admission_tests.rs"]
+mod fusion_admission_tests;
 #[cfg(feature = "native-accel")]
 #[path = "compile/semantic_fusion_candidates.rs"]
 mod semantic_fusion_candidates;
@@ -79,7 +82,7 @@ fn compile_with_bound_analysis(
         stage_analysis,
     )?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
-    let (var_names, initially_unassigned_slots) = c
+    let (mut var_names, initially_unassigned_slots) = c
         .layout
         .as_ref()
         .and_then(|layout| {
@@ -90,11 +93,36 @@ fn compile_with_bound_analysis(
                     .exports
                     .iter()
                     .map(|export| (export.slot.0, export.name.clone()))
-                    .collect(),
+                    .collect::<HashMap<_, _>>(),
                 function_layout_initially_unassigned_slots(hir, function_layout),
             ))
         })
         .unwrap_or_default();
+    if let Some(function_layout) = c.layout.as_ref().and_then(|layout| {
+        let entrypoint_layout = layout.entrypoints.get(&entrypoint)?;
+        layout.functions.get(&entrypoint_layout.target)
+    }) {
+        // A current-workspace eval may assign a name that was only read later
+        // in this entrypoint. Its ExternalWorkspace slot is not an export, but
+        // it must share the frame's name-to-slot map so eval commits into the
+        // exact slot the later LoadVar will read. The existing unassigned set
+        // keeps it invisible until an actual workspace assignment occurs.
+        for (binding, slot) in &function_layout.binding_slots {
+            let hir_binding = hir.bindings.get(binding.0).ok_or_else(|| {
+                CompileError::new("entrypoint workspace binding has no HIR owner")
+            })?;
+            if !matches!(hir_binding.role, runmat_hir::BindingRole::ExternalWorkspace) {
+                continue;
+            }
+            if let Some(previous) = var_names.insert(slot.0, hir_binding.name.0.clone()) {
+                if previous != hir_binding.name.0 {
+                    return Err(CompileError::new(
+                        "entrypoint workspace binding collides with an export slot",
+                    ));
+                }
+            }
+        }
+    }
     let entrypoint_target = hir
         .entrypoints
         .iter()
@@ -597,31 +625,11 @@ pub(crate) fn derive_semantic_fusion_instruction_windows(
     let mut windows = Vec::new();
     for mut assigned in by_candidate {
         assigned.sort_by_key(|(pc, _)| *pc);
-        let mut current: Option<crate::bytecode::FusionInstructionWindow> = None;
+        let mut group = fusion_windows::FusionWindowGroup::default();
         for (pc, kind) in assigned {
-            if let Some(window) = current.as_mut() {
-                if window.span.end.checked_add(1) == Some(pc) {
-                    window.span.end = pc;
-                    if kind == crate::bytecode::FusionInstructionKind::Matmul
-                        || (kind == crate::bytecode::FusionInstructionKind::Reduction
-                            && window.kind != crate::bytecode::FusionInstructionKind::Matmul)
-                    {
-                        window.kind = kind;
-                    }
-                    continue;
-                }
-            }
-            if let Some(window) = current.take() {
-                windows.push(window);
-            }
-            current = Some(crate::bytecode::FusionInstructionWindow {
-                span: runmat_accelerate::graph::InstrSpan { start: pc, end: pc },
-                kind,
-            });
+            group.push(pc, kind, &mut windows);
         }
-        if let Some(window) = current {
-            windows.push(window);
-        }
+        group.finish(&mut windows);
     }
     windows
 }
@@ -792,6 +800,12 @@ fn compile_semantic_functions(
         let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
             CompileError::new(format!("missing VM layout for function {:?}", function.id))
         })?;
+        let retained_callable_parent = mir
+            .retained_callable_parent(function.id)
+            .map_err(CompileError::new)?;
+        let lexical_projection = mir
+            .lexical_environment_projection(function.id)
+            .map_err(CompileError::new)?;
         let source_id = hir
             .modules
             .get(function.module.0)
@@ -857,13 +871,26 @@ fn compile_semantic_functions(
                     .clone(),
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
+                selected_source_owner: None,
+                selected_interop_receipt: None,
+                selected_executable_product: None,
+                selected_static_capture: None,
+                selected_class_product: None,
                 source_file: None,
                 private_source_owner: None,
                 source_role: hir.function_source_role(function),
+                lexical_parent: retained_callable_parent,
                 portable_function: runmat_types::ProgramFunctionId(
                     u32::try_from(function.id.0)
                         .map_err(|_| CompileError::new("portable function identity overflow"))?,
                 ),
+                portable_lexical_parent: retained_callable_parent
+                    .map(|parent| {
+                        u32::try_from(parent.0)
+                            .map(runmat_types::ProgramFunctionId)
+                            .map_err(|_| CompileError::new("portable parent identity overflow"))
+                    })
+                    .transpose()?,
                 binding_origin: None,
                 capabilities: u32::try_from(function.id.0)
                     .ok()
@@ -912,6 +939,83 @@ fn compile_semantic_functions(
                     .iter()
                     .map(|capture| capture.slot.0)
                     .collect(),
+                lexical_binding_slots: {
+                    let mut bindings = function_layout
+                        .binding_slots
+                        .iter()
+                        .filter_map(|(binding, slot)| {
+                            let kind = if lexical_projection.owned.contains(binding) {
+                                crate::bytecode::program::LexicalBindingKind::Owned
+                            } else if lexical_projection.inherited.contains(binding) {
+                                crate::bytecode::program::LexicalBindingKind::Inherited
+                            } else if lexical_projection.transit.contains(binding) {
+                                crate::bytecode::program::LexicalBindingKind::Transit
+                            } else {
+                                return None;
+                            };
+                            Some(crate::bytecode::program::LexicalBindingSlot {
+                                binding: *binding,
+                                slot: slot.0,
+                                kind,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    bindings.sort_by_key(|entry| entry.binding);
+                    bindings
+                },
+                inherited_storage_slots: lexical_projection
+                    .inherited_storage
+                    .iter()
+                    .map(|entry| {
+                        let slot = function_layout
+                            .binding_slots
+                            .get(&entry.binding)
+                            .ok_or_else(|| {
+                                CompileError::new("inherited canonical storage has no local slot")
+                            })?;
+                        let name = hir
+                            .bindings
+                            .iter()
+                            .find(|binding| binding.id == entry.binding)
+                            .map(|binding| binding.name.0.clone())
+                            .ok_or_else(|| {
+                                CompileError::new(
+                                    "inherited canonical storage has no semantic name",
+                                )
+                            })?;
+                        let owner_function = layout
+                            .functions
+                            .get(&entry.owner)
+                            .map(|owner| owner.display_name.clone())
+                            .ok_or_else(|| {
+                                CompileError::new("inherited canonical storage owner has no layout")
+                            })?;
+                        let kind = match entry.kind {
+                            runmat_mir::MirInheritedStorageKind::Global => {
+                                crate::bytecode::program::InheritedStorageKind::Global
+                            }
+                            runmat_mir::MirInheritedStorageKind::Persistent => {
+                                crate::bytecode::program::InheritedStorageKind::Persistent
+                            }
+                        };
+                        Ok(crate::bytecode::program::InheritedStorageSlot {
+                            binding: entry.binding,
+                            slot: slot.0,
+                            owner: entry.owner,
+                            portable_owner: runmat_types::ProgramFunctionId(
+                                u32::try_from(entry.owner.0).map_err(|_| {
+                                    CompileError::new(
+                                    "inherited storage owner exceeds portable function identity",
+                                )
+                                })?,
+                            ),
+                            name,
+                            owner_function,
+                            kind,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CompileError>>()?,
+                creates_lexical_environment: lexical_projection.creates_activation,
                 var_names: function_layout_var_names(hir, function_layout)?,
                 initially_unassigned_slots: function_layout_initially_unassigned_slots(
                     hir,
@@ -2919,6 +3023,27 @@ mod tests {
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[export.slot.0], Value::Num(3.0));
+    }
+
+    #[test]
+    fn current_workspace_eval_reserves_later_external_read_slot() {
+        let ast =
+            runmat_parser::parse("eval('old_callback = @() 1;'); first = feval(old_callback);")
+                .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "old_callback").then_some(*slot))
+            .expect("later external workspace read has a reserved frame slot");
+        assert!(bytecode.initially_unassigned_slots.contains(&slot));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadVar(read) if *read == slot)));
     }
 
     #[test]
@@ -7247,15 +7372,12 @@ y = x^[1 2; 3 4];\n",
         let binding = vars
             .iter()
             .find_map(|value| match value {
-                Value::BoundFunctionHandle {
-                    name,
-                    function,
-                    authority,
-                    ..
-                } if name == "remote_inc" && *function == helper_function.0 => {
+                Value::BoundFunctionHandle(handle)
+                    if handle.name == "remote_inc" && handle.function == helper_function.0 =>
+                {
                     Some(runmat_value::BoundFunctionBinding {
-                        function: *function,
-                        authority: authority.clone(),
+                        function: handle.function,
+                        authority: handle.authority.clone(),
                     })
                 }
                 _ => None,
@@ -7334,8 +7456,11 @@ y = x^[1 2; 3 4];\n",
                 assert_eq!(call.arguments, [Value::Num(2.0)]);
                 assert_eq!(call.requested_outputs, 1);
                 Box::pin(async move {
-                    runmat_value::ValueSequence::single(Value::Num(3.0))
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                    runmat_runtime::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(Value::Num(3.0))
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             })),
         );

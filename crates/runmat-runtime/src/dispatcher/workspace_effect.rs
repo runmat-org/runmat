@@ -4,6 +4,7 @@ use crate::context::{RuntimeContext, RuntimeWorkspaceService};
 use crate::RuntimeError;
 #[cfg(test)]
 use runmat_value::Value;
+#[cfg(test)]
 use runmat_value::ValueSequence;
 
 /// Retains the exact workspace port selected for one contextual call and
@@ -51,6 +52,7 @@ impl PostCallWorkspaceEffectFence {
         self.finish_sequence_observed(result).0
     }
 
+    #[cfg(test)]
     pub(super) fn finish_sequence_observed(
         self,
         result: Result<ValueSequence, RuntimeError>,
@@ -73,6 +75,7 @@ impl PostCallWorkspaceEffectFence {
         self.finish_optional_sequence_observed(result).0
     }
 
+    #[cfg(test)]
     pub(super) fn finish_optional_sequence_observed(
         self,
         result: Result<Option<ValueSequence>, RuntimeError>,
@@ -83,6 +86,55 @@ impl PostCallWorkspaceEffectFence {
         self.finish_optional_rooted_observed(result)
     }
 
+    pub(super) fn finish_owned_sequence_observed(
+        self,
+        result: Result<crate::execution::RootedValueSequence, RuntimeError>,
+    ) -> (
+        Result<crate::execution::RootedValueSequence, RuntimeError>,
+        PostCallObservationOutcome,
+    ) {
+        let (result, outcome) = self.finish_optional_owned_sequence_observed(result.map(Some));
+        (
+            result.map(|sequence| sequence.expect("selected builtin result remains present")),
+            outcome,
+        )
+    }
+
+    pub(super) fn finish_optional_owned_sequence_observed(
+        self,
+        result: Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+    ) -> (
+        Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+        PostCallObservationOutcome,
+    ) {
+        if self.workspace.is_none() {
+            let outcome = match &result {
+                Ok(Some(_)) => PostCallObservationOutcome::CompletedSuccess,
+                Err(_) => PostCallObservationOutcome::CompletedFailure,
+                Ok(None) => PostCallObservationOutcome::Unattributable,
+            };
+            return (result, outcome);
+        }
+        match result {
+            Ok(None) => (Ok(None), PostCallObservationOutcome::Unattributable),
+            Err(error) => {
+                let outcome = if self.checkpoint().is_ok() {
+                    PostCallObservationOutcome::CompletedFailure
+                } else {
+                    PostCallObservationOutcome::Unattributable
+                };
+                (Err(error), outcome)
+            }
+            Ok(Some(value)) => match self.checkpoint() {
+                Ok(()) => (
+                    Ok(Some(value)),
+                    PostCallObservationOutcome::CompletedSuccess,
+                ),
+                Err(error) => (Err(error), PostCallObservationOutcome::Unattributable),
+            },
+        }
+    }
+
     #[cfg(test)]
     fn finish_optional_rooted<T: runmat_gc::Trace>(
         self,
@@ -91,6 +143,7 @@ impl PostCallWorkspaceEffectFence {
         self.finish_optional_rooted_observed(result).0
     }
 
+    #[cfg(test)]
     fn finish_optional_rooted_observed<T: runmat_gc::Trace>(
         self,
         result: Result<Option<T>, RuntimeError>,

@@ -7,11 +7,12 @@ pub(crate) fn warmup_noop(
     pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-noop-elementwise"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-noop-pass-elementwise"),
@@ -30,11 +31,12 @@ pub(crate) fn run(
     bind_group: &wgpu::BindGroup,
     workgroups_x: u32,
 ) -> anyhow::Result<()> {
-    let mut enc = emission
-        .device()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut enc = pending.profiled_encoder(
+        emission,
+        &wgpu::CommandEncoderDescriptor {
             label: Some("runmat-elementwise-encoder"),
-        });
+        },
+    );
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-elementwise-pass"),

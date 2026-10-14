@@ -150,7 +150,10 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Num(gain) = block_on(dcgain_builtin(sys)).expect("dcgain") else {
+        let Value::Num(gain) = sys
+            .with_owned(|sys| block_on(dcgain_builtin(sys)))
+            .expect("dcgain")
+        else {
             panic!("expected scalar gain");
         };
         assert!((gain - 2.0 / 3.0).abs() < 1.0e-12);
@@ -183,7 +186,10 @@ mod tests {
                 arguments.push(Value::Num(sample_time));
             }
             let sys = block_on(crate::call_builtin_async("tf", &arguments)).expect("tf");
-            let Value::Num(gain) = block_on(dcgain_builtin(sys)).expect("dcgain") else {
+            let Value::Num(gain) = sys
+                .with_owned(|sys| block_on(dcgain_builtin(sys)))
+                .expect("dcgain")
+            else {
                 panic!("expected real infinite gain");
             };
             assert!(gain.is_infinite());
@@ -214,7 +220,10 @@ mod tests {
             ],
         ))
         .expect("tf with integer coefficients");
-        let Value::Num(gain) = block_on(dcgain_builtin(sys)).expect("dcgain model object") else {
+        let Value::Num(gain) = sys
+            .with_owned(|sys| block_on(dcgain_builtin(sys)))
+            .expect("dcgain model object")
+        else {
             panic!("real scalar gain");
         };
         assert!((gain - 2.0 / 3.0).abs() < 1.0e-12);

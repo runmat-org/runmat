@@ -55,9 +55,14 @@ fn im2uint16_map_error(
 #[runtime_builtin(
     name = "im2uint16",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::im2uint16"
 )]
-async fn im2uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn im2uint16_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     if rest.len() > 1 {
         return Err(im2uint16_error(&IM2UINT16_ERROR_TOO_MANY_INPUTS));
     }
@@ -73,6 +78,7 @@ async fn im2uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         _ => None,
     };
     super::conversion_mode::execute(
+        runtime.as_ref(),
         NAME,
         value,
         mode,
@@ -87,7 +93,7 @@ async fn im2uint16_execute(
     value: Value,
     mode: ImageIndexMode,
     resident_source: Option<runmat_accelerate_api::GpuTensorHandle>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let value = if matches!(value, Value::GpuTensor(_)) {
         common::gather_value(NAME, &value)
             .await
@@ -159,8 +165,10 @@ async fn im2uint16_execute(
             format!("type {}", class_name_for_value(&other)),
         )),
     }?;
-    common::restore_resident_numeric_result(resident_source.as_ref(), result, NAME)
-        .map_err(|err| im2uint16_map_error(err, &IM2UINT16_ERROR_INTERNAL))
+    let output = common::restore_resident_numeric_result(resident_source.as_ref(), result, NAME)
+        .map_err(|err| im2uint16_map_error(err, &IM2UINT16_ERROR_INTERNAL))?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| im2uint16_map_error(err.into_runtime_error(), &IM2UINT16_ERROR_INTERNAL))
 }
 
 fn ensure_resident_integer_class_supported(

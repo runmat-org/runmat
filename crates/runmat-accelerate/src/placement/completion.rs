@@ -3,6 +3,7 @@ use super::LocalPlacementFeedback;
 use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderOperationReceipt,
 };
+use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
 use runmat_runtime::context::RuntimeGraphObservationPermit;
 use runmat_runtime::context::RuntimePlacementFeedbackSource;
 use runmat_runtime::context::VmFusionFeedbackLease;
@@ -13,10 +14,12 @@ use runmat_runtime::context::VmFusionFeedbackLease;
 pub(crate) fn publish_provider_feedback(
     receipt: ProviderOperationReceipt,
     feedback: LocalPlacementFeedback,
+    command_contribution: Option<CommandProviderContribution>,
 ) {
     publish_provider_feedback_with_boundary(
         receipt,
         feedback,
+        command_contribution,
         CandidateTimingBoundary::PreparationBodyCleanup,
         None,
     );
@@ -30,10 +33,12 @@ pub(crate) fn publish_provider_feedback_full_call(
     receipt: ProviderOperationReceipt,
     feedback: LocalPlacementFeedback,
     prelude: std::time::Duration,
+    command_contribution: Option<CommandProviderContribution>,
 ) {
     publish_provider_feedback_with_boundary(
         receipt,
         feedback,
+        command_contribution,
         CandidateTimingBoundary::FullCall { prelude },
         None,
     );
@@ -46,10 +51,12 @@ pub(crate) fn publish_provider_feedback_vm_full_call(
     feedback: LocalPlacementFeedback,
     prelude: std::time::Duration,
     installation: VmFusionFeedbackLease,
+    command_contribution: Option<CommandProviderContribution>,
 ) {
     publish_provider_feedback_with_boundary(
         receipt,
         feedback,
+        command_contribution,
         CandidateTimingBoundary::FullCall { prelude },
         Some(installation),
     );
@@ -64,6 +71,7 @@ enum CandidateTimingBoundary {
 fn publish_provider_feedback_with_boundary(
     mut receipt: ProviderOperationReceipt,
     feedback: LocalPlacementFeedback,
+    command_contribution: Option<CommandProviderContribution>,
     boundary: CandidateTimingBoundary,
     installation: Option<VmFusionFeedbackLease>,
 ) {
@@ -84,6 +92,7 @@ fn publish_provider_feedback_with_boundary(
     };
     let mut source = DeferredProviderFeedback {
         receipt,
+        command_contribution,
         signature: feedback.signature,
         candidate: feedback.candidate,
         kind: feedback.kind,
@@ -106,6 +115,7 @@ fn publish_provider_feedback_with_boundary(
 
 struct DeferredProviderFeedback {
     receipt: ProviderOperationReceipt,
+    command_contribution: Option<CommandProviderContribution>,
     signature: runmat_execution::PlacementSignature,
     candidate: String,
     kind: runmat_execution::ExecutionCandidateKind,
@@ -114,6 +124,15 @@ struct DeferredProviderFeedback {
     terminal_without_feedback: bool,
     boundary: CandidateTimingBoundary,
     installation: Option<VmFusionFeedbackLease>,
+}
+
+impl DeferredProviderFeedback {
+    fn retire_unattributable(&mut self) {
+        if let Some(contribution) = self.command_contribution.take() {
+            contribution.complete(ProviderObservationTerminal::Missing);
+        }
+        self.terminal_without_feedback = true;
+    }
 }
 
 impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
@@ -127,7 +146,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
         {
             self.receipt.fail(ProviderObservationFailure::Abandoned);
             let _ = self.receipt.take_completed();
-            self.terminal_without_feedback = true;
+            self.retire_unattributable();
             return None;
         }
         if self
@@ -137,7 +156,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
         {
             self.receipt.fail(ProviderObservationFailure::Abandoned);
             let _ = self.receipt.take_completed();
-            self.terminal_without_feedback = true;
+            self.retire_unattributable();
             return None;
         }
         if self.cancellation.is_cancelled() {
@@ -148,7 +167,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
             .permit
             .authorizes(&self.signature, &self.candidate, self.kind)
         {
-            self.terminal_without_feedback = true;
+            self.retire_unattributable();
             return None;
         }
         if self
@@ -156,8 +175,25 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
             .as_ref()
             .is_some_and(|lease| !lease.is_current())
         {
-            self.terminal_without_feedback = true;
+            self.retire_unattributable();
             return None;
+        }
+        if let Some(contribution) = self.command_contribution.take() {
+            let terminal = match observation.status {
+                ProviderObservationStatus::Completed { .. } => {
+                    ProviderObservationTerminal::Completed {
+                        gpu_execution: observation.verified_wgpu_compute_elapsed,
+                        kernel_count: observation.verified_wgpu_dispatches,
+                    }
+                }
+                ProviderObservationStatus::Failed(ProviderObservationFailure::ProviderFailed) => {
+                    ProviderObservationTerminal::Failed
+                }
+                ProviderObservationStatus::Failed(_) | ProviderObservationStatus::Pending => {
+                    ProviderObservationTerminal::Missing
+                }
+            };
+            contribution.complete(terminal);
         }
         let (elapsed, succeeded) = match observation.status {
             ProviderObservationStatus::Completed { total_elapsed, .. } => {
@@ -262,6 +298,7 @@ fn source_for_test(
     };
     DeferredProviderFeedback {
         receipt,
+        command_contribution: None,
         permit: std::sync::Arc::new(ReceiptFixturePermit(signature.cache_key())),
         signature,
         candidate: "provider.fixture".into(),
@@ -276,7 +313,10 @@ fn source_for_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::observation::ProviderObservationClock;
+    use runmat_accelerate_api::observation::{ProviderObservationClock, WgpuSubmissionMeasurement};
+    use runmat_execution::profiling::{
+        CommandProfilingRoot, ObservedMetricCoverage, ProviderObservationCounts,
+    };
     use runmat_execution::{
         CandidateCostUnavailable, CandidateObservationEvidence, Digest, ExecutionCandidateKind,
         PlacementExecutionAuthorityRevision, PlacementInvalidation, PlacementRevision,
@@ -301,6 +341,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn invalidated_selected_receipts_cannot_publish_and_fresh_selection_can() {
         let session = Rc::new(crate::placement::PlacementSession::default());
+        let command = CommandProfilingRoot::new();
         let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ))
@@ -333,10 +374,15 @@ mod tests {
 
         let pending = ProviderOperationReceipt::new();
         let completion = pending.recorder().submission().unwrap();
-        publish_provider_feedback(pending, selected(signature.clone()));
+        publish_provider_feedback(
+            pending,
+            selected(signature.clone()),
+            command.receipt().begin_provider_operation(),
+        );
         session.invalidate(PlacementInvalidation::Provider { digest: provider });
         completion.complete();
         RuntimePlacementService::drain_feedback(session.as_ref());
+        assert_eq!(command.seal().observations.expect("valid").missing, 1);
         assert_eq!(
             session.observed_candidate_duration(&signature, candidate, kind),
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
@@ -346,7 +392,7 @@ mod tests {
         ready.recorder().submission().unwrap().complete();
         let invalidated = selected(signature.clone());
         session.invalidate(PlacementInvalidation::Provider { digest: provider });
-        publish_provider_feedback(ready, invalidated);
+        publish_provider_feedback(ready, invalidated, None);
         assert_eq!(
             session.observed_candidate_duration(&signature, candidate, kind),
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
@@ -354,7 +400,7 @@ mod tests {
 
         let fresh = ProviderOperationReceipt::new();
         fresh.recorder().submission().unwrap().complete();
-        publish_provider_feedback(fresh, selected(signature.clone()));
+        publish_provider_feedback(fresh, selected(signature.clone()), None);
         assert_eq!(
             session.observed_candidate_duration(&signature, candidate, kind),
             CandidateObservationEvidence::Unavailable(
@@ -369,6 +415,7 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn deferred_total_adds_exact_prelude_without_counting_queue_drain_delay() {
+        let command = CommandProfilingRoot::new();
         let clock = Arc::new(TestClock::default());
         let mut receipt = ProviderOperationReceipt::with_clock(clock.clone());
         let completion = receipt.recorder().submission().unwrap();
@@ -380,14 +427,39 @@ mod tests {
                 prelude: std::time::Duration::from_nanos(80),
             },
         );
+        source.command_contribution = command.receipt().begin_provider_operation();
         assert!(source.take_ready().is_none());
         assert!(!source.terminal_without_feedback());
         clock.0.store(20, Ordering::SeqCst);
-        completion.complete();
+        completion
+            .capture_completion()
+            .complete_with_wgpu(WgpuSubmissionMeasurement {
+                device_elapsed: None,
+                compute_elapsed: Some(std::time::Duration::from_nanos(7)),
+                dispatches: None,
+                query_allocation: None,
+            });
         clock.0.store(1_000, Ordering::SeqCst);
         let feedback = source.take_ready().expect("provider completion is ready");
         assert!(feedback.succeeded);
         assert_eq!(feedback.total_elapsed_ns, 100);
+        let snapshot = command.seal();
+        assert_eq!(
+            snapshot.observations,
+            Some(ProviderObservationCounts {
+                incomplete: 1,
+                ..ProviderObservationCounts::default()
+            })
+        );
+        assert_eq!(snapshot.gpu_execution, None);
+        assert_eq!(snapshot.kernel_count, None);
+        assert_eq!(
+            snapshot.observed_metric_coverage,
+            Some(ObservedMetricCoverage {
+                gpu_execution: true,
+                kernel_count: false,
+            })
+        );
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]

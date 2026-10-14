@@ -257,12 +257,12 @@ impl WgpuProvider {
             )?;
             if gram_bytes > 0 {
                 let gram_copy_label = format!("{label}-gram-copy");
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some(gram_copy_label.as_str()),
-                        });
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some(gram_copy_label.as_str()),
+                    },
+                );
                 encoder.copy_buffer_to_buffer(
                     gram_entry.buffer.as_ref(),
                     0,
@@ -290,9 +290,7 @@ impl WgpuProvider {
                 std::mem::size_of::<QrPowerIterParams>() as u64,
                 "runmat-qr-power-params",
             )?;
-            emission
-                .queue()
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
 
             let layout = &self.pipelines.qr_power_iter.get(emission)?.layout;
             let bind_entries = [

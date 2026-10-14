@@ -1,7 +1,32 @@
 //! Private-name observation from the selected VM definition registry.
-use super::FunctionRegistry;
+use super::{FunctionBytecode, FunctionRegistry, PrivateSourceDirectory};
 use runmat_hir::FunctionId;
 use std::path::Path;
+
+#[path = "private_resolution/view.rs"]
+mod view;
+pub use view::PublishedNameResolutionView;
+
+#[derive(Clone, Copy)]
+struct PrivateNameFact<'a> {
+    function: FunctionId,
+    display_name: &'a str,
+    source_file: Option<&'a str>,
+    private_owner_scope: &'a str,
+    private_source_owner: Option<&'a PrivateSourceDirectory>,
+}
+
+impl<'a> From<&'a FunctionBytecode> for PrivateNameFact<'a> {
+    fn from(body: &'a FunctionBytecode) -> Self {
+        Self {
+            function: body.function,
+            display_name: &body.display_name,
+            source_file: body.source_file.as_deref(),
+            private_owner_scope: &body.private_owner_scope,
+            private_source_owner: body.private_source_owner.as_ref(),
+        }
+    }
+}
 
 impl FunctionRegistry {
     /// Empty owner scope denotes a loose function-file directory, not global
@@ -12,49 +37,27 @@ impl FunctionRegistry {
         caller: FunctionId,
         name: &str,
     ) -> Option<FunctionId> {
-        let body = self.get(caller)?;
-        if !body.private_owner_scope.is_empty() {
-            if name.contains('.') {
-                return None;
-            }
-            if self.static_overlay.is_some() {
-                let scoped_name = format!("{}.__private__.{name}", body.private_owner_scope);
-                let owners = self.definition_dependency_owners(caller)?;
-                return unique_private_candidate(
-                    &scoped_name,
-                    "",
-                    body.private_source_owner.as_ref(),
-                    private_owner_directory(body)?,
-                    owners.iter().filter_map(|(id, _)| self.get(*id)),
-                );
-            }
-            let selected = self.resolve_name_in_private_scope(&body.private_owner_scope, name)?;
-            return self.get_current(selected).map(|_| selected);
-        }
-        if name.contains('.') {
-            return None;
-        }
-        let lexical_owner = private_owner_directory(body)?;
-        let synthetic_name = format!("__private__.{name}");
+        let body = PrivateNameFact::from(self.get(caller)?);
         if self.static_overlay.is_some() {
-            // An imported dynamic callable is retained-only. Its selected
-            // private dependencies are the exact leased bodies in this view,
-            // never arbitrary retired definitions or published replacements.
+            // A retained view enumerates only its exact leased graph, never
+            // a later published body at the same numeric function ID.
             let owners = self.definition_dependency_owners(caller)?;
-            unique_private_candidate(
-                &synthetic_name,
+            resolve_private_name(
+                body,
                 name,
-                body.private_source_owner.as_ref(),
-                lexical_owner,
-                owners.iter().filter_map(|(id, _)| self.get(*id)),
+                true,
+                |scoped| self.resolve_name(scoped),
+                owners
+                    .iter()
+                    .filter_map(|(id, _)| self.get(*id).map(PrivateNameFact::from)),
             )
         } else {
-            unique_private_candidate(
-                &synthetic_name,
+            resolve_private_name(
+                body,
                 name,
-                body.private_source_owner.as_ref(),
-                lexical_owner,
-                self.functions.values(),
+                false,
+                |scoped| self.resolve_name(scoped),
+                self.functions.values().map(PrivateNameFact::from),
             )
         }
     }
@@ -93,8 +96,40 @@ impl FunctionRegistry {
     }
 }
 
-fn private_owner_directory(body: &super::FunctionBytecode) -> Option<&Path> {
-    let source = Path::new(body.source_file.as_deref()?);
+fn resolve_private_name<'a>(
+    caller: PrivateNameFact<'_>,
+    name: &str,
+    static_overlay: bool,
+    resolve_current: impl Fn(&str) -> Option<FunctionId>,
+    candidates: impl Iterator<Item = PrivateNameFact<'a>>,
+) -> Option<FunctionId> {
+    if name.contains('.') {
+        return None;
+    }
+    if !caller.private_owner_scope.is_empty() {
+        let scoped_name = format!("{}.__private__.{name}", caller.private_owner_scope);
+        if static_overlay {
+            return unique_private_candidate(
+                &scoped_name,
+                "",
+                caller.private_source_owner,
+                private_owner_directory(caller.source_file)?,
+                candidates,
+            );
+        }
+        return resolve_current(&scoped_name);
+    }
+    unique_private_candidate(
+        &format!("__private__.{name}"),
+        name,
+        caller.private_source_owner,
+        private_owner_directory(caller.source_file)?,
+        candidates,
+    )
+}
+
+fn private_owner_directory(source_file: Option<&str>) -> Option<&Path> {
+    let source = Path::new(source_file?);
     let directory = source.parent()?;
     if directory
         .file_name()
@@ -112,12 +147,12 @@ fn unique_private_candidate<'a>(
     name: &str,
     captured_owner: Option<&super::PrivateSourceDirectory>,
     lexical_owner: &Path,
-    candidates: impl Iterator<Item = &'a super::FunctionBytecode>,
+    candidates: impl Iterator<Item = PrivateNameFact<'a>>,
 ) -> Option<FunctionId> {
     let mut matches = candidates.filter(|candidate| {
         (candidate.display_name == synthetic_name
             || (!name.is_empty() && candidate.display_name == name))
-            && candidate.source_file.as_deref().is_some_and(|source| {
+            && candidate.source_file.is_some_and(|source| {
                 let path = Path::new(source);
                 let Some(private_directory) = path.parent() else {
                     return false;
@@ -126,7 +161,7 @@ fn unique_private_candidate<'a>(
                     .file_name()
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.eq_ignore_ascii_case("private"))
-                    && match (captured_owner, candidate.private_source_owner.as_ref()) {
+                    && match (captured_owner, candidate.private_source_owner) {
                         (Some(caller), Some(candidate))
                             if caller.is_known() && candidate.is_known() =>
                         {
@@ -155,6 +190,8 @@ mod tests {
         }
     }
 
+    fn assert_send_sync<T: Send + Sync>() {}
+
     #[test]
     fn loose_private_observation_requires_exact_published_caller_directory() {
         let root = std::env::temp_dir().join("runmat-private-resolution-source-fixture");
@@ -169,6 +206,25 @@ mod tests {
             functions.insert(FunctionId(id), body(id, name, Some(&path)));
         }
         let registry = FunctionRegistry::new(functions);
+        assert_send_sync::<view::PrivateNameResolutionView>();
+        assert_send_sync::<view::PublishedNameResolutionView>();
+        let published = registry.published_name_resolution_view();
+        for name in ["left_entry", "right_entry", "__private__.helper", "missing"] {
+            assert_eq!(published.resolve_name(name), registry.resolve_name(name));
+        }
+        let view = registry.private_name_resolution_view();
+        for (caller, name) in [
+            (1, "helper"),
+            (2, "helper"),
+            (3, "helper"),
+            (1, "pkg.helper"),
+            (999, "helper"),
+        ] {
+            assert_eq!(
+                view.resolve_private_name_for_caller(FunctionId(caller), name),
+                registry.resolve_private_name_for_caller(FunctionId(caller), name)
+            );
+        }
         assert_eq!(
             registry.resolve_private_name_for_caller(FunctionId(1), "helper"),
             Some(FunctionId(4))
@@ -252,6 +308,13 @@ mod tests {
             .owned_view(FunctionId(1), &authority)
             .expect("old caller remains leased");
         assert_eq!(
+            retained
+                .private_name_resolution_view()
+                .resolve_private_name_for_caller(FunctionId(1), "helper"),
+            retained.resolve_private_name_for_caller(FunctionId(1), "helper"),
+            "the immutable view preserves the exact retained private selection"
+        );
+        assert_eq!(
             retained.get(FunctionId(1)).unwrap().source_file,
             Some(root.join("old/entry.m").to_string_lossy().into_owned())
         );
@@ -289,6 +352,61 @@ mod tests {
                 .resolve_private_name_for_caller(FunctionId(1), "helper"),
             Some(FunctionId(2)),
             "the republished caller uses its new captured directory"
+        );
+    }
+
+    #[test]
+    fn retained_dependency_caller_observes_the_same_selected_graph_as_sendable_view() {
+        let root = std::env::temp_dir().join("runmat-private-selected-graph-fixture");
+        let mut entry = body(1, "entry", Some(&root.join("entry.m")));
+        entry.instructions = vec![
+            Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1),
+            Instr::CallSemanticFunctionMulti(FunctionId(4), 0, 1),
+        ];
+        let mut dependency = body(2, "dependency", Some(&root.join("dependency.m")));
+        dependency.instructions = vec![Instr::CallSemanticFunctionMulti(FunctionId(3), 0, 1)];
+        let helper = body(
+            3,
+            "__private__.helper",
+            Some(&root.join("private/helper.m")),
+        );
+        let unrelated_sibling = body(
+            4,
+            "__private__.helper",
+            Some(&root.join("private/sibling.m")),
+        );
+        let registry = FunctionRegistry::new(HashMap::from([
+            (FunctionId(1), entry),
+            (FunctionId(2), dependency),
+            (FunctionId(3), helper),
+            (FunctionId(4), unrelated_sibling),
+        ]));
+        let owners = registry
+            .definition_dependency_owners(FunctionId(1))
+            .expect("root owns its static dependency graph");
+        let issuer = std::sync::Arc::new(());
+        let authority = runmat_value::BoundFunctionAuthority::local(
+            std::sync::Arc::downgrade(&issuer),
+            runmat_value::FunctionDefinitionOwner::issue(&owners[0].1, owners[0].0 .0),
+            owners[1..]
+                .iter()
+                .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+                .collect(),
+            runmat_value::LocalExport::Ephemeral,
+        );
+        let retained = registry
+            .owned_view(FunctionId(1), &authority)
+            .expect("root's exact retained graph");
+        let view = retained.private_name_resolution_view();
+        assert_eq!(
+            retained.resolve_private_name_for_caller(FunctionId(2), "helper"),
+            None,
+            "two same-owner private candidates in the selected static graph are ambiguous"
+        );
+        assert_eq!(
+            view.resolve_private_name_for_caller(FunctionId(2), "helper"),
+            retained.resolve_private_name_for_caller(FunctionId(2), "helper"),
+            "a dependency caller must see precisely its live registry candidate membership"
         );
     }
 

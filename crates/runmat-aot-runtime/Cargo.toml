@@ -13,6 +13,8 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-config = { workspace = true }
 runmat-accelerate = { workspace = true, features = ["cuda"] }
 runmat-accelerate-api = { workspace = true }
 runmat-native-codegen = { workspace = true, default-features = false }
@@ -32,6 +34,7 @@ tempfile = "3.12"
 [dev-dependencies]
 runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
+runmat-gc = { workspace = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -3,6 +3,7 @@ use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 pub const LINKAGE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "linkage" },
     category: "stats/ml",

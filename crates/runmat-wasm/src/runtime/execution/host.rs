@@ -2,7 +2,7 @@ use js_sys::{Function, Promise, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
+use runmat_execution_artifact::{ProgramExecutionResponse, WorkerProgramRequest};
 use serde::Serialize;
 
 use super::model::BrowserExecutionCapabilities;
@@ -41,7 +41,7 @@ impl BrowserExecutionHost {
         &self,
         task_id: &str,
         worker_id: &str,
-        request: &ProgramExecutionRequest,
+        request: &WorkerProgramRequest,
     ) -> Result<ProgramExecutionResponse, String> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -49,7 +49,7 @@ impl BrowserExecutionHost {
             schema_version: u16,
             task_id: &'a str,
             worker_id: &'a str,
-            program: &'a ProgramExecutionRequest,
+            program: &'a WorkerProgramRequest,
         }
         let function = required_method(&self.target, "launch").map_err(js_error)?;
         let serializer =

@@ -1,16 +1,12 @@
 use runmat_value::{ObjectInstance, Value};
 
 use crate::builtins::common::binary::BinaryInputPlan;
+use crate::execution::{RootedValue, RootedValues, RootedValuesBuilder};
 
 pub(crate) struct TabularBinaryPlan {
-    source: ObjectInstance,
-    variables: Vec<(String, Value, Value)>,
-}
-
-impl TabularBinaryPlan {
-    pub(crate) fn variables(self) -> (ObjectInstance, Vec<(String, Value, Value)>) {
-        (self.source, self.variables)
-    }
+    pub(crate) source: ObjectInstance,
+    pub(crate) variables: Vec<(String, Value)>,
+    pub(crate) right_values: RootedValues,
 }
 
 pub(crate) fn plan(
@@ -33,27 +29,39 @@ pub(crate) fn plan(
             pair_tabular(left, right).map(BinaryInputPlan::Structured)
         }
         (Value::Object(source), other) if super::super::is_tabular_object(&source) => {
-            let variables = super::super::table_variables(&source)
+            let fields = super::super::table_variables(&source)
                 .map_err(|error| error.to_string())?
-                .fields
-                .into_iter()
-                .map(|(name, left)| (name, left, other.clone()))
-                .collect();
+                .fields;
+            let mut variables = Vec::with_capacity(fields.len());
+            let mut right_values = RootedValuesBuilder::with_capacity(fields.len());
+            for (name, left) in fields {
+                right_values
+                    .push(other.clone())
+                    .map_err(|error| error.to_string())?;
+                variables.push((name, left));
+            }
             Ok(BinaryInputPlan::Structured(TabularBinaryPlan {
                 source,
                 variables,
+                right_values: right_values.finish().map_err(|error| error.to_string())?,
             }))
         }
         (other, Value::Object(source)) if super::super::is_tabular_object(&source) => {
-            let variables = super::super::table_variables(&source)
+            let fields = super::super::table_variables(&source)
                 .map_err(|error| error.to_string())?
-                .fields
-                .into_iter()
-                .map(|(name, right)| (name, other.clone(), right))
-                .collect();
+                .fields;
+            let mut variables = Vec::with_capacity(fields.len());
+            let mut right_values = RootedValuesBuilder::with_capacity(fields.len());
+            for (name, right) in fields {
+                right_values
+                    .push(right)
+                    .map_err(|error| error.to_string())?;
+                variables.push((name, other.clone()));
+            }
             Ok(BinaryInputPlan::Structured(TabularBinaryPlan {
                 source,
                 variables,
+                right_values: right_values.finish().map_err(|error| error.to_string())?,
             }))
         }
         (left, right) => Ok(BinaryInputPlan::Values(Box::new((left, right)))),
@@ -78,22 +86,31 @@ fn pair_tabular(left: ObjectInstance, right: ObjectInstance) -> Result<TabularBi
     let right_rows = super::rows::align_right_to_left(&left, &right)?;
     let identity_rows = right_rows.iter().copied().eq(0..right_rows.len());
     let mut variables = Vec::with_capacity(left_variables.fields.len());
+    let mut right_values = RootedValuesBuilder::with_capacity(left_variables.fields.len());
     for (name, left_value) in left_variables.fields {
         let right_value = right_variables
             .fields
             .get(&name)
             .cloned()
             .ok_or_else(|| format!("right tabular operand is missing variable '{name}'"))?;
-        let right_value = if identity_rows {
-            right_value
+        if identity_rows {
+            right_values
+                .push(right_value)
+                .map_err(|error| error.to_string())?;
         } else {
-            super::super::select_rows(&right_value, &right_rows)
-                .map_err(|error| error.to_string())?
-        };
-        variables.push((name, left_value, right_value));
+            // `select_rows` is synchronous and currently retires no
+            // temporary managed root internally. Publish its newly selected
+            // graph immediately, before another field selection can allocate.
+            let selected = super::super::select_rows(&right_value, &right_rows)
+                .map_err(|error| error.to_string())?;
+            let selected = RootedValue::new(selected).map_err(|error| error.to_string())?;
+            right_values.push_owned(selected);
+        }
+        variables.push((name, left_value));
     }
     Ok(TabularBinaryPlan {
         source: left,
         variables,
+        right_values: right_values.finish().map_err(|error| error.to_string())?,
     })
 }

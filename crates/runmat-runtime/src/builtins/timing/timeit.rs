@@ -262,48 +262,43 @@ fn prepare_callable(
             Ok(TimeitCallable {
                 handle: if crate::is_well_formed_qualified_name(&normalized) {
                     handle_for_name(&normalized)
-                        .unwrap_or_else(|| Value::ExternalFunctionHandle(normalized))
+                        .unwrap_or_else(|| Value::external_function_handle(normalized))
                 } else {
-                    Value::ExternalFunctionHandle(normalized)
+                    Value::external_function_handle(normalized)
                 },
                 num_outputs,
             })
         }
-        Value::BoundFunctionHandle {
-            name,
-            function,
-            authority,
-            source_role,
-            source_file,
-        } => {
-            let normalized = normalize_name(&name)?;
+        Value::BoundFunctionHandle(handle) => {
+            let normalized = normalize_name(&handle.name)?;
+            let mut data = handle.into_data();
+            data.name = normalized;
             Ok(TimeitCallable {
-                handle: Value::BoundFunctionHandle {
-                    name: normalized,
-                    function,
-                    authority,
-                    source_role,
-                    source_file,
-                },
+                handle: Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                    data,
+                )),
                 num_outputs,
             })
         }
-        Value::Closure(mut closure) => Ok(TimeitCallable {
+        Value::Closure(closure) => Ok(TimeitCallable {
             handle: {
                 if closure.binding.is_none() {
                     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(
                         &closure.function_name,
                     ) {
-                        closure.binding =
-                            Some(crate::user_functions::bound_function_binding_for(function));
-                        closure.source_file = crate::user_functions::source_file_for(function);
-                        if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
-                            closure.source_role =
-                                crate::user_functions::source_function_for(function)
-                                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| {
-                                        info.role
-                                    });
-                        }
+                        return Ok(TimeitCallable {
+                            handle: Value::Closure(
+                                closure.bind_resolved(
+                                    crate::user_functions::bound_function_binding_for(function),
+                                    crate::user_functions::source_function_for(function).map_or(
+                                        runmat_types::FunctionSourceRole::Unknown,
+                                        |info| info.role,
+                                    ),
+                                    crate::user_functions::source_file_for(function),
+                                ),
+                            ),
+                            num_outputs,
+                        });
                     }
                 }
                 Value::Closure(closure)

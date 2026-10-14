@@ -471,6 +471,42 @@ fn bare_builtin_identifier_after_external_visibility_uses_workspace_first_call()
 }
 
 #[test]
+fn current_workspace_eval_exposes_later_reads_without_exposing_evalin_base() {
+    for source in [
+        "eval('h = 4;'); x = h;",
+        "text = evalc('h = 4;'); x = h;",
+        "[first, second] = eval('h = 4; [2, 3]'); x = h;",
+    ] {
+        let assembly = lower_semantic(source);
+        assert!(
+            assembly.bindings.iter().any(|binding| {
+                binding.name.0 == "h" && matches!(binding.role, BindingRole::ExternalWorkspace)
+            }),
+            "{source}"
+        );
+    }
+
+    let ast =
+        runmat_parser::parse("function x = read_local(); evalin('base', 'h = 4;'); x = h; end")
+            .unwrap();
+    let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:UndefinedVariable")
+    );
+}
+
+#[test]
+fn shadowed_eval_does_not_expose_external_bindings() {
+    let ast = runmat_parser::parse("eval = @sin; eval('h = 4;'); x = h;").unwrap();
+    let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:UndefinedVariable")
+    );
+}
+
+#[test]
 fn shadowed_workspace_loading_identifier_does_not_expose_external_bindings() {
     let ast = runmat_parser::parse("load = 7; load; x = missing_name;").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
@@ -802,7 +838,10 @@ fn class_method_lowers_to_function_referenced_by_class() {
     assert_eq!(method_function.enclosing_class, Some(class.declaration.id));
     assert!(matches!(
         method_function.kind,
-        FunctionKind::ClassMethod { is_static: false }
+        FunctionKind::ClassMethod {
+            is_static: false,
+            role: runmat_types::ClassMethodRole::Ordinary
+        }
     ));
 }
 

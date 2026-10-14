@@ -50,9 +50,28 @@ pub fn is_event_data_value(value: &Value) -> bool {
     match value {
         Value::HandleObject(handle) => {
             crate::is_handle_valid(handle)
-                && is_class_or_subclass(&handle.class_name, &standard::EVENT_DATA.owned())
                 && runmat_gc::gc_with_value(&handle.target, |value| {
-                    matches!(value, Value::Object(object) if object.class_name == handle.class_name)
+                    let Value::Object(object) = value else {
+                        return false;
+                    };
+                    if object.class_name != handle.class_name
+                        || object.has_native_payload() && object.selected_class().is_some()
+                    {
+                        return false;
+                    }
+                    if let Some(facts) = object.selected_class() {
+                        return facts.is_handle_class()
+                            && super::checked_receiver_projection(object)
+                                .ok()
+                                .flatten()
+                                .is_some_and(|receiver| {
+                                    receiver.class_is_or_subclass(
+                                        facts.class(),
+                                        &standard::EVENT_DATA.owned(),
+                                    )
+                                });
+                    }
+                    is_class_or_subclass(&handle.class_name, &standard::EVENT_DATA.owned())
                 })
                 .unwrap_or(false)
         }

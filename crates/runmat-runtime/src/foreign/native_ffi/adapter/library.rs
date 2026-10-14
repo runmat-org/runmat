@@ -118,7 +118,14 @@ impl NativeFfiAdapter {
         if alias.trim().is_empty() {
             return Err(invalid_call("native library alias must not be empty"));
         }
-        if self.state.borrow().libraries.contains_key(alias) {
+        if self.state.borrow().libraries.contains_key(alias)
+            || self
+                .project_catalog
+                .borrow()
+                .loads
+                .iter()
+                .any(|load| load.alias == alias)
+        {
             return Err(invalid_call(format!(
                 "native library alias `{alias}` is already loaded"
             )));
@@ -134,8 +141,39 @@ impl NativeFfiAdapter {
         artifact_identity: String,
         allow_missing_symbols: bool,
     ) -> Result<Vec<String>, RuntimeError> {
-        let library = runmat_native_ffi::LoadedLibrary::open(library_path.as_ref())
+        let (entry, missing) = self.prepare_library_entry(
+            library_path.as_ref(),
+            metadata,
+            artifact_identity,
+            allow_missing_symbols,
+            false,
+        )?;
+        self.state
+            .borrow_mut()
+            .libraries
+            .insert(alias.into(), entry);
+        Ok(missing)
+    }
+
+    pub(super) fn prepare_library_entry(
+        &self,
+        library_path: &std::path::Path,
+        metadata: NativeLibraryMetadata,
+        artifact_identity: String,
+        allow_missing_symbols: bool,
+        project_owned: bool,
+    ) -> Result<(LibraryEntry, Vec<String>), RuntimeError> {
+        let mut library = runmat_native_ffi::LoadedLibrary::open(library_path)
             .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
+        if let Some(lease) = self.private_byte_lease.borrow().as_ref() {
+            if library_path.starts_with(lease.path()) {
+                library
+                    .attach_private_byte_lease(lease.clone())
+                    .map_err(|error| {
+                        foreign_error_with_source(ForeignErrorKind::LoadFailed, error)
+                    })?;
+            }
+        }
         let mut metadata = metadata;
         let mut missing = Vec::new();
         for declared_library in &mut metadata.libraries {
@@ -161,18 +199,15 @@ impl NativeFfiAdapter {
                 ),
             ));
         }
-        self.prepared_artifact_identities
-            .borrow_mut()
-            .insert(artifact_identity.clone());
-        self.state.borrow_mut().libraries.insert(
-            alias.into(),
+        Ok((
             LibraryEntry {
                 library: Rc::new(library),
                 metadata: Rc::new(metadata),
                 artifact_identity,
+                project_owned,
             },
-        );
-        Ok(missing)
+            missing,
+        ))
     }
 
     pub(super) fn unload(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {

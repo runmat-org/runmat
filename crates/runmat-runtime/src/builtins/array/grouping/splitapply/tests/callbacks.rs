@@ -37,14 +37,13 @@ fn table_variables_become_callback_arguments_in_table_order() {
 #[test]
 fn concatenates_each_requested_callback_output_independently() {
     let _outputs = crate::output_count::push_output_count(Some(2));
-    let outputs = output_list(
-        call(
-            "min",
-            tensor(vec![4.0, 1.0, 3.0, 2.0], vec![4, 1]),
-            vec![tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1])],
-        )
-        .unwrap(),
-    );
-    assert_eq!(numeric(outputs[0].clone()), vec![1.0, 2.0]);
-    assert_eq!(numeric(outputs[1].clone()), vec![2.0, 2.0]);
+    let result = call(
+        "min",
+        tensor(vec![4.0, 1.0, 3.0, 2.0], vec![4, 1]),
+        vec![tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1])],
+    )
+    .unwrap();
+    let outputs = output_list(&result);
+    assert_eq!(numeric_value(&outputs[0]), vec![1.0, 2.0]);
+    assert_eq!(numeric_value(&outputs[1]), vec![2.0, 2.0]);
 }
