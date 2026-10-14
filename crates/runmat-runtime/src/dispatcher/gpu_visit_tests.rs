@@ -47,7 +47,7 @@ fn gather_traversal_matches_recursive_materialization() {
                 output
             );
         }
-        provider.free(&handle).unwrap();
+        handle.release().unwrap();
     });
 }
 

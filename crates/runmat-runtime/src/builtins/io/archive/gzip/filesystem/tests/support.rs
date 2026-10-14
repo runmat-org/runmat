@@ -311,7 +311,11 @@ pub(super) struct ReplacingHttpService {
 }
 
 impl RuntimeHttpService for ReplacingHttpService {
-    fn send(&self, _: HttpRequest) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
+    fn send(
+        &self,
+        _: crate::context::RuntimeContext,
+        _: HttpRequest,
+    ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         self.sends.fetch_add(1, Ordering::SeqCst);
         let mut guard = self
             .guard

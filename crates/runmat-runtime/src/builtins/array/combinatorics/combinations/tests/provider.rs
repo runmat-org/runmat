@@ -74,7 +74,7 @@ fn nested_resident_gather_preserves_exact_class_shape_and_borrowed_buffer() {
             .unwrap(),
             Value::Tensor(input)
         );
-        provider.free(&handle).unwrap();
+        handle.release().unwrap();
     });
 }
 

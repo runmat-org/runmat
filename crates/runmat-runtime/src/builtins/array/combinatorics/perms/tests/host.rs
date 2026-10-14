@@ -40,7 +40,7 @@ fn complex_single_permutations_preserve_storage_and_exact_components() {
             );
         }
         assert_eq!(
-            output.shape,
+            output.shape(),
             vec![if columns == 2 { 2 } else { 1 }, columns]
         );
     }
