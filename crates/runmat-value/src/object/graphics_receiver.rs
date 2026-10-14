@@ -1,4 +1,4 @@
-//! Opaque identity carried by a live native Figure or Axes object.
+//! Opaque identity carried by a live native graphics object.
 //!
 //! The plot registry issues one shared lease for each selected object. A
 //! numeric route and generation are diagnostic coordinates only; consumers
@@ -9,8 +9,17 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GraphicsReceiverKind {
-    Figure { figure: u32 },
-    Axes { figure: u32, index: usize },
+    Figure {
+        figure: u32,
+    },
+    Axes {
+        figure: u32,
+        index: usize,
+    },
+    /// The numeric child key is a diagnostic coordinate, not object authority.
+    PlotChild {
+        id: u64,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]

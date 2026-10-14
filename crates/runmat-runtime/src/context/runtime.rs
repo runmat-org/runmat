@@ -745,28 +745,37 @@ impl RuntimeContext {
         slot: u64,
         root: crate::builtins::plotting::state::callbacks::PlotCallbackRoot,
     ) {
-        let mut callbacks = self.state.plot_callbacks.borrow_mut();
-        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
-        callbacks.insert(slot, root);
+        let (retired, replaced) = {
+            let mut callbacks = self.state.plot_callbacks.borrow_mut();
+            let retired = crate::builtins::plotting::state::callbacks::take_revoked(&mut callbacks);
+            let replaced = callbacks.insert(slot, root);
+            (retired, replaced)
+        };
+        drop(replaced);
+        drop(retired);
     }
 
     #[cfg(feature = "plot-core")]
     pub(crate) fn plot_callback(&self, slot: u64) -> Option<runmat_value::Value> {
-        let mut callbacks = self.state.plot_callbacks.borrow_mut();
-        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
-        callbacks.get(&slot).map(|root| root.value.clone())
-    }
-
-    #[cfg(feature = "plot-core")]
-    pub(crate) fn release_plot_callback(&self, slot: u64) {
-        self.state.plot_callbacks.borrow_mut().remove(&slot);
+        let (retired, value) = {
+            let mut callbacks = self.state.plot_callbacks.borrow_mut();
+            let retired = crate::builtins::plotting::state::callbacks::take_revoked(&mut callbacks);
+            let value = callbacks.get(&slot).map(|root| root.value.clone());
+            (retired, value)
+        };
+        drop(retired);
+        value
     }
 
     #[cfg(all(test, feature = "plot-core"))]
     pub(crate) fn plot_callback_root_count(&self) -> usize {
-        let mut callbacks = self.state.plot_callbacks.borrow_mut();
-        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
-        callbacks.len()
+        let (retired, count) = {
+            let mut callbacks = self.state.plot_callbacks.borrow_mut();
+            let retired = crate::builtins::plotting::state::callbacks::take_revoked(&mut callbacks);
+            (retired, callbacks.len())
+        };
+        drop(retired);
+        count
     }
 
     /// Invalidate only this session's staged host-effect invocations when its

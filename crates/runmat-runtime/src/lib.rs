@@ -121,6 +121,9 @@ pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
             let expected_class = match receiver.kind() {
                 runmat_value::GraphicsReceiverKind::Figure { .. } => runmat_types::standard::FIGURE,
                 runmat_value::GraphicsReceiverKind::Axes { .. } => runmat_types::standard::AXES,
+                // Chart HandleObject projection is not admitted until its
+                // canonical class and lease-bearing property owner exist.
+                runmat_value::GraphicsReceiverKind::PlotChild { .. } => return false,
             };
             handle.class_name == expected_class
                 && plotting_hooks::graphics_receiver_valid(&receiver)

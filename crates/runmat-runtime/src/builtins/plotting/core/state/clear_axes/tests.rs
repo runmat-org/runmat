@@ -46,11 +46,24 @@ fn targeted_clear_rebases_other_axes_handles_without_selection_drift() {
     select_axes_for_figure(handle, 1).unwrap();
     let removed = register_line_handle(handle, 0, removed_index);
     let survivor = register_line_handle(handle, 1, survivor_index);
+    let removed_receiver = plot_child_graphics_receiver(removed as u64)
+        .unwrap()
+        .expect("removed child");
+    let survivor_receiver = plot_child_graphics_receiver(survivor as u64)
+        .unwrap()
+        .expect("surviving child");
     let bar = ensure_colorbar_for_axes(handle, 0).unwrap();
     clear_axes_target(handle, 0, false).unwrap();
     assert_eq!(current_axes_state().active_index, 1);
     assert_eq!(current_figure_handle(), handle);
     assert!(plot_child_handle_snapshot(removed).is_err());
+    assert!(!graphics_receiver_valid(&removed_receiver));
+    assert!(graphics_receiver_valid(&survivor_receiver));
+    assert!(survivor_receiver.shares_lease(
+        &plot_child_graphics_receiver(survivor as u64)
+            .unwrap()
+            .expect("same remapped child")
+    ));
     assert_eq!(
         plot_child_handle_snapshot(survivor).unwrap().plot_index(),
         Some(0)

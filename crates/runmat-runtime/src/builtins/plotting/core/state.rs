@@ -64,6 +64,9 @@ pub use colormap::{
 mod clear_axes;
 #[path = "state/graphics_receiver.rs"]
 mod graphics_receiver;
+#[path = "state/plot_child_registry.rs"]
+mod plot_child_registry;
+use plot_child_registry::{PlotChildEntry, PlotChildRegistry};
 #[path = "state/interaction_exclusivity.rs"]
 mod interaction_exclusivity;
 pub use clear_axes::clear_axes_target;
@@ -72,7 +75,8 @@ pub use clear_axes::clear_current_axes;
 use graphics_receiver::issue_graphics_receiver;
 pub use graphics_receiver::{
     axes_graphics_receiver, axes_graphics_receiver_for_scene, figure_graphics_receiver,
-    graphics_receiver_object, graphics_receiver_valid, GraphicsReceiverIssueError,
+    graphics_receiver_object, graphics_receiver_valid, plot_child_graphics_receiver,
+    GraphicsReceiverIssueError,
 };
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
@@ -546,7 +550,7 @@ struct PlotRegistry {
     root_units: String,
     root_show_hidden_handles: bool,
     next_plot_child_handle: u64,
-    plot_children: HashMap<u64, PlotChildHandleState>,
+    plot_children: PlotChildRegistry,
     link_axes_groups: Vec<LinkAxesGroup>,
 }
 
@@ -745,23 +749,6 @@ pub enum FunctionSurfaceFunctionRef {
     /// Retain the actual callable, including its exact definition owner and
     /// captured environment, rather than reconstructing it from display data.
     OwnedCallable(callbacks::PlotCallableToken),
-}
-
-pub(crate) fn release_function_ref(function: &FunctionSurfaceFunctionRef) {
-    if let FunctionSurfaceFunctionRef::OwnedCallable(token) = function {
-        callbacks::release(token);
-    }
-}
-
-pub(crate) fn release_function_state(function: &FunctionSurfaceFunctionState) {
-    match function {
-        FunctionSurfaceFunctionState::Explicit(function) => release_function_ref(function),
-        FunctionSurfaceFunctionState::Parametric { x, y, z } => {
-            release_function_ref(x);
-            release_function_ref(y);
-            release_function_ref(z);
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1208,7 +1195,7 @@ impl Default for PlotRegistry {
             root_units: "pixels".to_string(),
             root_show_hidden_handles: false,
             next_plot_child_handle: 1u64 << 40,
-            plot_children: HashMap::new(),
+            plot_children: PlotChildRegistry::default(),
             link_axes_groups: Vec::new(),
         }
     }
@@ -1340,9 +1327,11 @@ struct PlotRegistryGuard<'a> {
     #[cfg(test)]
     _test_lock: Option<std::sync::MutexGuard<'static, ()>>,
     // Rust drops fields in declaration order. The registry and optional test
-    // lock retire before the exact scene identities held here.
+    // lock retire before the exact scene identities and removed child owners
+    // held here. Callable roots may finalize or reenter plotting on drop.
     _scene_transaction_lease: Option<GraphicsSceneLease>,
     _extra_scene_transaction_leases: Vec<GraphicsSceneLease>,
+    _retired_plot_children: Vec<PlotChildEntry>,
 }
 
 impl<'a> PlotRegistryGuard<'a> {
@@ -1356,6 +1345,7 @@ impl<'a> PlotRegistryGuard<'a> {
             _test_lock,
             _scene_transaction_lease: None,
             _extra_scene_transaction_leases: Vec::new(),
+            _retired_plot_children: Vec::new(),
         }
     }
 
@@ -1365,6 +1355,7 @@ impl<'a> PlotRegistryGuard<'a> {
             inner,
             _scene_transaction_lease: None,
             _extra_scene_transaction_leases: Vec::new(),
+            _retired_plot_children: Vec::new(),
         }
     }
 }
@@ -1374,6 +1365,7 @@ impl Drop for PlotRegistryGuard<'_> {
         self._scene_transaction_lease = self.inner.scene_transaction_lease.take();
         self._extra_scene_transaction_leases =
             std::mem::take(&mut self.inner.extra_scene_transaction_leases);
+        self._retired_plot_children = std::mem::take(&mut self.inner.plot_children.retired);
     }
 }
 
@@ -4097,7 +4089,9 @@ pub fn update_textscatter_handle_state(
     let mut reg = registry();
     let id = handle.round() as u64;
     match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::TextScatter(slot)) => {
+        Some(PlotChildHandleState::TextScatter(slot))
+            if slot.figure == state.figure && slot.axes_index == state.axes_index =>
+        {
             *slot = state;
             Ok(())
         }
@@ -4137,7 +4131,9 @@ pub fn update_wordcloud_handle_state(
     let mut reg = registry();
     let id = handle.round() as u64;
     match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::WordCloud(slot)) => {
+        Some(PlotChildHandleState::WordCloud(slot))
+            if slot.figure == state.figure && slot.axes_index == state.axes_index =>
+        {
             *slot = state;
             Ok(())
         }
@@ -4177,7 +4173,7 @@ pub fn update_stackedplot_handle_state(
     let mut reg = registry();
     let id = handle.round() as u64;
     match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::StackedPlot(slot)) => {
+        Some(PlotChildHandleState::StackedPlot(slot)) if slot.figure == state.figure => {
             *slot = state;
             Ok(())
         }
@@ -4948,20 +4944,10 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Heatmap(heatmap) => heatmap.figure != handle,
         PlotChildHandleState::Binscatter(binscatter) => binscatter.figure != handle,
         PlotChildHandleState::FunctionSurface(function_surface) => {
-            if function_surface.figure == handle {
-                release_function_state(&function_surface.function);
-                false
-            } else {
-                true
-            }
+            function_surface.figure != handle
         }
         PlotChildHandleState::FunctionContour(function_contour) => {
-            if function_contour.figure == handle {
-                release_function_ref(&function_contour.function);
-                false
-            } else {
-                true
-            }
+            function_contour.figure != handle
         }
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
@@ -5105,17 +5091,6 @@ pub fn reset_recent_figures() {
 
 pub fn reset_plot_state() {
     let mut reg = registry();
-    for child in reg.plot_children.values() {
-        match child {
-            PlotChildHandleState::FunctionSurface(surface) => {
-                release_function_state(&surface.function);
-            }
-            PlotChildHandleState::FunctionContour(contour) => {
-                release_function_ref(&contour.function);
-            }
-            _ => {}
-        }
-    }
     let retired = std::mem::take(&mut *reg);
     drop(reg);
     drop(retired);
@@ -5928,17 +5903,6 @@ mod tests {
     #[cfg(test)]
     pub(crate) fn reset_for_tests() {
         let mut reg = registry();
-        for child in reg.plot_children.values() {
-            match child {
-                PlotChildHandleState::FunctionSurface(surface) => {
-                    release_function_state(&surface.function);
-                }
-                PlotChildHandleState::FunctionContour(contour) => {
-                    release_function_ref(&contour.function);
-                }
-                _ => {}
-            }
-        }
         reg.plot_children.clear();
         let retired = std::mem::take(&mut reg.figures);
         reg.current = FigureHandle::default();
