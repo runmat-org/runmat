@@ -222,6 +222,77 @@ mod tests {
         });
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn replicated_nested_foreign_references_share_one_release_lease() {
+        use runmat_value::{
+            ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef, ForeignResourceKey,
+            ForeignResourceRelease, ForeignTypeIdentity,
+        };
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Debug, Default)]
+        struct Releases(Mutex<Vec<ForeignResourceKey>>);
+
+        impl ForeignResourceRelease for Releases {
+            fn release(&self, key: &ForeignResourceKey) {
+                self.0
+                    .lock()
+                    .expect("release observations")
+                    .push(key.clone());
+            }
+        }
+
+        let releases = Arc::new(Releases::default());
+        let key = ForeignResourceKey {
+            host_identity: "deal-test-host".into(),
+            handle: 17,
+            generation: 3,
+        };
+        let reference = ForeignRef::managed(
+            key.clone(),
+            ForeignTypeIdentity {
+                family: "native-ffi".into(),
+                name: "opaque-resource".into(),
+                version: 1,
+            },
+            ForeignOwnership::Shared,
+            ForeignAffinity::OriginProcess,
+            ForeignLifetime::Session,
+            releases.clone(),
+        );
+        let weak = reference.downgrade().expect("managed foreign lease");
+        let input = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::Foreign(reference)], 1, 1)
+                .expect("nested foreign input"),
+        );
+        let Value::OutputList(mut outputs) = call(vec![input], 3).expect("foreign replication")
+        else {
+            panic!("expected replicated outputs");
+        };
+        assert_eq!(outputs.len(), 3);
+        {
+            let original = weak.upgrade().expect("outputs retain foreign lease");
+            for output in &outputs {
+                let Value::Cell(cell) = output else {
+                    panic!("expected nested cell");
+                };
+                let Value::Foreign(alias) = &cell.data[0] else {
+                    panic!("expected foreign reference");
+                };
+                assert_eq!(alias, &original);
+                assert!(alias.shares_managed_lease(&original));
+            }
+        }
+        drop(outputs.pop());
+        drop(outputs.pop());
+        assert!(weak.upgrade().is_some());
+        assert!(releases.0.lock().expect("release observations").is_empty());
+        drop(outputs);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(*releases.0.lock().expect("release observations"), vec![key]);
+    }
+
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
         let _outputs = crate::output_count::push_output_count(Some(outputs));
         block_on(deal_builtin_registered(inputs))

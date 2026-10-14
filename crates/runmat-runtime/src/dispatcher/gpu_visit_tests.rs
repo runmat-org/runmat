@@ -1,6 +1,97 @@
 use super::*;
 
 #[test]
+fn gather_traversal_matches_recursive_materialization() {
+    use crate::builtins::common::{gpu_helpers, test_support};
+    use runmat_value::{
+        CellArray, Closure, IntegerStorage, ObjectInstance, StructArray, StructValue, Tensor,
+    };
+    test_support::with_test_provider(|provider| {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        let resident = Value::GpuTensor(handle.clone());
+        let mut structure = StructValue::new();
+        structure.insert("data", resident.clone());
+        let mut object = ObjectInstance::new("GatherFixture");
+        object.properties.insert("data".into(), resident.clone());
+        let inputs = vec![
+            Value::Cell(CellArray::new_with_shape(vec![resident.clone()], vec![1, 1]).unwrap()),
+            Value::Struct(structure.clone()),
+            Value::StructArray(
+                StructArray::new(vec![structure.clone(), structure], vec![1, 2]).unwrap(),
+            ),
+            Value::Object(object),
+            Value::Closure(Closure::new(
+                "fixture".into(),
+                None,
+                runmat_types::FunctionSourceRole::Anonymous,
+                None,
+                vec![resident],
+                None,
+            )),
+        ];
+        for (input, count) in inputs.into_iter().zip([1, 1, 2, 1, 1]) {
+            let mut handles = Vec::new();
+            try_visit_gathered_gpu_handles(&input, &mut |h| handles.push(h.buffer_id())).unwrap();
+            assert_eq!(handles, vec![handle.buffer_id(); count]);
+            let output = futures::executor::block_on(gather_if_needed_async(&input)).unwrap();
+            let mut remaining = 0;
+            try_visit_gathered_gpu_handles(&output, &mut |_| remaining += 1).unwrap();
+            assert_eq!(remaining, 0);
+            assert_eq!(
+                futures::executor::block_on(gather_if_needed_async(&output)).unwrap(),
+                output
+            );
+        }
+        provider.free(&handle).unwrap();
+    });
+}
+
+#[test]
+fn gather_traversal_preserves_passthrough_identity_and_rejects_transient_sequences() {
+    runmat_gc::gc_test_context(|| {
+        let allocation_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = allocation_owner
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine resident allocation");
+        let target = runmat_gc::gc_allocate(Value::GpuTensor(allocation.handle)).unwrap();
+        let handle = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "TraversalFixture".into(),
+            target,
+            valid: true,
+        });
+        let array = Value::ObjectArray(
+            runmat_value::ObjectArray::new("TraversalFixture", vec![handle.clone()], vec![1, 1])
+                .unwrap(),
+        );
+        runmat_gc::gc_with_value_mut(&target, |_| {
+            for input in [&handle, &array] {
+                let mut visited = 0;
+                try_visit_gathered_gpu_handles(input, &mut |_| visited += 1).unwrap();
+                assert_eq!(visited, 0);
+                assert_eq!(
+                    futures::executor::block_on(gather_if_needed_async(input)).unwrap(),
+                    *input
+                );
+            }
+        })
+        .unwrap();
+        let transient = Value::OutputList(vec![Value::Num(1.0)]);
+        let admission = try_visit_gathered_gpu_handles(&transient, &mut |_| {}).unwrap_err();
+        let runtime = futures::executor::block_on(gather_if_needed_async(&transient)).unwrap_err();
+        assert_eq!(admission.identifier(), runtime.identifier());
+    });
+}
+
+#[test]
 fn live_borrow_conflict_is_not_absence_of_device_aliases() {
     runmat_gc::gc_test_context(|| {
         let target = runmat_gc::gc_allocate(Value::Num(1.)).unwrap();

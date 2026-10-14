@@ -70,7 +70,14 @@ pub const NCHOOSEK_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "Output allocation or container construction fails.",
     message: "nchoosek: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const NCHOOSEK_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NCHOOSEK.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:nchoosek:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "nchoosek: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
+    NCHOOSEK_ERROR_TOO_MANY_OUTPUTS,
     NCHOOSEK_ERROR_INVALID_INPUT,
     NCHOOSEK_ERROR_TOO_LARGE,
     NCHOOSEK_ERROR_INTERNAL,

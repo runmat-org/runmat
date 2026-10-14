@@ -49,8 +49,17 @@ pub const COMBINATIONS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDesc
     when: "Provider gather or table construction fails.",
     message: "combinations: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] =
-    [COMBINATIONS_ERROR_TOO_LARGE, COMBINATIONS_ERROR_INTERNAL];
+pub const COMBINATIONS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMBINATIONS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:combinations:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "combinations: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    COMBINATIONS_ERROR_TOO_MANY_OUTPUTS,
+    COMBINATIONS_ERROR_TOO_LARGE,
+    COMBINATIONS_ERROR_INTERNAL,
+];
 pub const COMBINATIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

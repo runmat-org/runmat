@@ -56,6 +56,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::combinatorics::perms"
 )]
 async fn perms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PERMS_DESCRIPTOR,
+        &runmat_builtins::PERMS_ERROR_TOO_MANY_OUTPUTS,
+        "perms",
+    )?;
     if !rest.is_empty() {
         return Err(error::with_message(
             &PERMS_ERROR_INVALID_INPUT,

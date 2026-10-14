@@ -136,7 +136,21 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
 pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError> {
-    gather_if_needed_async_impl(value).await
+    let mut values = gather_values_async(std::slice::from_ref(value)).await?;
+    Ok(values.remove(0))
+}
+
+/// Admit the complete argument set before any provider download. Resident
+/// descriptor and view facts are immutable on current handles.
+pub(crate) async fn gather_values_async(values: &[Value]) -> Result<Vec<Value>, RuntimeError> {
+    for value in values {
+        try_visit_gathered_gpu_handles(value, &mut |_| {})?;
+    }
+    let mut output = Vec::with_capacity(values.len());
+    for value in values {
+        output.push(gather_if_needed_async_impl(value).await?);
+    }
+    Ok(output)
 }
 
 fn gather_if_needed_async_impl<'a>(
@@ -747,29 +761,45 @@ pub fn try_visit_gpu_handles(
     value: &Value,
     visitor: &mut impl FnMut(&GpuTensorHandle),
 ) -> Result<(), RuntimeError> {
-    visit_gpu_handles_inner(value, visitor, &mut Vec::new())
+    visit_gpu_handles_inner(value, visitor, &mut Vec::new(), GpuTraversal::Ownership)
+}
+
+/// Inspect precisely the resident payloads that scalar gather will download.
+/// Identity-bearing passthrough values are deliberately not followed.
+pub(crate) fn try_visit_gathered_gpu_handles(
+    value: &Value,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+) -> Result<(), RuntimeError> {
+    visit_gpu_handles_inner(value, visitor, &mut Vec::new(), GpuTraversal::Gather)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuTraversal {
+    Ownership,
+    Gather,
 }
 
 fn visit_gpu_handles_inner(
     value: &Value,
     visitor: &mut impl FnMut(&GpuTensorHandle),
     seen: &mut Vec<runmat_gc_api::GcHandle>,
+    traversal: GpuTraversal,
 ) -> Result<(), RuntimeError> {
     match value {
         Value::GpuTensor(handle) => visitor(handle),
         Value::Cell(cell) => cell
             .data
             .iter()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         Value::Struct(value) => value
             .fields
             .values()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         Value::StructArray(array) => {
             let mut result = Ok(());
             array.for_each_value(|value| {
                 if result.is_ok() {
-                    result = visit_gpu_handles_inner(value, visitor, seen);
+                    result = visit_gpu_handles_inner(value, visitor, seen, traversal);
                 }
             });
             result?;
@@ -777,23 +807,31 @@ fn visit_gpu_handles_inner(
         Value::Object(value) => value
             .properties
             .values()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         Value::ObjectArray(array) => array
             .data()
             .iter()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
-        Value::HandleObject(handle) => visit_gpu_target(&handle.target, visitor, seen)?,
-        Value::Listener(listener) => {
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
+        Value::HandleObject(handle) if traversal == GpuTraversal::Ownership => {
+            visit_gpu_target(&handle.target, visitor, seen)?;
+        }
+        Value::Listener(listener) if traversal == GpuTraversal::Ownership => {
             visit_gpu_target(&listener.target, visitor, seen)?;
             visit_gpu_target(&listener.callback, visitor, seen)?;
         }
         Value::Closure(value) => value
             .captures
             .iter()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
+        Value::OutputList(_) if traversal == GpuTraversal::Gather => {
+            return Err(crate::runtime_error::semantic_error(
+                "TransientSequenceBelowDispatch",
+                "legacy output-list carrier reached scalar gather dispatch",
+            ));
+        }
         Value::OutputList(values) => values
             .iter()
-            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         _ => {}
     }
     Ok(())
@@ -814,7 +852,7 @@ fn visit_gpu_target(
             .with_identifier("RunMat:Gpu:AliasInspectionFailed")
             .build()
     })?;
-    visit_gpu_handles_inner(&value, visitor, seen)
+    visit_gpu_handles_inner(&value, visitor, seen, GpuTraversal::Ownership)
 }
 
 pub(crate) async fn try_call_registered_instance_method(

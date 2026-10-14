@@ -1,3 +1,5 @@
+mod admission;
+
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, ShapeFact, ValueFact, ValueKindFact,
@@ -25,6 +27,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
 
     let selection = request.arguments.get(1);
+    let selection_count = admission::check(request, &mut diagnostics);
     let mut output = input.clone();
     match &output.kind {
         ValueKindFact::Numeric(numeric)
@@ -34,7 +37,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 Some(value) if value.is_scalar() => {
                     coefficient_class::resolve(input, value, &mut diagnostics)
                 }
-                Some(value) if !matches!(value.kind, ValueKindFact::Unknown) => {
+                Some(value) if value.shape.element_count().is_some_and(|count| count != 1) => {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-NCHOOSEK-SELECTION-SCALAR",
                         "nchoosek selection must be a numeric scalar",
@@ -54,9 +57,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 None => ValueFact::unknown(DynamicReason::RuntimeValue),
             };
         }
-        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Character => {
+        ValueKindFact::Numeric(numeric)
+            if numeric.domain == runmat_types::NumericDomain::Real
+                && input.shape.element_count().is_none() =>
+        {
+            // The scalar coefficient route can change class according to k;
+            // unknown population shape is not proof of the vector route.
+            output = ValueFact::unknown(DynamicReason::RuntimeValue);
             output.shape = ShapeFact::Ranked { rank: 2 };
+            output.residency = runmat_types::ResidencyFact::Host;
+        }
+        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Character => {
+            admission::check_vector(input, &mut diagnostics);
+            output.shape = admission::vector_output_shape(input, selection_count);
             support::facts::materialize(&mut output);
+            output.storage = runmat_types::StorageFact::Dense;
             output.residency = runmat_types::ResidencyFact::Host;
         }
         ValueKindFact::Unknown => {

@@ -1,4 +1,18 @@
 use super::*;
+
+#[test]
+fn character_pages_use_full_shape_admission() {
+    for shape in [vec![1, 2, 2], vec![1, 2, 1]] {
+        let count = shape.iter().product();
+        let chars = runmat_value::CharArray::new_with_shape(vec!['x'; count], shape).unwrap();
+        assert_eq!(
+            call(Value::CharArray(chars), Value::Num(1.0))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:nchoosek:InvalidInput")
+        );
+    }
+}
 use crate::builtins::common::test_support;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, LogicalArray, NumericDType, NumericStorage,

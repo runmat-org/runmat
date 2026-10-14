@@ -19,6 +19,14 @@ pub(super) struct CartesianPlan {
 }
 
 pub(super) fn build(lengths: &[usize]) -> BuiltinResult<CartesianPlan> {
+    // A zero factor determines the result independently of every other factor.
+    // No prefix/suffix stride is used when no output row exists.
+    if lengths.contains(&0) {
+        return Ok(CartesianPlan {
+            rows: 0,
+            repetitions: vec![Repetition { outer: 0, inner: 0 }; lengths.len()],
+        });
+    }
     let rows = checked_product(lengths)?;
     if rows > MAX_ROWS {
         return Err(too_large("combinations: output is too large"));

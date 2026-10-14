@@ -57,5 +57,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::combinatorics::combinations"
 )]
 async fn combinations_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::COMBINATIONS_DESCRIPTOR,
+        &runmat_builtins::COMBINATIONS_ERROR_TOO_MANY_OUTPUTS,
+        "combinations",
+    )?;
     execute::apply(first, rest).await
 }

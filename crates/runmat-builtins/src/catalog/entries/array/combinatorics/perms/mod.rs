@@ -54,7 +54,14 @@ pub const PERMS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     when: "Output allocation, provider gather, or container construction fails.",
     message: "perms: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const PERMS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PERMS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:perms:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "perms: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
+    PERMS_ERROR_TOO_MANY_OUTPUTS,
     PERMS_ERROR_INVALID_INPUT,
     PERMS_ERROR_TOO_LARGE,
     PERMS_ERROR_INTERNAL,

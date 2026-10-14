@@ -3,12 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(test)]
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
 use url::Url;
 
-use crate::builtins::common::fs::{enumeration, expand_user_path, path_to_string};
+use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::shape::effective_rank;
 use crate::builtins::io::http::transport::{self, HttpMethod, HttpRequest};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -17,6 +18,8 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[path = "gzip/codec.rs"]
 mod codec;
+#[path = "gzip/filesystem.rs"]
+mod filesystem;
 
 #[cfg(test)]
 #[path = "gzip/cooperation_tests.rs"]
@@ -91,14 +94,21 @@ fn path_from_text(text: &str, name: &str) -> BuiltinResult<PathBuf> {
     ))
 }
 
-async fn expand_input_paths(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Vec<PathBuf>> {
+async fn expand_input_paths(
+    filesystem: &filesystem::ArchiveFilesystem,
+    paths: Vec<PathBuf>,
+    name: &str,
+) -> BuiltinResult<Vec<PathBuf>> {
     let mut out = Vec::new();
     for path in paths {
         let text = path_to_string(&path);
         if text.contains('*') || text.contains('?') {
-            let mut matches: Vec<_> = enumeration::matching(&path)
-                .await
-                .map_err(|err| archive_error(name, format!("{name}: {err}")))?
+            let mut matches: Vec<_> = filesystem
+                .matching(&path)
+                .await?
+                .map_err(|source| {
+                    archive_error_with_source(name, format!("{name}: {source}"), source)
+                })?
                 .into_iter()
                 .map(|entry| entry.path)
                 .collect();
@@ -108,14 +118,14 @@ async fn expand_input_paths(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Ve
             out.extend(matches);
             continue;
         }
-        if vfs::metadata_async(&path)
-            .await
+        if filesystem
+            .metadata(&path)
+            .await?
             .is_ok_and(|meta| meta.is_dir())
         {
-            for entry in enumeration::directory(&path)
-                .await
-                .map_err(|err| archive_error(name, format!("{name}: {err}")))?
-            {
+            for entry in filesystem.directory(&path).await?.map_err(|source| {
+                archive_error_with_source(name, format!("{name}: {source}"), source)
+            })? {
                 if !entry.metadata.is_dir() {
                     out.push(entry.path);
                 }
@@ -124,7 +134,16 @@ async fn expand_input_paths(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Ve
             out.push(path);
         }
     }
+    for path in &out {
+        gzip_filename(path)?;
+    }
     Ok(out)
+}
+
+fn gzip_filename(path: &Path) -> BuiltinResult<&str> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| archive_error("gzip", "gzip: invalid filename"))
 }
 
 fn char_value(text: &str) -> Value {
@@ -169,49 +188,35 @@ async fn gzip_builtin(
     } else {
         None
     };
-    let mut cooperation = context
-        .as_ref()
-        .map(crate::context::RuntimeContext::cpu_cooperation);
-    codec::checkpoint(&mut cooperation.as_mut(), 0).await?;
-    // Admit every public control before the first filesystem operation.
-    let inputs = expand_input_paths(inputs, "gzip").await?;
+    // Capture only after every public control has been admitted, and before
+    // the first suspension or filesystem operation.
+    let mut filesystem =
+        filesystem::ArchiveFilesystem::capture(codec::Operation::Compress, context.as_ref())?;
+    filesystem.checkpoint(0).await?;
+    let inputs = expand_input_paths(&filesystem, inputs, "gzip").await?;
     let mut outputs = Vec::with_capacity(inputs.len());
     for input in inputs {
-        outputs.push(gzip_one(&input, output_folder.as_deref(), cooperation.as_mut()).await?);
+        outputs.push(gzip_one(&mut filesystem, &input, output_folder.as_deref()).await?);
     }
     cellstr(outputs, "gzip")
 }
 
 async fn gzip_one(
+    filesystem: &mut filesystem::ArchiveFilesystem,
     input: &Path,
     output_folder: Option<&Path>,
-    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<PathBuf> {
-    let bytes = vfs::read_async(input)
-        .await
-        .map_err(|err| archive_error("gzip", format!("gzip: {err}")))?;
-    let compressed = codec::transform(
-        &bytes,
-        codec::Operation::Compress,
-        cooperation.as_deref_mut(),
-    )
-    .await?;
-    let filename = input
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| archive_error("gzip", "gzip: invalid filename"))?;
+    let filename = gzip_filename(input)?;
+    let bytes = filesystem.read(input).await?;
+    let compressed = filesystem.transform(&bytes).await?;
     let output = output_folder
         .map(|folder| folder.join(format!("{filename}.gz")))
         .unwrap_or_else(|| input.with_file_name(format!("{filename}.gz")));
-    codec::checkpoint(&mut cooperation, 0).await?;
+    filesystem.checkpoint(0).await?;
     if let Some(parent) = output.parent() {
-        vfs::create_dir_all_async(parent)
-            .await
-            .map_err(|err| archive_error("gzip", format!("gzip: {err}")))?;
+        filesystem.create_dir_all(parent).await?;
     }
-    vfs::write_async(&output, compressed)
-        .await
-        .map_err(|err| archive_error("gzip", format!("gzip: {err}")))?;
+    filesystem.write(&output, &compressed).await?;
     Ok(output)
 }
 
@@ -242,18 +247,17 @@ async fn gunzip_builtin(
     } else {
         None
     };
-    let mut cooperation = context
-        .as_ref()
-        .map(crate::context::RuntimeContext::cpu_cooperation);
-    codec::checkpoint(&mut cooperation.as_mut(), 0).await?;
+    let mut filesystem =
+        filesystem::ArchiveFilesystem::capture(codec::Operation::Decompress, context.as_ref())?;
+    filesystem.checkpoint(0).await?;
     let mut outputs = Vec::with_capacity(inputs.len());
     for input in inputs {
         outputs.push(
             extract_gunzip_source(
+                &mut filesystem,
                 input,
                 output_folder.as_deref(),
                 context.as_ref(),
-                cooperation.as_mut(),
             )
             .await?,
         );
@@ -262,8 +266,8 @@ async fn gunzip_builtin(
 }
 
 enum GunzipSource {
-    Path(PathBuf),
-    Url(Url),
+    Path { path: PathBuf, filename: String },
+    Url { url: Url, filename: String },
 }
 
 fn gunzip_sources_from_value(value: &Value) -> BuiltinResult<Vec<GunzipSource>> {
@@ -290,21 +294,37 @@ fn gunzip_sources_from_value(value: &Value) -> BuiltinResult<Vec<GunzipSource>> 
 fn parse_gunzip_source(text: &str) -> BuiltinResult<GunzipSource> {
     if let Ok(url) = Url::parse(text) {
         if matches!(url.scheme(), "http" | "https") {
-            return Ok(GunzipSource::Url(url));
+            let filename = url
+                .path_segments()
+                .and_then(|mut segments| segments.next_back())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("download.gz")
+                .to_owned();
+            gunzip_output_name(&filename)?;
+            return Ok(GunzipSource::Url { url, filename });
         }
     }
-    Ok(GunzipSource::Path(path_from_text(text, "gunzip")?))
+    let path = path_from_text(text, "gunzip")?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| archive_error("gunzip", "gunzip: invalid filename"))?
+        .to_owned();
+    gunzip_output_name(&filename)?;
+    Ok(GunzipSource::Path { path, filename })
 }
 
 async fn extract_gunzip_source(
+    filesystem: &mut filesystem::ArchiveFilesystem,
     source: GunzipSource,
     output_folder: Option<&Path>,
     context: Option<&crate::context::RuntimeContext>,
-    cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<PathBuf> {
     match source {
-        GunzipSource::Path(path) => gunzip_one(&path, output_folder, cooperation).await,
-        GunzipSource::Url(url) => {
+        GunzipSource::Path { path, filename } => {
+            gunzip_one(filesystem, &path, &filename, output_folder).await
+        }
+        GunzipSource::Url { url, filename } => {
             let response = transport::send_request(
                 HttpRequest {
                     url: url.clone(),
@@ -323,43 +343,48 @@ async fn extract_gunzip_source(
                 }
                 transport::TransportCallError::Runtime(err) => err,
             })?;
-            let name = url
-                .path_segments()
-                .and_then(|mut segments| segments.next_back())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("download.gz");
-            gunzip_bytes(&response.body, name, output_folder, cooperation).await
+            filesystem.check()?;
+            gunzip_bytes(filesystem, &response.body, &filename, output_folder).await
         }
     }
 }
 
 async fn gunzip_one(
+    filesystem: &mut filesystem::ArchiveFilesystem,
     input: &Path,
+    filename: &str,
     output_folder: Option<&Path>,
-    cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<PathBuf> {
-    let bytes = vfs::read_async(input)
-        .await
-        .map_err(|err| archive_error("gunzip", format!("gunzip: {err}")))?;
-    let filename = input
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| archive_error("gunzip", "gunzip: invalid filename"))?;
+    let bytes = filesystem.read(input).await?;
     gunzip_bytes(
+        filesystem,
         &bytes,
         filename,
         output_folder.or_else(|| input.parent()),
-        cooperation,
     )
     .await
 }
 
 async fn gunzip_bytes(
+    filesystem: &mut filesystem::ArchiveFilesystem,
     bytes: &[u8],
     filename: &str,
     output_folder: Option<&Path>,
-    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<PathBuf> {
+    let output_name = gunzip_output_name(filename)?;
+    let decoded = filesystem.transform(bytes).await?;
+    let output = output_folder
+        .map(|folder| folder.join(output_name))
+        .unwrap_or_else(|| PathBuf::from(output_name));
+    filesystem.checkpoint(0).await?;
+    if let Some(parent) = output.parent() {
+        filesystem.create_dir_all(parent).await?;
+    }
+    filesystem.write(&output, &decoded).await?;
+    Ok(output)
+}
+
+fn gunzip_output_name(filename: &str) -> BuiltinResult<&str> {
     let output_name = filename.strip_suffix(".gz").unwrap_or(filename);
     if output_name.is_empty()
         || matches!(output_name, "." | "..")
@@ -367,25 +392,7 @@ async fn gunzip_bytes(
     {
         return Err(archive_error("gunzip", "gunzip: invalid output filename"));
     }
-    let decoded = codec::transform(
-        bytes,
-        codec::Operation::Decompress,
-        cooperation.as_deref_mut(),
-    )
-    .await?;
-    let output = output_folder
-        .map(|folder| folder.join(output_name))
-        .unwrap_or_else(|| PathBuf::from(output_name));
-    codec::checkpoint(&mut cooperation, 0).await?;
-    if let Some(parent) = output.parent() {
-        vfs::create_dir_all_async(parent)
-            .await
-            .map_err(|err| archive_error("gunzip", format!("gunzip: {err}")))?;
-    }
-    vfs::write_async(&output, decoded)
-        .await
-        .map_err(|err| archive_error("gunzip", format!("gunzip: {err}")))?;
-    Ok(output)
+    Ok(output_name)
 }
 
 #[cfg(test)]
@@ -518,12 +525,22 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn decompression_rejects_non_basename_destinations_before_decode_or_write() {
+        let filesystem = std::sync::Arc::new(vfs::MemoryFsProvider::with_current_dir("/workspace"));
+        let mut owner = vfs::with_provider_override(filesystem, || {
+            filesystem::ArchiveFilesystem::capture(codec::Operation::Decompress, None)
+                .expect("archive owner")
+        });
         for name in [".gz", "..gz", "...gz", "../escape.gz", "nested\\escape.gz"] {
-            let error =
-                futures::executor::block_on(gunzip_bytes(b"not a gzip stream", name, None, None))
-                    .unwrap_err();
+            let error = futures::executor::block_on(gunzip_bytes(
+                &mut owner,
+                b"not a gzip stream",
+                name,
+                None,
+            ))
+            .unwrap_err();
             assert!(
                 error.message().contains("invalid output filename"),
                 "{name}: {error}"

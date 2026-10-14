@@ -113,7 +113,7 @@ fn logical(data: Vec<u8>, shape: Vec<usize>, selection: usize) -> BuiltinResult<
 }
 
 fn characters(array: CharArray, selection: usize) -> BuiltinResult<Value> {
-    let population = arguments::vector_len(&[array.rows, array.cols])?;
+    let population = arguments::vector_len(&array.shape)?;
     let rows = output_rows(population, selection)?;
     CharArray::new(rows_data(&array.data, rows, selection)?, rows, selection)
         .map(Value::CharArray)

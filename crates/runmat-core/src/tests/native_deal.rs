@@ -25,6 +25,89 @@ fn wide_tensor() -> Value {
     )
 }
 
+#[test]
+fn deal_replication_executes_in_submitted_parfor_iterations() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let service = std::rc::Rc::new(InProcessMultiLabExecutionService::new(2));
+    session.install_execution_services(service.clone());
+    let source = "pool = parpool(2); input = [0x0020000000000001u64, 0x0020000000000002u64, 0x0020000000000003u64, 0x0020000000000004u64]; first = zeros(1, 4, 'uint64'); second = zeros(1, 4, 'uint64'); parfor (index = 1:4, 2); [left, right] = deal(input(index)); first(index) = left; second(index) = right; end;";
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new("deal-parfor-test@1", "deal_parfor.m", source),
+        None,
+    ))
+    .expect("compile parallel deal contract");
+    let region = unit
+        .bytecode()
+        .parfor_regions
+        .first()
+        .expect("compiler-bound parallel region");
+    assert!(
+        region.contract.effects.0.iter().all(|effect| matches!(
+            effect,
+            runmat_types::EffectKind::MayThrow | runmat_types::EffectKind::Randomness
+        )),
+        "parallel deal effects: {:?}",
+        region.contract.effects
+    );
+    assert!(
+        region
+            .input_variables()
+            .all(|variable| variable.contract.transferable),
+        "parallel deal inputs: {:?}",
+        region.variables
+    );
+    let outcome =
+        execute_text_request(&mut session, source).expect("execute parallel deal replication");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(service.submitted_revisions().len(), 4);
+    let variables = session.get_variables().expect("parallel outputs");
+    let expected = IntegerStorage::U64((1..=4).map(|index| (1_u64 << 53) + index).collect());
+    for name in ["first", "second"] {
+        let Some(Value::Tensor(output)) = variables.get(name) else {
+            panic!("expected exact parallel tensor for {name}");
+        };
+        assert_eq!(output.integer_storage(), Some(&expected));
+        assert_eq!(output.shape(), [1, 4]);
+    }
+}
+
+#[test]
+fn deal_retains_distributed_identity_and_pool_retirement() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); source = uint64([1, 0x0020000000000001u64]); original = distributed(source); [first, second] = deal(original); gatheredFirst = gather(first); gatheredSecond = gather(second);",
+    )
+    .expect("execute distributed deal replication");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    {
+        let variables = session.get_variables().expect("distributed outputs");
+        let Some(Value::Distributed(original)) = variables.get("original") else {
+            panic!("expected distributed input");
+        };
+        for name in ["first", "second"] {
+            let Some(Value::Distributed(alias)) = variables.get(name) else {
+                panic!("expected retained distributed output for {name}");
+            };
+            assert_eq!(alias, original);
+        }
+        for name in ["gatheredFirst", "gatheredSecond"] {
+            assert_eq!(variables.get(name), variables.get("source"));
+        }
+    }
+    execute_text_request(&mut session, "delete(pool);").expect("retire distributed pool");
+    for name in ["first", "second"] {
+        let outcome = execute_text_request(&mut session, &format!("stale = gather({name});"))
+            .expect("retired alias returns a diagnostic");
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "RunMat:parallel:StaleDistributedLease" }));
+    }
+}
+
+#[cfg(feature = "jit")]
 fn assert_wide_aliases(left: &Value, right: &Value) {
     let (Value::Tensor(left), Value::Tensor(right)) = (left, right) else {
         panic!("deal must retain tensor class in both outputs");
