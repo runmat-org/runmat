@@ -6,6 +6,7 @@ mod validation;
 
 use super::stage_failure::StageExecutionFailure;
 use super::*;
+use crate::builtins::common::gpu_helpers::reject_gpu_outputs;
 use runmat_accelerate_api::{
     DeepLearningConv1DCapability, DeepLearningConv1DGradients, DeepLearningConv1DOperands,
     DeepLearningConv1DRequest,
@@ -23,13 +24,17 @@ async fn prepared_parameter(
     role: ParameterRole,
     input: &GpuTensorHandle,
     protected: &[&GpuTensorHandle],
+    cancel: &dyn Fn() -> BuiltinResult<()>,
     function: &'static str,
-) -> BuiltinResult<GpuTensorHandle> {
+) -> Result<GpuTensorHandle, StageExecutionFailure> {
     if let Some(handle) = resident_parameter_handle(layer, role) {
         return Ok(handle.clone());
     }
     let host = parameters::prepare_host_parameter(layer, role, function).await?;
-    parameters::upload_parameter(provider, host, input, protected, function)
+    cancel().map_err(StageExecutionFailure::Abandoned)?;
+    Ok(parameters::upload_parameter(
+        provider, host, input, protected, function,
+    )?)
 }
 
 pub(in crate::builtins::deep_learning) async fn forward(
@@ -47,6 +52,7 @@ pub(in crate::builtins::deep_learning) async fn forward(
         ParameterRole::Weights,
         input,
         &[input],
+        cancel,
         function,
     )
     .await?;
@@ -57,6 +63,7 @@ pub(in crate::builtins::deep_learning) async fn forward(
         ParameterRole::Bias,
         input,
         &[input, &weights],
+        cancel,
         function,
     )
     .await?;
@@ -169,54 +176,98 @@ pub(in crate::builtins::deep_learning) async fn adjoint(
         .map_err(|error| {
             provider_failure(function, "resident convolution adjoint", error.into())
         })?;
-    cancel()?;
-    let mut input_gradient = validation::result(
-        result.input,
+    let DeepLearningConv1DGradients {
+        input: raw_input,
+        weights: raw_weights,
+        bias: raw_bias,
+    } = result;
+    if let Err(error) = cancel() {
+        return Err(reject_gpu_outputs(
+            [raw_input, raw_weights, raw_bias],
+            error,
+        ));
+    }
+    let mut input_gradient = match validation::result(
+        raw_input,
         input,
         weights,
         bias,
         provider,
         &request.input_shape,
         function,
-    )?;
-    let mut weight_gradient = validation::result(
-        result.weights,
+    ) {
+        Ok(gradient) => gradient,
+        Err(error) => return Err(reject_gpu_outputs([raw_weights, raw_bias], error)),
+    };
+    let mut weight_gradient = match validation::result(
+        raw_weights,
         input,
         weights,
         bias,
         provider,
         &request.weights_shape,
         function,
-    )?;
-    let mut bias_gradient = validation::result(
-        result.bias,
+    ) {
+        Ok(gradient) => gradient,
+        Err(error) => return Err(reject_gpu_outputs([input_gradient, raw_bias], error)),
+    };
+    let mut bias_gradient = match validation::result(
+        raw_bias,
         input,
         weights,
         bias,
         provider,
         &request.bias_shape,
         function,
-    )?;
-    validation::distinct_gradients(
+    ) {
+        Ok(gradient) => gradient,
+        Err(error) => return Err(reject_gpu_outputs([input_gradient, weight_gradient], error)),
+    };
+    if let Err(error) = validation::distinct_gradients(
         &input_gradient,
         &weight_gradient,
         &bias_gradient,
         upstream,
         function,
-    )?;
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+    ) {
+        return Err(reject_gpu_outputs(
+            [input_gradient, weight_gradient, bias_gradient],
+            error,
+        ));
+    }
+    if let Err(error) = crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut input_gradient,
         [input, weights, bias, upstream],
-    )?;
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+    ) {
+        return Err(reject_gpu_outputs(
+            [input_gradient, weight_gradient, bias_gradient],
+            error,
+        ));
+    }
+    if let Err(error) = crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut weight_gradient,
         [input, weights, bias, upstream],
-    )?;
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+    ) {
+        return Err(reject_gpu_outputs(
+            [input_gradient, weight_gradient, bias_gradient],
+            error,
+        ));
+    }
+    if let Err(error) = crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut bias_gradient,
         [input, weights, bias, upstream],
-    )?;
-    cancel()?;
+    ) {
+        return Err(reject_gpu_outputs(
+            [input_gradient, weight_gradient, bias_gradient],
+            error,
+        ));
+    }
+    if let Err(error) = cancel() {
+        return Err(reject_gpu_outputs(
+            [input_gradient, weight_gradient, bias_gradient],
+            error,
+        ));
+    }
     Ok(DeepLearningConv1DGradients {
         input: input_gradient,
         weights: weight_gradient,

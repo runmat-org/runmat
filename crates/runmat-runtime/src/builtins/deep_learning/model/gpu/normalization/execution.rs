@@ -1,7 +1,9 @@
 use super::super::stage_failure::StageExecutionFailure;
 use super::super::*;
 use super::validation::{validate_output, validate_statistics};
-use crate::builtins::common::gpu_helpers::propagate_output_provenance;
+use crate::builtins::common::gpu_helpers::{
+    propagate_output_provenance, reject_gpu_output, reject_gpu_outputs,
+};
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
 use runmat_accelerate_api::{DeepLearningLayerNormCapability, DeepLearningLayerNormRequest};
 
@@ -38,13 +40,17 @@ async fn prepare_parameter(
     role: ParameterRole,
     input: &GpuTensorHandle,
     protected: &[&GpuTensorHandle],
+    cancel: &dyn Fn() -> BuiltinResult<()>,
     function: &'static str,
-) -> BuiltinResult<GpuTensorHandle> {
+) -> Result<GpuTensorHandle, StageExecutionFailure> {
     if let Some(handle) = parameter(layer, role) {
         return Ok(handle.clone());
     }
     let host = parameters::prepare_host_parameter(layer, role, function).await?;
-    parameters::upload_parameter(provider, host, input, protected, function)
+    cancel().map_err(StageExecutionFailure::Abandoned)?;
+    Ok(parameters::upload_parameter(
+        provider, host, input, protected, function,
+    )?)
 }
 
 pub(in crate::builtins::deep_learning) async fn forward(
@@ -52,19 +58,19 @@ pub(in crate::builtins::deep_learning) async fn forward(
     input: &GpuTensorHandle,
     stage: &NormalizationStage,
     target_axes: &AxisPlan,
+    cancel: &dyn Fn() -> BuiltinResult<()>,
     function: &'static str,
-) -> BuiltinResult<Result<GpuTensorHandle, GpuCapabilityReason>> {
+) -> Result<Result<GpuTensorHandle, GpuCapabilityReason>, StageExecutionFailure> {
     Ok(execute(
         network,
         input,
         stage,
         target_axes,
         ForwardMode::Ordinary,
-        None,
+        cancel,
         function,
     )
-    .await
-    .map_err(StageExecutionFailure::into_error)?
+    .await?
     .map(|execution| execution.output))
 }
 
@@ -82,7 +88,7 @@ pub(in crate::builtins::deep_learning) async fn forward_recorded(
         stage,
         target_axes,
         ForwardMode::Record,
-        Some(cancel),
+        cancel,
         function,
     )
     .await?
@@ -106,7 +112,7 @@ async fn execute(
     stage: &NormalizationStage,
     target_axes: &AxisPlan,
     mode: ForwardMode,
-    cancel: Option<&dyn Fn() -> BuiltinResult<()>>,
+    cancel: &dyn Fn() -> BuiltinResult<()>,
     function: &'static str,
 ) -> Result<Result<Execution, GpuCapabilityReason>, StageExecutionFailure> {
     // A later composed stage/presentation plan can pre-admit device permutes.
@@ -147,33 +153,29 @@ async fn execute(
             return Ok(Err(GpuCapabilityReason::ResourceLimit))
         }
     }
-    if let Some(cancel) = cancel {
-        cancel().map_err(StageExecutionFailure::Abandoned)?;
-    }
+    cancel().map_err(StageExecutionFailure::Abandoned)?;
     let scale = prepare_parameter(
         provider,
         layer,
         ParameterRole::Scale,
         input,
         &[input],
+        cancel,
         function,
     )
     .await?;
-    if let Some(cancel) = cancel {
-        cancel().map_err(StageExecutionFailure::Abandoned)?;
-    }
+    cancel().map_err(StageExecutionFailure::Abandoned)?;
     let offset = prepare_parameter(
         provider,
         layer,
         ParameterRole::Offset,
         input,
         &[input, &scale],
+        cancel,
         function,
     )
     .await?;
-    if let Some(cancel) = cancel {
-        cancel().map_err(StageExecutionFailure::Abandoned)?;
-    }
+    cancel().map_err(StageExecutionFailure::Abandoned)?;
     let (output, statistics) = match mode {
         ForwardMode::Ordinary => (
             provider
@@ -194,10 +196,13 @@ async fn execute(
             (recorded.output, Some(recorded.statistics))
         }
     };
-    if let Some(cancel) = cancel {
-        cancel().map_err(StageExecutionFailure::Abandoned)?;
+    if let Err(error) = cancel() {
+        return Err(StageExecutionFailure::Abandoned(reject_gpu_outputs(
+            std::iter::once(output).chain(statistics),
+            error,
+        )));
     }
-    let mut output = validate_output(
+    let mut output = match validate_output(
         output,
         input,
         &scale,
@@ -205,22 +210,41 @@ async fn execute(
         provider,
         stage.geometry.axes.shape(),
         function,
-    )?;
-    let statistics = statistics
-        .map(|statistics| {
-            validate_statistics(
-                statistics,
-                input,
-                &scale,
-                &offset,
-                &output,
-                provider,
-                stage.geometry.groups,
-                function,
-            )
-        })
-        .transpose()?;
-    propagate_output_provenance(&mut output, [input, &scale, &offset])?;
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            return Err(StageExecutionFailure::Operational(reject_gpu_outputs(
+                statistics, error,
+            )));
+        }
+    };
+    let statistics = if let Some(statistics) = statistics {
+        match validate_statistics(
+            statistics,
+            input,
+            &scale,
+            &offset,
+            &output,
+            provider,
+            stage.geometry.groups,
+            function,
+        ) {
+            Ok(statistics) => Some(statistics),
+            Err(error) => {
+                return Err(StageExecutionFailure::Operational(reject_gpu_output(
+                    output, error,
+                )));
+            }
+        }
+    } else {
+        None
+    };
+    if let Err(error) = propagate_output_provenance(&mut output, [input, &scale, &offset]) {
+        return Err(StageExecutionFailure::Operational(reject_gpu_outputs(
+            std::iter::once(output).chain(statistics),
+            error,
+        )));
+    }
     let record = statistics.map(|statistics| NormalizationRecord {
         layer_index: stage.layer_index,
         scale,

@@ -107,9 +107,30 @@ impl AccelProvider for RecordedCancellationProvider {
             })
         })
     }
+
+    fn deep_learning_layer_norm<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+        request: &'a DeepLearningLayerNormRequest,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.dispatches.fetch_add(1, Ordering::SeqCst);
+            let output = self.owner.allocate_zeroed(
+                request.shape.clone(),
+                input.physical().element_type(),
+                GpuTensorStorage::Real,
+            )?;
+            self.probes.lock().unwrap().push(output.probe);
+            std::future::ready(()).await;
+            self.cancellation.cancel(CancellationReason::User);
+            Ok(output.handle)
+        })
+    }
 }
 
-fn recorded_cancellation(fail_after_cancel: bool) {
+fn normalization_cancellation(fail_after_cancel: bool, recorded: bool) {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     let provider: &'static RecordedCancellationProvider =
         Box::leak(Box::new(RecordedCancellationProvider {
@@ -175,16 +196,30 @@ fn recorded_cancellation(fail_after_cancel: bool) {
             Ok(())
         }
     };
-    let failure = match block_on(super::super::execution::forward_recorded(
-        &network,
-        &input.handle,
-        &stage,
-        &axes,
-        &check,
-        "forward",
-    )) {
-        Err(failure) => failure,
-        Ok(_) => panic!("recorded normalization must not publish after cancellation"),
+    let failure = if recorded {
+        match block_on(super::super::execution::forward_recorded(
+            &network,
+            &input.handle,
+            &stage,
+            &axes,
+            &check,
+            "forward",
+        )) {
+            Err(failure) => failure,
+            Ok(_) => panic!("recorded normalization must not publish after cancellation"),
+        }
+    } else {
+        match block_on(super::super::execution::forward(
+            &network,
+            &input.handle,
+            &stage,
+            &axes,
+            &check,
+            "forward",
+        )) {
+            Err(failure) => failure,
+            Ok(_) => panic!("ordinary normalization must not publish after cancellation"),
+        }
     };
     match failure {
         StageExecutionFailure::Abandoned(error) if !fail_after_cancel => {
@@ -205,16 +240,21 @@ fn recorded_cancellation(fail_after_cancel: bool) {
         "borrowed input must remain live"
     );
     let probes = provider.probes.lock().unwrap();
-    assert_eq!(probes.len(), 4);
+    assert_eq!(probes.len(), if recorded { 4 } else { 3 });
     assert!(probes.iter().all(|probe| probe.retirements() == 1));
 }
 
 #[test]
 fn recorded_normalization_cancellation_after_await_retires_owned_handles() {
-    recorded_cancellation(false);
+    normalization_cancellation(false, true);
 }
 
 #[test]
 fn recorded_normalization_provider_failure_precedes_concurrent_cancel() {
-    recorded_cancellation(true);
+    normalization_cancellation(true, true);
+}
+
+#[test]
+fn ordinary_normalization_cancellation_after_await_retires_owned_handles() {
+    normalization_cancellation(false, false);
 }

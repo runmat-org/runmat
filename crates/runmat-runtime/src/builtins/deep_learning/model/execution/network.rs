@@ -115,14 +115,17 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
             .standalone_normalization()
             .map_err(|error| deep_learning_error(function, format!("{function}: {error}")))?
         {
+            let check = || gpu::mixed::admit_cancellation(request.runtime, function);
             match gpu::normalize_network_gpu(
                 request.network,
                 handle,
                 &normalization,
                 &output_axes,
+                &check,
                 function,
             )
-            .await?
+            .await
+            .map_err(gpu::stage_failure::StageExecutionFailure::into_error)?
             {
                 Ok(output) => {
                     return Ok(NetworkExecutionOutcome {
@@ -163,6 +166,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                 plan.input_axes(),
                 plan.output_axes(),
                 &output_axes,
+                request.runtime,
                 function,
             )
             .await?

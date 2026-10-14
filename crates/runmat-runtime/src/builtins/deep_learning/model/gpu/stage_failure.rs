@@ -4,13 +4,13 @@
 //! provider and validation failures remain operational even if cancellation
 //! arrives later. No error text or ambient state is used to reclassify them.
 
-pub(super) enum StageExecutionFailure {
+pub(in crate::builtins::deep_learning) enum StageExecutionFailure {
     Abandoned(crate::RuntimeError),
     Operational(crate::RuntimeError),
 }
 
 impl StageExecutionFailure {
-    pub(super) fn into_error(self) -> crate::RuntimeError {
+    pub(in crate::builtins::deep_learning) fn into_error(self) -> crate::RuntimeError {
         match self {
             Self::Abandoned(error) | Self::Operational(error) => error,
         }
