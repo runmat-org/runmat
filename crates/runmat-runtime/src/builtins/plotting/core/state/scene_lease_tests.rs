@@ -1,6 +1,17 @@
 use super::*;
 
 #[test]
+fn implicit_axis_target_and_limits_reads_do_not_create_a_figure() {
+    let _guard = lock_plot_test_registry();
+    reset_plot_state();
+    let handle = current_figure_handle();
+    assert!(!figure_handle_exists(handle));
+    assert_eq!(current_axes_target_before_mutation(), (handle, 0));
+    assert_eq!(axis_limits_before_mutation(), (None, None));
+    assert!(!figure_handle_exists(handle));
+}
+
+#[test]
 fn central_mutation_helpers_replace_exact_scene_lease_after_admission() {
     let _guard = lock_plot_test_registry();
     let handle = new_figure_handle();

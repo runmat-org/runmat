@@ -2168,6 +2168,17 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
     notify_figure_updates(updates);
 }
 
+/// Read current axes limits without creating a default Figure before the
+/// caller performs its mutation. A vacant Figure starts in auto mode.
+pub(crate) fn axis_limits_before_mutation() -> AxisLimitSnapshot {
+    let reg = registry();
+    reg.figures
+        .get(&reg.current)
+        .and_then(|state| state.figure.axes_metadata(state.active_axes))
+        .map(|metadata| (metadata.x_limits, metadata.y_limits))
+        .unwrap_or((None, None))
+}
+
 /// Update an admitted axes target without making it the current axes.
 pub fn set_axis_manual_limits_for_axes(
     handle: FigureHandle,
@@ -5180,6 +5191,15 @@ pub fn current_axes_state() -> FigureAxesState {
         cols: state.figure.axes_cols.max(1),
         active_index: state.active_axes,
     }
+}
+
+/// Read the current synchronous mutation target without manufacturing the
+/// default Figure before the setter runs.
+pub(crate) fn current_axes_target_before_mutation() -> (FigureHandle, usize) {
+    let reg = registry();
+    let handle = reg.current;
+    let axes_index = reg.figures.get(&handle).map_or(0, |state| state.active_axes);
+    (handle, axes_index)
 }
 
 pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {

@@ -5,9 +5,9 @@ use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
     axes_metadata_snapshot, axis_color_limits_snapshot_for_axes,
     axis_display_bounds_snapshot_for_axes, axis_z_limits_snapshot_for_axes, current_axes_state,
-    current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
-    set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime, set_z_limits,
-    FigureHandle,
+    current_axes_target_before_mutation, current_figure_handle_if_exists, set_axes_style_for_axes,
+    set_axis_equal, set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime,
+    set_z_limits, FigureHandle,
 };
 use crate::RuntimeError;
 use runmat_builtins::{
@@ -142,8 +142,8 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(Value::Bool(true))
         }
         "manual" => {
-            let state = current_axes_state();
-            crate::builtins::plotting::state::lock_axes_limits(state.handle, state.active_index)
+            let (handle, axes_index) = current_axes_target_before_mutation();
+            crate::builtins::plotting::state::lock_axes_limits(handle, axes_index)
                 .map_err(|_| axis_invalid_argument())?;
             Ok(Value::Bool(true))
         }
