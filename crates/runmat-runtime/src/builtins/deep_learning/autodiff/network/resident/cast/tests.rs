@@ -43,7 +43,7 @@ impl AccelProvider for AliasingCastProvider {
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move { Ok(input.clone()) })
     }
@@ -100,9 +100,13 @@ impl AccelProvider for ChangingCastProvider {
     fn unary_double<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.conversions.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { anyhow::bail!("cast must not run after feasibility changes") })
+        Box::pin(async {
+            Err(runmat_accelerate_api::ProviderExecutionError::from(
+                anyhow::anyhow!("cast must not run after feasibility changes"),
+            ))
+        })
     }
 }
 
@@ -160,13 +164,14 @@ impl AccelProvider for WrongClassCastProvider {
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let result = self.owner().allocate_zeroed(
                 input.shape().to_vec(),
                 runmat_accelerate_api::NumericElementType::F32,
                 GpuTensorStorage::Real,
-            )?;
+            )
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
             *self.result_probe.lock().unwrap() = Some(result.probe);
             Ok(result.handle)
         })

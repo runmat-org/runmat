@@ -87,7 +87,7 @@ impl AccelProvider for RejectAdjoint {
     }
 }
 
-fn network(layers: Vec<Value>) -> Value {
+fn network(layers: Vec<Value>) -> crate::execution::RootedValue {
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(layers, 3, 1).unwrap(),
     )]))
@@ -147,12 +147,12 @@ fn resident_layers_reject_missing_reverse_capabilities_before_provider_effects()
                 ("Labels", Value::String(format.into())),
             ],
         );
-        let Value::Object(network) = network else {
+        let Value::Object(network) = network.value() else {
             panic!("dlnetwork expected")
         };
-        let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+        let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
         assert!(matches!(
-            plan::admit_for_tape(&network, &host, host.output_axes(), "forward").unwrap(),
+            plan::admit_for_tape(network, &host, host.output_axes(), "forward").unwrap(),
             Some(Err(GpuCapabilityReason::ProviderOperation))
         ));
         assert_eq!(provider.effects.load(Ordering::SeqCst), 0);

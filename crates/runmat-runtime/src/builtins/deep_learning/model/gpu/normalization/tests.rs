@@ -1,4 +1,5 @@
 use super::super::*;
+use super::super::stage_failure::StageExecutionFailure;
 use super::execution::forward;
 use super::validation::validate_output;
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
@@ -64,7 +65,17 @@ fn unsupported_provider_declines_before_upload_or_dispatch() {
             layer_index: 1,
             geometry,
         };
-        let result = block_on(forward(&network, &input, &stage, &axes, "forward")).unwrap();
+        let result = match block_on(forward(
+            &network,
+            &input,
+            &stage,
+            &axes,
+            &|| Ok(()),
+            "forward",
+        )) {
+            Ok(result) => result,
+            Err(_) => panic!("unsupported provider must decline without an execution failure"),
+        };
         assert_eq!(result.unwrap_err(), GpuCapabilityReason::ProviderOperation);
         let telemetry = provider.telemetry_snapshot();
         assert_eq!(telemetry.upload_bytes, 0);
@@ -125,7 +136,11 @@ fn foreign_parameter_owner_is_rejected_before_provider_effects() {
             layer_index: 1,
             geometry,
         };
-        let error = block_on(forward(&network, &input, &stage, &axes, "forward")).unwrap_err();
+        let error = block_on(forward(&network, &input, &stage, &axes, &|| Ok(()), "forward"))
+            .unwrap_err();
+        let StageExecutionFailure::Operational(error) = error else {
+            panic!("parameter owner mismatch must remain an operational failure");
+        };
         assert_eq!(
             error.identifier(),
             Some("RunMat:gpu:ProviderPayloadMismatch")
