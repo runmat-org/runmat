@@ -82,7 +82,7 @@ impl ApplicationHandler for WindowRunner<'_, '_> {
 }
 #[cfg(feature = "gui")]
 #[derive(Debug, thiserror::Error)]
-enum WindowRenderError {
+pub(in crate::gui) enum WindowRenderError {
     #[error("GPU access failed: {0}")]
     Access(#[from] runmat_accelerate_api::WgpuAccessError),
     #[error("surface rendering failed: {0}")]
@@ -143,6 +143,16 @@ impl<'window> PlotWindow<'window> {
             .window
             .ok_or("Winit did not resume the plot window during initialization")?;
 
+        let mut plot = Self::new_with_window(config, window).await?;
+        plot.event_loop = Some(event_loop);
+        Ok(plot)
+    }
+
+    /// Initialize rendering after the application-owned event loop creates a window.
+    pub(in crate::gui) async fn new_with_window(
+        config: WindowConfig,
+        window: Arc<Window>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Reuse shared context when available; fall back to creating a dedicated device otherwise.
         let shared_ctx = crate::context::shared_wgpu_context();
         let (instance, surface, shared_ctx) = if let Some(ctx) = shared_ctx {
@@ -265,7 +275,7 @@ impl<'window> PlotWindow<'window> {
 
         Ok(Self {
             window,
-            event_loop: Some(event_loop),
+            event_loop: None,
             plot_renderer,
             plot_overlay,
             surface,
@@ -405,7 +415,7 @@ impl<'window> PlotWindow<'window> {
         Ok(())
     }
 
-    fn handle_event(
+    pub(in crate::gui) fn handle_event(
         &mut self,
         event: Event<()>,
         target: &ActiveEventLoop,
@@ -697,7 +707,10 @@ impl<'window> PlotWindow<'window> {
     }
 
     /// Render a frame
-    fn render(&mut self, _dt: std::time::Duration) -> Result<(), WindowRenderError> {
+    pub(in crate::gui) fn render(
+        &mut self,
+        _dt: std::time::Duration,
+    ) -> Result<(), WindowRenderError> {
         let access = self.plot_renderer.wgpu_renderer.access.clone();
         access.with_shared(|emission| self.render_with_emission(emission))?
     }
