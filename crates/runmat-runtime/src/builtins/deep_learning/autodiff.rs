@@ -46,7 +46,9 @@ pub(super) use array_methods::{
 };
 
 mod network;
-pub(in crate::builtins::deep_learning) use network::admit_resident_tape_parents;
+pub(in crate::builtins::deep_learning) use network::{
+    admit_resident_tape_parents, ResidentTapeAdmission,
+};
 pub(super) use network::{
     annotate_network_outputs, record_network_execution, record_resident_network_execution,
 };

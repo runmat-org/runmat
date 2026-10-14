@@ -152,6 +152,101 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
 }
 "#;
 
+const ADJOINT_GROUPS: &str = r#"
+@group(0) @binding(0) var<storage, read> input: Tensor;
+@group(0) @binding(1) var<storage, read> upstream: Tensor;
+@group(0) @binding(2) var<storage, read> gamma: Tensor;
+@group(0) @binding(3) var<storage, read> statistics: Tensor;
+@group(0) @binding(4) var<storage, read_write> sums: Tensor;
+$COMMON$
+
+@compute @workgroup_size($WG$)
+fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let local = invocation.x;
+  if (local >= params.chunk_count) { return; }
+  let group = params.chunk_offset + local;
+  let base = 3u * group;
+  var sum_dxhat = $SCALAR$(0.0);
+  var sum_dxhat_xhat = $SCALAR$(0.0);
+  for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
+    let index = physical_index(group, sample);
+    let channel = group_and_channel(index).y;
+    let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+    let dxhat = upstream.data[index] * gamma.data[channel];
+    sum_dxhat = sum_dxhat + dxhat;
+    sum_dxhat_xhat = sum_dxhat_xhat + dxhat * xhat;
+  }
+  sums.data[2u * group] = sum_dxhat;
+  sums.data[2u * group + 1u] = sum_dxhat_xhat;
+}
+"#;
+
+const ADJOINT_CHANNELS: &str = r#"
+@group(0) @binding(0) var<storage, read> input: Tensor;
+@group(0) @binding(1) var<storage, read> upstream: Tensor;
+@group(0) @binding(2) var<storage, read> statistics: Tensor;
+@group(0) @binding(3) var<storage, read_write> dgamma: Tensor;
+@group(0) @binding(4) var<storage, read_write> dbeta: Tensor;
+$COMMON$
+
+@compute @workgroup_size($WG$)
+fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let local = invocation.x;
+  if (local >= params.chunk_count) { return; }
+  let channel = params.chunk_offset + local;
+  var inner_stride = 1u;
+  for (var axis = 0u; axis < params.channel_axis; axis = axis + 1u) {
+    inner_stride = inner_stride * extent(axis);
+  }
+  let channels = extent(params.channel_axis);
+  let count = params.total / channels;
+  var gamma_sum = $SCALAR$(0.0);
+  var beta_sum = $SCALAR$(0.0);
+  for (var item = 0u; item < count; item = item + 1u) {
+    let index = (item / inner_stride) * inner_stride * channels + channel * inner_stride + item % inner_stride;
+    let group = group_and_channel(index).x;
+    let base = 3u * group;
+    let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+    gamma_sum = gamma_sum + upstream.data[index] * xhat;
+    beta_sum = beta_sum + upstream.data[index];
+  }
+  dgamma.data[channel] = gamma_sum;
+  dbeta.data[channel] = beta_sum;
+}
+"#;
+
+const ADJOINT_INPUT: &str = r#"
+@group(0) @binding(0) var<storage, read> input: Tensor;
+@group(0) @binding(1) var<storage, read> upstream: Tensor;
+@group(0) @binding(2) var<storage, read> gamma: Tensor;
+@group(0) @binding(3) var<storage, read> statistics: Tensor;
+@group(0) @binding(4) var<storage, read> sums: Tensor;
+@group(0) @binding(5) var<storage, read_write> dx: Tensor;
+$COMMON$
+
+@compute @workgroup_size($WG$)
+fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
+  let local = invocation.x;
+  if (local >= params.chunk_count) { return; }
+  let index = params.chunk_offset + local;
+  let position = group_and_channel(index);
+  let base = 3u * position.x;
+  let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+  let dxhat = upstream.data[index] * gamma.data[position.y];
+  let count = $SCALAR$(params.group_size);
+  let centered = count * dxhat - sums.data[2u * position.x] - xhat * sums.data[2u * position.x + 1u];
+  if (statistics.data[base + 2u] == $SCALAR$(0.0)) {
+    dx.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
+  } else {
+    // Divide the complete derivative numerator by the same scaled input
+    // maximum used by forward. Forming inv_std_scaled / maximum first can
+    // underflow even when the final gradient is representable.
+    dx.data[index] = scaled_ratio(centered, statistics.data[base]) *
+        (statistics.data[base + 2u] / count);
+  }
+}
+"#;
+
 fn common(precision: super::super::types::NumericPrecision, binding: u32) -> String {
     let (scalar, epsilon, nan, special, ratio_scale) = match precision {
         super::super::types::NumericPrecision::F32 => (
@@ -206,6 +301,27 @@ pub fn affine(precision: super::super::types::NumericPrecision) -> String {
     } else {
         source
     }
+}
+
+pub fn adjoint_groups(precision: super::super::types::NumericPrecision) -> String {
+    ADJOINT_GROUPS
+        .replace("$COMMON$", &common(precision, 5))
+        .replace("$SCALAR$", precision_scalar(precision))
+        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+}
+
+pub fn adjoint_channels(precision: super::super::types::NumericPrecision) -> String {
+    ADJOINT_CHANNELS
+        .replace("$COMMON$", &common(precision, 5))
+        .replace("$SCALAR$", precision_scalar(precision))
+        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+}
+
+pub fn adjoint_input(precision: super::super::types::NumericPrecision) -> String {
+    ADJOINT_INPUT
+        .replace("$COMMON$", &common(precision, 6))
+        .replace("$SCALAR$", precision_scalar(precision))
+        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
 }
 
 fn precision_scalar(precision: super::super::types::NumericPrecision) -> &'static str {

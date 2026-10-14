@@ -7,6 +7,7 @@ mod lowering;
 
 use super::super::*;
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
+use runmat_accelerate_api::DeepLearningConv1DRequest;
 use runmat_accelerate_api::GpuTensorLayout;
 
 pub(super) use admission::admit;
@@ -30,6 +31,10 @@ pub(super) enum Stage {
     },
     Dense {
         layer_index: usize,
+    },
+    Conv {
+        layer_index: usize,
+        request: DeepLearningConv1DRequest,
     },
     Relu,
     Elu {

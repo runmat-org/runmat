@@ -301,6 +301,27 @@ pub(in crate::builtins::deep_learning) async fn reverse(
                 parameters.push((*layer_index, ParameterRole::Bias, db));
                 dx
             }
+            ResidentStageKind::Conv {
+                layer_index,
+                request,
+                weights,
+                bias,
+            } => {
+                let derivatives = super::super::convolution::adjoint(
+                    provider,
+                    &stage.input,
+                    weights,
+                    bias,
+                    &gradient,
+                    request,
+                    cancel,
+                    "dlgradient",
+                )
+                .await?;
+                parameters.push((*layer_index, ParameterRole::Weights, derivatives.weights));
+                parameters.push((*layer_index, ParameterRole::Bias, derivatives.bias));
+                derivatives.input
+            }
             ResidentStageKind::Relu | ResidentStageKind::Elu { .. } => {
                 let operation = match &stage.kind {
                     ResidentStageKind::Relu => ProviderActivationAdjoint::Relu,
@@ -364,6 +385,42 @@ pub(in crate::builtins::deep_learning) async fn reverse(
                     provider,
                     stage.input.shape(),
                 )?
+            }
+            ResidentStageKind::Normalize { record } => {
+                let derivatives = normalization::adjoint(
+                    provider,
+                    &stage.input,
+                    &gradient,
+                    record,
+                    cancel,
+                    "dlgradient",
+                )
+                .await?;
+                parameters.push((record.layer_index, ParameterRole::Scale, derivatives.scale));
+                parameters.push((
+                    record.layer_index,
+                    ParameterRole::Offset,
+                    derivatives.offset,
+                ));
+                derivatives.input
+            }
+            ResidentStageKind::Pool {
+                axis,
+                input_axes,
+                output_axes,
+            } => {
+                pooling::adjoint(
+                    provider,
+                    &stage.input,
+                    &gradient,
+                    *axis,
+                    input_axes,
+                    output_axes,
+                    output_axes,
+                    cancel,
+                    "dlgradient",
+                )
+                .await?
             }
         };
     }

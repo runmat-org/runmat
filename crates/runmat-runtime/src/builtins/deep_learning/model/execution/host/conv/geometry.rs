@@ -102,6 +102,7 @@ pub(super) struct Geometry {
     pub batch_size: usize,
     pub time_size: usize,
     pub left: usize,
+    pub right: usize,
     pub options: ConvOptions,
 }
 
@@ -286,6 +287,7 @@ impl Geometry {
             batch_size: batch_axis.map_or(1, |axis| axes.shape()[axis]),
             time_size: time_axis.map_or(1, |axis| axes.shape()[axis]),
             left,
+            right,
             options,
         })
     }

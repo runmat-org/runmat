@@ -27,6 +27,16 @@ pub(super) fn admitted_source<'a>(
     source(host.admitted_input(), element_type)
 }
 
+pub(super) fn source_shape(value: &Value) -> Option<&[usize]> {
+    match forward_data(value) {
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::LogicalArray(array) => Some(&array.shape),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(&[1, 1]),
+        _ => None,
+    }
+}
+
 fn source<'a>(
     value: &'a Value,
     element_type: NumericElementType,
@@ -197,6 +207,40 @@ pub(super) fn from_plan<'a, 'h: 'a>(
                 ));
                 view = view
                     .with_shape(vec![batch, output_channels])
+                    .with_layout(GpuTensorLayout::Contiguous);
+            }
+            Stage::Conv {
+                layer_index,
+                request,
+            } => {
+                let Some(weights) = parameter(
+                    host,
+                    *layer_index,
+                    ParameterRole::Weights,
+                    element_type,
+                    Some(request.weights_shape.to_vec()),
+                    Vec::new(),
+                    &mut parameters,
+                ) else {
+                    return Ok(None);
+                };
+                let Some(bias) = parameter(
+                    host,
+                    *layer_index,
+                    ParameterRole::Bias,
+                    element_type,
+                    Some(request.bias_shape.to_vec()),
+                    Vec::new(),
+                    &mut parameters,
+                ) else {
+                    return Ok(None);
+                };
+                steps.push(step(
+                    Operation::Conv1D(request.clone()),
+                    Bindings::Conv1D { weights, bias },
+                ));
+                view = view
+                    .with_shape(request.output_shape.clone())
                     .with_layout(GpuTensorLayout::Contiguous);
             }
             Stage::Relu | Stage::Elu { .. } => {

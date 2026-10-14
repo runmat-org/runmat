@@ -46,11 +46,13 @@ mod envelope;
 pub use envelope::EnvelopeSignalDomainError;
 mod deep_learning;
 pub use deep_learning::{
-    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage,
-    DeepLearningForwardBufferBound, DeepLearningForwardCapability, DeepLearningForwardGeometry,
-    DeepLearningForwardOperation, DeepLearningForwardParameter, DeepLearningForwardParameters,
-    DeepLearningForwardResources, DeepLearningForwardRoute, DeepLearningForwardRouteError,
-    DeepLearningForwardSource, DeepLearningForwardStep, DeepLearningLayerNormCapability,
+    DeepLearningConv1DCapability, DeepLearningConv1DGradients, DeepLearningConv1DOperands,
+    DeepLearningConv1DPaddingValue, DeepLearningConv1DRequest, DeepLearningFeedForwardCapability,
+    DeepLearningFeedForwardStage, DeepLearningForwardBufferBound, DeepLearningForwardCapability,
+    DeepLearningForwardGeometry, DeepLearningForwardOperation, DeepLearningForwardParameter,
+    DeepLearningForwardParameters, DeepLearningForwardResources, DeepLearningForwardRoute,
+    DeepLearningForwardRouteError, DeepLearningForwardSource, DeepLearningForwardStep,
+    DeepLearningLayerNormCapability, DeepLearningLayerNormGradients, DeepLearningLayerNormRecorded,
     DeepLearningLayerNormRequest, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
     DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
@@ -1030,8 +1032,11 @@ pub enum ProviderActivationAdjoint {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProviderResidentAdjointStage {
     Dense,
+    Conv1D,
     Activation(ProviderActivationAdjoint),
     SoftmaxRows,
+    LayerNorm,
+    Pool1D,
 }
 
 /// Declares how provider-owned GPU handles may cross async spawn boundaries.
@@ -3997,6 +4002,27 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("deep-learning global-average-pool-1d not supported by provider")
     }
+    /// Adjoint of a physical pooling reduction. `upstream` retains the
+    /// reduced axis as a singleton; presentation is inverted by the caller.
+    fn deep_learning_global_average_pool_1d_adjoint<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _upstream: &'a GpuTensorHandle,
+        _request: DeepLearningPool1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("deep-learning global-average-pool-1d adjoint not supported by provider")
+    }
+    /// Pure derivative admission, including authentic owner, class, input
+    /// geometry, and the singleton-axis upstream descriptor.
+    fn deep_learning_global_average_pool_1d_adjoint_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _input_shape: &[usize],
+        _upstream: Option<&GpuTensorHandle>,
+        _request: DeepLearningPool1DRequest,
+    ) -> anyhow::Result<DeepLearningPool1DCapability> {
+        Ok(DeepLearningPool1DCapability::UnsupportedOperation)
+    }
     /// Pure whole-route admission. An error denotes an invalid owner or
     /// malformed descriptor; unsupported valid work is a typed capability.
     fn deep_learning_global_average_pool_1d_capability(
@@ -4027,6 +4053,43 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("deep-learning layer normalization not supported by provider")
     }
+    /// One forward execution whose exact scaled statistics remain available
+    /// to reverse-mode differentiation. The ordinary forward hook need not
+    /// retain this buffer.
+    fn deep_learning_layer_norm_recorded<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _scale: &'a GpuTensorHandle,
+        _offset: &'a GpuTensorHandle,
+        _request: &'a DeepLearningLayerNormRequest,
+    ) -> AccelProviderFuture<'a, DeepLearningLayerNormRecorded> {
+        unsupported_future("recorded deep-learning layer normalization not supported by provider")
+    }
+    fn deep_learning_layer_norm_adjoint<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _scale: &'a GpuTensorHandle,
+        _offset: &'a GpuTensorHandle,
+        _statistics: &'a GpuTensorHandle,
+        _upstream: &'a GpuTensorHandle,
+        _request: &'a DeepLearningLayerNormRequest,
+    ) -> AccelProviderFuture<'a, DeepLearningLayerNormGradients> {
+        unsupported_future("deep-learning layer normalization adjoint not supported by provider")
+    }
+    /// Pure admission for the recorded forward/reverse pair. A later-stage
+    /// query uses the real provider anchor plus admitted future geometry; a
+    /// present upstream/statistics descriptor is authenticated as well.
+    fn deep_learning_layer_norm_adjoint_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _scale: Option<&GpuTensorHandle>,
+        _offset: Option<&GpuTensorHandle>,
+        _statistics: Option<&GpuTensorHandle>,
+        _upstream: Option<&GpuTensorHandle>,
+        _request: &DeepLearningLayerNormRequest,
+    ) -> anyhow::Result<DeepLearningLayerNormCapability> {
+        Ok(DeepLearningLayerNormCapability::UnsupportedOperation)
+    }
     /// Pure admission for the entire normalization kernel and physical
     /// parameter geometry. No uploads, allocations, or dispatches occur.
     fn deep_learning_layer_norm_capability(
@@ -4050,6 +4113,41 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _request: &DeepLearningLayerNormRequest,
     ) -> anyhow::Result<DeepLearningLayerNormCapability> {
         Ok(DeepLearningLayerNormCapability::UnsupportedOperation)
+    }
+    /// Learned multichannel 1-D cross-correlation, distinct from the signal
+    /// `conv1d` operation and its reversal/alignment contract.
+    fn deep_learning_conv1d<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _weights: &'a GpuTensorHandle,
+        _bias: &'a GpuTensorHandle,
+        _request: &'a DeepLearningConv1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("deep-learning conv1d not supported by provider")
+    }
+    /// Reverse the exact learned cross-correlation using the forward input
+    /// and prepared parameter leases, without gathering either operand.
+    fn deep_learning_conv1d_adjoint<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _weights: &'a GpuTensorHandle,
+        _bias: &'a GpuTensorHandle,
+        _upstream: &'a GpuTensorHandle,
+        _request: &'a DeepLearningConv1DRequest,
+    ) -> AccelProviderFuture<'a, DeepLearningConv1DGradients> {
+        unsupported_future("deep-learning conv1d adjoint not supported by provider")
+    }
+    /// A pure complete forward/adjoint route query. `anchor` proves ownership
+    /// even when the future input has not been produced; a present `input`
+    /// must match the physical request. Absent parameters or seed represent
+    /// host values or not-yet-produced outputs, never permission to gather
+    /// explicit residency.
+    fn deep_learning_conv1d_capability(
+        &self,
+        _operands: DeepLearningConv1DOperands<'_>,
+        _request: &DeepLearningConv1DRequest,
+    ) -> anyhow::Result<DeepLearningConv1DCapability> {
+        Ok(DeepLearningConv1DCapability::UnsupportedOperation)
     }
     /// Pure admission for a physical feed-forward stage in a planned
     /// sequence. `anchor` proves device ownership and numeric class. The

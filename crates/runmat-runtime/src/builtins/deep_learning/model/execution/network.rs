@@ -45,14 +45,16 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
     }
     let active_tape = autodiff::tape_is_active();
     if let Some(handle) = resident_input_handle(request.input) {
-        if active_tape {
-            autodiff::admit_resident_tape_parents(
+        let resident_tape_admission = if active_tape {
+            Some(autodiff::admit_resident_tape_parents(
                 request.network,
                 request.input,
                 handle,
                 function,
-            )?;
-        }
+            )?)
+        } else {
+            None
+        };
         if let Some(mixed) = gpu::mixed::forward_with_trace(
             request.network,
             &plan,
@@ -65,13 +67,25 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         {
             match mixed {
                 Ok(execution) => {
+                    let trace = match (execution.trace, resident_tape_admission) {
+                        (Some(trace), Some(admission)) => {
+                            Some(NetworkTrace::Resident { trace, admission })
+                        }
+                        (None, None) => None,
+                        _ => {
+                            return Err(deep_learning_error(
+                                function,
+                                "resident execution did not preserve its admitted tape",
+                            ));
+                        }
+                    };
                     return Ok(NetworkExecutionOutcome {
                         data: crate::builtins::common::gpu_helpers::resident_gpu_value(
                             execution.output,
                         )?,
                         output_axes,
                         state_updates: Vec::new(),
-                        trace: execution.trace.map(NetworkTrace::Resident),
+                        trace,
                         runtime: request.runtime.cloned(),
                         placement: None,
                     });

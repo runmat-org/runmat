@@ -4,6 +4,9 @@
 //! context.  Each handle is an owning view lease; dropping a failed or
 //! cancelled reverse pass releases only its new results, not borrowed inputs.
 
+use crate::builtins::deep_learning::model::gpu::normalization::NormalizationRecord;
+use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use runmat_accelerate_api::DeepLearningConv1DRequest;
 use runmat_accelerate_api::GpuTensorHandle;
 
 pub(in crate::builtins::deep_learning) enum ResidentStageKind {
@@ -15,11 +18,25 @@ pub(in crate::builtins::deep_learning) enum ResidentStageKind {
         layer_index: usize,
         weights: GpuTensorHandle,
     },
+    Conv {
+        layer_index: usize,
+        request: DeepLearningConv1DRequest,
+        weights: GpuTensorHandle,
+        bias: GpuTensorHandle,
+    },
     Relu,
     Elu {
         alpha: f64,
     },
     Softmax,
+    Normalize {
+        record: NormalizationRecord,
+    },
+    Pool {
+        axis: usize,
+        input_axes: AxisPlan,
+        output_axes: AxisPlan,
+    },
 }
 
 pub(in crate::builtins::deep_learning) struct ResidentStage {

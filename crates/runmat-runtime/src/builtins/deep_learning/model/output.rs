@@ -88,7 +88,7 @@ pub(super) fn present(
             };
             (data, execution.next_state, Some(nodes))
         }
-        Some(NetworkTrace::Resident(trace)) => {
+        Some(NetworkTrace::Resident { trace, admission }) => {
             let Value::GpuTensor(output) = &data else {
                 return Err(deep_learning_error(
                     function,
@@ -102,8 +102,7 @@ pub(super) fn present(
                 ));
             }
             let nodes = autodiff::record_resident_network_execution(
-                network,
-                input,
+                admission,
                 output,
                 trace,
                 output_axes.clone(),

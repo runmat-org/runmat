@@ -33,8 +33,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Current limits and residency",
             paragraphs: &[
-                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom layers, and sparse or complex differentiation are not implemented. A scalar output of an executed provider-resident network can be differentiated through admitted fully connected, ReLU, ELU, and softmax stages in real single or double precision. Connected resident operations without an adjoint are rejected before reverse provider work; disconnected targets receive zero gradients. Provider capability and exact ownership are checked without gathering explicit GPU data.",
-                "The callback and tape are execution state: nested callbacks keep separate graphs, and suspension does not expose one callback's tape to another invocation. Host tape primitives and the bounded resident network route have separate adjoints; generic resident arithmetic, other resident network layers, resident precision casts, and GPU trainnet are not yet supported by this route.",
+                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom layers, and sparse or complex differentiation are not implemented. A scalar output of an executed provider-resident network can be differentiated through admitted fully connected, convolution1d, layer normalization, global average pooling, ReLU, ELU, and softmax stages in real single or double precision where the provider implements their adjoints. Connected resident operations without an adjoint are rejected before reverse provider work; disconnected targets receive zero gradients. Provider capability and exact ownership are checked without gathering explicit GPU data.",
+                "The callback and tape are execution state: nested callbacks keep separate graphs, and suspension does not expose one callback's tape to another invocation. Host tape primitives and the bounded resident network route have separate adjoints. When a resident single-precision execution consumes double-precision learnables, a capable provider restores requested double-precision parameter gradients through a native cast. An F32-only provider can still differentiate a single-precision input; it rejects a requested double-precision parameter gradient before reverse provider work. Generic resident arithmetic, resident recurrent adjoints, and GPU trainnet are not yet supported by this route.",
             ],
         },
     ],
@@ -55,7 +55,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Can I differentiate a GPU-backed dlarray?",
-            answer: "For an admitted scalar provider-resident network output, the current resident tape differentiates fully connected, ReLU, ELU, and softmax stages in real single or double precision. Other connected resident operations report a provider-adjoint gap; explicit GPU data are not implicitly downloaded.",
+            answer: "For an admitted scalar provider-resident network output, the current resident tape differentiates fully connected, convolution1d, layer normalization, global average pooling, ReLU, ELU, and softmax stages in real single or double precision when the provider supplies the required adjoints. Other connected resident operations report a provider-adjoint gap; explicit GPU data are not implicitly downloaded.",
         },
         BuiltinDocumentationFaq {
             question: "What does dlgradient return for network learnables?",

@@ -2,7 +2,7 @@ use super::*;
 use crate::simple_provider::InProcessProvider;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderWorkload,
+    GpuTensorHandle, GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderWorkload,
 };
 
 #[cfg(feature = "wgpu")]
@@ -76,6 +76,33 @@ fn typed_conversion_feasibility_matches_real_inprocess_output_and_bytes() {
     )
     .unwrap()
     .is_supported());
+
+    let widened = query(
+        DOUBLE_CATALOG_ENTRY.identity.name,
+        ProviderElementType::F32,
+        &[2, 1],
+    );
+    let ProviderFeasibility::Supported { estimate } = validate(&provider, false, &widened).unwrap()
+    else {
+        panic!("F64-capable provider supports native F32-to-F64 conversion");
+    };
+    assert_eq!(estimate.output_bytes, Some(16));
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.25, -2.5]),
+            shape: &[2, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let output = block_on(provider.unary_double(&input)).unwrap();
+    let actual = block_on(provider.download_numeric(&output)).unwrap();
+    assert_eq!(actual.shape, vec![2, 1]);
+    assert_eq!(
+        actual.data,
+        runmat_accelerate_api::HostNumericDataOwned::F64(vec![1.25, -2.5])
+    );
+    input.release().unwrap();
+    output.release().unwrap();
 }
 
 #[test]
@@ -223,4 +250,44 @@ fn same_type_alias_and_empty_cast_have_no_shader_or_submission_work() {
     );
     assert_eq!(work.estimate.dispatches, Some(0));
     assert_eq!(work.scalar_visits, 0);
+}
+
+#[test]
+fn f32_only_owner_rejects_widening_before_any_physical_cast_route() {
+    struct F32Only;
+    impl AccelProvider for F32Only {
+        fn precision(&self) -> ProviderPrecision {
+            ProviderPrecision::F32
+        }
+        fn device_info(&self) -> String {
+            "nonexecuting F32 cast admission fixture".into()
+        }
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("admission fixture cannot upload")
+        }
+        fn download<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { anyhow::bail!("admission fixture cannot download") })
+        }
+    }
+    let mut request = query(
+        DOUBLE_CATALOG_ENTRY.identity.name,
+        ProviderElementType::F32,
+        &[2, 3],
+    );
+    request.workload.preparation_route = Some(
+        runmat_accelerate_api::ProviderPreparationRoute::FloatingCast {
+            target: ProviderPrecision::F64,
+        },
+    );
+    assert!(matches!(
+        validate(&F32Only, true, &request),
+        Some(ProviderFeasibility::Rejected { rejection })
+            if rejection.code == ProviderRejectionCode::UnsupportedElementType
+    ));
 }

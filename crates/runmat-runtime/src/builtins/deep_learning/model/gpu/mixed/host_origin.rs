@@ -126,10 +126,10 @@ pub(in crate::builtins::deep_learning) async fn execute_host_route_selected(
     execution::execute(network, &uploaded, admitted.plan, false, runtime, function)
         .await
         .map_err(|failure| match failure {
-            execution::SelectedExecutionFailure::Abandoned(error) => {
+            super::super::stage_failure::StageExecutionFailure::Abandoned(error) => {
                 HostRouteFailure::Abandoned(error)
             }
-            execution::SelectedExecutionFailure::Operational(error) => {
+            super::super::stage_failure::StageExecutionFailure::Operational(error) => {
                 HostRouteFailure::Operational(error)
             }
         })

@@ -1,8 +1,32 @@
+use super::super::stage_failure::StageExecutionFailure;
 use super::super::*;
-use super::validation::validate_output;
+use super::validation::{validate_output, validate_statistics};
 use crate::builtins::common::gpu_helpers::propagate_output_provenance;
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
-use runmat_accelerate_api::DeepLearningLayerNormCapability;
+use runmat_accelerate_api::{DeepLearningLayerNormCapability, DeepLearningLayerNormRequest};
+
+pub(in crate::builtins::deep_learning) struct NormalizationRecord {
+    pub layer_index: usize,
+    pub scale: GpuTensorHandle,
+    pub offset: GpuTensorHandle,
+    pub statistics: GpuTensorHandle,
+    pub request: DeepLearningLayerNormRequest,
+}
+
+pub(in crate::builtins::deep_learning) struct RecordedNormalization {
+    pub output: GpuTensorHandle,
+    pub record: NormalizationRecord,
+}
+
+enum ForwardMode {
+    Ordinary,
+    Record,
+}
+
+struct Execution {
+    output: GpuTensorHandle,
+    record: Option<NormalizationRecord>,
+}
 
 fn parameter(layer: &ObjectInstance, role: ParameterRole) -> Option<&GpuTensorHandle> {
     resident_parameter_handle(layer, role)
@@ -30,6 +54,61 @@ pub(in crate::builtins::deep_learning) async fn forward(
     target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<Result<GpuTensorHandle, GpuCapabilityReason>> {
+    Ok(execute(
+        network,
+        input,
+        stage,
+        target_axes,
+        ForwardMode::Ordinary,
+        None,
+        function,
+    )
+    .await
+    .map_err(StageExecutionFailure::into_error)?
+    .map(|execution| execution.output))
+}
+
+pub(in crate::builtins::deep_learning) async fn forward_recorded(
+    network: &ObjectInstance,
+    input: &GpuTensorHandle,
+    stage: &NormalizationStage,
+    target_axes: &AxisPlan,
+    cancel: &dyn Fn() -> BuiltinResult<()>,
+    function: &'static str,
+) -> Result<Result<RecordedNormalization, GpuCapabilityReason>, StageExecutionFailure> {
+    match execute(
+        network,
+        input,
+        stage,
+        target_axes,
+        ForwardMode::Record,
+        Some(cancel),
+        function,
+    )
+    .await?
+    {
+        Ok(execution) => {
+            let record = execution.record.ok_or_else(|| {
+                deep_learning_error(function, "recorded normalization omitted statistics")
+            })?;
+            Ok(Ok(RecordedNormalization {
+                output: execution.output,
+                record,
+            }))
+        }
+        Err(reason) => Ok(Err(reason)),
+    }
+}
+
+async fn execute(
+    network: &ObjectInstance,
+    input: &GpuTensorHandle,
+    stage: &NormalizationStage,
+    target_axes: &AxisPlan,
+    mode: ForwardMode,
+    cancel: Option<&dyn Fn() -> BuiltinResult<()>>,
+    function: &'static str,
+) -> Result<Result<Execution, GpuCapabilityReason>, StageExecutionFailure> {
     // A later composed stage/presentation plan can pre-admit device permutes.
     // This route deliberately declines them before any provider effect.
     if target_axes != &stage.geometry.axes {
@@ -44,7 +123,8 @@ pub(in crate::builtins::deep_learning) async fn forward(
         return Err(deep_learning_error(
             function,
             "admitted normalization stage no longer matches network Layers",
-        ));
+        )
+        .into());
     };
     let parameters = match super::admit_parameters(layer, provider, input, function)? {
         Ok(parameters) => parameters,
@@ -67,6 +147,9 @@ pub(in crate::builtins::deep_learning) async fn forward(
             return Ok(Err(GpuCapabilityReason::ResourceLimit))
         }
     }
+    if let Some(cancel) = cancel {
+        cancel().map_err(StageExecutionFailure::Abandoned)?;
+    }
     let scale = prepare_parameter(
         provider,
         layer,
@@ -76,6 +159,9 @@ pub(in crate::builtins::deep_learning) async fn forward(
         function,
     )
     .await?;
+    if let Some(cancel) = cancel {
+        cancel().map_err(StageExecutionFailure::Abandoned)?;
+    }
     let offset = prepare_parameter(
         provider,
         layer,
@@ -85,12 +171,32 @@ pub(in crate::builtins::deep_learning) async fn forward(
         function,
     )
     .await?;
-    let output = provider
-        .deep_learning_layer_norm(input, &scale, &offset, &request)
-        .await
-        .map_err(|error| {
-            provider_failure(function, "resident layer normalization", error.into())
-        })?;
+    if let Some(cancel) = cancel {
+        cancel().map_err(StageExecutionFailure::Abandoned)?;
+    }
+    let (output, statistics) = match mode {
+        ForwardMode::Ordinary => (
+            provider
+                .deep_learning_layer_norm(input, &scale, &offset, &request)
+                .await
+                .map_err(|error| {
+                    provider_failure(function, "resident layer normalization", error.into())
+                })?,
+            None,
+        ),
+        ForwardMode::Record => {
+            let recorded = provider
+                .deep_learning_layer_norm_recorded(input, &scale, &offset, &request)
+                .await
+                .map_err(|error| {
+                    provider_failure(function, "recorded resident normalization", error.into())
+                })?;
+            (recorded.output, Some(recorded.statistics))
+        }
+    };
+    if let Some(cancel) = cancel {
+        cancel().map_err(StageExecutionFailure::Abandoned)?;
+    }
     let mut output = validate_output(
         output,
         input,
@@ -100,6 +206,27 @@ pub(in crate::builtins::deep_learning) async fn forward(
         stage.geometry.axes.shape(),
         function,
     )?;
+    let statistics = statistics
+        .map(|statistics| {
+            validate_statistics(
+                statistics,
+                input,
+                &scale,
+                &offset,
+                &output,
+                provider,
+                stage.geometry.groups,
+                function,
+            )
+        })
+        .transpose()?;
     propagate_output_provenance(&mut output, [input, &scale, &offset])?;
-    Ok(Ok(output))
+    let record = statistics.map(|statistics| NormalizationRecord {
+        layer_index: stage.layer_index,
+        scale,
+        offset,
+        statistics,
+        request,
+    });
+    Ok(Ok(Execution { output, record }))
 }

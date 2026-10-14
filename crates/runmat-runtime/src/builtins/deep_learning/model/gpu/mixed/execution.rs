@@ -1,6 +1,7 @@
 //! Execute a fully pre-admitted sequence. A later unsupported provider result
 //! is operational failure, never permission to replay after earlier effects.
 
+use super::super::stage_failure::StageExecutionFailure;
 use super::super::*;
 use super::plan::{Plan, Stage};
 use super::trace::{ResidentExecution, ResidentStage, ResidentStageKind, ResidentTrace};
@@ -56,7 +57,7 @@ fn materialize_view(
     }
 }
 
-pub(super) fn capability_changed(
+pub(in crate::builtins::deep_learning) fn capability_changed(
     function: &'static str,
     reason: GpuCapabilityReason,
 ) -> crate::RuntimeError {
@@ -68,28 +69,6 @@ pub(super) fn capability_changed(
     .build()
 }
 
-/// Failure provenance is fixed at the operation that produced the error.
-/// A cancellation arriving after a provider error cannot rewrite that error
-/// into an abandoned call.
-pub(super) enum SelectedExecutionFailure {
-    Abandoned(crate::RuntimeError),
-    Operational(crate::RuntimeError),
-}
-
-impl SelectedExecutionFailure {
-    pub(super) fn into_error(self) -> crate::RuntimeError {
-        match self {
-            Self::Abandoned(error) | Self::Operational(error) => error,
-        }
-    }
-}
-
-impl From<crate::RuntimeError> for SelectedExecutionFailure {
-    fn from(error: crate::RuntimeError) -> Self {
-        Self::Operational(error)
-    }
-}
-
 pub(super) async fn execute(
     network: &ObjectInstance,
     input: &GpuTensorHandle,
@@ -97,7 +76,7 @@ pub(super) async fn execute(
     capture: bool,
     runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
-) -> Result<ResidentExecution, SelectedExecutionFailure> {
+) -> Result<ResidentExecution, StageExecutionFailure> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| admission::invalid_owner(function, admission::GpuOperand::Input))?;
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -107,7 +86,7 @@ pub(super) async fn execute(
     let mut recorded = capture.then(|| Vec::with_capacity(plan.stages.len()));
     let consumed_resident_parameters = plan.consumed_resident_parameters;
     for stage in plan.stages {
-        admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
+        admit_cancellation(runtime, function).map_err(StageExecutionFailure::Abandoned)?;
         let changes_view_layout = matches!(&stage, Stage::Transpose { .. });
         let stage_input = recorded.as_ref().map(|_| current.clone());
         let (next, kind) = match stage {
@@ -184,6 +163,28 @@ pub(super) async fn execute(
                     }),
                 )
             }
+            Stage::Conv {
+                layer_index,
+                request,
+            } => {
+                let Value::Object(layer) = &layers.data[layer_index] else {
+                    unreachable!("host plan admitted convolution layer objects")
+                };
+                let check = || admit_cancellation(runtime, function);
+                let executed = super::super::convolution::forward(
+                    provider, layer, &current, &request, &check, function,
+                )
+                .await?;
+                (
+                    executed.output,
+                    Some(ResidentStageKind::Conv {
+                        layer_index,
+                        request,
+                        weights: executed.weights,
+                        bias: executed.bias,
+                    }),
+                )
+            }
             Stage::Relu => {
                 let output = provider.activation_relu(&current).await.map_err(|error| {
                     provider_failure(function, "planned resident ReLU", error.into())
@@ -217,36 +218,69 @@ pub(super) async fn execute(
                     Some(ResidentStageKind::Softmax),
                 )
             }
-            Stage::Normalize { stage } => match normalization::forward(
-                network,
-                &current,
-                &stage,
-                &stage.geometry.axes,
-                function,
-            )
-            .await?
-            {
-                Ok(output) => (output, None),
-                Err(reason) => return Err(capability_changed(function, reason).into()),
-            },
+            Stage::Normalize { stage } => {
+                if capture {
+                    let check = || admit_cancellation(runtime, function);
+                    match normalization::forward_recorded(
+                        network,
+                        &current,
+                        &stage,
+                        &stage.geometry.axes,
+                        &check,
+                        function,
+                    )
+                    .await?
+                    {
+                        Ok(recorded) => (
+                            recorded.output,
+                            Some(ResidentStageKind::Normalize {
+                                record: recorded.record,
+                            }),
+                        ),
+                        Err(reason) => return Err(capability_changed(function, reason).into()),
+                    }
+                } else {
+                    match normalization::forward(
+                        network,
+                        &current,
+                        &stage,
+                        &stage.geometry.axes,
+                        function,
+                    )
+                    .await?
+                    {
+                        Ok(output) => (output, None),
+                        Err(reason) => return Err(capability_changed(function, reason).into()),
+                    }
+                }
+            }
             Stage::Pool {
                 axis,
                 input_axes,
                 output_axes,
-            } => pooling::forward(
-                provider,
-                &current,
-                axis,
-                &input_axes,
-                &output_axes,
-                &output_axes,
-                function,
-            )
-            .await?
-            .ok_or_else(|| capability_changed(function, GpuCapabilityReason::ProviderOperation))
-            .map(|output| (output, None))?,
+            } => {
+                let output = pooling::forward(
+                    provider,
+                    &current,
+                    axis,
+                    &input_axes,
+                    &output_axes,
+                    &output_axes,
+                    function,
+                )
+                .await?
+                .ok_or_else(|| {
+                    capability_changed(function, GpuCapabilityReason::ProviderOperation)
+                })?;
+                let kind = capture.then_some(ResidentStageKind::Pool {
+                    axis,
+                    input_axes,
+                    output_axes,
+                });
+                (output, kind)
+            }
         };
-        admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
+        admit_cancellation(runtime, function).map_err(StageExecutionFailure::Abandoned)?;
         current = next;
         if !changes_view_layout && current.view().layout() != GpuTensorLayout::Contiguous {
             return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
@@ -268,7 +302,7 @@ pub(super) async fn execute(
             });
         }
     }
-    admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
+    admit_cancellation(runtime, function).map_err(StageExecutionFailure::Abandoned)?;
     if current.shape() != plan.output_axes.shape() {
         return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
             current,
@@ -283,7 +317,7 @@ pub(super) async fn execute(
         &mut current,
         std::iter::once(input).chain(consumed_resident_parameters.iter()),
     )?;
-    admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
+    admit_cancellation(runtime, function).map_err(StageExecutionFailure::Abandoned)?;
     let trace = recorded.map(|stages| ResidentTrace {
         stages,
         output: current.clone(),

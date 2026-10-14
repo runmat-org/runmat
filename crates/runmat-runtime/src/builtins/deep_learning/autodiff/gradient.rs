@@ -81,8 +81,9 @@ async fn dlgradient_in_runtime(
             "dlgradient: loss must be scalar",
         ));
     }
+    let mut requested_nodes = Vec::new();
     for target in rest.iter().take(requested) {
-        targets::validate(target)?;
+        requested_nodes.extend(targets::node_ids(target)?);
     }
     resident::admit_cancellation(runtime)?;
     let host_gradients;
@@ -93,7 +94,7 @@ async fn dlgradient_in_runtime(
             GradientSource::Host(&host_gradients)
         }
         super::tape::NodeValue::Resident(_) => {
-            resident_gradients = resident::backward(runtime, loss_node).await?;
+            resident_gradients = resident::backward(runtime, loss_node, &requested_nodes).await?;
             GradientSource::Resident(&resident_gradients)
         }
     };

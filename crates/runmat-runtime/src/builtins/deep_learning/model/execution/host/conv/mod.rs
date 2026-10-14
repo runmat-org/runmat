@@ -3,12 +3,14 @@
 mod backward;
 mod geometry;
 mod kernel;
+mod resident;
 
 pub(in crate::builtins::deep_learning) use backward::backward;
 pub(in crate::builtins::deep_learning) use geometry::{
     ConvError, ConvOptions, Padding, PaddingValue,
 };
 pub(in crate::builtins::deep_learning) use kernel::forward;
+pub(in crate::builtins::deep_learning) use resident::resident_request;
 
 pub(in crate::builtins::deep_learning) fn admit(
     axes: &crate::builtins::deep_learning::model::plan::axes::AxisPlan,

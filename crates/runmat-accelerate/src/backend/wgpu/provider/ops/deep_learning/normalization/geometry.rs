@@ -93,3 +93,34 @@ pub(super) fn geometry(request: &DeepLearningLayerNormRequest) -> Result<(usize,
     );
     Ok((groups, group_size))
 }
+
+pub(super) fn params(
+    request: &DeepLearningLayerNormRequest,
+    precision: crate::backend::wgpu::types::NumericPrecision,
+) -> Result<NormParams> {
+    let (groups, group_size) = geometry(request)?;
+    let total = shape_count(&request.shape)?;
+    let mut shape = [1u32; 4];
+    for (target, &extent) in shape.iter_mut().zip(&request.shape) {
+        *target = u32::try_from(extent)?;
+    }
+    let epsilon_bits = match precision {
+        crate::backend::wgpu::types::NumericPrecision::F32 => {
+            (request.epsilon as f32).to_bits() as u64
+        }
+        crate::backend::wgpu::types::NumericPrecision::F64 => request.epsilon.to_bits(),
+    };
+    Ok(NormParams {
+        shape,
+        rank: u32::try_from(request.shape.len())?,
+        reduce_mask: u32::from(request.reduce_mask),
+        groups: u32::try_from(groups)?,
+        group_size: u32::try_from(group_size)?,
+        channel_axis: u32::try_from(request.channel_axis)?,
+        total: u32::try_from(total)?,
+        chunk_offset: 0,
+        chunk_count: 0,
+        epsilon_low: epsilon_bits as u32,
+        epsilon_high: (epsilon_bits >> 32) as u32,
+    })
+}

@@ -468,8 +468,16 @@ pub struct WgpuPipelines {
     pub symmetry: PipelineBundle,
     pub reduce_nd_mean: PipelineBundle,
     pub deep_learning_stable_pool_1d: PipelineBundle,
+    pub deep_learning_pool_1d_adjoint: PipelineBundle,
     pub deep_learning_layer_norm_statistics: PipelineBundle,
     pub deep_learning_layer_norm_affine: PipelineBundle,
+    pub deep_learning_layer_norm_adjoint_groups: PipelineBundle,
+    pub deep_learning_layer_norm_adjoint_channels: PipelineBundle,
+    pub deep_learning_layer_norm_adjoint_input: PipelineBundle,
+    pub deep_learning_conv1d_forward: PipelineBundle,
+    pub deep_learning_conv1d_adjoint_input: PipelineBundle,
+    pub deep_learning_conv1d_adjoint_weight: PipelineBundle,
+    pub deep_learning_conv1d_adjoint_bias: PipelineBundle,
     pub reduce_nd_moments: PipelineBundle,
 }
 
@@ -1933,6 +1941,19 @@ impl WgpuPipelines {
         )
         .requiring(ieee_word_features(precision));
 
+        let deep_learning_pool_1d_adjoint = create_pipeline(
+            access,
+            "runmat-deep-learning-pool-1d-adjoint-layout",
+            "runmat-deep-learning-pool-1d-adjoint-shader",
+            "runmat-deep-learning-pool-1d-adjoint-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            crate::backend::wgpu::shaders::deep_learning::pool_1d_adjoint(precision),
+        );
+
         let deep_learning_layer_norm_statistics = create_pipeline(
             access,
             "runmat-layer-norm-statistics-layout",
@@ -1962,6 +1983,106 @@ impl WgpuPipelines {
             crate::backend::wgpu::shaders::deep_learning_normalization::affine(precision),
         )
         .requiring(ieee_word_features(precision));
+
+        let deep_learning_layer_norm_adjoint_groups = create_pipeline(
+            access,
+            "runmat-layer-norm-adjoint-groups-layout",
+            "runmat-layer-norm-adjoint-groups-shader",
+            "runmat-layer-norm-adjoint-groups-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
+                uniform_entry(5),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_normalization::adjoint_groups(precision),
+        );
+        let deep_learning_layer_norm_adjoint_channels = create_pipeline(
+            access,
+            "runmat-layer-norm-adjoint-channels-layout",
+            "runmat-layer-norm-adjoint-channels-shader",
+            "runmat-layer-norm-adjoint-channels-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                storage_read_write_entry(4),
+                uniform_entry(5),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_normalization::adjoint_channels(precision),
+        );
+        let deep_learning_layer_norm_adjoint_input = create_pipeline(
+            access,
+            "runmat-layer-norm-adjoint-input-layout",
+            "runmat-layer-norm-adjoint-input-shader",
+            "runmat-layer-norm-adjoint-input-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_entry(4),
+                storage_read_write_entry(5),
+                uniform_entry(6),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_normalization::adjoint_input(precision),
+        );
+
+        let deep_learning_conv1d_forward = create_pipeline(
+            access,
+            "runmat-learned-conv1d-forward-layout",
+            "runmat-learned-conv1d-forward-shader",
+            "runmat-learned-conv1d-forward-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_convolution::forward(precision),
+        );
+        let deep_learning_conv1d_adjoint_input = create_pipeline(
+            access,
+            "runmat-learned-conv1d-adjoint-input-layout",
+            "runmat-learned-conv1d-adjoint-input-shader",
+            "runmat-learned-conv1d-adjoint-input-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_convolution::adjoint_input(precision),
+        );
+        let deep_learning_conv1d_adjoint_weight = create_pipeline(
+            access,
+            "runmat-learned-conv1d-adjoint-weight-layout",
+            "runmat-learned-conv1d-adjoint-weight-shader",
+            "runmat-learned-conv1d-adjoint-weight-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_convolution::adjoint_weight(precision),
+        );
+        let deep_learning_conv1d_adjoint_bias = create_pipeline(
+            access,
+            "runmat-learned-conv1d-adjoint-bias-layout",
+            "runmat-learned-conv1d-adjoint-bias-shader",
+            "runmat-learned-conv1d-adjoint-bias-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_convolution::adjoint_bias(precision),
+        );
 
         let reduce_nd_moments = create_pipeline(
             access,
@@ -2068,8 +2189,16 @@ impl WgpuPipelines {
             symmetry,
             reduce_nd_mean,
             deep_learning_stable_pool_1d,
+            deep_learning_pool_1d_adjoint,
             deep_learning_layer_norm_statistics,
             deep_learning_layer_norm_affine,
+            deep_learning_layer_norm_adjoint_groups,
+            deep_learning_layer_norm_adjoint_channels,
+            deep_learning_layer_norm_adjoint_input,
+            deep_learning_conv1d_forward,
+            deep_learning_conv1d_adjoint_input,
+            deep_learning_conv1d_adjoint_weight,
+            deep_learning_conv1d_adjoint_bias,
             reduce_nd_moments,
         }
     }

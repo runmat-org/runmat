@@ -12,9 +12,10 @@ mod graph;
 pub(super) async fn backward(
     runtime: Option<&crate::context::RuntimeContext>,
     loss_node: usize,
+    requested_nodes: &[usize],
 ) -> BuiltinResult<HashMap<usize, runmat_accelerate_api::GpuTensorHandle>> {
     admit_cancellation(runtime)?;
-    let graph = graph::admit(loss_node)?;
+    let graph = graph::admit(loss_node, requested_nodes)?;
     let output = &graph.loss;
     if output
         .shape()
@@ -61,13 +62,14 @@ pub(super) async fn backward(
     };
     let mut gradients = HashMap::new();
     gradients.insert(loss_node, seed);
-    for (id, execution) in graph.executions {
+    for (id, execution, plan) in graph.executions {
         let Some(seed) = gradients.get(&id).cloned() else {
             continue;
         };
         admit_cancellation(runtime)?;
         for (node, mut gradient) in
-            super::super::network::reverse_resident_execution(&execution, seed, runtime).await?
+            super::super::network::reverse_resident_execution(&execution, &plan, seed, runtime)
+                .await?
         {
             crate::builtins::common::gpu_helpers::propagate_output_provenance(
                 &mut gradient,
