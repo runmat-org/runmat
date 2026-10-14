@@ -7,7 +7,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Run a function once when a cleanup object's last reachable owner is released.",
     description: "`cleanupObj = onCleanup(cleanupFun)` creates a host handle object that invokes a zero-input function handle or closure on explicit deletion or final owner release. It is useful for restoring state, closing files, removing temporary folders, and other cleanup tasks.",
     keywords: &["onCleanup", "cleanup", "delete", "cancel", "scope", "resource"],
-    related: &["clear", "clearvars", "delete", "cancel", "fopen"],
+    related: &["clear", "clearvars", "delete", "fopen"],
     sections: &[
         BuiltinDocumentationSection { heading: "Callback and ownership", paragraphs: &[
             "The callback receives zero input arguments and has zero requested outputs. Use an anonymous function such as `@() fclose(fid)` to capture arguments. Numeric values, including exact integers and GPU-resident numeric values, are not callbacks; captured values retain their ordinary ownership and are not inspected or gathered by onCleanup.",
