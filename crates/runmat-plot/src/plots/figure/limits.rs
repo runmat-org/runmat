@@ -2,6 +2,89 @@
 use super::AxesMetadata;
 use crate::core::BoundingBox;
 use glam::Vec3;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AxisLimitAxis {
+    X,
+    Y,
+    Z,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AxisLimitMethod {
+    #[default]
+    TickAligned,
+    Tight,
+    Padded,
+}
+
+impl AxisLimitMethod {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::TickAligned)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TickAligned => "tickaligned",
+            Self::Tight => "tight",
+            Self::Padded => "padded",
+        }
+    }
+}
+
+pub fn resolve_axis_bounds(
+    lower: f64,
+    upper: f64,
+    explicit: Option<(f64, f64)>,
+    method: AxisLimitMethod,
+) -> (f64, f64) {
+    if let Some(explicit) = explicit {
+        return explicit;
+    }
+    if !lower.is_finite() || !upper.is_finite() {
+        return (0.0, 1.0);
+    }
+    let (lower, upper) = if lower < upper {
+        (lower, upper)
+    } else {
+        let padding = (lower.abs() * 0.05).max(0.5);
+        (lower - padding, upper + padding)
+    };
+    match method {
+        AxisLimitMethod::Tight => (lower, upper),
+        AxisLimitMethod::Padded => {
+            let padding = (upper - lower) * 0.07;
+            if padding.is_finite() {
+                (lower - padding, upper + padding)
+            } else {
+                (lower, upper)
+            }
+        }
+        AxisLimitMethod::TickAligned => {
+            let rough_step = (upper - lower) / 5.0;
+            if !rough_step.is_finite() || rough_step <= f64::MIN_POSITIVE {
+                return (lower, upper);
+            }
+            let magnitude = 10_f64.powf(rough_step.log10().floor());
+            if !magnitude.is_finite() || magnitude <= 0.0 {
+                return (lower, upper);
+            }
+            let step = [1.0, 2.0, 5.0, 10.0]
+                .into_iter()
+                .map(|factor| factor * magnitude)
+                .find(|candidate| *candidate >= rough_step)
+                .unwrap_or(10.0 * magnitude);
+            let aligned = ((lower / step).floor() * step, (upper / step).ceil() * step);
+            if aligned.0.is_finite() && aligned.1.is_finite() && aligned.0 < aligned.1 {
+                aligned
+            } else {
+                (lower, upper)
+            }
+        }
+    }
+}
 
 /// Apply explicit bounds and the axes aspect policy before cameras or export
 /// consume the box. Degenerate dimensions receive the same minimum span on
@@ -10,14 +93,18 @@ pub fn display_bounds_3d(bounds: BoundingBox, metadata: Option<&AxesMetadata>) -
     let mut min = bounds.min;
     let mut max = bounds.max;
     if let Some(meta) = metadata {
-        for (index, limits) in [meta.x_limits, meta.y_limits, meta.z_limits]
-            .into_iter()
-            .enumerate()
+        for (index, (limits, method)) in [
+            (meta.x_limits, meta.x_limit_method),
+            (meta.y_limits, meta.y_limit_method),
+            (meta.z_limits, meta.z_limit_method),
+        ]
+        .into_iter()
+        .enumerate()
         {
-            if let Some((lower, upper)) = limits {
-                min[index] = lower as f32;
-                max[index] = upper as f32;
-            }
+            let (lower, upper) =
+                resolve_axis_bounds(f64::from(min[index]), f64::from(max[index]), limits, method);
+            min[index] = lower as f32;
+            max[index] = upper as f32;
         }
     }
     for index in 0..3 {

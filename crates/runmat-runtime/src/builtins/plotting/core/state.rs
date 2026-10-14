@@ -81,7 +81,9 @@ pub use graphics_receiver::{
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
 pub use axes_modes::{
-    axis_color_limits_snapshot_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
+    axis_color_limits_snapshot_for_axes, axis_displayed_color_limits_for_axes,
+    axis_limit_method_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
+    set_axis_limit_method_for_axes,
     set_hidden_line_removal_for_axes, set_y_direction_for_axes,
 };
 #[cfg(test)]
@@ -2192,6 +2194,26 @@ pub fn set_axis_limits_for_axes(
     Ok(())
 }
 
+/// Update an admitted axes target without making it the current axes.
+pub fn set_axis_manual_limits_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x: Option<(f64, f64)>,
+    y: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let updates = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        set_axes_limits_with_links(&mut reg, handle, axes_index, x, y)?
+    };
+    notify_figure_updates(updates);
+    Ok(())
+}
+
 fn axis_limits_for_link_axis(
     state: &mut FigureState,
     axes_index: usize,
@@ -2690,14 +2712,18 @@ fn display_bounds_for_state_axes(
     let mut y_max = bounds.max.y as f64;
 
     if let Some(meta) = state.figure.axes_metadata(axes_index) {
-        if let Some((lo, hi)) = meta.x_limits {
-            x_min = lo;
-            x_max = hi;
-        }
-        if let Some((lo, hi)) = meta.y_limits {
-            y_min = lo;
-            y_max = hi;
-        }
+        (x_min, x_max) = runmat_plot::plots::figure::resolve_axis_bounds(
+            x_min,
+            x_max,
+            meta.x_limits,
+            meta.x_limit_method,
+        );
+        (y_min, y_max) = runmat_plot::plots::figure::resolve_axis_bounds(
+            y_min,
+            y_max,
+            meta.y_limits,
+            meta.y_limit_method,
+        );
         if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
             (x_min, x_max, y_min, y_max) =
                 data_aspect_adjusted_bounds(x_min, x_max, y_min, y_max, meta.data_aspect_ratio);
@@ -3329,6 +3355,27 @@ pub fn set_z_limits_for_axes(
     Ok(())
 }
 
+pub fn set_axis_z_limits_preserving_selection(
+    handle: FigureHandle,
+    axes_index: usize,
+    limits: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let figure = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_axes_z_limits(axes_index, limits);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.owned_clone()
+    };
+    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -3351,6 +3398,27 @@ pub fn set_color_limits_for_axes(
         state.figure.set_axes_color_limits(axes_index, limits);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_axis_color_limits_preserving_selection(
+    handle: FigureHandle,
+    axes_index: usize,
+    limits: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let figure = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_axes_color_limits(axes_index, limits);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.owned_clone()
+    };
+    notify_with_figure(handle, &figure, FigureEventKind::Updated);
     Ok(())
 }
 

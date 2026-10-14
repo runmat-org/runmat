@@ -17,7 +17,8 @@ use set_preflight::{
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
-    axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure,
+    axis_display_bounds_snapshot_for_axes, axis_displayed_color_limits_for_axes,
+    axis_z_limits_snapshot_for_axes, current_axes_handle_for_figure,
     current_figure_handle_if_exists, decode_axes_handle, decode_plot_object_handle,
     figure_handle_exists, figure_has_sg_title, figure_tag, legend_entries_snapshot,
     present_figure_update, root_default_properties, root_default_property, root_figure_handles,
@@ -728,6 +729,16 @@ fn get_axes_property(
         axes_state_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
         .map_err(|err| map_figure_error(builtin, err))?;
+    let displayed_color = || {
+        axis_displayed_color_limits_for_axes(handle, axes_index)
+            .map(limit_value)
+            .map_err(|err| map_figure_error(builtin, err))
+    };
+    let displayed_z = || {
+        axis_z_limits_snapshot_for_axes(handle, axes_index)
+            .map(|limits| limit_value(limits.or(Some((0.0, 1.0)))))
+            .map_err(|err| map_figure_error(builtin, err))
+    };
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -864,14 +875,11 @@ fn get_axes_property(
                 "Colormap",
                 Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
-            st.insert(
-                "ColorLimits",
-                crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits),
-            );
-            st.insert("XLim", limit_value(meta.x_limits));
-            st.insert("YLim", limit_value(meta.y_limits));
-            st.insert("ZLim", limit_value(meta.z_limits));
-            st.insert("CLim", limit_value(meta.color_limits));
+            st.insert("ColorLimits", displayed_color()?);
+            st.insert("XLim", limit_value(x_bounds(display_bounds)));
+            st.insert("YLim", limit_value(y_bounds(display_bounds)));
+            st.insert("ZLim", displayed_z()?);
+            st.insert("CLim", displayed_color()?);
             st.insert(
                 "XTick",
                 tick_value(ticks_or_auto(
@@ -1005,13 +1013,11 @@ fn get_axes_property(
         Some("colormap") => Ok(Value::String(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
-        Some("colorlimits") => Ok(crate::builtins::plotting::op_common::limits::limit_value(
-            meta.color_limits,
-        )),
-        Some("xlim") => Ok(limit_value(meta.x_limits)),
-        Some("ylim") => Ok(limit_value(meta.y_limits)),
-        Some("zlim") => Ok(limit_value(meta.z_limits)),
-        Some("clim") => Ok(limit_value(meta.color_limits)),
+        Some("colorlimits") => displayed_color(),
+        Some("xlim") => Ok(limit_value(x_bounds(display_bounds))),
+        Some("ylim") => Ok(limit_value(y_bounds(display_bounds))),
+        Some("zlim") => displayed_z(),
+        Some("clim") => displayed_color(),
         Some("xtick") => Ok(tick_value(ticks_or_auto(
             meta.x_ticks.as_deref(),
             x_bounds(display_bounds),
@@ -1840,7 +1846,7 @@ fn apply_axes_property(
             let limits = limits_from_optional_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_limits_for_axes(
+            crate::builtins::plotting::state::set_axis_manual_limits_for_axes(
                 handle,
                 axes_index,
                 limits,
@@ -1853,7 +1859,7 @@ fn apply_axes_property(
             let limits = limits_from_optional_value(value, builtin)?;
             let meta = axes_metadata_snapshot(handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_limits_for_axes(
+            crate::builtins::plotting::state::set_axis_manual_limits_for_axes(
                 handle,
                 axes_index,
                 meta.x_limits,
@@ -1864,14 +1870,18 @@ fn apply_axes_property(
         }
         "zlim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            crate::builtins::plotting::state::set_z_limits_for_axes(handle, axes_index, limits)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            crate::builtins::plotting::state::set_axis_z_limits_preserving_selection(
+                handle, axes_index, limits,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "clim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            crate::builtins::plotting::state::set_color_limits_for_axes(handle, axes_index, limits)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            crate::builtins::plotting::state::set_axis_color_limits_preserving_selection(
+                handle, axes_index, limits,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xtick" => {

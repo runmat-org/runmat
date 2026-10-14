@@ -1,15 +1,67 @@
+use runmat_plot::plots::figure::{AxisLimitAxis, AxisLimitMethod};
 use runmat_value::{NumericScalar, Tensor, Value};
 
 use crate::builtins::plotting::plotting_error;
+use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
+use crate::builtins::plotting::state::FigureHandle;
 use crate::BuiltinResult;
+
+pub type LimitTarget = Option<(FigureHandle, usize)>;
+
+pub struct PreparedLimitCall {
+    pub target: LimitTarget,
+    pub command: LimitCommand,
+}
+
+pub fn selected_limit_axes(target: LimitTarget) -> (FigureHandle, usize) {
+    target.unwrap_or_else(|| {
+        let current = crate::builtins::plotting::state::current_axes_state();
+        (current.handle, current.active_index)
+    })
+}
+
+pub fn limit_state_error(
+    builtin: &'static str,
+    err: impl std::error::Error + Send + Sync + 'static,
+) -> crate::RuntimeError {
+    crate::builtins::plotting::plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
+}
+
+pub fn prepare_limit_call(
+    builtin: &'static str,
+    args: &[Value],
+    color_limits: bool,
+) -> BuiltinResult<PreparedLimitCall> {
+    let (target, controls) = match args {
+        [first, rest @ ..] if !rest.is_empty() => match resolve_plot_handle(first, builtin) {
+            Ok(PlotHandle::Axes(handle, index)) => (Some((handle, index)), rest),
+            _ => (None, args),
+        },
+        [first] => match resolve_plot_handle(first, builtin) {
+            Ok(PlotHandle::Axes(handle, index)) => (Some((handle, index)), &args[1..]),
+            _ => (None, args),
+        },
+        [] => (None, args),
+    };
+    let command = parse_limit_command(builtin, controls, color_limits)?;
+    Ok(PreparedLimitCall { target, command })
+}
 
 #[derive(Clone, Debug)]
 pub enum LimitCommand {
     Query,
+    QueryMode,
+    QueryMethod,
+    Freeze,
+    SetMethod(AxisLimitMethod),
     Set(Option<(f64, f64)>),
 }
 
-pub fn parse_limit_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<LimitCommand> {
+pub fn parse_limit_command(
+    builtin: &'static str,
+    args: &[Value],
+    color_limits: bool,
+) -> BuiltinResult<LimitCommand> {
     if args.is_empty() {
         return Ok(LimitCommand::Query);
     }
@@ -23,8 +75,15 @@ pub fn parse_limit_command(builtin: &'static str, args: &[Value]) -> BuiltinResu
     if let Some(text) = crate::builtins::plotting::style::value_as_string(arg) {
         let normalized = text.trim().to_ascii_lowercase();
         return match normalized.as_str() {
-            "auto" | "tight" => Ok(LimitCommand::Set(None)),
-            "manual" => Ok(LimitCommand::Query),
+            "auto" => Ok(LimitCommand::Set(None)),
+            "tight" if !color_limits => Ok(LimitCommand::SetMethod(AxisLimitMethod::Tight)),
+            "padded" if !color_limits => Ok(LimitCommand::SetMethod(AxisLimitMethod::Padded)),
+            "tickaligned" if !color_limits => {
+                Ok(LimitCommand::SetMethod(AxisLimitMethod::TickAligned))
+            }
+            "manual" => Ok(LimitCommand::Freeze),
+            "mode" if !color_limits => Ok(LimitCommand::QueryMode),
+            "method" if !color_limits => Ok(LimitCommand::QueryMethod),
             _ => Err(plotting_error(
                 builtin,
                 format!("{builtin}: unsupported mode `{normalized}`"),
@@ -33,6 +92,29 @@ pub fn parse_limit_command(builtin: &'static str, args: &[Value]) -> BuiltinResu
     }
     let limits = limits_from_value(arg, builtin)?;
     Ok(LimitCommand::Set(Some(limits)))
+}
+
+pub fn query_limit_method(
+    builtin: &'static str,
+    axis: AxisLimitAxis,
+    target: LimitTarget,
+) -> BuiltinResult<Value> {
+    let (handle, index) = selected_limit_axes(target);
+    let method = crate::builtins::plotting::state::axis_limit_method_for_axes(handle, index, axis)
+        .map_err(|err| limit_state_error(builtin, err))?;
+    Ok(Value::String(method.as_str().into()))
+}
+
+pub fn set_limit_method(
+    builtin: &'static str,
+    axis: AxisLimitAxis,
+    method: AxisLimitMethod,
+    target: LimitTarget,
+) -> BuiltinResult<Value> {
+    let (handle, index) = selected_limit_axes(target);
+    crate::builtins::plotting::state::set_axis_limit_method_for_axes(handle, index, axis, method)
+        .map_err(|err| limit_state_error(builtin, err))?;
+    Ok(Value::String(method.as_str().into()))
 }
 
 pub fn limits_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<(f64, f64)> {

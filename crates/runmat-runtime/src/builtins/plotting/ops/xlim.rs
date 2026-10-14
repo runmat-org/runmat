@@ -10,9 +10,15 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
-use super::state::{axis_limits_snapshot, set_axis_limits};
+use super::op_common::limits::{
+    limit_state_error, limit_value, prepare_limit_call, query_limit_method, selected_limit_axes,
+    set_limit_method, LimitCommand,
+};
+use super::state::{
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, set_axis_manual_limits_for_axes,
+};
 use crate::builtins::plotting::type_resolvers::get_type;
+use runmat_plot::plots::figure::AxisLimitAxis;
 
 const XLIM_INTEGER_LIMITS_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -57,7 +63,7 @@ const XLIM_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Limit mode string ('auto', 'tight', or 'manual').",
+    description: "Limit mode or method ('auto', 'manual', 'mode', 'method', 'tight', 'padded', or 'tickaligned').",
 }];
 
 const XLIM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
@@ -113,11 +119,43 @@ pub const XLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::plotting::xlim"
 )]
 pub fn xlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    match parse_limit_command("xlim", &args)? {
-        LimitCommand::Query => Ok(limit_value(axis_limits_snapshot().0)),
+    let call = prepare_limit_call("xlim", &args, false)?;
+    let (handle, index) = selected_limit_axes(call.target);
+    match call.command {
+        LimitCommand::Query => {
+            let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            Ok(limit_value(bounds.map(|bounds| (bounds.0, bounds.1))))
+        }
+        LimitCommand::QueryMode => {
+            let metadata = axes_metadata_snapshot(handle, index)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            Ok(Value::String(
+                if metadata.x_limits.is_some() { "manual" } else { "auto" }.into(),
+            ))
+        }
+        LimitCommand::QueryMethod => query_limit_method("xlim", AxisLimitAxis::X, call.target),
+        LimitCommand::SetMethod(method) => {
+            set_limit_method("xlim", AxisLimitAxis::X, method, call.target)
+        }
+        LimitCommand::Freeze => {
+            let metadata = axes_metadata_snapshot(handle, index)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            let limits = metadata
+                .x_limits
+                .or_else(|| bounds.map(|bounds| (bounds.0, bounds.1)))
+                .unwrap_or((0.0, 1.0));
+            set_axis_manual_limits_for_axes(handle, index, Some(limits), metadata.y_limits)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            Ok(limit_value(Some(limits)))
+        }
         LimitCommand::Set(limits) => {
-            let (_, y) = axis_limits_snapshot();
-            set_axis_limits(limits, y);
+            let metadata = axes_metadata_snapshot(handle, index)
+                .map_err(|err| limit_state_error("xlim", err))?;
+            set_axis_manual_limits_for_axes(handle, index, limits, metadata.y_limits)
+                .map_err(|err| limit_state_error("xlim", err))?;
             Ok(limit_value(limits))
         }
     }
@@ -157,6 +195,45 @@ mod tests {
         let queried = xlim_builtin(Vec::new()).unwrap();
         let tensor = runmat_value::Tensor::try_from(&queried).unwrap();
         assert_eq!(tensor.materialize_f64(), vec![0.0, 10.0]);
+    }
+
+    #[test]
+    fn automatic_method_and_manual_freeze_share_displayed_limits() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        futures::executor::block_on(crate::builtins::plotting::plot::plot_builtin(vec![
+            Value::Tensor(
+                runmat_value::Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3])
+                    .expect("line data"),
+            ),
+        ]))
+        .expect("nonempty plot");
+
+        xlim_builtin(vec![Value::String("tight".into())]).expect("tight method");
+        let tight = runmat_value::Tensor::try_from(&xlim_builtin(Vec::new()).expect("tight query"))
+            .expect("tight tensor")
+            .materialize_f64();
+        xlim_builtin(vec![Value::String("padded".into())]).expect("padded method");
+        let padded =
+            runmat_value::Tensor::try_from(&xlim_builtin(Vec::new()).expect("padded query"))
+                .expect("padded tensor")
+                .materialize_f64();
+        assert!(padded[0] < tight[0] && padded[1] > tight[1]);
+        assert!(matches!(
+            xlim_builtin(vec![Value::String("method".into())]).expect("method"),
+            Value::String(method) if method == "padded"
+        ));
+        xlim_builtin(vec![Value::String("manual".into())]).expect("freeze");
+        assert!(matches!(
+            xlim_builtin(vec![Value::String("mode".into())]).expect("mode"),
+            Value::String(mode) if mode == "manual"
+        ));
+        let frozen = runmat_value::Tensor::try_from(&xlim_builtin(Vec::new()).expect("frozen"))
+            .expect("frozen tensor")
+            .materialize_f64();
+        assert_eq!(frozen, padded);
     }
 
     #[test]

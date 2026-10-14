@@ -1365,6 +1365,21 @@ pub struct SerializedAxesMetadata {
     pub y_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub z_limits: Option<[f64; 2]>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub x_limit_method: crate::plots::figure::AxisLimitMethod,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub y_limit_method: crate::plots::figure::AxisLimitMethod,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub z_limit_method: crate::plots::figure::AxisLimitMethod,
     #[serde(default)]
     pub x_log: bool,
     #[serde(default)]
@@ -1581,6 +1596,9 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             x_limits: value.x_limits.map(|(a, b)| [a, b]),
             y_limits: value.y_limits.map(|(a, b)| [a, b]),
             z_limits: value.z_limits.map(|(a, b)| [a, b]),
+            x_limit_method: value.x_limit_method,
+            y_limit_method: value.y_limit_method,
+            z_limit_method: value.z_limit_method,
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
@@ -1643,6 +1661,9 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             x_limits: value.x_limits.map(|[a, b]| (a, b)),
             y_limits: value.y_limits.map(|[a, b]| (a, b)),
             z_limits: value.z_limits.map(|[a, b]| (a, b)),
+            x_limit_method: value.x_limit_method,
+            y_limit_method: value.y_limit_method,
+            z_limit_method: value.z_limit_method,
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,

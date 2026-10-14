@@ -1,9 +1,50 @@
 //! Axis direction and manual limit locking share the figure/axes state owner.
 use super::*;
-use runmat_plot::plots::figure::YDirection;
+use runmat_plot::plots::figure::{AxisLimitAxis, AxisLimitMethod, YDirection};
 #[cfg(test)]
 #[path = "axes_modes/tests.rs"]
 mod tests;
+
+pub fn axis_limit_method_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    axis: AxisLimitAxis,
+) -> Result<AxisLimitMethod, FigureError> {
+    let reg = registry();
+    let state = reg
+        .figures
+        .get(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    validate_axes_index(state, axes_index)?;
+    let meta = state.figure.axes_metadata(axes_index).expect("validated axes");
+    Ok(match axis {
+        AxisLimitAxis::X => meta.x_limit_method,
+        AxisLimitAxis::Y => meta.y_limit_method,
+        AxisLimitAxis::Z => meta.z_limit_method,
+    })
+}
+
+pub fn set_axis_limit_method_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    axis: AxisLimitAxis,
+    method: AxisLimitMethod,
+) -> Result<(), FigureError> {
+    let figure = {
+        let mut reg = registry();
+        let state = reg
+            .figures
+            .get(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        validate_axes_index(state, axes_index)?;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_axes_limit_method(axes_index, axis, method);
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.owned_clone()
+    };
+    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    Ok(())
+}
 
 pub fn axis_color_limits_snapshot_for_axes(
     handle: FigureHandle,
@@ -25,6 +66,21 @@ pub fn axis_color_limits_snapshot_for_axes(
         ));
     }
     Ok(state.figure.axes_scalar_color_range(axes_index))
+}
+
+pub fn axis_displayed_color_limits_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<Option<(f64, f64)>, FigureError> {
+    use runmat_plot::plots::surface::ScalarColorRange;
+    let range = axis_color_limits_snapshot_for_axes(handle, axes_index)?;
+    Ok(match range {
+        ScalarColorRange::Known(lo, hi) if lo.is_finite() && hi.is_finite() && lo < hi => {
+            Some((lo, hi))
+        }
+        ScalarColorRange::Empty | ScalarColorRange::NotMapped => Some((0.0, 1.0)),
+        ScalarColorRange::Known(_, _) | ScalarColorRange::Unavailable => None,
+    })
 }
 
 /// Z limits exist for represented 3-D content or an explicitly configured Z
