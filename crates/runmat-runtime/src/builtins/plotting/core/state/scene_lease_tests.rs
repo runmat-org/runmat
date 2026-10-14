@@ -38,7 +38,7 @@ fn central_mutation_helpers_replace_exact_scene_lease_after_admission() {
     assert!(!selected.shares_lease(&successor));
     assert_eq!(successor.figure(), handle.as_u32());
 
-    let _ = axis_limits_snapshot();
+    let _ = axes_metadata_snapshot(handle, axes_index).expect("axes query");
     let _ = current_hold_enabled();
     let _ = pan_state_snapshot(handle, None).expect("pan query");
     assert!(matches!(

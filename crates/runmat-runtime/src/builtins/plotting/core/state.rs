@@ -2168,31 +2168,6 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
     notify_figure_updates(updates);
 }
 
-pub fn set_axis_limits_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x: Option<(f64, f64)>,
-    y: Option<(f64, f64)>,
-) -> Result<(), FigureError> {
-    let updates = {
-        let mut reg = registry();
-        let state = get_state_mut(&mut reg, handle);
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
-        state.active_axes = axes_index;
-        state.figure.set_active_axes_index(axes_index);
-        set_axes_limits_with_links(&mut reg, handle, axes_index, x, y)?
-    };
-    notify_figure_updates(updates);
-    Ok(())
-}
-
 /// Update an admitted axes target without making it the current axes.
 pub fn set_axis_manual_limits_for_axes(
     handle: FigureHandle,
@@ -2497,19 +2472,6 @@ pub fn set_axis_tick_angles_for_axes(
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
-}
-
-pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    let meta = state
-        .figure
-        .axes_metadata(axes)
-        .cloned()
-        .unwrap_or_default();
-    (meta.x_limits, meta.y_limits)
 }
 
 pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
@@ -3310,14 +3272,6 @@ pub fn current_or_any_waitbar_handle() -> Option<FigureHandle> {
         .find_map(|(handle, state)| state.waitbar.as_ref().map(|_| *handle))
 }
 
-pub fn z_limits_snapshot() -> Option<(f64, f64)> {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    state.figure.axes_metadata(axes).and_then(|m| m.z_limits)
-}
-
 pub fn color_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
@@ -3340,18 +3294,6 @@ pub fn set_z_limits(limits: Option<(f64, f64)>) {
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_z_limits_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    limits: Option<(f64, f64)>,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_z_limits(axes_index, limits);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
 }
 
 pub fn set_axis_z_limits_preserving_selection(

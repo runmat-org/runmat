@@ -868,7 +868,7 @@ mod tests {
         .unwrap();
         let (figure, axes_index) =
             crate::builtins::plotting::state::decode_axes_handle(ax1).expect("axes handle");
-        crate::builtins::plotting::state::set_axis_limits_for_axes(
+        crate::builtins::plotting::state::set_axis_manual_limits_for_axes(
             figure,
             axes_index,
             Some((0.0, 10.0)),
