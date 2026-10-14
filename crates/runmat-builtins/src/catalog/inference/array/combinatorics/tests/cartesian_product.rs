@@ -6,6 +6,52 @@ use crate::{
 use runmat_types::{ObjectFact, ResidencyFact, StructFact};
 
 #[test]
+fn gathered_nested_columns_preserve_exact_class_shape_and_host_facts() {
+    use runmat_types::CellFact;
+    use std::collections::BTreeMap;
+    let mut resident = numeric(
+        NumericClass::UInt64,
+        ShapeFact::from(vec![Some(2), Some(1)]),
+    );
+    resident.residency = ResidencyFact::Device {
+        provider: Some("fixture".into()),
+    };
+    let structure = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::from([("data".into(), resident)]),
+        true,
+    )));
+    let cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(structure.clone()),
+            elements: vec![structure],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    let entry = builtin_catalog_entry_by_name("combinations").unwrap();
+    let inferred = crate::infer_catalog_call(entry, &request(vec![cell]));
+    let ValueKindFact::Object(table) = &inferred.outputs[0].kind else {
+        panic!("table")
+    };
+    let ValueKindFact::Struct(variables) = &table.properties["Variables"].kind else {
+        panic!("variables")
+    };
+    let ValueKindFact::Cell(column) = &variables.fields["Var1"].kind else {
+        panic!("cell")
+    };
+    assert_eq!(variables.fields["Var1"].storage, StorageFact::Dense);
+    let ValueKindFact::Struct(nested) = &column.element.kind else {
+        panic!("structure")
+    };
+    let payload = &nested.fields["data"];
+    assert_eq!(payload.residency, ResidencyFact::Host);
+    assert_eq!(payload.numeric().unwrap().class, NumericClass::UInt64);
+    assert_eq!(payload.storage, StorageFact::Dense);
+    assert_eq!(payload.shape, ShapeFact::from(vec![Some(2), Some(1)]));
+}
+
+#[test]
 fn infers_typed_table_variables_and_cartesian_height() {
     let entry = builtin_catalog_entry_by_name("combinations").expect("combinations entry");
     assert_eq!(
@@ -79,6 +125,32 @@ fn preserves_zero_height_and_reports_missing_input() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-COMBINATIONS-ARITY"));
+}
+
+#[test]
+fn zero_height_does_not_depend_on_overflowing_or_unknown_other_lengths() {
+    let entry = builtin_catalog_entry_by_name("combinations").unwrap();
+    for first in [
+        ShapeFact::from(vec![Some(usize::MAX), Some(2)]),
+        ShapeFact::Ranked { rank: 2 },
+    ] {
+        let inferred = crate::infer_catalog_call(
+            entry,
+            &request(vec![
+                numeric(NumericClass::Double, first),
+                numeric(NumericClass::Int32, ShapeFact::from(vec![Some(0), Some(1)])),
+            ]),
+        );
+        let ValueKindFact::Object(table) = &inferred.outputs[0].kind else {
+            panic!("table")
+        };
+        let ValueKindFact::Struct(variables) = &table.properties["Variables"].kind else {
+            panic!("variables")
+        };
+        for variable in variables.fields.values() {
+            assert_eq!(variable.shape, ShapeFact::from(vec![Some(0), Some(1)]));
+        }
+    }
 }
 
 #[test]

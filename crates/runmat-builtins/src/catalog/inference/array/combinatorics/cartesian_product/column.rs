@@ -20,6 +20,8 @@ impl ColumnFact {
         };
         output.shape = shape;
         support::facts::materialize(&mut output);
+        // Table variables are array carriers even for exactly one row.
+        output.storage = StorageFact::Dense;
         output.residency = ResidencyFact::Host;
         output
     }

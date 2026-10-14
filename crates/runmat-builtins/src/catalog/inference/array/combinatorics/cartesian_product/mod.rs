@@ -8,6 +8,7 @@ use runmat_types::{
     ValueKindFact,
 };
 
+use super::super::super::support::materialization::gathered_value_fact;
 use super::super::super::{argument_error, finish_fixed};
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -23,11 +24,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let columns = request
         .arguments
         .iter()
-        .map(column::infer)
+        .map(|input| column::infer(&gathered_value_fact(input)))
         .collect::<Vec<_>>();
-    let row_count = columns.iter().try_fold(1_usize, |product, column| {
-        product.checked_mul(column.sequence_length?)
-    });
+    let row_count = if columns
+        .iter()
+        .any(|column| column.sequence_length == Some(0))
+    {
+        Some(0)
+    } else {
+        columns.iter().try_fold(1_usize, |product, column| {
+            product.checked_mul(column.sequence_length?)
+        })
+    };
     let column_shape = ShapeFact::from(vec![row_count, Some(1)]);
     let variables = columns
         .into_iter()

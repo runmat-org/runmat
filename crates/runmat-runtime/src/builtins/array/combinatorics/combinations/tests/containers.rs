@@ -2,6 +2,36 @@ use super::*;
 use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor};
 
 #[test]
+fn asymmetric_cell_pages_are_linearized_in_column_major_order() {
+    let cells = CellArray::new_with_shape(
+        (1..=12)
+            .map(|value| Value::Int(runmat_value::IntValue::U64(value)))
+            .collect(),
+        vec![2, 3, 2],
+    )
+    .unwrap();
+    let output = table(
+        call(
+            Value::Cell(cells),
+            vec![Value::Tensor(
+                Tensor::new(vec![7., 8.], vec![1, 2]).unwrap(),
+            )],
+        )
+        .unwrap(),
+    );
+    let variables = table_variables(&output).unwrap();
+    let Value::Cell(column) = &variables.fields["Var1"] else {
+        panic!("cell variable");
+    };
+    let expected = [1, 4, 2, 5, 3, 6, 7, 10, 8, 11, 9, 12]
+        .into_iter()
+        .flat_map(|value| vec![Value::Int(runmat_value::IntValue::U64(value)); 2])
+        .collect::<Vec<_>>();
+    assert_eq!(column.data, expected);
+    assert_eq!(column.shape, vec![24, 1]);
+}
+
+#[test]
 fn cartesian_product_uses_rightmost_fastest_order() {
     let named_inputs = table(
         call(

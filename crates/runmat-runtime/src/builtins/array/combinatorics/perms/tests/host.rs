@@ -1,4 +1,50 @@
 use super::*;
+
+#[test]
+fn character_pages_use_full_shape_admission() {
+    for shape in [vec![1, 2, 2], vec![1, 2, 1]] {
+        let count = shape.iter().product();
+        let chars = runmat_value::CharArray::new_with_shape(vec!['x'; count], shape).unwrap();
+        assert_eq!(
+            call(Value::CharArray(chars)).unwrap_err().identifier(),
+            Some("RunMat:perms:InvalidInput")
+        );
+    }
+}
+
+#[test]
+fn complex_single_permutations_preserve_storage_and_exact_components() {
+    for data in [
+        vec![],
+        vec![(1.25_f32, -0.0_f32)],
+        vec![(1.25, -0.0), (-2.5, 3.75)],
+    ] {
+        let columns = data.len();
+        let input = ComplexTensor::from_f32(data.clone(), vec![1, columns]).unwrap();
+        let Value::ComplexTensor(output) = call(Value::ComplexTensor(input)).unwrap() else {
+            panic!("complex output");
+        };
+        let runmat_value::ComplexStorage::F32(values) = output.complex_storage() else {
+            panic!("permutation must retain represented Single components");
+        };
+        let expected = match columns {
+            0 => vec![],
+            1 => data,
+            _ => vec![data[1], data[0], data[0], data[1]],
+        };
+        assert_eq!(values.len(), expected.len());
+        for (actual, expected) in values.iter().zip(expected) {
+            assert_eq!(
+                (actual.0.to_bits(), actual.1.to_bits()),
+                (expected.0.to_bits(), expected.1.to_bits())
+            );
+        }
+        assert_eq!(
+            output.shape,
+            vec![if columns == 2 { 2 } else { 1 }, columns]
+        );
+    }
+}
 use runmat_value::{
     CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
     StringArray,

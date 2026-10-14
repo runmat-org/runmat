@@ -19,6 +19,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "cell-matrix-order",
+        title: "Read cell elements down columns",
+        program: "C = {1, 2, 3; 4, 5, 6};\nT = combinations(C);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(size(T), [6 1]));\nassert(isequal(T.Var1, {1; 4; 2; 5; 3; 6}));",
+        },
+    },
+    BuiltinExample {
         id: "numeric-and-text",
         title: "Generate numeric and text pairs",
         program: "T = combinations([1 2], [\"x\" \"y\"])",

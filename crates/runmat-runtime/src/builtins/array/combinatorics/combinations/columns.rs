@@ -30,7 +30,7 @@ impl CombinationColumn {
                     .map(|value| value.to_string())
                     .collect(),
             ),
-            Value::Cell(array) => Self::Cell(array.data),
+            Value::Cell(array) => Self::Cell(array.into_column_major().map_err(error::internal)?),
             other => Self::Cell(vec![other]),
         })
     }
@@ -92,6 +92,9 @@ fn materialize_numeric(
 }
 
 fn repeat_values<T: Clone>(values: &[T], repetition: Repetition, rows: usize) -> Vec<T> {
+    if rows == 0 {
+        return Vec::new();
+    }
     let mut output = Vec::with_capacity(rows);
     for _ in 0..repetition.outer {
         for value in values {

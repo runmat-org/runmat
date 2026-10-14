@@ -26,12 +26,7 @@ fn outputs_are_fresh_materializations() {
     assert_eq!(output.view, ViewFact::Materialized);
     assert_eq!(output.alias, AliasFact::Unique);
     assert_eq!(output.mutation, MutationFact::ValueSemantics);
-    assert_eq!(
-        output.residency,
-        ResidencyFact::Device {
-            provider: Some("test".into())
-        }
-    );
+    assert_eq!(output.residency, ResidencyFact::Unknown);
 
     let cells = ValueFact::proven(
         ValueKindFact::Cell(CellFact {

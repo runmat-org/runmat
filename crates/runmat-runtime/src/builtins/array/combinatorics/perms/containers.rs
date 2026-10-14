@@ -1,6 +1,7 @@
 use runmat_builtins::{PERMS_ERROR_INTERNAL, PERMS_ERROR_TOO_LARGE};
 use runmat_value::{
-    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexStorage, ComplexTensor, LogicalArray, NumericStorage, StringArray,
+    Tensor, Value,
 };
 
 use crate::BuiltinResult;
@@ -43,19 +44,19 @@ fn permute_numeric_storage(storage: NumericStorage, rows: usize) -> BuiltinResul
 pub(super) fn complex(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let elements = shape::vector_len(tensor.shape())?;
     let rows = cardinality::output_rows(elements)?;
-    if let Some(storage) = tensor.integer_storage() {
-        let storage = storage
-            .reorder(|values| {
-                enumeration::permuted_columns(values, rows)
-                    .map_err(|failure| format!("{failure:?}"))
-            })
-            .map_err(internal)?;
-        return ComplexTensor::new_integer(storage, vec![rows, elements])
-            .map(Value::ComplexTensor)
-            .map_err(internal);
-    }
-    let data = permuted_columns(&tensor.materialize_f64(), rows)?;
-    ComplexTensor::new(data, vec![rows, elements])
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(permuted_columns(&values, rows)?.into()),
+        ComplexStorage::F32(values) => ComplexStorage::F32(permuted_columns(&values, rows)?.into()),
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            storage
+                .reorder(|values| {
+                    enumeration::permuted_columns(values, rows)
+                        .map_err(|failure| format!("{failure:?}"))
+                })
+                .map_err(internal)?,
+        ),
+    };
+    ComplexTensor::from_complex_storage(storage, vec![rows, elements])
         .map(Value::ComplexTensor)
         .map_err(internal)
 }
@@ -69,7 +70,7 @@ pub(super) fn logical(array: LogicalArray) -> BuiltinResult<Value> {
 }
 
 pub(super) fn characters(chars: CharArray) -> BuiltinResult<Value> {
-    let elements = shape::vector_len(&[chars.rows, chars.cols])?;
+    let elements = shape::vector_len(&chars.shape)?;
     let rows = cardinality::output_rows(elements)?;
     CharArray::new(permuted_rows(&chars.data, rows)?, rows, elements)
         .map(Value::CharArray)

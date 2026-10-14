@@ -58,5 +58,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::combinatorics::nchoosek"
 )]
 async fn nchoosek_builtin(first: Value, k: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::NCHOOSEK_DESCRIPTOR,
+        &runmat_builtins::NCHOOSEK_ERROR_TOO_MANY_OUTPUTS,
+        "nchoosek",
+    )?;
     execute::apply(first, k).await
 }

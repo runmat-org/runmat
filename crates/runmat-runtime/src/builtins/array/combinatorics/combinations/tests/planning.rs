@@ -19,10 +19,18 @@ fn cartesian_repetition_plan_is_checked_before_materialization() {
 
 #[test]
 fn empty_products_retain_zero_rows_and_well_defined_strides() {
-    let plan = plan::build(&[2, 0, 3]).expect("empty plan");
-    assert_eq!(plan.rows, 0);
-    assert_eq!(plan.repetitions[0].inner, 0);
-    assert_eq!(plan.repetitions[1].outer, 2);
-    assert_eq!(plan.repetitions[1].inner, 3);
-    assert_eq!(plan.repetitions[2].outer, 0);
+    for lengths in [
+        [2, 0, 3],
+        [usize::MAX, 2, 0],
+        [0, usize::MAX, 2],
+        [usize::MAX, 0, 2],
+    ] {
+        let plan = plan::build(&lengths).expect("empty plan");
+        assert_eq!(plan.rows, 0);
+        assert_eq!(plan.repetitions.len(), lengths.len());
+        assert!(plan
+            .repetitions
+            .iter()
+            .all(|stride| stride.outer == 0 && stride.inner == 0));
+    }
 }

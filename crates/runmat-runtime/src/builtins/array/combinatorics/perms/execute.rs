@@ -8,6 +8,10 @@ use super::{containers, error};
 
 pub(super) async fn apply(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
+        // Cardinality and vector shape depend only on the admitted descriptor,
+        // so invalid requests must not initiate an owning-provider download.
+        let elements = super::shape::vector_len(handle.shape())?;
+        super::cardinality::output_rows(elements)?;
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
             .map_err(internal)?;

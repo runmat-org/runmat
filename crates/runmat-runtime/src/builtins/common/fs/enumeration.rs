@@ -2,6 +2,7 @@ use glob::Pattern;
 use runmat_filesystem::{self as vfs, FsMetadata, FsProvider};
 use std::collections::HashSet;
 use std::ffi::OsString;
+use std::future::Future;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -9,6 +10,33 @@ pub(crate) struct ListedEntry {
     pub path: PathBuf,
     pub metadata: FsMetadata,
     pub recursable: bool,
+}
+
+/// Liveness authority retained by an owner that enumerates through a captured
+/// provider. The check is synchronous because it guards, rather than performs,
+/// each provider operation.
+pub(crate) trait EnumerationAuthority {
+    fn check(&self) -> io::Result<()>;
+}
+
+struct UnrestrictedEnumeration;
+
+impl EnumerationAuthority for UnrestrictedEnumeration {
+    fn check(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+async fn guarded<T>(
+    authority: &dyn EnumerationAuthority,
+    work: impl Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    authority.check()?;
+    let result = work.await;
+    if result.is_ok() {
+        authority.check()?;
+    }
+    result
 }
 
 pub(crate) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
@@ -21,19 +49,35 @@ pub(crate) async fn directory_in(
     cwd: &Path,
     path: &Path,
 ) -> io::Result<Vec<ListedEntry>> {
+    directory_in_guarded(provider, cwd, path, &UnrestrictedEnumeration).await
+}
+
+pub(crate) async fn directory_in_guarded(
+    provider: &dyn FsProvider,
+    cwd: &Path,
+    path: &Path,
+    authority: &dyn EnumerationAuthority,
+) -> io::Result<Vec<ListedEntry>> {
     let mut listed = Vec::new();
-    for entry in provider.read_dir(&resolve(provider, cwd, path)).await? {
+    for entry in guarded(authority, provider.read_dir(&resolve(provider, cwd, path))).await? {
         let entry_path = entry.path().to_path_buf();
         let recursable = entry.is_dir();
-        let metadata = match provider
-            .metadata(&resolve(provider, cwd, &entry_path))
-            .await
+        let metadata = match guarded(
+            authority,
+            provider.metadata(&resolve(provider, cwd, &entry_path)),
+        )
+        .await
         {
             Ok(metadata) => metadata,
-            Err(_) => {
-                provider
-                    .symlink_metadata(&resolve(provider, cwd, &entry_path))
-                    .await?
+            Err(error) => {
+                if authority.check().is_err() {
+                    return Err(error);
+                }
+                guarded(
+                    authority,
+                    provider.symlink_metadata(&resolve(provider, cwd, &entry_path)),
+                )
+                .await?
             }
         };
         listed.push(ListedEntry {
@@ -51,10 +95,14 @@ async fn matching_directory(
     provider: &dyn FsProvider,
     cwd: &Path,
     path: &Path,
+    authority: &dyn EnumerationAuthority,
 ) -> io::Result<Vec<ListedEntry>> {
-    match provider.metadata(&resolve(provider, cwd, path)).await {
-        Ok(metadata) if metadata.is_dir() => directory_in(provider, cwd, path).await,
+    match guarded(authority, provider.metadata(&resolve(provider, cwd, path))).await {
+        Ok(metadata) if metadata.is_dir() => {
+            directory_in_guarded(provider, cwd, path, authority).await
+        }
         Ok(_) => Ok(Vec::new()),
+        Err(error) if authority.check().is_err() => Err(error),
         Err(error)
             if matches!(
                 error.kind(),
@@ -77,6 +125,15 @@ pub(crate) async fn matching_in(
     cwd: &Path,
     pattern: &Path,
 ) -> io::Result<Vec<ListedEntry>> {
+    matching_in_guarded(provider, cwd, pattern, &UnrestrictedEnumeration).await
+}
+
+pub(crate) async fn matching_in_guarded(
+    provider: &dyn FsProvider,
+    cwd: &Path,
+    pattern: &Path,
+    authority: &dyn EnumerationAuthority,
+) -> io::Result<Vec<ListedEntry>> {
     let (base, components) = split_pattern(pattern)?;
     let mut pending = vec![(base, 0usize)];
     let mut paths = HashSet::new();
@@ -88,7 +145,7 @@ pub(crate) async fn matching_in(
         }
         let component = &components[index];
         if component == "**" {
-            let entries = matching_directory(provider, cwd, &folder).await?;
+            let entries = matching_directory(provider, cwd, &folder, authority).await?;
             if index + 1 == components.len() {
                 for entry in entries {
                     let path = child_path(&folder, &entry.path);
@@ -109,7 +166,7 @@ pub(crate) async fn matching_in(
         }
 
         let matcher = Pattern::new(component).map_err(invalid_pattern)?;
-        for entry in matching_directory(provider, cwd, &folder).await? {
+        for entry in matching_directory(provider, cwd, &folder, authority).await? {
             let name = entry.path.file_name().and_then(|name| name.to_str());
             if !name.is_some_and(|name| matcher.matches(name)) {
                 continue;
@@ -125,14 +182,20 @@ pub(crate) async fn matching_in(
 
     let mut listed = Vec::with_capacity(paths.len());
     for path in paths {
-        let metadata = match provider.metadata(&resolve(provider, cwd, &path)).await {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                provider
-                    .symlink_metadata(&resolve(provider, cwd, &path))
+        let metadata =
+            match guarded(authority, provider.metadata(&resolve(provider, cwd, &path))).await {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    if authority.check().is_err() {
+                        return Err(error);
+                    }
+                    guarded(
+                        authority,
+                        provider.symlink_metadata(&resolve(provider, cwd, &path)),
+                    )
                     .await?
-            }
-        };
+                }
+            };
         listed.push(ListedEntry {
             path,
             metadata,

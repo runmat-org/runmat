@@ -3,6 +3,28 @@ use crate::builtins::common::{gpu_helpers, test_support};
 use runmat_value::IntegerStorage;
 
 #[test]
+fn resident_shape_and_size_errors_precede_provider_access() {
+    for (shape, expected) in [
+        (vec![2, 2], "RunMat:perms:InvalidInput"),
+        (vec![1, 2, 1], "RunMat:perms:InvalidInput"),
+        (vec![1, 11], "RunMat:perms:TooLarge"),
+    ] {
+        let allocation_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let handle = allocation_owner
+            .allocate_zeroed(
+                shape,
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle;
+        let error = call(Value::GpuTensor(handle))
+        .expect_err("shape admission before missing owner lookup");
+        assert_eq!(error.identifier(), Some(expected));
+    }
+}
+
+#[test]
 fn provider_outputs_restore_owner_class_and_explicit_residency() {
     test_support::with_test_provider(|provider| {
         let input = Tensor::new_integer(
@@ -93,14 +115,14 @@ fn logical_and_complex_provider_values_restore_their_storage() {
 
 #[cfg(feature = "wgpu")]
 #[test]
+#[ignore = "requires a real WGPU device; run explicitly with --ignored"]
 fn wgpu_fallback_preserves_every_integer_class_and_explicit_residency() {
     let _accel_guard = test_support::accel_test_lock();
-    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    );
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return;
-    };
+    )
+    .expect("actual WGPU device required for this explicit hardware witness");
+    let provider: &dyn runmat_accelerate_api::AccelProvider = provider;
     let cases = [
         IntegerStorage::I8(vec![1, 2]),
         IntegerStorage::I16(vec![1, 2]),
@@ -126,12 +148,15 @@ fn wgpu_fallback_preserves_every_integer_class_and_explicit_residency() {
             .expect("upload")
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated fixture provenance");
-        let output = call(Value::GpuTensor(handle)).expect("resident perms");
+        let output = call(Value::GpuTensor(handle.clone())).expect("resident perms");
         let Value::GpuTensor(output_handle) = &output else {
             panic!("expected resident output")
         };
         assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+        let output_handle = output_handle.clone();
         let gathered = test_support::gather(output).expect("gather");
         assert_eq!(gathered.integer_storage(), Some(&expected));
+        provider.free(&output_handle).unwrap();
+        provider.free(&handle).unwrap();
     }
 }

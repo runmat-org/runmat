@@ -109,3 +109,62 @@ fn strict_mode_does_not_create_a_missing_parent() {
     assert_eq!(super::support::status(&runmat), 0.0);
     assert!(target.exists());
 }
+
+#[test]
+fn strict_mode_rejects_resident_filename_before_provider_lookup() {
+    let _lock = super::support::lock();
+    let allocation =
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1]);
+
+    let error = super::support::run(vec![Value::GpuTensor(allocation.handle.clone())], 1, false)
+        .expect_err("resident numeric extension");
+
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::SAVEPATH_NUMERIC_CHARACTER_CODES_EXTENSION.error_identifier
+    );
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[test]
+fn resident_numeric_filename_uses_its_exact_provider_and_retains_the_source() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let _lock = super::support::lock();
+        let directory = tempdir().expect("directory");
+        let target = directory.path().join("resident-pathdef.m");
+        let text = target.to_string_lossy();
+        let tensor = Tensor::new(
+            text.chars()
+                .map(|character| u32::from(character) as f64)
+                .collect(),
+            vec![1, text.chars().count()],
+        )
+        .expect("numeric filename");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("resident numeric filename");
+        let lifetime = handle.allocation_lease().downgrade();
+        let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+            .expect("exact resident owner");
+        assert!(runmat_accelerate_api::same_provider_instance(
+            owner, provider
+        ));
+        let before = provider.telemetry_snapshot();
+
+        let value = super::support::run(vec![Value::GpuTensor(handle.clone())], 1, true)
+            .expect("resident savepath");
+
+        assert_eq!(super::support::status(&value), 0.0);
+        assert!(target.is_file());
+        let after = provider.telemetry_snapshot();
+        assert!(after.download_bytes > before.download_bytes);
+        assert_eq!(after.kernel_launches, before.kernel_launches);
+        assert!(lifetime.acquire().is_some());
+        handle.release().expect("release resident filename");
+        assert!(lifetime.acquire().is_none());
+    });
+}

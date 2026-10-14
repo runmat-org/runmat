@@ -87,3 +87,44 @@ fn matlab_mode_rejects_resident_numeric_before_provider_lookup() {
         Some("RunMat:compatibility:GenpathNumericCharacterCodesExtension")
     );
 }
+
+#[test]
+fn resident_numeric_root_uses_its_exact_provider_and_retains_the_source() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let directory = tempdir().expect("directory");
+        let path_text = directory.path().to_string_lossy();
+        let tensor = Tensor::new(
+            path_text
+                .chars()
+                .map(|character| u32::from(character) as f64)
+                .collect(),
+            vec![1, path_text.chars().count()],
+        )
+        .expect("numeric root");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("resident numeric root");
+        let lifetime = handle.allocation_lease().downgrade();
+        let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+            .expect("exact resident owner");
+        assert!(runmat_accelerate_api::same_provider_instance(
+            owner, provider
+        ));
+        let before = provider.telemetry_snapshot();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+
+        assert_eq!(
+            text(call(vec![Value::GpuTensor(handle.clone())]).expect("resident genpath")),
+            canonical(directory.path())
+        );
+
+        let after = provider.telemetry_snapshot();
+        assert!(after.download_bytes > before.download_bytes);
+        assert_eq!(after.kernel_launches, before.kernel_launches);
+        assert!(lifetime.acquire().is_some());
+        handle.release().expect("release resident root");
+        assert!(lifetime.acquire().is_none());
+    });
+}

@@ -19,6 +19,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "complex-single",
+        title: "Preserve complex Single components",
+        program: "v = complex(single([1 2]), single([3 4]));\nP = perms(v);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(P, \"single\"));\nassert(isequal(P, [v(2) v(1); v(1) v(2)]));",
+        },
+    },
+    BuiltinExample {
         id: "numeric-vector",
         title: "Permute a numeric vector",
         program: "P = perms([1 2 3])",

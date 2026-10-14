@@ -51,6 +51,9 @@ mod native_deal;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_max.rs"]
 mod native_max;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_textlines.rs"]
+mod native_textlines;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
