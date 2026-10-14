@@ -27,7 +27,7 @@ impl Drop for VmThreadState {
 fn run_source(
     source: &str,
     provider: &'static dyn AccelProvider,
-) -> Result<(), runmat_runtime::RuntimeError> {
+) -> Result<(), Box<runmat_runtime::RuntimeError>> {
     let source = source.to_owned();
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
@@ -42,7 +42,9 @@ fn run_source(
             let entrypoint = hir.assembly.entrypoints[0].id;
             let bytecode = runmat_vm::compile(&hir.assembly, &mir, entrypoint)
                 .expect("compile public DL program");
-            block_on(runmat_vm::interpret(&bytecode)).map(|_| ())
+            block_on(runmat_vm::interpret(&bytecode))
+                .map(|_| ())
+                .map_err(Box::new)
         })
         .expect("start public VM stack")
         .join()
