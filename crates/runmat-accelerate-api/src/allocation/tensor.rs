@@ -126,6 +126,10 @@ impl GpuTensorHandle {
         &self,
         provenance: GpuHandleProvenance,
     ) -> Result<Self, AllocationAcquisitionError> {
+        if self.view().provenance() == Some(provenance) {
+            self.allocation_lease().validate_live()?;
+            return Ok(self.clone());
+        }
         self.with_view(self.view().clone().with_provenance(provenance))
     }
     pub fn shares_allocation_with(&self, other: &Self) -> bool {

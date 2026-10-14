@@ -2,6 +2,7 @@
 //! sequence; no provider handle, upload, query, or timing is needed here.
 
 use super::*;
+use crate::builtins::deep_learning::model::execution::host::conv::{resident_request, ConvError};
 use crate::builtins::deep_learning::model::plan::{
     host::{Controls, HostNetworkPlan},
     normalization::{Geometry, NormalizationStage},
@@ -310,7 +311,59 @@ fn lower_for_purpose(
                     .with_shape(physical.shape().to_vec())
                     .with_layout(GpuTensorLayout::Contiguous);
             }
-            Controls::Convolution(_) | Controls::Recurrent(_) => {
+            Controls::Convolution(options) => {
+                if let Err(reason) = ensure_contiguous(&mut view, &mut stages, element) {
+                    return Ok(Some(Err(reason)));
+                }
+                if physical != step.input_axes {
+                    return Ok(Some(Err(GpuCapabilityReason::AxisLayout)));
+                }
+                let parameter_shape = |role| {
+                    host.parameter_views()
+                        .iter()
+                        .find(|row| row.key.layer_index == step.index && row.key.role == role)
+                        .and_then(|row| row.value)
+                        .and_then(|value| super::super::physical::source_shape(value))
+                };
+                let Some(weights_shape) = parameter_shape(
+                    crate::builtins::deep_learning::model::parameters::ParameterRole::Weights,
+                ) else {
+                    return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+                };
+                let Some(bias_shape) = parameter_shape(
+                    crate::builtins::deep_learning::model::parameters::ParameterRole::Bias,
+                ) else {
+                    return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+                };
+                let request = match resident_request(
+                    &physical,
+                    weights_shape,
+                    bias_shape,
+                    host.execution_precision(),
+                    options,
+                ) {
+                    Ok(request) => request,
+                    Err(ConvError::ShapeOverflow) => {
+                        return Ok(Some(Err(GpuCapabilityReason::ResourceLimit)));
+                    }
+                    Err(ConvError::UnsupportedPrecision) => {
+                        return Ok(Some(Err(GpuCapabilityReason::InputPrecision)));
+                    }
+                    Err(_) => return Ok(Some(Err(GpuCapabilityReason::AxisLayout))),
+                };
+                if request.output_shape.as_slice() != step.output_axes.shape() {
+                    return Ok(Some(Err(GpuCapabilityReason::AxisLayout)));
+                }
+                stages.push(Stage::Conv {
+                    layer_index: step.index,
+                    request,
+                });
+                physical = step.output_axes.clone();
+                view = view
+                    .with_shape(physical.shape().to_vec())
+                    .with_layout(GpuTensorLayout::Contiguous);
+            }
+            Controls::Recurrent(_) => {
                 let Value::Object(layer) = &layers.data[step.index] else {
                     unreachable!("host plan admitted layer objects")
                 };

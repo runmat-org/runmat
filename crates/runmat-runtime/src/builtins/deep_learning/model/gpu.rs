@@ -6,12 +6,15 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use runmat_builtins::DeepLearningAxisLabel;
 
 mod parameters;
+mod stage_failure;
+mod convolution;
 mod normalization;
 mod admission;
 mod pooling;
 pub(in crate::builtins::deep_learning) mod mixed;
 
-pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
+pub(in crate::builtins::deep_learning) use admission::GpuCapabilityReason;
+pub(super) use admission::{admit_gpu_forward, GpuForwardAdmission};
 pub(in crate::builtins::deep_learning) use mixed::{
     admit_host_route, execute_host_route_selected, AdmittedHostRoute,
 };
@@ -351,7 +354,7 @@ async fn fully_connected_forward_with_weights_gpu(
     Ok((output, weights_handle))
 }
 
-fn provider_failure(
+pub(in crate::builtins::deep_learning) fn provider_failure(
     function: &'static str,
     operation: &str,
     source: ProviderExecutionError,

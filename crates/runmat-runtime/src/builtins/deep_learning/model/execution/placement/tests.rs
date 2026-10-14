@@ -25,6 +25,9 @@ use crate::context::{
 };
 use crate::RuntimeError;
 
+#[path = "tests/conv_cancellation.rs"]
+mod conv_cancellation;
+
 #[derive(Default)]
 struct SelectedRoute {
     feedback: RefCell<Vec<PlacementFeedback>>,

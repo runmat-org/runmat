@@ -137,6 +137,9 @@ impl WgpuProvider {
                 DeepLearningForwardOperation::Pool1D { route, .. } => self
                     .pool_1d_buffer_demand(input, route)
                     .ok_or(BufferBoundError::Overflow)?,
+                DeepLearningForwardOperation::Conv1D(request) => self
+                    .deep_learning_conv1d_forward_buffer_demand(request)
+                    .ok_or(BufferBoundError::Overflow)?,
                 DeepLearningForwardOperation::LayerNorm(request) => {
                     let DeepLearningForwardParameters::LayerNorm { scale, offset } =
                         step.parameters

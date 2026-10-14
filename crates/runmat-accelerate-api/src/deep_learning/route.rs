@@ -202,6 +202,23 @@ impl DeepLearningForwardRoute<'_> {
                     view = GpuTensorView::contiguous(route.target_shape.clone());
                 }
                 (
+                    DeepLearningForwardOperation::Conv1D(request),
+                    DeepLearningForwardParameters::Conv1D { weights, bias },
+                ) => {
+                    if view.layout() != GpuTensorLayout::Contiguous
+                        || view.shape() != request.input_shape.as_slice()
+                        || self.parameter_view(weights, element)?.shape()
+                            != request.weights_shape.as_slice()
+                        || self.parameter_view(bias, element)?.shape()
+                            != request.bias_shape.as_slice()
+                    {
+                        return Err(DeepLearningForwardRouteError::InvalidGeometry);
+                    }
+                    used_parameters[weights] = true;
+                    used_parameters[bias] = true;
+                    view = GpuTensorView::contiguous(request.output_shape.clone());
+                }
+                (
                     DeepLearningForwardOperation::LayerNorm(request),
                     DeepLearningForwardParameters::LayerNorm { scale, offset },
                 ) => {
@@ -318,6 +335,77 @@ mod tests {
         wrong_output.output_view = GpuTensorView::contiguous(vec![99, 1]);
         assert_eq!(
             wrong_output.analyze(),
+            Err(DeepLearningForwardRouteError::InvalidGeometry)
+        );
+    }
+
+    #[test]
+    fn convolution_route_checks_exact_physical_parameter_binding_and_output() {
+        let request = DeepLearningConv1DRequest {
+            input_shape: vec![4, 2, 3],
+            output_shape: vec![2, 5, 3],
+            weights_shape: [2, 2, 5],
+            bias_shape: [1, 5],
+            span_axis: 0,
+            channel_axis: 1,
+            batch_axis: Some(2),
+            time_axis: None,
+            stride: 2,
+            dilation: 2,
+            padding_left: 0,
+            padding_right: 1,
+            padding_value: DeepLearningConv1DPaddingValue::SymmetricIncludeEdge,
+        };
+        let mut route = DeepLearningForwardRoute {
+            input: DeepLearningForwardSource::Host {
+                element_type: NumericElementType::F32,
+                shape: request.input_shape.clone(),
+            },
+            parameters: vec![
+                DeepLearningForwardParameter {
+                    source: DeepLearningForwardSource::Host {
+                        element_type: NumericElementType::F32,
+                        shape: request.weights_shape.to_vec(),
+                    },
+                    view_steps: Vec::new(),
+                },
+                DeepLearningForwardParameter {
+                    source: DeepLearningForwardSource::Host {
+                        element_type: NumericElementType::F32,
+                        shape: request.bias_shape.to_vec(),
+                    },
+                    view_steps: Vec::new(),
+                },
+            ],
+            steps: vec![DeepLearningForwardStep {
+                operation: DeepLearningForwardOperation::Conv1D(request.clone()),
+                parameters: DeepLearningForwardParameters::Conv1D {
+                    weights: 0,
+                    bias: 1,
+                },
+            }],
+            output_view: GpuTensorView::contiguous(request.output_shape.clone()),
+        };
+        let geometry = route.analyze().unwrap();
+        assert_eq!(geometry.output_bytes, 2 * 5 * 3 * 4);
+        assert_eq!(geometry.stage_inputs.len(), 1);
+        assert_eq!(geometry.stage_inputs[0].shape(), request.input_shape);
+
+        route.steps[0].parameters = DeepLearningForwardParameters::Conv1D {
+            weights: 1,
+            bias: 0,
+        };
+        assert_eq!(
+            route.analyze(),
+            Err(DeepLearningForwardRouteError::InvalidGeometry)
+        );
+        route.steps[0].parameters = DeepLearningForwardParameters::Conv1D {
+            weights: 0,
+            bias: 1,
+        };
+        route.output_view = GpuTensorView::contiguous(vec![3, 5, 2]);
+        assert_eq!(
+            route.analyze(),
             Err(DeepLearningForwardRouteError::InvalidGeometry)
         );
     }

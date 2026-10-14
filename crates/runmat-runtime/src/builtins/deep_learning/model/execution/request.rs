@@ -3,13 +3,17 @@
 use runmat_value::{ObjectInstance, Value};
 
 use super::host::network::HostTrace;
+use crate::builtins::deep_learning::autodiff::ResidentTapeAdmission;
 use crate::builtins::deep_learning::model::{
     gpu::mixed::ResidentTrace, plan::axes::AxisPlan, state::StateUpdate,
 };
 
 pub(in crate::builtins::deep_learning) enum NetworkTrace {
     Host(HostTrace),
-    Resident(ResidentTrace),
+    Resident {
+        trace: ResidentTrace,
+        admission: ResidentTapeAdmission,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

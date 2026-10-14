@@ -9,6 +9,13 @@ pub use route::{DeepLearningForwardGeometry, DeepLearningForwardRouteError};
 #[path = "deep_learning/route_signature.rs"]
 mod route_signature;
 
+#[path = "deep_learning/convolution.rs"]
+mod convolution;
+pub use convolution::{
+    DeepLearningConv1DCapability, DeepLearningConv1DGradients, DeepLearningConv1DOperands,
+    DeepLearningConv1DPaddingValue, DeepLearningConv1DRequest,
+};
+
 /// The physical input to a proposed forward route. A host source describes the
 /// bytes that preparation would upload; it does not authorize or perform that
 /// upload. A resident source retains its real allocation owner for admission.
@@ -29,13 +36,14 @@ pub struct DeepLearningForwardParameter<'a> {
     pub view_steps: Vec<ProviderViewStep>,
 }
 
-/// Typed binding roles for the two operations that consume learned values.
+/// Typed binding roles for operations that consume learned values.
 /// Indices address `DeepLearningForwardRoute::parameters` and are checked by
 /// provider admission before any effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeepLearningForwardParameters {
     None,
     Dense { weights: usize, bias: usize },
+    Conv1D { weights: usize, bias: usize },
     LayerNorm { scale: usize, offset: usize },
 }
 
@@ -50,6 +58,7 @@ pub enum DeepLearningForwardOperation {
         input_shape: Vec<usize>,
         route: DeepLearningPool1DRoute,
     },
+    Conv1D(DeepLearningConv1DRequest),
     LayerNorm(DeepLearningLayerNormRequest),
 }
 
@@ -150,6 +159,23 @@ pub struct DeepLearningLayerNormRequest {
     pub scale_shape: Vec<usize>,
     pub offset_shape: Vec<usize>,
     pub epsilon: f64,
+}
+
+/// The output and native scaled statistics from one executed normalization.
+/// Backward consumes the same statistics; it must not recompute the forward
+/// reduction from a potentially changed input or parameter snapshot.
+#[derive(Debug)]
+pub struct DeepLearningLayerNormRecorded {
+    pub output: GpuTensorHandle,
+    pub statistics: GpuTensorHandle,
+}
+
+/// Gradients in the physical shapes of the forward input and Scale/Offset.
+#[derive(Debug)]
+pub struct DeepLearningLayerNormGradients {
+    pub input: GpuTensorHandle,
+    pub scale: GpuTensorHandle,
+    pub offset: GpuTensorHandle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

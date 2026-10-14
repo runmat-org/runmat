@@ -7,6 +7,10 @@ use runmat_accelerate_api::{
     DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 
+#[path = "pooling/adjoint.rs"]
+mod adjoint;
+pub(super) use adjoint::adjoint;
+
 pub(super) fn route(
     input_axes: &AxisPlan,
     source_axes: &AxisPlan,

@@ -91,6 +91,45 @@ fn matching_resident_parameter<'a>(
     })
 }
 
+/// Authenticate a canonical resident learnable before any parameter upload.
+/// A host row remains `None`; explicit residency never becomes a gather path.
+pub(super) fn admit_resident_parameter<'a>(
+    layer: &'a ObjectInstance,
+    role: ParameterRole,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<Result<Option<&'a GpuTensorHandle>, GpuCapabilityReason>> {
+    let Some(handle) = resident_parameter_handle(layer, role) else {
+        return Ok(Ok(None));
+    };
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| {
+            admission::invalid_owner(function, admission::GpuOperand::Parameter(role))
+        })?;
+    if !runmat_accelerate_api::same_provider_instance(provider, owner) {
+        return Err(admission::invalid_owner(
+            function,
+            admission::GpuOperand::Parameter(role),
+        ));
+    }
+    if runmat_accelerate_api::handle_precision(handle)
+        != runmat_accelerate_api::handle_precision(input)
+    {
+        if runmat_accelerate_api::handle_is_explicit(handle) {
+            return Err(unsupported_error(
+                function,
+                format!(
+                    "{function}: explicit resident {} precision differs from input",
+                    role.name()
+                ),
+            ));
+        }
+        return Ok(Err(GpuCapabilityReason::ParameterPrecision(role)));
+    }
+    Ok(Ok(Some(handle)))
+}
+
 pub(super) async fn prepare_host_parameter(
     layer: &ObjectInstance,
     role: ParameterRole,

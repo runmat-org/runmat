@@ -1,6 +1,5 @@
 //! Admission shared by standalone and planned resident normalization stages.
 
-use super::super::admission::{invalid_owner, GpuOperand};
 use super::super::*;
 
 pub(in crate::builtins::deep_learning) struct ResidentParameters<'a> {
@@ -14,34 +13,25 @@ pub(in crate::builtins::deep_learning) fn admit_parameters<'a>(
     input: &GpuTensorHandle,
     function: &'static str,
 ) -> BuiltinResult<Result<ResidentParameters<'a>, GpuCapabilityReason>> {
-    let parameters = ResidentParameters {
-        scale: resident_parameter_handle(layer, ParameterRole::Scale),
-        offset: resident_parameter_handle(layer, ParameterRole::Offset),
+    let scale = match super::super::parameters::admit_resident_parameter(
+        layer,
+        ParameterRole::Scale,
+        provider,
+        input,
+        function,
+    )? {
+        Ok(value) => value,
+        Err(reason) => return Ok(Err(reason)),
     };
-    for (role, resident) in [
-        (ParameterRole::Scale, parameters.scale),
-        (ParameterRole::Offset, parameters.offset),
-    ] {
-        let Some(resident) = resident else { continue };
-        let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(resident)
-            .ok_or_else(|| invalid_owner(function, GpuOperand::Parameter(role)))?;
-        if !runmat_accelerate_api::same_provider_instance(provider, owner) {
-            return Err(invalid_owner(function, GpuOperand::Parameter(role)));
-        }
-        if runmat_accelerate_api::handle_precision(resident)
-            != runmat_accelerate_api::handle_precision(input)
-        {
-            if runmat_accelerate_api::handle_is_explicit(resident) {
-                return Err(unsupported_error(
-                    function,
-                    format!(
-                        "{function}: explicit resident {} precision differs from input",
-                        role.name()
-                    ),
-                ));
-            }
-            return Ok(Err(GpuCapabilityReason::ParameterPrecision(role)));
-        }
-    }
-    Ok(Ok(parameters))
+    let offset = match super::super::parameters::admit_resident_parameter(
+        layer,
+        ParameterRole::Offset,
+        provider,
+        input,
+        function,
+    )? {
+        Ok(value) => value,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    Ok(Ok(ResidentParameters { scale, offset }))
 }

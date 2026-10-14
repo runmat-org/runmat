@@ -5,7 +5,8 @@ use super::*;
 use crate::builtins::deep_learning::model::admission::resident_input_handle;
 use crate::builtins::deep_learning::model::plan::host::HostNetworkPlan;
 use runmat_accelerate_api::{
-    AccelProvider, DeepLearningFeedForwardStage as PhysicalStage, DeepLearningForwardCapability,
+    AccelProvider, DeepLearningConv1DCapability, DeepLearningConv1DOperands,
+    DeepLearningFeedForwardStage as PhysicalStage, DeepLearningForwardCapability,
     DeepLearningLayerNormCapability, DeepLearningPool1DCapability, GpuTensorStorage, GpuTensorView,
     ProviderViewCapability, ProviderViewChain, ProviderViewSource, ProviderViewStep,
 };
@@ -50,6 +51,7 @@ fn admit_stages(
     input: &GpuTensorHandle,
     plan: &Plan,
     provider: &'static dyn AccelProvider,
+    purpose: RoutePurpose,
     function: &'static str,
 ) -> BuiltinResult<Result<(), GpuCapabilityReason>> {
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -139,6 +141,66 @@ fn admit_stages(
                     .with_shape(vec![batch, output_channels])
                     .with_layout(GpuTensorLayout::Contiguous);
             }
+            Stage::Conv {
+                layer_index,
+                request,
+            } => {
+                if view.layout() != GpuTensorLayout::Contiguous
+                    || view.shape() != request.input_shape.as_slice()
+                {
+                    return Ok(Err(GpuCapabilityReason::AxisLayout));
+                }
+                let Some(Value::Object(layer)) = layers.data.get(*layer_index) else {
+                    unreachable!("host plan admitted convolution layer")
+                };
+                let weights = match super::super::super::parameters::admit_resident_parameter(
+                    layer,
+                    crate::builtins::deep_learning::model::parameters::ParameterRole::Weights,
+                    provider,
+                    input,
+                    function,
+                )? {
+                    Ok(handle) => handle,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                let bias = match super::super::super::parameters::admit_resident_parameter(
+                    layer,
+                    crate::builtins::deep_learning::model::parameters::ParameterRole::Bias,
+                    provider,
+                    input,
+                    function,
+                )? {
+                    Ok(handle) => handle,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                let current_input = (view == *input.view()).then_some(input);
+                let capability = provider
+                    .deep_learning_conv1d_capability(
+                        DeepLearningConv1DOperands {
+                            anchor: input,
+                            input: current_input,
+                            weights,
+                            bias,
+                            upstream: None,
+                        },
+                        request,
+                    )
+                    .map_err(|error| {
+                        provider_failure(function, "resident convolution admission", error.into())
+                    })?;
+                match capability {
+                    DeepLearningConv1DCapability::Ready => {}
+                    DeepLearningConv1DCapability::UnsupportedOperation => {
+                        return Ok(Err(GpuCapabilityReason::ProviderOperation));
+                    }
+                    DeepLearningConv1DCapability::ResourceLimit => {
+                        return Ok(Err(GpuCapabilityReason::ResourceLimit));
+                    }
+                }
+                view = view
+                    .with_shape(request.output_shape.clone())
+                    .with_layout(GpuTensorLayout::Contiguous);
+            }
             Stage::Relu | Stage::Elu { .. } => {
                 let Some(elements) = view
                     .shape()
@@ -186,12 +248,13 @@ fn admit_stages(
                         Ok(parameters) => parameters,
                         Err(reason) => return Ok(Err(reason)),
                     };
+                let request = stage.geometry.resident_request();
                 let capability = provider
                     .deep_learning_layer_norm_planned_capability(
                         input,
                         affine.scale,
                         affine.offset,
-                        &stage.geometry.resident_request(),
+                        &request,
                     )
                     .map_err(|error| {
                         provider_failure(function, "resident normalization admission", error.into())
@@ -203,6 +266,33 @@ fn admit_stages(
                     }
                     DeepLearningLayerNormCapability::ResourceLimit => {
                         return Ok(Err(GpuCapabilityReason::ResourceLimit))
+                    }
+                }
+                if purpose == RoutePurpose::ResidentTape {
+                    let reverse = provider
+                        .deep_learning_layer_norm_adjoint_capability(
+                            input,
+                            affine.scale,
+                            affine.offset,
+                            None,
+                            None,
+                            &request,
+                        )
+                        .map_err(|error| {
+                            provider_failure(
+                                function,
+                                "planned normalization adjoint admission",
+                                error.into(),
+                            )
+                        })?;
+                    match reverse {
+                        DeepLearningLayerNormCapability::Ready => {}
+                        DeepLearningLayerNormCapability::UnsupportedOperation => {
+                            return Ok(Err(GpuCapabilityReason::ProviderOperation))
+                        }
+                        DeepLearningLayerNormCapability::ResourceLimit => {
+                            return Ok(Err(GpuCapabilityReason::ResourceLimit))
+                        }
                     }
                 }
             }
@@ -228,6 +318,31 @@ fn admit_stages(
                     }
                     DeepLearningPool1DCapability::ResourceLimit => {
                         return Ok(Err(GpuCapabilityReason::ResourceLimit))
+                    }
+                }
+                if purpose == RoutePurpose::ResidentTape {
+                    let reverse = provider
+                        .deep_learning_global_average_pool_1d_adjoint_capability(
+                            input,
+                            input_axes.shape(),
+                            None,
+                            route.reduction,
+                        )
+                        .map_err(|error| {
+                            provider_failure(
+                                function,
+                                "planned pooling adjoint admission",
+                                error.into(),
+                            )
+                        })?;
+                    match reverse {
+                        DeepLearningPool1DCapability::Ready => {}
+                        DeepLearningPool1DCapability::UnsupportedOperation => {
+                            return Ok(Err(GpuCapabilityReason::ProviderOperation))
+                        }
+                        DeepLearningPool1DCapability::ResourceLimit => {
+                            return Ok(Err(GpuCapabilityReason::ResourceLimit))
+                        }
                     }
                 }
                 view = view
@@ -329,7 +444,7 @@ fn admit_for_purpose(
         Ok(plan) => plan,
         Err(reason) => return Ok(Some(Err(reason))),
     };
-    if let Err(reason) = admit_stages(network, host, input, &plan, provider, function)? {
+    if let Err(reason) = admit_stages(network, host, input, &plan, provider, purpose, function)? {
         return Ok(Some(Err(reason)));
     }
     let Some(route) = super::super::physical::from_plan(host, &plan, function)? else {

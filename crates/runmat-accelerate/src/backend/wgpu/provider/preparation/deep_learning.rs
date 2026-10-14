@@ -83,6 +83,7 @@ enum FixedPipeline {
     LayerNormStatistics,
     LayerNormAffine,
     StablePool1D,
+    Conv1DForward,
 }
 
 impl FixedPipeline {
@@ -98,6 +99,7 @@ impl FixedPipeline {
             Self::LayerNormStatistics => 7,
             Self::LayerNormAffine => 8,
             Self::StablePool1D => 9,
+            Self::Conv1DForward => 10,
         }
     }
 
@@ -121,6 +123,10 @@ impl FixedPipeline {
             Self::StablePool1D => provider
                 .pipelines
                 .deep_learning_stable_pool_1d
+                .is_initialized(),
+            Self::Conv1DForward => provider
+                .pipelines
+                .deep_learning_conv1d_forward
                 .is_initialized(),
         }
     }
@@ -285,6 +291,11 @@ impl WgpuProvider {
                     if request.shape.iter().all(|extent| *extent != 0) {
                         fixed.push(FixedPipeline::LayerNormStatistics);
                         fixed.push(FixedPipeline::LayerNormAffine);
+                    }
+                }
+                DeepLearningForwardOperation::Conv1D(request) => {
+                    if request.output_shape.iter().all(|extent| *extent != 0) {
+                        fixed.push(FixedPipeline::Conv1DForward);
                     }
                 }
             }

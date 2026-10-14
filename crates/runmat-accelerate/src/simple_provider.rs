@@ -3766,6 +3766,9 @@ impl AccelProvider for InProcessProvider {
                 runmat_accelerate_api::ProviderResidentAdjointStage::Activation(operation) => {
                     self.activation_adjoint_supported(*operation, precision)
                 }
+                runmat_accelerate_api::ProviderResidentAdjointStage::LayerNorm
+                | runmat_accelerate_api::ProviderResidentAdjointStage::Pool1D
+                | runmat_accelerate_api::ProviderResidentAdjointStage::Conv1D => false,
             })
     }
     fn deep_learning_feed_forward_stage_capability(

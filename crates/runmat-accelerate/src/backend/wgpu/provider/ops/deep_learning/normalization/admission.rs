@@ -1,6 +1,64 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) fn deep_learning_layer_norm_adjoint_capability_exec(
+        &self,
+        anchor: &GpuTensorHandle,
+        scale: Option<&GpuTensorHandle>,
+        offset: Option<&GpuTensorHandle>,
+        statistics: Option<&GpuTensorHandle>,
+        upstream: Option<&GpuTensorHandle>,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        let capability =
+            self.deep_learning_layer_norm_planned_capability_exec(anchor, scale, offset, request)?;
+        if capability != DeepLearningLayerNormCapability::Ready {
+            return Ok(capability);
+        }
+        let (groups, _) = geometry(request)?;
+        let expected_statistics = [3, groups];
+        for (handle, expected) in [
+            (statistics, expected_statistics.as_slice()),
+            (upstream, request.shape.as_slice()),
+        ] {
+            if let Some(handle) = handle {
+                let owned = self.get_entry_raw(handle)?;
+                ensure!(
+                    handle.shape() == expected
+                        && owned.shape.as_slice() == expected
+                        && owned.len == shape_count(expected)?
+                        && owned.element_type == handle.physical().element_type()
+                        && owned.storage == handle.physical().storage()
+                        && owned.logical == runmat_accelerate_api::handle_is_logical(handle)
+                        && owned.integer_type()
+                            == runmat_accelerate_api::handle_integer_type(handle),
+                    "normalization adjoint descriptor differs from provider-owned geometry"
+                );
+                if owned.element_type != anchor.physical().element_type()
+                    || owned.storage != GpuTensorStorage::Real
+                    || owned.logical
+                    || owned.integer_type().is_some()
+                {
+                    return Ok(DeepLearningLayerNormCapability::UnsupportedOperation);
+                }
+            }
+        }
+        let total = shape_count(&request.shape)?;
+        let channels = request.shape[request.channel_axis];
+        let binding_limit = u64::from(self.adapter_limits.max_storage_buffer_binding_size)
+            .min(self.adapter_limits.max_buffer_size);
+        let element_size = u64::try_from(self.element_size)?;
+        if [total, groups * 2, channels].iter().any(|&count| {
+            u64::try_from(count)
+                .ok()
+                .and_then(|n| n.checked_mul(element_size))
+                .is_none_or(|bytes| bytes > binding_limit)
+        }) {
+            return Ok(DeepLearningLayerNormCapability::ResourceLimit);
+        }
+        Ok(DeepLearningLayerNormCapability::Ready)
+    }
+
     /// Exact explicit statistics/output/uniform demand for one layer-norm
     /// dispatch. Input/parameter view materializations are accounted for by
     /// the whole-route caller before this kernel is invoked.

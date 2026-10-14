@@ -12,26 +12,28 @@ use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
-    CovarianceOptions, DeepLearningLayerNormCapability, DeepLearningLayerNormRequest,
-    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DResultAxis,
-    DeepLearningPool1DRoute, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
-    HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
-    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
-    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
-    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
-    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
-    ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
-    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
-    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
-    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
-    ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode, ProviderSpectralRange,
-    ProviderSpectralRequest, ProviderSpectralResult, ProviderStdNormalization,
-    ProviderSymmetryKind, ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions,
-    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
-    SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
+    CovarianceOptions, DeepLearningConv1DCapability, DeepLearningConv1DOperands,
+    DeepLearningConv1DPaddingValue, DeepLearningConv1DRequest, DeepLearningLayerNormCapability,
+    DeepLearningLayerNormRequest, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
+    DeepLearningPool1DResultAxis, DeepLearningPool1DRoute, FindDirection, FspecialRequest,
+    GpuTensorHandle, GpuTensorStorage, HostTensorOwned, HostTensorView, ImfilterOptions,
+    IsMemberOptions, IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
+    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
+    ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
+    ProviderCrossentropyResult, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
+    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
+    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
+    ProviderMeshgridResult, ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult,
+    ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult,
+    ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
+    ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode,
+    ProviderSpectralRange, ProviderSpectralRequest, ProviderSpectralResult,
+    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
+    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
+    SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions,
+    UniqueResult, WgpuBufferRef,
 };
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -85,6 +87,8 @@ mod deep_learning_preparation;
 mod deep_learning_resource_bound;
 #[path = "ops/deep_learning/route.rs"]
 mod deep_learning_route;
+#[path = "ops/deep_learning/convolution/mod.rs"]
+mod deep_learning_convolution;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/fft/mod.rs"]

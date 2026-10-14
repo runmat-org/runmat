@@ -8,10 +8,14 @@ use std::{collections::HashSet, rc::Rc};
 
 pub(super) struct ResidentGraph {
     pub loss: runmat_accelerate_api::GpuTensorHandle,
-    pub executions: Vec<(usize, Rc<super::super::super::network::ResidentTapeRecord>)>,
+    pub executions: Vec<(
+        usize,
+        Rc<super::super::super::network::ResidentTapeRecord>,
+        super::super::super::network::ResidentReversePlan,
+    )>,
 }
 
-pub(super) fn admit(loss_node: usize) -> BuiltinResult<ResidentGraph> {
+pub(super) fn admit(loss_node: usize, requested_nodes: &[usize]) -> BuiltinResult<ResidentGraph> {
     let tape = active_tape().ok_or_else(|| {
         deep_learning_error(
             "dlgradient",
@@ -75,7 +79,7 @@ pub(super) fn admit(loss_node: usize) -> BuiltinResult<ResidentGraph> {
                         "dlgradient: resident execution has no floating class",
                     )
                 })?;
-                for (parent, shape, dtype) in execution.parent_bindings() {
+                for (parent, shape, dtype, executed_source_dtype) in execution.parent_bindings() {
                     if parent >= id {
                         return Err(deep_learning_error(
                             "dlgradient",
@@ -88,7 +92,12 @@ pub(super) fn admit(loss_node: usize) -> BuiltinResult<ResidentGraph> {
                             "dlgradient: resident tape parent is missing",
                         )
                     })?;
-                    if dtype != output_dtype
+                    // The parent may retain its original precision while the
+                    // executed resident route used a different precision.
+                    // The immutable executed trace supplies the source class;
+                    // requested publication casts are admitted after graph
+                    // reachability is known, before reverse provider effects.
+                    if executed_source_dtype != output_dtype
                         || recorded.value.shape() != shape
                         || recorded.value.numeric_dtype() != Some(dtype)
                     {
@@ -121,9 +130,27 @@ pub(super) fn admit(loss_node: usize) -> BuiltinResult<ResidentGraph> {
             }
         }
     }
-    executions.sort_unstable_by(|(lhs, _), (rhs, _)| rhs.cmp(lhs));
+    let loss_value = loss_value.clone();
+    drop(tape);
+    // Tape IDs are topological. Mark only paths from a requested target back
+    // to this loss; connected but unrequested parameters need no publication
+    // cast or accumulated parent contribution.
+    executions.sort_unstable_by_key(|(id, _)| *id);
+    let mut required: HashSet<usize> = requested_nodes.iter().copied().collect();
+    let mut planned = Vec::new();
+    for (id, execution) in executions {
+        if execution
+            .parent_bindings()
+            .any(|(parent, _, _, _)| required.contains(&parent))
+        {
+            required.insert(id);
+            let plan = super::super::super::network::plan_resident_reverse(&execution, &required)?;
+            planned.push((id, execution, plan));
+        }
+    }
+    planned.sort_unstable_by(|(lhs, _, _), (rhs, _, _)| rhs.cmp(lhs));
     Ok(ResidentGraph {
-        loss: loss_value.clone(),
-        executions,
+        loss: loss_value,
+        executions: planned,
     })
 }

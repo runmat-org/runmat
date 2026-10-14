@@ -2,10 +2,10 @@
 
 use super::*;
 use runmat_accelerate_api::{
-    DeepLearningFeedForwardCapability, DeepLearningForwardCapability, DeepLearningForwardOperation,
-    DeepLearningForwardResources, DeepLearningForwardRoute, DeepLearningForwardSource,
-    DeepLearningLayerNormCapability, DeepLearningPool1DCapability, ProviderViewCapability,
-    ProviderViewChain, ProviderViewSource,
+    DeepLearningConv1DCapability, DeepLearningFeedForwardCapability, DeepLearningForwardCapability,
+    DeepLearningForwardOperation, DeepLearningForwardResources, DeepLearningForwardRoute,
+    DeepLearningForwardSource, DeepLearningLayerNormCapability, DeepLearningPool1DCapability,
+    ProviderViewCapability, ProviderViewChain, ProviderViewSource,
 };
 use std::collections::HashSet;
 
@@ -200,6 +200,17 @@ impl WgpuProvider {
                             return Ok(DeepLearningForwardCapability::UnsupportedOperation)
                         }
                         DeepLearningLayerNormCapability::ResourceLimit => {
+                            return Ok(DeepLearningForwardCapability::ResourceLimit)
+                        }
+                    }
+                }
+                DeepLearningForwardOperation::Conv1D(request) => {
+                    match self.deep_learning_conv1d_capability_for_type(element_type, request)? {
+                        DeepLearningConv1DCapability::Ready => {}
+                        DeepLearningConv1DCapability::UnsupportedOperation => {
+                            return Ok(DeepLearningForwardCapability::UnsupportedOperation)
+                        }
+                        DeepLearningConv1DCapability::ResourceLimit => {
                             return Ok(DeepLearningForwardCapability::ResourceLimit)
                         }
                     }

@@ -1,6 +1,9 @@
 use super::*;
 use runmat_accelerate_api::{GpuTensorLayout, GpuTensorView};
 
+#[path = "pooling/adjoint.rs"]
+mod adjoint;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Pool1DParams {

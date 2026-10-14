@@ -290,10 +290,13 @@ impl AccelProvider for WgpuProvider {
         matching_precision
             && stages.iter().all(|stage| match stage {
                 runmat_accelerate_api::ProviderResidentAdjointStage::Dense => true,
+                runmat_accelerate_api::ProviderResidentAdjointStage::Conv1D => true,
                 runmat_accelerate_api::ProviderResidentAdjointStage::Activation(operation) => {
                     self.activation_adjoint_supported(*operation, precision)
                 }
                 runmat_accelerate_api::ProviderResidentAdjointStage::SoftmaxRows => true,
+                runmat_accelerate_api::ProviderResidentAdjointStage::LayerNorm => true,
+                runmat_accelerate_api::ProviderResidentAdjointStage::Pool1D => true,
             })
     }
     fn elementwise_geometry(&self) -> Option<runmat_accelerate_api::ProviderElementwiseGeometry> {
@@ -1039,6 +1042,25 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.deep_learning_global_average_pool_1d_exec(a, request) })
     }
 
+    fn deep_learning_global_average_pool_1d_adjoint<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        upstream: &'a GpuTensorHandle,
+        request: DeepLearningPool1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.deep_learning_pool_1d_adjoint_exec(input, upstream, request) })
+    }
+
+    fn deep_learning_global_average_pool_1d_adjoint_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        input_shape: &[usize],
+        upstream: Option<&GpuTensorHandle>,
+        request: DeepLearningPool1DRequest,
+    ) -> Result<DeepLearningPool1DCapability> {
+        self.deep_learning_pool_1d_adjoint_capability_exec(anchor, input_shape, upstream, request)
+    }
+
     fn deep_learning_global_average_pool_1d_capability(
         &self,
         input: &GpuTensorHandle,
@@ -1060,6 +1082,37 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn deep_learning_conv1d<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        weights: &'a GpuTensorHandle,
+        bias: &'a GpuTensorHandle,
+        request: &'a DeepLearningConv1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.deep_learning_conv1d_exec(input, weights, bias, request) })
+    }
+
+    fn deep_learning_conv1d_adjoint<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        weights: &'a GpuTensorHandle,
+        bias: &'a GpuTensorHandle,
+        upstream: &'a GpuTensorHandle,
+        request: &'a DeepLearningConv1DRequest,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::DeepLearningConv1DGradients> {
+        Box::pin(async move {
+            self.deep_learning_conv1d_adjoint_exec(input, weights, bias, upstream, request)
+        })
+    }
+
+    fn deep_learning_conv1d_capability(
+        &self,
+        operands: DeepLearningConv1DOperands<'_>,
+        request: &DeepLearningConv1DRequest,
+    ) -> Result<DeepLearningConv1DCapability> {
+        self.deep_learning_conv1d_capability_exec(operands, request)
+    }
+
     fn deep_learning_layer_norm<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -1068,6 +1121,51 @@ impl AccelProvider for WgpuProvider {
         request: &'a DeepLearningLayerNormRequest,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.deep_learning_layer_norm_exec(input, scale, offset, request) })
+    }
+
+    fn deep_learning_layer_norm_recorded<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        scale: &'a GpuTensorHandle,
+        offset: &'a GpuTensorHandle,
+        request: &'a DeepLearningLayerNormRequest,
+    ) -> runmat_accelerate_api::AccelProviderFuture<
+        'a,
+        runmat_accelerate_api::DeepLearningLayerNormRecorded,
+    > {
+        Box::pin(async move {
+            self.deep_learning_layer_norm_recorded_exec(input, scale, offset, request)
+        })
+    }
+
+    fn deep_learning_layer_norm_adjoint<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        scale: &'a GpuTensorHandle,
+        offset: &'a GpuTensorHandle,
+        statistics: &'a GpuTensorHandle,
+        upstream: &'a GpuTensorHandle,
+        request: &'a DeepLearningLayerNormRequest,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::DeepLearningLayerNormGradients> {
+        Box::pin(async move {
+            self.deep_learning_layer_norm_adjoint_exec(
+                input, scale, offset, statistics, upstream, request,
+            )
+        })
+    }
+
+    fn deep_learning_layer_norm_adjoint_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        scale: Option<&GpuTensorHandle>,
+        offset: Option<&GpuTensorHandle>,
+        statistics: Option<&GpuTensorHandle>,
+        upstream: Option<&GpuTensorHandle>,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        self.deep_learning_layer_norm_adjoint_capability_exec(
+            anchor, scale, offset, statistics, upstream, request,
+        )
     }
 
     fn deep_learning_layer_norm_capability(

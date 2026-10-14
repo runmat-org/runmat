@@ -17,6 +17,9 @@ use runmat_value::{CellArray, Tensor, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+#[path = "host_origin_tests/conv_cancellation.rs"]
+mod conv_cancellation;
+
 struct AdmissionProbe {
     effects: AtomicUsize,
     queries: AtomicUsize,

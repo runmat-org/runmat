@@ -2,6 +2,39 @@
 
 pub const POOL_WORKGROUP_SIZE: u32 = 256;
 
+const POOL_1D_ADJOINT: &str = r#"
+struct Tensor { data: array<$SCALAR$>, };
+struct Params {
+  pool_size: u32,
+  chunk_output_count: u32,
+  inner_stride: u32,
+  output_offset: u32,
+};
+@group(0) @binding(0) var<storage, read> upstream: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size($WG$)
+fn main(@builtin(local_invocation_id) lane: vec3<u32>, @builtin(workgroup_id) group: vec3<u32>) {
+  let local = group.x * $WG$u + lane.x;
+  if (local >= params.chunk_output_count) { return; }
+  let index = params.output_offset + local;
+  let block = params.inner_stride * params.pool_size;
+  let upstream_index = (index / block) * params.inner_stride + index % params.inner_stride;
+  output.data[index] = upstream.data[upstream_index] / $SCALAR$(params.pool_size);
+}
+"#;
+
+pub fn pool_1d_adjoint(precision: super::super::types::NumericPrecision) -> String {
+    let scalar = match precision {
+        super::super::types::NumericPrecision::F32 => "f32",
+        super::super::types::NumericPrecision::F64 => "f64",
+    };
+    POOL_1D_ADJOINT
+        .replace("$SCALAR$", scalar)
+        .replace("$WG$", &POOL_WORKGROUP_SIZE.to_string())
+}
+
 const STABLE_POOL_1D: &str = r#"
 struct Tensor { data: array<$SCALAR$>, };
 struct Params {

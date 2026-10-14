@@ -9,6 +9,11 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{DeepLearningAxisLayout, DeepLearningNormalizationAxes};
 use runmat_value::{CellArray, Tensor};
 
+#[path = "tests/cancellation.rs"]
+mod cancellation;
+#[path = "tests/adjoint.rs"]
+mod adjoint;
+
 #[test]
 fn unsupported_provider_declines_before_upload_or_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {

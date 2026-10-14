@@ -174,6 +174,11 @@ impl Encoder {
                 self.count(weights);
                 self.count(bias);
             }
+            DeepLearningForwardParameters::Conv1D { weights, bias } => {
+                self.tag(3);
+                self.count(weights);
+                self.count(bias);
+            }
             DeepLearningForwardParameters::LayerNorm { scale, offset } => {
                 self.tag(2);
                 self.count(scale);
@@ -212,6 +217,37 @@ impl Encoder {
                 self.shape(&request.scale_shape);
                 self.shape(&request.offset_shape);
                 self.number(request.epsilon.to_bits());
+            }
+            DeepLearningForwardOperation::Conv1D(request) => {
+                self.tag(4);
+                self.shape(&request.input_shape);
+                self.shape(&request.output_shape);
+                self.shape(&request.weights_shape);
+                self.shape(&request.bias_shape);
+                self.count(request.span_axis);
+                self.count(request.channel_axis);
+                for axis in [request.batch_axis, request.time_axis] {
+                    match axis {
+                        Some(index) => {
+                            self.tag(1);
+                            self.count(index);
+                        }
+                        None => self.tag(0),
+                    }
+                }
+                self.count(request.stride);
+                self.count(request.dilation);
+                self.count(request.padding_left);
+                self.count(request.padding_right);
+                match request.padding_value {
+                    DeepLearningConv1DPaddingValue::Constant(value) => {
+                        self.tag(0);
+                        self.number(value.to_bits());
+                    }
+                    DeepLearningConv1DPaddingValue::Replicate => self.tag(1),
+                    DeepLearningConv1DPaddingValue::SymmetricIncludeEdge => self.tag(2),
+                    DeepLearningConv1DPaddingValue::SymmetricExcludeEdge => self.tag(3),
+                }
             }
         }
     }

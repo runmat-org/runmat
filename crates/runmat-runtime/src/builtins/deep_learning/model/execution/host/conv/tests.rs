@@ -136,6 +136,56 @@ fn stride_dilation_padding_and_boundary_modes_are_numerical() {
     );
 }
 
+#[test]
+fn resident_descriptor_uses_the_exact_host_admitted_padding_and_axes() {
+    use runmat_accelerate_api::DeepLearningConv1DPaddingValue as PhysicalPadding;
+
+    let axes = axes("SCBT", &[4, 2, 3, 2]);
+    let options = ConvOptions {
+        stride: 2,
+        dilation: 2,
+        padding: Padding::Same,
+        padding_value: PaddingValue::SymmetricIncludeEdge,
+    };
+    let physical = resident_request(
+        &axes,
+        &[2, 2, 5],
+        &[1, 5],
+        runmat_value::NumericDType::F32,
+        options,
+    )
+    .unwrap();
+    assert_eq!(physical.input_shape, vec![4, 2, 3, 2]);
+    assert_eq!(physical.output_shape, vec![2, 5, 3, 2]);
+    assert_eq!(physical.weights_shape, [2, 2, 5]);
+    assert_eq!(physical.bias_shape, [1, 5]);
+    assert_eq!((physical.span_axis, physical.channel_axis), (0, 1));
+    assert_eq!(
+        (physical.batch_axis, physical.time_axis),
+        (Some(2), Some(3))
+    );
+    assert_eq!((physical.stride, physical.dilation), (2, 2));
+    assert_eq!((physical.padding_left, physical.padding_right), (0, 1));
+    assert_eq!(
+        physical.padding_value,
+        PhysicalPadding::SymmetricIncludeEdge
+    );
+
+    let causal = resident_request(
+        &axes,
+        &[2, 2, 5],
+        &[1, 5],
+        runmat_value::NumericDType::F64,
+        ConvOptions {
+            padding: Padding::Causal,
+            ..options
+        },
+    )
+    .unwrap();
+    assert_eq!((causal.padding_left, causal.padding_right), (2, 0));
+    assert_eq!(causal.output_shape, vec![2, 5, 3, 2]);
+}
+
 fn objective(x: &[f64], w: &[f64], b: f64, dy: &[f64]) -> f64 {
     let input = Tensor::new(x.to_vec(), vec![1, 1, 3]).unwrap();
     let weights = Tensor::new(w.to_vec(), vec![2, 1, 1]).unwrap();

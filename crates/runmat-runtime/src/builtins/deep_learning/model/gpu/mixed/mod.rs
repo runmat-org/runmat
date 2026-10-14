@@ -11,11 +11,14 @@ mod trace;
 mod tests;
 #[cfg(test)]
 mod host_origin_tests;
+#[cfg(test)]
+mod resident_layer_tests;
 
 use super::*;
 use crate::builtins::deep_learning::model::admission::resident_input_handle;
 use crate::builtins::deep_learning::model::plan::host::HostNetworkPlan;
 pub(in crate::builtins::deep_learning) use backward::reverse as reverse_resident;
+pub(in crate::builtins::deep_learning) use execution::capability_changed;
 use runmat_accelerate_api::{ProviderActivationAdjoint, ProviderResidentAdjointStage};
 pub(in crate::builtins::deep_learning) use trace::{ResidentExecution, ResidentTrace};
 
@@ -62,6 +65,9 @@ pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
                         plan::Stage::Dense { .. } => {
                             reverse_stages.push(ProviderResidentAdjointStage::Dense)
                         }
+                        plan::Stage::Conv { .. } => {
+                            reverse_stages.push(ProviderResidentAdjointStage::Conv1D)
+                        }
                         plan::Stage::Relu => {
                             reverse_stages.push(ProviderResidentAdjointStage::Activation(
                                 ProviderActivationAdjoint::Relu,
@@ -75,8 +81,11 @@ pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
                         plan::Stage::Softmax => {
                             reverse_stages.push(ProviderResidentAdjointStage::SoftmaxRows)
                         }
-                        plan::Stage::Normalize { .. } | plan::Stage::Pool { .. } => {
-                            return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+                        plan::Stage::Normalize { .. } => {
+                            reverse_stages.push(ProviderResidentAdjointStage::LayerNorm)
+                        }
+                        plan::Stage::Pool { .. } => {
+                            reverse_stages.push(ProviderResidentAdjointStage::Pool1D)
                         }
                     }
                 }
@@ -86,7 +95,7 @@ pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
             }
             let execution = execution::execute(network, input, plan, capture, runtime, function)
                 .await
-                .map_err(execution::SelectedExecutionFailure::into_error)?;
+                .map_err(super::stage_failure::StageExecutionFailure::into_error)?;
             execution::admit_cancellation(runtime, function)?;
             Ok(Some(Ok(execution)))
         }

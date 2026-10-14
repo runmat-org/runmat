@@ -118,7 +118,7 @@ fn cancellation_after_awaited_stage_stops_later_stages_without_publication() {
     let Err(error) = result else {
         panic!("the first awaited stage must cancel before publication")
     };
-    assert!(matches!(&error, SelectedExecutionFailure::Abandoned(_)));
+    assert!(matches!(&error, StageExecutionFailure::Abandoned(_)));
     assert_eq!(
         error.into_error().identifier(),
         Some("Invocation:Cancelled")
@@ -182,7 +182,7 @@ fn provider_failure_remains_operational_when_cancellation_races_it() {
     .err()
     .expect("the provider must fail the selected stage");
     assert!(provider.cancellation.token().is_cancelled());
-    assert!(matches!(&failure, SelectedExecutionFailure::Operational(_)));
+    assert!(matches!(&failure, StageExecutionFailure::Operational(_)));
     assert_ne!(failure.into_error().identifier(), Some("RunMat:Cancelled"));
     assert_eq!(provider.stages.load(Ordering::SeqCst), 1);
     assert_eq!(allocation.probe.retirements(), 0);

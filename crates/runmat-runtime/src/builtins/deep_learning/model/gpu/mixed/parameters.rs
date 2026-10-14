@@ -20,6 +20,9 @@ pub(super) fn consumed_parameter_rows<'v, 'a>(
             super::plan::Stage::Dense { layer_index } => {
                 (*layer_index, &[ParameterRole::Weights, ParameterRole::Bias])
             }
+            super::plan::Stage::Conv { layer_index, .. } => {
+                (*layer_index, &[ParameterRole::Weights, ParameterRole::Bias])
+            }
             super::plan::Stage::Normalize { stage } => (
                 stage.layer_index,
                 &[ParameterRole::Scale, ParameterRole::Offset],
@@ -64,6 +67,9 @@ pub(super) fn has_unsupported_resident_parameters(host: &HostNetworkPlan<'_>) ->
                     (&step.controls, row.key.role),
                     (
                         Controls::Dense,
+                        ParameterRole::Weights | ParameterRole::Bias
+                    ) | (
+                        Controls::Convolution(_),
                         ParameterRole::Weights | ParameterRole::Bias
                     ) | (
                         Controls::Normalization(_),

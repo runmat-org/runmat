@@ -58,6 +58,52 @@ fn clones_share_view_and_new_views_share_one_physical_retirement() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unchanged_provenance_retains_view_identity_but_changed_intent_mints_a_view() {
+    let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
+    let original = tensor(&owner);
+    let explicit = original
+        .with_provenance(crate::GpuHandleProvenance::Explicit)
+        .unwrap();
+    assert_ne!(explicit.view_identity(), original.view_identity());
+    assert_eq!(original.view().provenance(), None);
+    let published_again = explicit
+        .with_provenance(crate::GpuHandleProvenance::Explicit)
+        .unwrap();
+    assert_eq!(published_again.view_identity(), explicit.view_identity());
+    assert_eq!(published_again.shape().as_ptr(), explicit.shape().as_ptr());
+    let automatic = explicit
+        .with_provenance(crate::GpuHandleProvenance::Automatic)
+        .unwrap();
+    assert_ne!(automatic.view_identity(), explicit.view_identity());
+    assert_eq!(original.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
+    assert_eq!(explicit.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
+    assert_eq!(published_again.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
+    assert_eq!(automatic.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert_eq!(owner.retire_calls.load(Ordering::SeqCst), 1);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unchanged_provenance_does_not_bypass_a_retiring_owner() {
+    let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
+    let original = tensor(&owner)
+        .with_provenance(crate::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let live = owner.weak_lease(ID);
+    owner.entries.lock().unwrap().get_mut(&ID).unwrap().phase = Entry::Retiring;
+    assert_eq!(
+        original
+            .with_provenance(crate::GpuHandleProvenance::Explicit)
+            .unwrap_err(),
+        AllocationAcquisitionError::NotLive
+    );
+    owner.entries.lock().unwrap().get_mut(&ID).unwrap().phase = Entry::Live(live);
+    drop(original);
+    assert_eq!(owner.retire_calls.load(Ordering::SeqCst), 1);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn wire_is_nonowning_and_acquisition_rejects_foreign_stale_or_forged_facts() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let original = tensor(&owner);
