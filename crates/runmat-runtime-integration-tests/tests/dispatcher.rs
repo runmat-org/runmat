@@ -152,7 +152,7 @@ fn host_only_trace(value: Value) -> Result<Value, TestBuiltinError> {
 fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, TestBuiltinError> {
     match (a, b) {
         (Value::Tensor(ta), Value::Tensor(tb)) => {
-            if ta.shape != tb.shape {
+            if ta.shape() != tb.shape() {
                 return Err(TestBuiltinError::terminal(
                     "host_only_add_tensors: shape mismatch",
                 ));
@@ -163,7 +163,7 @@ fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, TestBuiltinError> 
                 .zip(tb.materialize_f64().iter())
                 .map(|(x, y)| x + y)
                 .collect();
-            let tensor = Tensor::new(data, ta.shape.clone())
+            let tensor = Tensor::new(data, ta.shape().to_vec())
                 .map_err(|error| TestBuiltinError::terminal(error.to_string()))?;
             Ok(Value::Tensor(tensor))
         }
@@ -180,7 +180,7 @@ fn call_registered_builtin() {
         &[Value::Int(runmat_value::IntValue::I32(4))],
     )
     .unwrap();
-    if let Value::Int(n) = result {
+    if let Value::Int(n) = result.value() {
         assert_eq!(n.to_i64(), 8);
     } else {
         panic!();
@@ -189,13 +189,14 @@ fn call_registered_builtin() {
     assert!(names.contains(&"dispatcher_fixture_twice"));
 }
 
-fn mark_automatic(value: Value) -> Value {
+fn mark_automatic(value: &Value) -> Value {
     match value {
-        Value::GpuTensor(mut handle) => {
+        Value::GpuTensor(handle) => {
+            let mut handle = handle.clone();
             runmat_accelerate_api::mark_handle_automatic(&mut handle);
             Value::GpuTensor(handle)
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
@@ -204,11 +205,11 @@ fn dispatcher_gathers_gpu_argument_for_host_builtin() {
     register_inprocess_provider();
 
     let cpu_tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    let gpu_value =
-        mark_automatic(call_builtin("gpuArray", &[Value::Tensor(cpu_tensor.clone())]).unwrap());
+    let gpu_root = call_builtin("gpuArray", &[Value::Tensor(cpu_tensor.clone())]).unwrap();
+    let gpu_value = mark_automatic(gpu_root.value());
     let result = call_builtin("host_only_trace", &[gpu_value]).unwrap();
 
-    match result {
+    match result.value() {
         Value::Num(sum) => assert!((sum - 10.0).abs() < 1e-9),
         other => panic!("expected numeric result, got {other:?}"),
     }
@@ -220,12 +221,14 @@ fn dispatcher_gathers_multiple_gpu_arguments() {
 
     let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let b = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-    let ga = mark_automatic(call_builtin("gpuArray", &[Value::Tensor(a.clone())]).unwrap());
-    let gb = mark_automatic(call_builtin("gpuArray", &[Value::Tensor(b.clone())]).unwrap());
+    let ga_root = call_builtin("gpuArray", &[Value::Tensor(a.clone())]).unwrap();
+    let gb_root = call_builtin("gpuArray", &[Value::Tensor(b.clone())]).unwrap();
+    let ga = mark_automatic(ga_root.value());
+    let gb = mark_automatic(gb_root.value());
 
     let result = call_builtin("host_only_add_tensors", &[ga, gb]).unwrap();
 
-    match result {
+    match result.value() {
         Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![6.0, 8.0, 10.0, 12.0]),
         other => panic!("expected tensor result, got {other:?}"),
     }

@@ -179,10 +179,9 @@ fn pending_textline_operations_retain_selected_owner_and_cancel_without_replay()
                 runmat_runtime::context::IsolatedMemoryPreferenceService::new(),
             ))
             .expect("isolated application settings");
-        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let cancellation = session.interrupt_handle();
         let request = request(&session, operation);
-        let mut call =
-            Box::pin(session.execute_request_with_cancellation(request, cancellation.token()));
+        let mut call = Box::pin(session.execute_request(request));
 
         for _ in 0..32 {
             let mut context = Context::from_waker(noop_waker_ref());
