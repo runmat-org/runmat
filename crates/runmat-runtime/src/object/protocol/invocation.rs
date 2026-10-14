@@ -11,25 +11,25 @@ use crate::runtime_error::semantic_error;
 use crate::sequence::{ResolveValueSequence, SequenceResolutionContext};
 use crate::RuntimeError;
 use runmat_value::Value;
+use std::future::Future;
 use std::rc::Rc;
 
-pub async fn invoke_resolved_object_protocol(
-    resolution: &ProtocolResolution,
+pub fn invoke_resolved_object_protocol<'resolution>(
+    resolution: &'resolution ProtocolResolution,
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'resolution> {
     invoke_resolved_object_protocol_with_context(None, resolution, base, path, requested_outputs)
-        .await
 }
 
-pub async fn invoke_resolved_object_protocol_in_context(
-    runtime: &RuntimeContext,
-    resolution: &ProtocolResolution,
+pub fn invoke_resolved_object_protocol_in_context<'runtime, 'resolution>(
+    runtime: &'runtime RuntimeContext,
+    resolution: &'resolution ProtocolResolution,
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'resolution> {
     invoke_resolved_object_protocol_with_context(
         Some(runtime),
         resolution,
@@ -37,7 +37,6 @@ pub async fn invoke_resolved_object_protocol_in_context(
         path,
         requested_outputs,
     )
-    .await
 }
 
 async fn invoke_resolved_object_protocol_with_context(
@@ -77,23 +76,23 @@ async fn invoke_resolved_object_protocol_in_scope(
 /// Invoke a prepared assignment protocol with the exact comma-separated RHS.
 /// The sequence remains an argument list and can never be stored as one
 /// language value.
-pub async fn invoke_resolved_object_assignment(
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_assignment<'method>(
+    method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> Result<RootedValue, RuntimeError> {
-    invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
+    invoke_resolved_object_assignment_with_context(None, method, base, path, values)
 }
 
-pub async fn invoke_resolved_object_assignment_in_context(
-    runtime: &RuntimeContext,
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_assignment_in_context<'runtime, 'method>(
+    runtime: &'runtime RuntimeContext,
+    method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> Result<RootedValue, RuntimeError> {
-    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values).await
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
+    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values)
 }
 
 async fn invoke_resolved_object_assignment_with_context(
@@ -135,22 +134,21 @@ async fn invoke_resolved_object_assignment_in_scope(
         )
 }
 
-pub async fn invoke_resolved_object_method(
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_method<'method>(
+    method: &'method ResolvedObjectMethod,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
-    invoke_resolved_object_method_with_context(None, method, arguments, requested_outputs).await
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'method> {
+    invoke_resolved_object_method_with_context(None, method, arguments, requested_outputs)
 }
 
-pub async fn invoke_resolved_object_method_in_context(
-    runtime: &RuntimeContext,
-    method: &ResolvedObjectMethod,
+pub fn invoke_resolved_object_method_in_context<'runtime, 'method>(
+    runtime: &'runtime RuntimeContext,
+    method: &'method ResolvedObjectMethod,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'method> {
     invoke_resolved_object_method_with_context(Some(runtime), method, arguments, requested_outputs)
-        .await
 }
 
 async fn invoke_resolved_object_method_with_context(
@@ -216,22 +214,22 @@ async fn invoke_resolved_object_method_in_scope(
 
 /// Invoke an object-defined `end(obj, k, n)` selector exactly once. `k` and
 /// `n` use MATLAB's one-based component convention.
-pub async fn invoke_object_end(
+pub fn invoke_object_end<'access>(
     receiver: Value,
     component_index: usize,
     component_count: usize,
-    access: &super::ObjectAccessContext,
-) -> Result<Option<RootedValue>, RuntimeError> {
-    invoke_object_end_with_context(None, receiver, component_index, component_count, access).await
+    access: &'access super::ObjectAccessContext,
+) -> impl Future<Output = Result<Option<RootedValue>, RuntimeError>> + use<'access> {
+    invoke_object_end_with_context(None, receiver, component_index, component_count, access)
 }
 
-pub async fn invoke_object_end_in_context(
-    runtime: &RuntimeContext,
+pub fn invoke_object_end_in_context<'runtime, 'access>(
+    runtime: &'runtime RuntimeContext,
     receiver: Value,
     component_index: usize,
     component_count: usize,
-    access: &super::ObjectAccessContext,
-) -> Result<Option<RootedValue>, RuntimeError> {
+    access: &'access super::ObjectAccessContext,
+) -> impl Future<Output = Result<Option<RootedValue>, RuntimeError>> + use<'runtime, 'access> {
     invoke_object_end_with_context(
         Some(runtime),
         receiver,
@@ -239,7 +237,6 @@ pub async fn invoke_object_end_in_context(
         component_count,
         access,
     )
-    .await
 }
 
 async fn invoke_object_end_with_context(
@@ -276,12 +273,12 @@ async fn invoke_object_end_in_scope(
     .map(Some)
 }
 
-pub async fn invoke_prepared_object_end(
-    method: &ResolvedObjectMethod,
+pub fn invoke_prepared_object_end<'method>(
+    method: &'method ResolvedObjectMethod,
     receiver: Value,
     component_index: usize,
     component_count: usize,
-) -> Result<RootedValue, RuntimeError> {
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
     invoke_prepared_object_end_with_context(
         None,
         method,
@@ -289,7 +286,6 @@ pub async fn invoke_prepared_object_end(
         component_index,
         component_count,
     )
-    .await
 }
 
 pub(super) async fn invoke_prepared_object_end_with_context(

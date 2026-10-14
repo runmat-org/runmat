@@ -7,32 +7,31 @@ use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
-pub async fn execute_owned_subsref<Read, ReadFuture>(
+pub fn execute_owned_subsref<'name, Read, ReadFuture>(
     base: Value,
     path: ObjectSubscriptPath,
     read_first: Read,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'name, Read, ReadFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_owned_subsref_with_context(None, base, path, read_first, caller_function_name).await
+    execute_owned_subsref_with_context(None, base, path, read_first, caller_function_name)
 }
 
-pub async fn execute_owned_subsref_in_context<Read, ReadFuture>(
-    runtime: &crate::context::RuntimeContext,
+pub fn execute_owned_subsref_in_context<'runtime, 'name, Read, ReadFuture>(
+    runtime: &'runtime crate::context::RuntimeContext,
     base: Value,
     path: ObjectSubscriptPath,
     read_first: Read,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'name, Read, ReadFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     execute_owned_subsref_with_context(Some(runtime), base, path, read_first, caller_function_name)
-        .await
 }
 
 pub async fn execute_owned_subsref_with_context<Read, ReadFuture>(
@@ -88,14 +87,15 @@ where
     }
 }
 
-pub async fn execute_owned_subsasgn<Read, ReadFuture, Write, WriteFuture>(
+pub fn execute_owned_subsasgn<'name, Read, ReadFuture, Write, WriteFuture>(
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     read_first: Read,
     write_first: Write,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>>
+       + use<'name, Read, ReadFuture, Write, WriteFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
@@ -111,18 +111,18 @@ where
         write_first,
         caller_function_name,
     )
-    .await
 }
 
-pub async fn execute_owned_subsasgn_in_context<Read, ReadFuture, Write, WriteFuture>(
-    runtime: &crate::context::RuntimeContext,
+pub fn execute_owned_subsasgn_in_context<'runtime, 'name, Read, ReadFuture, Write, WriteFuture>(
+    runtime: &'runtime crate::context::RuntimeContext,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     read_first: Read,
     write_first: Write,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>>
+       + use<'runtime, 'name, Read, ReadFuture, Write, WriteFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
@@ -138,7 +138,6 @@ where
         write_first,
         caller_function_name,
     )
-    .await
 }
 
 pub async fn execute_owned_subsasgn_with_context<Read, ReadFuture, Write, WriteFuture>(
