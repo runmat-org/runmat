@@ -15,8 +15,8 @@ use super::op_common::limits::{
     set_limit_method, LimitCommand,
 };
 use super::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, set_axis_manual_limits_for_axes,
-    set_current_y_limits,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes,
+    axis_displayed_limits_snapshot_for_axes, set_axis_manual_limits_for_axes, set_current_y_limits,
 };
 use crate::builtins::plotting::type_resolvers::get_type;
 use runmat_plot::plots::figure::AxisLimitAxis;
@@ -113,9 +113,9 @@ pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match call.command {
         LimitCommand::Query => {
             let (handle, index) = selected_limit_axes(call.target);
-            let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
+            let limits = axis_displayed_limits_snapshot_for_axes(handle, index, AxisLimitAxis::Y)
                 .map_err(|err| limit_state_error("ylim", err))?;
-            Ok(limit_value(bounds.map(|bounds| (bounds.2, bounds.3))))
+            Ok(limit_value(limits))
         }
         LimitCommand::QueryMode => {
             let (handle, index) = selected_limit_axes(call.target);
@@ -191,6 +191,13 @@ mod tests {
             runmat_value::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
         )])
         .unwrap();
+        let manual = ylim_builtin(Vec::new()).expect("manual limits on empty axes");
+        assert_eq!(
+            runmat_value::Tensor::try_from(&manual)
+                .expect("manual limits tensor")
+                .materialize_f64(),
+            vec![1.0, 5.0]
+        );
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();
         let tensor = runmat_value::Tensor::try_from(&queried).unwrap();

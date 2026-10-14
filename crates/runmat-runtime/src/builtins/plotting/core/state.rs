@@ -1,5 +1,6 @@
 use glam::Vec4;
 use once_cell::sync::OnceCell;
+use runmat_plot::plots::figure::AxisLimitAxis;
 use runmat_plot::plots::{
     surface::ColorMap, surface::ShadingMode, AxesKind, Figure, LegendStyle, LineStyle, PlotElement,
     TextStyle,
@@ -2691,6 +2692,38 @@ pub fn axis_display_bounds_snapshot_for_axes(
     Ok(display_bounds_for_state_axes(state, axes_index))
 }
 
+/// Query displayed limits when content supplies bounds, or explicit manual
+/// limits for an otherwise empty axes. Auto limits on empty axes remain absent.
+pub fn axis_displayed_limits_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    axis: AxisLimitAxis,
+) -> Result<Option<(f64, f64)>, FigureError> {
+    let axis = match axis {
+        AxisLimitAxis::X => LinkAxesAxis::X,
+        AxisLimitAxis::Y => LinkAxesAxis::Y,
+        AxisLimitAxis::Z => return axis_z_limits_snapshot_for_axes(handle, axes_index),
+    };
+    let mut reg = registry();
+    let state = reg
+        .figures
+        .get_mut(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    validate_axes_index(state, axes_index)?;
+    let explicit = state
+        .figure
+        .axes_metadata(axes_index)
+        .and_then(|meta| match axis {
+            LinkAxesAxis::X => meta.x_limits,
+            LinkAxesAxis::Y => meta.y_limits,
+        });
+    let displayed = display_bounds_for_state_axes(state, axes_index).map(|bounds| match axis {
+        LinkAxesAxis::X => (bounds.0, bounds.1),
+        LinkAxesAxis::Y => (bounds.2, bounds.3),
+    });
+    Ok(displayed.or(explicit))
+}
+
 fn display_bounds_for_state_axes(
     state: &mut FigureState,
     axes_index: usize,
@@ -5224,7 +5257,10 @@ pub fn current_axes_state() -> FigureAxesState {
 pub(crate) fn current_axes_target_before_mutation() -> (FigureHandle, usize) {
     let reg = registry();
     let handle = reg.current;
-    let axes_index = reg.figures.get(&handle).map_or(0, |state| state.active_axes);
+    let axes_index = reg
+        .figures
+        .get(&handle)
+        .map_or(0, |state| state.active_axes);
     (handle, axes_index)
 }
 
