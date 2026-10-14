@@ -3,8 +3,8 @@
 use super::super::*;
 use super::execution::NormalizationRecord;
 use crate::builtins::common::gpu_helpers::{
-    propagate_output_provenance, reject_gpu_output, unary_gpu_output_matches_shape,
-    GpuOutputAliasPolicy, UnaryGpuOutputContract,
+    propagate_output_provenance, reject_gpu_output, reject_gpu_outputs,
+    unary_gpu_output_matches_shape, GpuOutputAliasPolicy, UnaryGpuOutputContract,
 };
 use runmat_accelerate_api::{DeepLearningLayerNormCapability, DeepLearningLayerNormGradients};
 
@@ -95,7 +95,17 @@ pub(in crate::builtins::deep_learning) async fn adjoint(
         .map_err(|error| {
             provider_failure(function, "resident normalization adjoint", error.into())
         })?;
-    cancel()?;
+    let DeepLearningLayerNormGradients {
+        input: raw_input,
+        scale: raw_scale,
+        offset: raw_offset,
+    } = result;
+    if let Err(error) = cancel() {
+        return Err(reject_gpu_outputs(
+            [raw_input, raw_scale, raw_offset],
+            error,
+        ));
+    }
     let protected = [
         input,
         upstream,
@@ -103,27 +113,39 @@ pub(in crate::builtins::deep_learning) async fn adjoint(
         &record.offset,
         &record.statistics,
     ];
-    let mut dx = checked_gradient(result.input, input, &protected, provider, function)?;
-    let mut dscale = checked_gradient(result.scale, &record.scale, &protected, provider, function)?;
-    let mut doffset = checked_gradient(
-        result.offset,
-        &record.offset,
-        &protected,
-        provider,
-        function,
-    )?;
+    let mut dx = match checked_gradient(raw_input, input, &protected, provider, function) {
+        Ok(gradient) => gradient,
+        Err(error) => return Err(reject_gpu_outputs([raw_scale, raw_offset], error)),
+    };
+    let mut dscale =
+        match checked_gradient(raw_scale, &record.scale, &protected, provider, function) {
+            Ok(gradient) => gradient,
+            Err(error) => return Err(reject_gpu_outputs([dx, raw_offset], error)),
+        };
+    let mut doffset =
+        match checked_gradient(raw_offset, &record.offset, &protected, provider, function) {
+            Ok(gradient) => gradient,
+            Err(error) => return Err(reject_gpu_outputs([dx, dscale], error)),
+        };
     if dx.shares_allocation_with(&dscale)
         || dx.shares_allocation_with(&doffset)
         || dscale.shares_allocation_with(&doffset)
     {
-        return Err(deep_learning_error(
-            function,
-            "normalization adjoint results alias each other",
+        return Err(reject_gpu_outputs(
+            [dx, dscale, doffset],
+            deep_learning_error(function, "normalization adjoint results alias each other"),
         ));
     }
-    propagate_output_provenance(&mut dx, [input, upstream, &record.scale])?;
-    propagate_output_provenance(&mut dscale, [input, upstream, &record.scale])?;
-    propagate_output_provenance(&mut doffset, [input, upstream, &record.offset])?;
+    if let Err(error) = propagate_output_provenance(&mut dx, [input, upstream, &record.scale]) {
+        return Err(reject_gpu_outputs([dx, dscale, doffset], error));
+    }
+    if let Err(error) = propagate_output_provenance(&mut dscale, [input, upstream, &record.scale]) {
+        return Err(reject_gpu_outputs([dx, dscale, doffset], error));
+    }
+    if let Err(error) = propagate_output_provenance(&mut doffset, [input, upstream, &record.offset])
+    {
+        return Err(reject_gpu_outputs([dx, dscale, doffset], error));
+    }
     Ok(DeepLearningLayerNormGradients {
         input: dx,
         scale: dscale,

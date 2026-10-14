@@ -6,7 +6,7 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use runmat_builtins::DeepLearningAxisLabel;
 
 mod parameters;
-mod stage_failure;
+pub(in crate::builtins::deep_learning) mod stage_failure;
 mod convolution;
 mod normalization;
 mod admission;
@@ -61,6 +61,7 @@ pub(super) async fn evaluate_network_gpu(
     input_axes: &AxisPlan,
     source_axes: &AxisPlan,
     target_axes: &AxisPlan,
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
@@ -87,6 +88,7 @@ pub(super) async fn evaluate_network_gpu(
     )?;
 
     if let GpuForwardLayout::GlobalPool { axis } = layout {
+        let check = || mixed::admit_cancellation(runtime, function);
         return pooling::forward(
             provider,
             input,
@@ -94,9 +96,11 @@ pub(super) async fn evaluate_network_gpu(
             input_axes,
             source_axes,
             target_axes,
+            &check,
             function,
         )
-        .await;
+        .await
+        .map_err(stage_failure::StageExecutionFailure::into_error);
     }
 
     // Provider numerical kernels use [B,C]. CB needs an actual resident

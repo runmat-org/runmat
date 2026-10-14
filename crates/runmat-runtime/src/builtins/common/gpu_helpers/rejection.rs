@@ -21,6 +21,19 @@ pub(crate) fn reject_gpu_output(output: GpuTensorHandle, mut error: RuntimeError
     error
 }
 
+/// Retire every owned result of a failed multi-output provider call while
+/// preserving the first semantic failure and chaining any physical cleanup
+/// failures. Each element is one owned reference; shared input aliases are
+/// never acquired or retired through this helper.
+pub(crate) fn reject_gpu_outputs(
+    outputs: impl IntoIterator<Item = GpuTensorHandle>,
+    error: RuntimeError,
+) -> RuntimeError {
+    outputs
+        .into_iter()
+        .fold(error, |error, output| reject_gpu_output(output, error))
+}
+
 #[derive(Debug)]
 struct RejectedOutputCleanup {
     prior: Option<Box<RuntimeErrorSource>>,
@@ -65,5 +78,23 @@ mod tests {
         assert_eq!(allocation.probe.retirements(), 0);
         let _error = reject_gpu_output(allocation.handle, error);
         assert_eq!(allocation.probe.retirements(), 1);
+    }
+
+    #[test]
+    fn rejected_multi_output_retires_each_owned_result_without_reclassifying_error() {
+        let owner = TestAllocationOwner::new();
+        let first = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let second = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let error = crate::build_runtime_error("invalid paired result")
+            .with_identifier("RunMat:test")
+            .build();
+        let error = reject_gpu_outputs([first.handle, second.handle], error);
+        assert_eq!(error.identifier(), Some("RunMat:test"));
+        assert_eq!(first.probe.retirements(), 1);
+        assert_eq!(second.probe.retirements(), 1);
     }
 }

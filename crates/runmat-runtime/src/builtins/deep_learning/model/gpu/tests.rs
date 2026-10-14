@@ -111,6 +111,7 @@ fn admitted_transpose_failure_is_operational_not_a_late_host_retry() {
         &input_axes,
         &output_axes,
         &output_axes,
+        None,
         "forward",
     ))
     .unwrap_err();

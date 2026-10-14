@@ -219,8 +219,8 @@ pub(super) async fn execute(
                 )
             }
             Stage::Normalize { stage } => {
+                let check = || admit_cancellation(runtime, function);
                 if capture {
-                    let check = || admit_cancellation(runtime, function);
                     match normalization::forward_recorded(
                         network,
                         &current,
@@ -245,6 +245,7 @@ pub(super) async fn execute(
                         &current,
                         &stage,
                         &stage.geometry.axes,
+                        &check,
                         function,
                     )
                     .await?
@@ -259,6 +260,7 @@ pub(super) async fn execute(
                 input_axes,
                 output_axes,
             } => {
+                let check = || admit_cancellation(runtime, function);
                 let output = pooling::forward(
                     provider,
                     &current,
@@ -266,6 +268,7 @@ pub(super) async fn execute(
                     &input_axes,
                     &output_axes,
                     &output_axes,
+                    &check,
                     function,
                 )
                 .await?
@@ -328,7 +331,7 @@ pub(super) async fn execute(
     })
 }
 
-pub(super) fn admit_cancellation(
+pub(in crate::builtins::deep_learning::model) fn admit_cancellation(
     runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
 ) -> BuiltinResult<()> {

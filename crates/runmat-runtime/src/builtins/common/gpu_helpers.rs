@@ -108,7 +108,7 @@ mod adoption;
 pub(crate) use adoption::propagate_output_provenance;
 pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 mod rejection;
-pub(crate) use rejection::reject_gpu_output;
+pub(crate) use rejection::{reject_gpu_output, reject_gpu_outputs};
 
 #[cfg(test)]
 #[path = "gpu_helpers/owned_encoding_tests.rs"]

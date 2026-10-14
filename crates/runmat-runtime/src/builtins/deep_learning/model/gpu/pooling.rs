@@ -91,18 +91,21 @@ pub(super) async fn forward(
     input_axes: &AxisPlan,
     source_axes: &AxisPlan,
     target_axes: &AxisPlan,
+    cancel: &dyn Fn() -> BuiltinResult<()>,
     function: &'static str,
-) -> BuiltinResult<Option<GpuTensorHandle>> {
+) -> Result<Option<GpuTensorHandle>, super::stage_failure::StageExecutionFailure> {
     let planned = route(input_axes, source_axes, target_axes, axis, function)?;
     let precision = runmat_accelerate_api::handle_precision(input);
     let mut keep_shape = input.shape().to_vec();
     keep_shape[axis] = 1;
+    cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
     let reduced = provider
         .deep_learning_global_average_pool_1d(input, planned.reduction)
         .await
         .map_err(|error| {
             provider_failure(function, "resident global average pooling", error.into())
         })?;
+    cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
     let mut current = validate(
         reduced,
         input,
@@ -114,6 +117,7 @@ pub(super) async fn forward(
         function,
     )?;
     if current.shape() != source_axes.shape() {
+        cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
         let reshaped = provider
             .reshape(&current, source_axes.shape())
             .map_err(|error| provider_failure(function, "pooled output reshape", error.into()))?;
@@ -134,6 +138,7 @@ pub(super) async fn forward(
         .enumerate()
         .any(|(target, &source)| target != source)
     {
+        cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
         let alias = presentation_alias_policy(source_axes, &planned);
         let reordered = provider
             .permute(&current, &planned.target_to_source)
@@ -155,6 +160,7 @@ pub(super) async fn forward(
             function,
         )?;
     }
+    cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
     propagate_output_provenance(&mut current, [input])?;
     Ok(Some(current))
 }

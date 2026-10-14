@@ -18,6 +18,7 @@ use super::*;
 use crate::builtins::deep_learning::model::admission::resident_input_handle;
 use crate::builtins::deep_learning::model::plan::host::HostNetworkPlan;
 pub(in crate::builtins::deep_learning) use backward::reverse as reverse_resident;
+pub(in crate::builtins::deep_learning::model) use execution::admit_cancellation;
 pub(in crate::builtins::deep_learning) use execution::capability_changed;
 use runmat_accelerate_api::{ProviderActivationAdjoint, ProviderResidentAdjointStage};
 pub(in crate::builtins::deep_learning) use trace::{ResidentExecution, ResidentTrace};
