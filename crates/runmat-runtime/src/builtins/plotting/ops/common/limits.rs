@@ -33,12 +33,8 @@ pub fn prepare_limit_call(
     color_limits: bool,
 ) -> BuiltinResult<PreparedLimitCall> {
     let (target, controls) = match args {
-        [first, rest @ ..] if !rest.is_empty() => match resolve_plot_handle(first, builtin) {
+        [first, rest @ ..] => match resolve_plot_handle(first, builtin) {
             Ok(PlotHandle::Axes(handle, index)) => (Some((handle, index)), rest),
-            _ => (None, args),
-        },
-        [first] => match resolve_plot_handle(first, builtin) {
-            Ok(PlotHandle::Axes(handle, index)) => (Some((handle, index)), &args[1..]),
             _ => (None, args),
         },
         [] => (None, args),

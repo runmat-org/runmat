@@ -30,7 +30,7 @@ pub(super) fn admitted_source<'a>(
 pub(super) fn source_shape(value: &Value) -> Option<&[usize]> {
     match forward_data(value) {
         Value::GpuTensor(handle) => Some(handle.shape()),
-        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::Tensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(&array.shape),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(&[1, 1]),
         _ => None,

@@ -7,7 +7,7 @@ use runmat_builtins::SETFIELD_ERROR_OBJECT_PROPERTY;
 use runmat_types::MemberAccess;
 use runmat_value::{ObjectInstance, Value};
 
-pub(super) async fn write_property(
+pub(in super::super) async fn write_property(
     obj: &mut ObjectInstance,
     name: &str,
     rhs: Value,

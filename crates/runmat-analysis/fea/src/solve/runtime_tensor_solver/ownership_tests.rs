@@ -1,8 +1,9 @@
 //! Real owned host-backed fixture allocations exercise solver lifetime edges.
 use super::*;
+use runmat_accelerate_api::allocation::AllocationIdentity;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelProvider, AllocationIdentity, GpuTensorStorage, HostNumericDataOwned,
+    AccelDownloadFuture, AccelProvider, GpuTensorStorage, HostNumericDataOwned,
     HostNumericDataView, HostNumericTensorOwned,
 };
 use std::sync::Mutex;
