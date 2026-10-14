@@ -111,17 +111,16 @@ fn validate_mask(
     expected: &[usize],
 ) -> Result<(), Failure> {
     // A validated logical view may use U8, F32, or F64 physical lanes.
-    let descriptor_valid = gpu_helpers::expected_handle_numeric_element_type(mask)
-        .is_ok_and(|element| {
+    let descriptor_valid =
+        gpu_helpers::expected_handle_numeric_element_type(mask).is_ok_and(|element| {
             matches!(
                 element,
                 runmat_accelerate_api::NumericElementType::U8
                     | runmat_accelerate_api::NumericElementType::F32
                     | runmat_accelerate_api::NumericElementType::F64
             ) && gpu_helpers::numeric_descriptor_matches(mask, element, GpuTensorStorage::Real)
-        })
-        && mask.view().validate(mask.physical()).is_ok()
-        && gpu_helpers::gpu_class_metadata_matches(mask, None, None, true);
+        }) && mask.view().validate(mask.physical()).is_ok()
+            && gpu_helpers::gpu_class_metadata_matches(mask, None, None, true);
     if mask.allocation_lease().validate_live().is_err()
         || mask.device_id() != input.device_id()
         || gpu_helpers::exact_provider_for_handle(mask)

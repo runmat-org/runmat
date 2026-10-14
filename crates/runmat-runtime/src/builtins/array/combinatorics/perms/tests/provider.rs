@@ -19,7 +19,7 @@ fn resident_shape_and_size_errors_precede_provider_access() {
             .expect("genuine unregistered allocation")
             .handle;
         let error = call(Value::GpuTensor(handle))
-        .expect_err("shape admission before missing owner lookup");
+            .expect_err("shape admission before missing owner lookup");
         assert_eq!(error.identifier(), Some(expected));
     }
 }

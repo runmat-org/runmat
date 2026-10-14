@@ -149,10 +149,6 @@ const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`saveobj` does not launch provider kernels. `save` remains the residency sink for any GPU values that appear inside the serialized payload.",
             "The operation is not elementwise or a reduction, does not broadcast, and ends fusion. It requires no optional feature.",
         ] },
-        BuiltinDocumentationSection { heading: "Original usage examples", paragraphs: &[
-            "Return a default property payload:\nobj = new_object('Point');\npayload = saveobj(obj)",
-            "Save an object through MAT-file serialization:\nobj = new_object('Point');\nsave('object_state.mat', 'obj')",
-        ] },
     ],
     examples: &[
         BuiltinExample { id: "default-property-payload", title: "Return an object's default property payload", program: "obj = Point(7);\npayload = saveobj(obj);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isstruct(payload)); assert(payload.x == 7);" } },
@@ -165,13 +161,13 @@ const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Are handle identities preserved?", answer: "No. Current support serializes the referenced object's properties. It does not preserve handle identity, listener state, or aliasing relationships across save/load." },
     ],
     links: &[BuiltinDocumentationLink { label: "loadobj", target: BuiltinDocumentationLinkTarget::Documentation("./loadobj") }, BuiltinDocumentationLink { label: "save", target: BuiltinDocumentationLinkTarget::Documentation("./save") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Documentation("./load") }], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The original display-only examples remain above; executable class-file examples cover their default-payload and MAT-file intents, alongside the unchanged direct-input error example."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &[] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("loadobj"), slug: Some("loadobj"),
     summary: "Restore an object payload produced during MAT-file loading.",
     description: "`loadobj(a)` restores an object from a serialized object envelope. The `load` builtin calls this path automatically for objects saved by RunMat. When the saved class registers a static `loadobj` method, RunMat dispatches to it with the saved payload.",
-    keywords: &["loadobj", "saveobj", "object serialization", "mat", "classdef"], related: &["saveobj", "load", "classref"],
+    keywords: &["loadobj", "saveobj", "object serialization", "mat", "classdef"], related: &["saveobj", "load"],
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "The public signature is `b = loadobj(a)`.",
@@ -187,14 +183,10 @@ const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`loadobj` does not launch provider kernels. Loaded object properties are CPU-resident after MAT-file loading; downstream acceleration may later promote numeric properties through the usual RunMat Accelerate paths.",
             "The operation is not elementwise or a reduction, does not broadcast, and ends fusion. It requires no optional feature.",
         ] },
-        BuiltinDocumentationSection { heading: "Original usage examples", paragraphs: &[
-            "Load an object from a MAT-file:\nsave('object_state.mat', 'obj');\nclear obj;\nload('object_state.mat')",
-            "Use class-specific static restoration:\npayload = saveobj(obj);\nrestored = classref('MyClass').loadobj(payload)",
-        ] },
     ],
     examples: &[
         BuiltinExample { id: "load-object-mat", title: "Restore an object from an isolated MAT-file", program: "obj = Point(7);\nsave('object_state.mat', 'obj');\nclear obj;\nload('object_state.mat');", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(obj, 'Point')); assert(obj.x == 7);" } },
-        BuiltinExample { id: "static-class-restoration", title: "Call a class-specific static loadobj method", program: "obj = RestoringPoint(7);\npayload = saveobj(obj);\nrestored = classref('RestoringPoint').loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: RESTORING_POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored, 'RestoringPoint')); assert(restored.x == 8);" } },
+        BuiltinExample { id: "static-class-restoration", title: "Call a class-specific static loadobj method", program: "obj = RestoringPoint(7);\npayload = saveobj(obj);\nrestored = RestoringPoint.loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: RESTORING_POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored, 'RestoringPoint')); assert(restored.x == 8);" } },
         BuiltinExample { id: "nested-integer", title: "Retain exact nested integer payloads", program: "payload = struct('x', uint64(7)); restored = loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored.x,'uint64')); assert(restored.x == uint64(7));" } },
     ], example_exemption: None,
     faqs: &[
@@ -202,8 +194,8 @@ const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "What happens without a class-specific `loadobj` method?", answer: "RunMat reconstructs a value object with the saved class name and property struct fields. If the saved payload was not a struct, the payload itself is returned." },
         BuiltinDocumentationFaq { question: "Does this support arbitrary MATLAB object MAT-files?", answer: "No. This support covers RunMat's own Level-5 object envelope and runtime object model. MATLAB v7.3/HDF5 class storage, object arrays, listener state, and handle alias preservation remain unsupported." },
     ],
-    links: &[BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Documentation("./saveobj") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Documentation("./load") }, BuiltinDocumentationLink { label: "classref", target: BuiltinDocumentationLinkTarget::Documentation("./classref") }], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The original display-only examples remain above; executable class-file examples cover their MAT-file and static-restoration intents, alongside the existing exact-integer example."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+    links: &[BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Builtin("saveobj") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Builtin("load") }], media: &[],
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &[] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
 macro_rules! entry {

@@ -120,7 +120,12 @@ pub fn zlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let metadata = axes_metadata_snapshot(handle, index)
                 .map_err(|err| limit_state_error("zlim", err))?;
             Ok(Value::String(
-                if metadata.z_limits.is_some() { "manual" } else { "auto" }.into(),
+                if metadata.z_limits.is_some() {
+                    "manual"
+                } else {
+                    "auto"
+                }
+                .into(),
             ))
         }
         LimitCommand::QueryMethod => query_limit_method("zlim", AxisLimitAxis::Z, call.target),

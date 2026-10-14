@@ -83,8 +83,7 @@ mod axes_modes;
 pub use axes_modes::{
     axis_color_limits_snapshot_for_axes, axis_displayed_color_limits_for_axes,
     axis_limit_method_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
-    set_axis_limit_method_for_axes,
-    set_hidden_line_removal_for_axes, set_y_direction_for_axes,
+    set_axis_limit_method_for_axes, set_hidden_line_removal_for_axes, set_y_direction_for_axes,
 };
 #[cfg(test)]
 pub use colorbar::colorbar_handle_for_axes;

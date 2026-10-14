@@ -131,7 +131,12 @@ pub fn xlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let metadata = axes_metadata_snapshot(handle, index)
                 .map_err(|err| limit_state_error("xlim", err))?;
             Ok(Value::String(
-                if metadata.x_limits.is_some() { "manual" } else { "auto" }.into(),
+                if metadata.x_limits.is_some() {
+                    "manual"
+                } else {
+                    "auto"
+                }
+                .into(),
             ))
         }
         LimitCommand::QueryMethod => query_limit_method("xlim", AxisLimitAxis::X, call.target),
@@ -205,8 +210,7 @@ mod tests {
         let _ = clear_figure(None);
         futures::executor::block_on(crate::builtins::plotting::plot::plot_builtin(vec![
             Value::Tensor(
-                runmat_value::Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3])
-                    .expect("line data"),
+                runmat_value::Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).expect("line data"),
             ),
         ]))
         .expect("nonempty plot");

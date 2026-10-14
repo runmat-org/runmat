@@ -16,7 +16,10 @@ pub fn axis_limit_method_for_axes(
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
     validate_axes_index(state, axes_index)?;
-    let meta = state.figure.axes_metadata(axes_index).expect("validated axes");
+    let meta = state
+        .figure
+        .axes_metadata(axes_index)
+        .expect("validated axes");
     Ok(match axis {
         AxisLimitAxis::X => meta.x_limit_method,
         AxisLimitAxis::Y => meta.y_limit_method,

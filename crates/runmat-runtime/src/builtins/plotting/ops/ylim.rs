@@ -120,7 +120,12 @@ pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let metadata = axes_metadata_snapshot(handle, index)
                 .map_err(|err| limit_state_error("ylim", err))?;
             Ok(Value::String(
-                if metadata.y_limits.is_some() { "manual" } else { "auto" }.into(),
+                if metadata.y_limits.is_some() {
+                    "manual"
+                } else {
+                    "auto"
+                }
+                .into(),
             ))
         }
         LimitCommand::QueryMethod => query_limit_method("ylim", AxisLimitAxis::Y, call.target),

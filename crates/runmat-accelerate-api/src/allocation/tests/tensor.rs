@@ -75,10 +75,22 @@ fn unchanged_provenance_retains_view_identity_but_changed_intent_mints_a_view() 
         .with_provenance(crate::GpuHandleProvenance::Automatic)
         .unwrap();
     assert_ne!(automatic.view_identity(), explicit.view_identity());
-    assert_eq!(original.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
-    assert_eq!(explicit.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
-    assert_eq!(published_again.release().unwrap(), AllocationReleaseOutcome::ReferenceReleased);
-    assert_eq!(automatic.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert_eq!(
+        original.release().unwrap(),
+        AllocationReleaseOutcome::ReferenceReleased
+    );
+    assert_eq!(
+        explicit.release().unwrap(),
+        AllocationReleaseOutcome::ReferenceReleased
+    );
+    assert_eq!(
+        published_again.release().unwrap(),
+        AllocationReleaseOutcome::ReferenceReleased
+    );
+    assert_eq!(
+        automatic.release().unwrap(),
+        AllocationReleaseOutcome::Retired
+    );
     assert_eq!(owner.retire_calls.load(Ordering::SeqCst), 1);
 }
 

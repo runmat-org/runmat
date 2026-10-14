@@ -1,4 +1,4 @@
-#![cfg(feature = "wgpu")]
+#![cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 
 //! Public dlarray/forward/dlgradient witnesses on a required native adapter.
 //! Run each ignored precision filter in its own process with the matching

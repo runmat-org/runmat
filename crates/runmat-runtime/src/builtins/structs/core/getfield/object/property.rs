@@ -3,9 +3,7 @@ use crate::builtins::introspection::dynamicprops;
 use crate::execution::RootedValue;
 use crate::sequence::ResolveValueSequence;
 use crate::{call_builtin_async, object_property_getter_name, BuiltinResult};
-use runmat_builtins::{
-    GETFIELD_ERROR_OBJECT_PROPERTY, GETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
-};
+use runmat_builtins::{GETFIELD_ERROR_OBJECT_PROPERTY, GETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS};
 use runmat_types::MemberAccess;
 use runmat_value::{ObjectInstance, Value};
 
