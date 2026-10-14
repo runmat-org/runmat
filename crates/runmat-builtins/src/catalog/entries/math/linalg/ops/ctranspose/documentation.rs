@@ -133,9 +133,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[BuiltinDocumentationLink { label: "Conjugate-transpose runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/ctranspose.rs") }],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Host, integer, object, and provider transpose tests", location: "builtins::math::linalg::ops::ctranspose::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Provider transpose round trip", location: "builtins::math::linalg::ops::ctranspose::tests::ctranspose_gpu_roundtrip" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "WGPU and host numerical parity", location: "builtins::math::linalg::ops::ctranspose::tests::ctranspose_wgpu_matches_cpu" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Executable catalog examples", location: "scripts/runtime/verify-builtin-examples.mjs" },
         ],
-        notes: &["The existing legacy JSON reference retains its presentation and GPU metadata until generated catalog output passes explicit parity checks."],
+        notes: &[],
     },
     introduced: None,
     status: None,
