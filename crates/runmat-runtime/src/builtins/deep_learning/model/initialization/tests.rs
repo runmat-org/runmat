@@ -2,8 +2,11 @@ use super::*;
 use futures::executor::block_on;
 use runmat_builtins::DeepLearningLayerKind as K;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 static CALLBACK_INVOCATIONS: AtomicUsize = AtomicUsize::new(0);
+// The shared callback fixture is observed by multiple parallel lib tests.
+static CALLBACK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[runmat_macros::runtime_builtin(
     name = "__deep_learning_initializer_once",
@@ -139,6 +142,9 @@ fn initializes_all_admitted_parameter_roles_from_canonical_geometry() {
 
 #[test]
 fn invalid_later_initializer_rejects_before_any_layer_mutation() {
+    let _callback_guard = CALLBACK_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let mut layers = vec![
         layer(K::FeatureInput, "x", &[("InputSize", Value::Num(2.0))]),
         layer(
@@ -171,6 +177,9 @@ fn invalid_later_initializer_rejects_before_any_layer_mutation() {
 
 #[test]
 fn callback_initializer_is_invoked_once_and_published_atomically() {
+    let _callback_guard = CALLBACK_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let mut layers = vec![
         layer(K::FeatureInput, "x", &[("InputSize", Value::Num(2.0))]),
         layer(
@@ -203,6 +212,9 @@ fn callback_initializer_is_invoked_once_and_published_atomically() {
 
 #[test]
 fn invalid_network_output_name_precedes_initializer_callback() {
+    let _callback_guard = CALLBACK_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let layers = vec![
         layer(K::FeatureInput, "x", &[("InputSize", Value::Num(2.0))]),
         layer(

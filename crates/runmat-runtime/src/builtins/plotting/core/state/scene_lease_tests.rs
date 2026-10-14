@@ -1,14 +1,20 @@
 use super::*;
 
 #[test]
-fn implicit_axis_target_and_limits_reads_do_not_create_a_figure() {
+fn implicit_axis_target_read_and_single_axis_updates_keep_one_current_owner() {
     let _guard = lock_plot_test_registry();
     reset_plot_state();
     let handle = current_figure_handle();
     assert!(!figure_handle_exists(handle));
     assert_eq!(current_axes_target_before_mutation(), (handle, 0));
-    assert_eq!(axis_limits_before_mutation(), (None, None));
     assert!(!figure_handle_exists(handle));
+
+    set_current_x_limits(Some((1.0, 2.0)));
+    assert!(figure_handle_exists(handle));
+    set_current_y_limits(Some((3.0, 4.0)));
+    let metadata = axes_metadata_snapshot(handle, 0).expect("current axes");
+    assert_eq!(metadata.x_limits, Some((1.0, 2.0)));
+    assert_eq!(metadata.y_limits, Some((3.0, 4.0)));
 }
 
 #[test]
