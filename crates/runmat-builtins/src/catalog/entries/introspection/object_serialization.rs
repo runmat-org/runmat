@@ -113,6 +113,22 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         location: "crates/runmat-vm/tests/functions.rs::object_saveobj_loadobj_script_surface",
     },
 ];
+const POINT_CLASS: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+    id: BuiltinExampleFixtureId { local_name: "point-class" },
+    root: BuiltinFilesystemRoot::IsolatedWorkspace,
+    entries: &[BuiltinFilesystemEntry::File {
+        relative_path: "Point.m",
+        content: BuiltinFixtureContent::Utf8("classdef Point\n  properties\n    x\n  end\n  methods\n    function obj = Point(x)\n      obj.x = x;\n    end\n  end\nend\n"),
+    }],
+});
+const RESTORING_POINT_CLASS: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+    id: BuiltinExampleFixtureId { local_name: "restoring-point-class" },
+    root: BuiltinFilesystemRoot::IsolatedWorkspace,
+    entries: &[BuiltinFilesystemEntry::File {
+        relative_path: "RestoringPoint.m",
+        content: BuiltinFixtureContent::Utf8("classdef RestoringPoint\n  properties\n    x\n  end\n  methods\n    function obj = RestoringPoint(x)\n      obj.x = x;\n    end\n  end\n  methods(Static)\n    function obj = loadobj(payload)\n      obj = RestoringPoint(payload.x + 1);\n    end\n  end\nend\n"),
+    }],
+});
 const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("saveobj"), slug: Some("saveobj"),
     summary: "Return the MAT-file serialization payload for an object.",
@@ -138,14 +154,18 @@ const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Save an object through MAT-file serialization:\nobj = new_object('Point');\nsave('object_state.mat', 'obj')",
         ] },
     ],
-    examples: &[BuiltinExample { id: "reject-non-object", title: "Reject a direct integer input", program: "saveobj(uint64(7));", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:ObjectSerialization:InvalidArgument" } }], example_exemption: None,
+    examples: &[
+        BuiltinExample { id: "default-property-payload", title: "Return an object's default property payload", program: "obj = Point(7);\npayload = saveobj(obj);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isstruct(payload)); assert(payload.x == 7);" } },
+        BuiltinExample { id: "save-object-mat", title: "Save an object to an isolated MAT-file", program: "obj = Point(7);\nsave('object_state.mat', 'obj');", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "stored = load('object_state.mat'); assert(isa(stored.obj, 'Point')); assert(stored.obj.x == 7);" } },
+        BuiltinExample { id: "reject-non-object", title: "Reject a direct integer input", program: "saveobj(uint64(7));", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:ObjectSerialization:InvalidArgument" } },
+    ], example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does `save` call `saveobj` automatically?", answer: "Yes. Before MAT-file encoding, RunMat walks selected values and applies registered `saveobj` methods for object and handle-object values." },
         BuiltinDocumentationFaq { question: "What is saved when no class-specific method exists?", answer: "RunMat writes the current runtime property map in an internal object envelope so `load` can reconstruct an object with the same class name and stored properties." },
         BuiltinDocumentationFaq { question: "Are handle identities preserved?", answer: "No. Current support serializes the referenced object's properties. It does not preserve handle identity, listener state, or aliasing relationships across save/load." },
     ],
     links: &[BuiltinDocumentationLink { label: "loadobj", target: BuiltinDocumentationLinkTarget::Documentation("./loadobj") }, BuiltinDocumentationLink { label: "save", target: BuiltinDocumentationLinkTarget::Documentation("./save") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Documentation("./load") }], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The two original display-only examples remain above; the executable example verifies the direct-input error."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The original display-only examples remain above; executable class-file examples cover their default-payload and MAT-file intents, alongside the unchanged direct-input error example."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("loadobj"), slug: Some("loadobj"),
@@ -172,14 +192,18 @@ const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Use class-specific static restoration:\npayload = saveobj(obj);\nrestored = classref('MyClass').loadobj(payload)",
         ] },
     ],
-    examples: &[BuiltinExample { id: "nested-integer", title: "Retain exact nested integer payloads", program: "payload = struct('x', uint64(7)); restored = loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored.x,'uint64')); assert(restored.x == uint64(7));" } }], example_exemption: None,
+    examples: &[
+        BuiltinExample { id: "load-object-mat", title: "Restore an object from an isolated MAT-file", program: "obj = Point(7);\nsave('object_state.mat', 'obj');\nclear obj;\nload('object_state.mat');", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(obj, 'Point')); assert(obj.x == 7);" } },
+        BuiltinExample { id: "static-class-restoration", title: "Call a class-specific static loadobj method", program: "obj = RestoringPoint(7);\npayload = saveobj(obj);\nrestored = classref('RestoringPoint').loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: RESTORING_POINT_CLASS, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored, 'RestoringPoint')); assert(restored.x == 8);" } },
+        BuiltinExample { id: "nested-integer", title: "Retain exact nested integer payloads", program: "payload = struct('x', uint64(7)); restored = loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored.x,'uint64')); assert(restored.x == uint64(7));" } },
+    ], example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does `load` call `loadobj` automatically?", answer: "Yes for object envelopes written by RunMat. `load` restores nested object payloads and calls registered static `Class.loadobj` methods when available." },
         BuiltinDocumentationFaq { question: "What happens without a class-specific `loadobj` method?", answer: "RunMat reconstructs a value object with the saved class name and property struct fields. If the saved payload was not a struct, the payload itself is returned." },
         BuiltinDocumentationFaq { question: "Does this support arbitrary MATLAB object MAT-files?", answer: "No. This support covers RunMat's own Level-5 object envelope and runtime object model. MATLAB v7.3/HDF5 class storage, object arrays, listener state, and handle alias preservation remain unsupported." },
     ],
     links: &[BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Documentation("./saveobj") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Documentation("./load") }, BuiltinDocumentationLink { label: "classref", target: BuiltinDocumentationLinkTarget::Documentation("./classref") }], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The two original display-only examples remain above; the executable example verifies exact nested integers."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &["The original display-only examples remain above; executable class-file examples cover their MAT-file and static-restoration intents, alongside the existing exact-integer example."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
 macro_rules! entry {
