@@ -82,7 +82,7 @@ pub fn figure_colormap_snapshot(handle: FigureHandle) -> Result<(ColorMap, usize
 }
 
 fn direct_image_limits_updates(
-    children: &HashMap<u64, PlotChildHandleState>,
+    children: &PlotChildRegistry,
     figure: FigureHandle,
     axes_index: Option<usize>,
 ) -> Vec<(usize, usize, bool)> {

@@ -9,8 +9,12 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
-use super::state::{color_limits_snapshot, set_color_limits_runtime};
+use super::op_common::limits::{
+    limit_state_error, limit_value, prepare_limit_call, selected_limit_axes, LimitCommand,
+};
+use super::state::{
+    axis_displayed_color_limits_for_axes, set_axis_color_limits_preserving_selection,
+};
 use crate::builtins::plotting::type_resolvers::get_type;
 
 const CLIM_OUTPUT_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -155,10 +159,36 @@ pub(super) fn clim_impl(builtin: &'static str, args: Vec<Value>) -> crate::Built
             format!("{builtin}: unsupported mode `tight`"),
         ));
     }
-    match parse_limit_command(builtin, &args)? {
-        LimitCommand::Query => Ok(limit_value(color_limits_snapshot())),
+    let call = prepare_limit_call(builtin, &args, true)?;
+    let (handle, index) = selected_limit_axes(call.target);
+    match call.command {
+        LimitCommand::Query => {
+            let limits = axis_displayed_color_limits_for_axes(handle, index)
+                .map_err(|err| limit_state_error(builtin, err))?;
+            Ok(limit_value(limits))
+        }
+        LimitCommand::QueryMode | LimitCommand::QueryMethod | LimitCommand::SetMethod(_) => {
+            Err(crate::builtins::plotting::plotting_error(
+                builtin,
+                format!("{builtin}: axis-limit mode or method is unsupported for color limits"),
+            ))
+        }
+        LimitCommand::Freeze => {
+            let limits = axis_displayed_color_limits_for_axes(handle, index)
+                .map_err(|err| limit_state_error(builtin, err))?
+                .ok_or_else(|| {
+                    crate::builtins::plotting::plotting_error(
+                        builtin,
+                        format!("{builtin}: automatic color extent is unavailable for manual mode"),
+                    )
+                })?;
+            set_axis_color_limits_preserving_selection(handle, index, Some(limits))
+                .map_err(|err| limit_state_error(builtin, err))?;
+            Ok(limit_value(Some(limits)))
+        }
         LimitCommand::Set(limits) => {
-            set_color_limits_runtime(limits);
+            set_axis_color_limits_preserving_selection(handle, index, limits)
+                .map_err(|err| limit_state_error(builtin, err))?;
             Ok(limit_value(limits))
         }
     }
@@ -196,5 +226,84 @@ mod tests {
         let queried = clim_builtin(Vec::new()).unwrap();
         let tensor = runmat_value::Tensor::try_from(&queried).unwrap();
         assert_eq!(tensor.materialize_f64(), vec![0.25, 0.75]);
+    }
+
+    #[test]
+    fn named_axes_targets_preserve_current_selection_and_displayed_property() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        super::super::state::reset_plot_state();
+        super::super::state::configure_subplot(1, 2, 0).expect("first axes");
+        let first = super::super::state::current_axes_state();
+        let target = Value::Num(super::super::state::encode_axes_handle(first.handle, 0));
+        super::super::state::configure_subplot(1, 2, 1).expect("second axes");
+        let active_before = super::super::state::current_axes_state().active_index;
+
+        struct TargetLimitCase {
+            property_name: &'static str,
+            builtin: fn(Vec<Value>) -> crate::BuiltinResult<Value>,
+            expected: [f64; 2],
+        }
+        let cases = [
+            TargetLimitCase {
+                property_name: "XLim",
+                builtin: super::super::xlim::xlim_builtin,
+                expected: [2.0, 8.0],
+            },
+            TargetLimitCase {
+                property_name: "YLim",
+                builtin: super::super::ylim::ylim_builtin,
+                expected: [-2.0, 4.0],
+            },
+            TargetLimitCase {
+                property_name: "ZLim",
+                builtin: super::super::zlim::zlim_builtin,
+                expected: [-4.0, 4.0],
+            },
+            TargetLimitCase {
+                property_name: "CLim",
+                builtin: clim_builtin,
+                expected: [0.25, 0.75],
+            },
+            TargetLimitCase {
+                property_name: "CLim",
+                builtin: super::super::caxis::caxis_builtin,
+                expected: [0.1, 0.9],
+            },
+        ];
+        for TargetLimitCase {
+            property_name,
+            builtin,
+            expected,
+        } in cases
+        {
+            let limits = Value::Tensor(
+                runmat_value::Tensor::new(expected.to_vec(), vec![1, 2]).expect("limits"),
+            );
+            builtin(vec![target.clone(), limits]).expect("target setter");
+            assert_eq!(
+                super::super::state::current_axes_state().active_index,
+                active_before
+            );
+            let queried = builtin(vec![target.clone()]).expect("target query");
+            assert_eq!(
+                runmat_value::Tensor::try_from(&queried)
+                    .expect("limits tensor")
+                    .materialize_f64(),
+                expected.to_vec()
+            );
+            let property = super::super::properties::get_properties(
+                super::super::properties::PlotHandle::Axes(first.handle, 0),
+                Some(property_name),
+                "get",
+            )
+            .expect("target property");
+            assert_eq!(
+                runmat_value::Tensor::try_from(&property)
+                    .expect("property tensor")
+                    .materialize_f64(),
+                expected.to_vec()
+            );
+        }
     }
 }

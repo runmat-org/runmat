@@ -31,7 +31,9 @@ mod limits;
 mod preparation;
 #[path = "figure/persistence_projection/mod.rs"]
 mod persistence_projection;
-pub use limits::{display_bounds_3d, positive_log_bounds};
+pub use limits::{
+    display_bounds_3d, positive_log_bounds, resolve_axis_bounds, AxisLimitAxis, AxisLimitMethod,
+};
 pub use persistence_projection::project_figure_for_persistence;
 pub use persistence_projection::{
     FigureAnnotationRemap, FigureAxesContainerSelection, FigureAxesPersistenceSelection,
@@ -230,6 +232,9 @@ pub struct AxesMetadata {
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
+    pub x_limit_method: AxisLimitMethod,
+    pub y_limit_method: AxisLimitMethod,
+    pub z_limit_method: AxisLimitMethod,
     pub x_log: bool,
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
@@ -1327,6 +1332,23 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_limit_method(
+        &mut self,
+        axes_index: usize,
+        axis: AxisLimitAxis,
+        method: AxisLimitMethod,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            match axis {
+                AxisLimitAxis::X => meta.x_limit_method = method,
+                AxisLimitAxis::Y => meta.y_limit_method = method,
+                AxisLimitAxis::Z => meta.z_limit_method = method,
+            }
         }
         self.dirty = true;
     }

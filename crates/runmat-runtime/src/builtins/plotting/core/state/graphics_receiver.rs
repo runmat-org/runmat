@@ -49,7 +49,30 @@ pub fn graphics_receiver_valid(receiver: &GraphicsReceiverRef) -> bool {
                         .get(&index)
                         .is_some_and(|owned| owned.shares_lease(receiver))
             }),
+        GraphicsReceiverKind::PlotChild { id } => reg
+            .plot_children
+            .entries
+            .get(&id)
+            .and_then(|entry| entry.receiver.as_ref())
+            .is_some_and(|owned| owned.shares_lease(receiver)),
     }
+}
+
+/// Issue or borrow the exact identity already owned by one admitted child.
+/// The numeric child key is never accepted as proof of object authority.
+pub fn plot_child_graphics_receiver(
+    id: u64,
+) -> Result<Option<GraphicsReceiverRef>, GraphicsReceiverIssueError> {
+    let mut reg = registry();
+    let Some(entry) = reg.plot_children.entries.get_mut(&id) else {
+        return Ok(None);
+    };
+    if let Some(receiver) = &entry.receiver {
+        return Ok(Some(receiver.clone()));
+    }
+    let receiver = issue_graphics_receiver(GraphicsReceiverKind::PlotChild { id })?;
+    entry.receiver = Some(receiver.clone());
+    Ok(Some(receiver))
 }
 
 pub fn figure_graphics_receiver(
@@ -136,6 +159,10 @@ pub fn graphics_receiver_object(
     let class = match receiver.kind() {
         GraphicsReceiverKind::Figure { .. } => runmat_types::standard::FIGURE,
         GraphicsReceiverKind::Axes { .. } => runmat_types::standard::AXES,
+        // Canonical chart class identities and lease-bearing property
+        // transactions are separate admissions. Do not project a numeric
+        // Type label as a HandleObject class.
+        GraphicsReceiverKind::PlotChild { .. } => return Ok(None),
     };
     let object = runmat_value::ObjectInstance::new(class).with_graphics_receiver(receiver);
     let target = runmat_gc::gc_allocate(runmat_value::Value::Object(object))?;
@@ -152,6 +179,7 @@ pub fn graphics_receiver_object(
 mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use runmat_value::Value;
 
     fn setup() -> super::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -189,6 +217,141 @@ mod tests {
         assert!(graphics_receiver_valid(&replacement));
         reset_plot_state();
         assert!(!graphics_receiver_valid(&replacement));
+    }
+
+    #[test]
+    fn child_lease_is_exact_and_retires_on_clear_and_key_reuse() {
+        let _guard = setup();
+        let figure = FigureHandle::from(19);
+        select_figure(figure);
+        let id = register_line_handle(figure, 0, 0) as u64;
+        let original = plot_child_graphics_receiver(id)
+            .expect("issue child")
+            .expect("registered child");
+        let repeated = plot_child_graphics_receiver(id)
+            .expect("borrow child")
+            .expect("registered child");
+        assert!(original.shares_lease(&repeated));
+        assert!(graphics_receiver_valid(&original));
+        assert!(!graphics_receiver_valid(&GraphicsReceiverRef::issued(
+            original.kind(),
+            original.generation(),
+        )));
+
+        clear_figure(Some(figure)).expect("clear figure");
+        assert!(!graphics_receiver_valid(&original));
+        assert!(plot_child_graphics_receiver(id).expect("lookup").is_none());
+
+        let mut reg = registry();
+        reg.plot_children.insert(
+            id,
+            PlotChildHandleState::Line(SimplePlotHandleState {
+                figure,
+                axes_index: 0,
+                plot_index: 0,
+            }),
+        );
+        drop(reg);
+        let replacement = plot_child_graphics_receiver(id)
+            .expect("issue replacement")
+            .expect("replacement child");
+        assert!(!original.shares_lease(&replacement));
+        assert!(!graphics_receiver_valid(&original));
+        assert!(graphics_receiver_valid(&replacement));
+    }
+
+    #[test]
+    fn copied_function_children_keep_callable_and_distinct_receiver_until_last_plot_retires() {
+        let _guard = setup();
+        let original_roots = callbacks::direct_root_count();
+
+        for contour in [false, true] {
+            let mut source_scene = Figure::new();
+            let plot_index = if contour {
+                source_scene.add_contour_plot_on_axes(
+                    runmat_plot::plots::ContourPlot::from_vertices(
+                        Vec::new(),
+                        0.0,
+                        runmat_plot::core::BoundingBox::default(),
+                    ),
+                    0,
+                )
+            } else {
+                source_scene.add_surface_plot_on_axes(
+                    runmat_plot::plots::SurfacePlot::new(vec![0.0], vec![0.0], vec![vec![0.0]])
+                        .expect("minimal surface"),
+                    0,
+                )
+            };
+            let source_figure = import_figure(source_scene);
+            let target_figure = import_figure(Figure::new());
+            let token = callbacks::retain(Value::Num(31.0), "copyobj").expect("root callable");
+            let source_handle = if contour {
+                register_function_contour_handle(
+                    source_figure,
+                    0,
+                    plot_index,
+                    2,
+                    (0.0, 1.0),
+                    (0.0, 1.0),
+                    FunctionSurfaceFunctionRef::OwnedCallable(token),
+                    false,
+                )
+            } else {
+                register_function_surface_handle(
+                    source_figure,
+                    0,
+                    plot_index,
+                    2,
+                    (0.0, 1.0),
+                    (0.0, 1.0),
+                    FunctionSurfaceFunctionState::Explicit(
+                        FunctionSurfaceFunctionRef::OwnedCallable(token),
+                    ),
+                )
+            };
+            let source_receiver = plot_child_graphics_receiver(source_handle as u64)
+                .expect("source receiver")
+                .expect("registered source");
+            let copied_handle =
+                copy_plot_child_to_parent(source_handle, CopyParentTarget::Axes(target_figure, 0))
+                    .expect("copy plot child");
+            let copied_receiver = plot_child_graphics_receiver(copied_handle as u64)
+                .expect("copy receiver")
+                .expect("registered copy");
+            assert!(!source_receiver.shares_lease(&copied_receiver));
+
+            close_figure(Some(source_figure)).expect("retire source");
+            assert!(!graphics_receiver_valid(&source_receiver));
+            assert!(graphics_receiver_valid(&copied_receiver));
+            let copied_state = plot_child_handle_snapshot(copied_handle).expect("copied child");
+            let copied_token = match &copied_state {
+                PlotChildHandleState::FunctionSurface(state) => {
+                    let FunctionSurfaceFunctionState::Explicit(
+                        FunctionSurfaceFunctionRef::OwnedCallable(token),
+                    ) = &state.function
+                    else {
+                        panic!("copied surface callable")
+                    };
+                    token
+                }
+                PlotChildHandleState::FunctionContour(state) => {
+                    let FunctionSurfaceFunctionRef::OwnedCallable(token) = &state.function else {
+                        panic!("copied contour callable")
+                    };
+                    token
+                }
+                _ => panic!("copied function child"),
+            };
+            assert_eq!(
+                callbacks::resolve(copied_token, "copyobj").unwrap(),
+                Value::Num(31.0)
+            );
+            drop(copied_state);
+            close_figure(Some(target_figure)).expect("retire copied child");
+            assert!(!graphics_receiver_valid(&copied_receiver));
+            assert_eq!(callbacks::direct_root_count(), original_roots);
+        }
     }
 
     #[test]

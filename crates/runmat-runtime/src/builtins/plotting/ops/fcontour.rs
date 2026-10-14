@@ -1065,7 +1065,6 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
         },
     );
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
-        super::state::release_function_ref(&function_ref);
         return render_result.map(|_| f64::NAN);
     };
     let handle = register_function_contour_handle(

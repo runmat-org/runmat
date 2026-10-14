@@ -991,7 +991,6 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
         },
     );
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
-        super::state::release_function_state(&function_state);
         return render_result.map(|_| f64::NAN);
     };
     let handle = register_function_surface_handle(
@@ -1021,13 +1020,8 @@ fn function_surface_state(
         )),
         SurfaceFunction::Parametric { x, y, z } => {
             let x = function_surface_ref(x, BUILTIN_NAME)?;
-            let y = function_surface_ref(y, BUILTIN_NAME).inspect_err(|_| {
-                super::state::release_function_ref(&x);
-            })?;
-            let z = function_surface_ref(z, BUILTIN_NAME).inspect_err(|_| {
-                super::state::release_function_ref(&x);
-                super::state::release_function_ref(&y);
-            })?;
+            let y = function_surface_ref(y, BUILTIN_NAME)?;
+            let z = function_surface_ref(z, BUILTIN_NAME)?;
             Ok(FunctionSurfaceFunctionState::Parametric { x, y, z })
         }
     }

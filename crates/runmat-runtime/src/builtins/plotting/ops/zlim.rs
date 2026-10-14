@@ -10,9 +10,15 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
-use super::state::{set_z_limits, z_limits_snapshot};
+use super::op_common::limits::{
+    limit_state_error, limit_value, prepare_limit_call, query_limit_method, selected_limit_axes,
+    set_limit_method, LimitCommand,
+};
+use super::state::{
+    axes_metadata_snapshot, axis_z_limits_snapshot_for_axes, set_axis_z_limits_preserving_selection,
+};
 use crate::builtins::plotting::type_resolvers::get_type;
+use runmat_plot::plots::figure::AxisLimitAxis;
 
 const ZLIM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "limits",
@@ -46,7 +52,7 @@ const ZLIM_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Limit mode string ('auto', 'tight', or 'manual').",
+    description: "Limit mode or method ('auto', 'manual', 'mode', 'method', 'tight', 'padded', or 'tickaligned').",
 }];
 
 const ZLIM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
@@ -102,10 +108,36 @@ pub const ZLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::plotting::zlim"
 )]
 pub fn zlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    match parse_limit_command("zlim", &args)? {
-        LimitCommand::Query => Ok(limit_value(z_limits_snapshot())),
+    let call = prepare_limit_call("zlim", &args, false)?;
+    let (handle, index) = selected_limit_axes(call.target);
+    match call.command {
+        LimitCommand::Query => {
+            let limits = axis_z_limits_snapshot_for_axes(handle, index)
+                .map_err(|err| limit_state_error("zlim", err))?;
+            Ok(limit_value(limits.or(Some((0.0, 1.0)))))
+        }
+        LimitCommand::QueryMode => {
+            let metadata = axes_metadata_snapshot(handle, index)
+                .map_err(|err| limit_state_error("zlim", err))?;
+            Ok(Value::String(
+                if metadata.z_limits.is_some() { "manual" } else { "auto" }.into(),
+            ))
+        }
+        LimitCommand::QueryMethod => query_limit_method("zlim", AxisLimitAxis::Z, call.target),
+        LimitCommand::SetMethod(method) => {
+            set_limit_method("zlim", AxisLimitAxis::Z, method, call.target)
+        }
+        LimitCommand::Freeze => {
+            let limits = axis_z_limits_snapshot_for_axes(handle, index)
+                .map_err(|err| limit_state_error("zlim", err))?
+                .unwrap_or((0.0, 1.0));
+            set_axis_z_limits_preserving_selection(handle, index, Some(limits))
+                .map_err(|err| limit_state_error("zlim", err))?;
+            Ok(limit_value(Some(limits)))
+        }
         LimitCommand::Set(limits) => {
-            set_z_limits(limits);
+            set_axis_z_limits_preserving_selection(handle, index, limits)
+                .map_err(|err| limit_state_error("zlim", err))?;
             Ok(limit_value(limits))
         }
     }

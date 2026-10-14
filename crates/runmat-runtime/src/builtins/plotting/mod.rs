@@ -296,11 +296,12 @@ pub use self::state::{
     axes_graphics_receiver, axes_graphics_receiver_for_scene, capture_figure_persistence_snapshot,
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_graphics_receiver, figure_handles, graphics_receiver_object,
-    import_figure, install_figure_observer, link_axes, new_figure_handle, record_recent_figure,
-    reset_hold_state_for_run, reset_plot_state, reset_recent_figures, select_axes_for_figure,
-    select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError, FigureEventKind,
-    FigureEventView, FigureHandle, FigurePersistenceSnapshot, FigurePersistenceSnapshotError,
-    FigureSnapshotEntry, FigureSnapshotScope, GraphicsReceiverIssueError, HoldMode, LinkAxesMode,
+    import_figure, install_figure_observer, link_axes, new_figure_handle,
+    plot_child_graphics_receiver, record_recent_figure, reset_hold_state_for_run, reset_plot_state,
+    reset_recent_figures, select_axes_for_figure, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle,
+    FigurePersistenceSnapshot, FigurePersistenceSnapshotError, FigureSnapshotEntry,
+    FigureSnapshotScope, GraphicsReceiverIssueError, HoldMode, LinkAxesMode,
 };
 #[doc(hidden)]
 pub use self::test_support::{lock_plot_test_context, PlotTestLockGuard};
