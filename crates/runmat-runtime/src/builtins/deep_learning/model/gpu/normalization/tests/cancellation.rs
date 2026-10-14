@@ -43,9 +43,7 @@ impl AccelProvider for RecordedCancellationProvider {
         let data = match host.data {
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
-            _ => {
-                return Err(anyhow::anyhow!("fixture expects native floating parameters").into())
-            }
+            _ => return Err(anyhow::anyhow!("fixture expects native floating parameters").into()),
         };
         let allocated = self.owner.allocate_numeric(HostNumericTensorOwned {
             data,

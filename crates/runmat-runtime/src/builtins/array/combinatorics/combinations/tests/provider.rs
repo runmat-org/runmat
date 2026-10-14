@@ -140,5 +140,5 @@ fn actual_wgpu_input_is_gathered_into_a_typed_host_table() {
         Value::Tensor(column)
             if column.integer_storage() == Some(&IntegerStorage::I32(vec![-3, 7]))
     ));
-    provider.free(&handle).unwrap();
+    handle.release().unwrap();
 }

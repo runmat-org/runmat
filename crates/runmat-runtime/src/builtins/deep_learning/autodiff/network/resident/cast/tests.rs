@@ -166,12 +166,14 @@ impl AccelProvider for WrongClassCastProvider {
         input: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let result = self.owner().allocate_zeroed(
-                input.shape().to_vec(),
-                runmat_accelerate_api::NumericElementType::F32,
-                GpuTensorStorage::Real,
-            )
-            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            let result = self
+                .owner()
+                .allocate_zeroed(
+                    input.shape().to_vec(),
+                    runmat_accelerate_api::NumericElementType::F32,
+                    GpuTensorStorage::Real,
+                )
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
             *self.result_probe.lock().unwrap() = Some(result.probe);
             Ok(result.handle)
         })

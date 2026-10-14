@@ -1,5 +1,5 @@
-use super::super::*;
 use super::super::stage_failure::StageExecutionFailure;
+use super::super::*;
 use super::execution::forward;
 use super::validation::validate_output;
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
@@ -136,8 +136,15 @@ fn foreign_parameter_owner_is_rejected_before_provider_effects() {
             layer_index: 1,
             geometry,
         };
-        let error = block_on(forward(&network, &input, &stage, &axes, &|| Ok(()), "forward"))
-            .unwrap_err();
+        let error = block_on(forward(
+            &network,
+            &input,
+            &stage,
+            &axes,
+            &|| Ok(()),
+            "forward",
+        ))
+        .unwrap_err();
         let StageExecutionFailure::Operational(error) = error else {
             panic!("parameter owner mismatch must remain an operational failure");
         };

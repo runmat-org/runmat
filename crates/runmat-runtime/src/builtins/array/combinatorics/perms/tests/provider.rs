@@ -156,7 +156,7 @@ fn wgpu_fallback_preserves_every_integer_class_and_explicit_residency() {
         let output_handle = output_handle.clone();
         let gathered = test_support::gather(output).expect("gather");
         assert_eq!(gathered.integer_storage(), Some(&expected));
-        provider.free(&output_handle).unwrap();
-        provider.free(&handle).unwrap();
+        output_handle.release().unwrap();
+        handle.release().unwrap();
     }
 }

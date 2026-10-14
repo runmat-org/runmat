@@ -191,11 +191,11 @@ fn call_registered_builtin() {
 
 fn mark_automatic(value: &Value) -> Value {
     match value {
-        Value::GpuTensor(handle) => {
-            let mut handle = handle.clone();
-            runmat_accelerate_api::mark_handle_automatic(&mut handle);
-            Value::GpuTensor(handle)
-        }
+        Value::GpuTensor(handle) => Value::GpuTensor(
+            handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated fixture provenance"),
+        ),
         other => other.clone(),
     }
 }
