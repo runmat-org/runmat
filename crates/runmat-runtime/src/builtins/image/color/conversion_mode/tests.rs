@@ -23,11 +23,12 @@ const NAMES: [&str; 3] = ["im2double", "im2uint8", "im2uint16"];
 #[test]
 fn indexed_char_array_control_flattens_row_column_and_nd_geometry() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for shape in [vec![1, 7], vec![7, 1], vec![1, 1, 7]] {
         let option = CharArray::new_with_shape("indexed".chars().collect(), shape).unwrap();
         for name in NAMES {
-            block_on(dispatcher::call_builtin_async(
+            block_on(dispatcher::call_builtin_async_in_context(
+                &runtime,
                 name,
                 &[
                     Value::Int(IntValue::U8(1)),
@@ -93,20 +94,23 @@ impl RuntimeAccelerationService for Service {
     }
 }
 
-fn enter(events: &Events) -> RuntimeContextGuard {
+fn enter(events: &Events) -> (RuntimeContext, RuntimeContextGuard) {
     enter_with_pause(events, false)
 }
 
-fn enter_with_pause(events: &Events, pause_after_preparation: bool) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
-                Service {
-                    events: events.clone(),
-                    pause_after_preparation,
-                },
-            ))),
-    )
+fn enter_with_pause(
+    events: &Events,
+    pause_after_preparation: bool,
+) -> (RuntimeContext, RuntimeContextGuard) {
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_acceleration(Rc::new(Service {
+                events: events.clone(),
+                pause_after_preparation,
+            })),
+        );
+    let guard = RuntimeContextGuard::enter(runtime.clone());
+    (runtime, guard)
 }
 
 #[test]
@@ -130,13 +134,19 @@ fn all_three_declare_one_typed_gather_sink_for_both_forms() {
 #[test]
 fn valid_calls_prepare_once_and_invalid_controls_do_not_prepare() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for name in NAMES {
-        block_on(dispatcher::call_builtin_async(name, &[Value::Num(1.0)])).unwrap();
+        block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
+            name,
+            &[Value::Num(1.0)],
+        ))
+        .unwrap();
         assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
         events.borrow_mut().clear();
 
-        block_on(dispatcher::call_builtin_async(
+        block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[Value::Int(IntValue::U8(1)), Value::String("indexed".into())],
         ))
@@ -153,7 +163,10 @@ fn valid_calls_prepare_once_and_invalid_controls_do_not_prepare() {
                 Value::Num(2.0),
             ],
         ] {
-            assert!(block_on(dispatcher::call_builtin_async(name, &args)).is_err());
+            assert!(block_on(dispatcher::call_builtin_async_in_context(
+                &runtime, name, &args
+            ))
+            .is_err());
             assert!(events.borrow().is_empty(), "{name}: {:?}", events.borrow());
         }
     }
@@ -162,14 +175,24 @@ fn valid_calls_prepare_once_and_invalid_controls_do_not_prepare() {
 #[test]
 fn unpolled_calls_and_invalid_requested_output_count_have_no_service_effect() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for name in NAMES {
         let args = [Value::Num(1.0)];
-        drop(dispatcher::call_builtin_async(name, &args));
+        drop(dispatcher::call_builtin_async_in_context(
+            &runtime, name, &args,
+        ));
         assert!(events.borrow().is_empty());
-        assert!(block_on(dispatcher::call_builtin_async_with_outputs(name, &args, 2)).is_err());
+        assert!(
+            block_on(dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime, name, &args, 2
+            ))
+            .is_err()
+        );
         assert!(events.borrow().is_empty());
-        block_on(dispatcher::call_builtin_async_with_outputs(name, &args, 0)).unwrap();
+        block_on(dispatcher::call_builtin_async_with_outputs_in_context(
+            &runtime, name, &args, 0,
+        ))
+        .unwrap();
         assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
         events.borrow_mut().clear();
     }
@@ -178,7 +201,7 @@ fn unpolled_calls_and_invalid_requested_output_count_have_no_service_effect() {
 #[test]
 fn malformed_indexed_control_precedes_even_an_unregistered_resident_owner() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for name in NAMES {
         let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
         let handle = owner
@@ -189,7 +212,8 @@ fn malformed_indexed_control_precedes_even_an_unregistered_resident_owner() {
             )
             .unwrap()
             .handle;
-        let error = block_on(dispatcher::call_builtin_async(
+        let error = block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[
                 Value::GpuTensor(handle),
@@ -206,9 +230,11 @@ fn malformed_indexed_control_precedes_even_an_unregistered_resident_owner() {
 #[test]
 fn dropping_polled_conversion_call_aborts_prepared_observation_once() {
     let events = Events::default();
-    let _context = enter_with_pause(&events, true);
+    let (runtime, _context) = enter_with_pause(&events, true);
     let args = [Value::Num(0.5)];
-    let mut call = Box::pin(dispatcher::call_builtin_async("im2uint8", &args));
+    let mut call = Box::pin(dispatcher::call_builtin_async_in_context(
+        &runtime, "im2uint8", &args,
+    ));
     let waker = futures::task::noop_waker();
     let mut context = Context::from_waker(&waker);
     assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
@@ -220,14 +246,15 @@ fn dropping_polled_conversion_call_aborts_prepared_observation_once() {
 #[test]
 fn indexed_scalar_value_bounds_skip_preparation_only_for_existing_runtime_errors() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for (name, value) in [
         ("im2uint8", Value::Num(256.5)),
         ("im2uint8", Value::Num(f64::NAN)),
         ("im2uint8", Value::Int(IntValue::U16(256))),
         ("im2uint16", Value::Num(f64::INFINITY)),
     ] {
-        assert!(block_on(dispatcher::call_builtin_async(
+        assert!(block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[value, Value::String("indexed".into()),]
         ))
@@ -239,7 +266,8 @@ fn indexed_scalar_value_bounds_skip_preparation_only_for_existing_runtime_errors
         ("im2uint8", Value::Num(1.5)),
         ("im2uint16", Value::Num(f64::NEG_INFINITY)),
     ] {
-        block_on(dispatcher::call_builtin_async(
+        block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[value, Value::String("indexed".into())],
         ))
@@ -252,10 +280,11 @@ fn indexed_scalar_value_bounds_skip_preparation_only_for_existing_runtime_errors
 #[test]
 fn empty_nd_numeric_images_keep_typed_preparation_and_indexed_range_sensitive_arrays_do_not() {
     let events = Events::default();
-    let _context = enter(&events);
+    let (runtime, _context) = enter(&events);
     for name in NAMES {
         let image = Tensor::new_integer(IntegerStorage::U8(vec![]), vec![0, 2, 3]).unwrap();
-        block_on(dispatcher::call_builtin_async(
+        block_on(dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[Value::Tensor(image)],
         ))
@@ -264,7 +293,8 @@ fn empty_nd_numeric_images_keep_typed_preparation_and_indexed_range_sensitive_ar
         events.borrow_mut().clear();
     }
     let bad = Tensor::new(vec![1.0, 257.0], vec![1, 2]).unwrap();
-    assert!(block_on(dispatcher::call_builtin_async(
+    assert!(block_on(dispatcher::call_builtin_async_in_context(
+        &runtime,
         "im2uint8",
         &[Value::Tensor(bad), Value::String("indexed".into()),]
     ))
