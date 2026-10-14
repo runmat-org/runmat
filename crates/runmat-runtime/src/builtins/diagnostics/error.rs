@@ -419,7 +419,7 @@ pub(crate) mod tests {
             .signatures
             .iter()
             .all(|signature| signature.outputs.is_empty()));
-        let builtin = runmat_builtins::builtin_function_by_name("error").expect("registered");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name("error").expect("registered");
         assert_eq!(builtin.integer_capabilities.len(), 2);
         assert_eq!(builtin.integer_capabilities[0].inputs[0].classes.len(), 8);
         assert_eq!(builtin.extensions.len(), 3);
