@@ -201,13 +201,27 @@ fn numeric_filename_does_not_coerce_to_filesystem_path() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn imread_dispatcher_reports_builtin_error_directly() {
+    let driver = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test HTTP driver");
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_http(Rc::new(NativeHttpService::new(driver.handle().clone()))),
+        );
     let url = spawn_repeating_server(
         2,
         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
     );
-    let err = crate::call_builtin("imread", &[Value::from(format!("{url}/missing.jpg"))])
-        .expect_err("expected 404");
+    let err = futures::executor::block_on(crate::call_builtin_async_in_context(
+        &runtime,
+        "imread",
+        &[Value::from(format!("{url}/missing.jpg"))],
+    ))
+    .expect_err("expected 404");
     assert_eq!(err.identifier(), IMREAD_ERROR_HTTP_STATUS.identifier);
     assert!(err.message().contains("HTTP status 404"));
     assert!(!err.message().contains("No matching overload"));
