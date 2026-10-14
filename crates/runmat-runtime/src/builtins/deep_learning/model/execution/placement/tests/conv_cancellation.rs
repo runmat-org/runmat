@@ -32,11 +32,13 @@ impl AccelProvider for CancelledConvolution {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let data = match host.data {
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
-            _ => anyhow::bail!("convolution fixture requires floating storage"),
+            _ => {
+                return Err(anyhow::anyhow!("convolution fixture requires floating storage").into())
+            }
         };
         Ok(self
             .owner

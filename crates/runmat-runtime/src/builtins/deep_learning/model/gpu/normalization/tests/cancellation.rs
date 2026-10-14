@@ -39,11 +39,13 @@ impl AccelProvider for RecordedCancellationProvider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let data = match host.data {
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
-            _ => anyhow::bail!("fixture expects native floating parameters"),
+            _ => {
+                return Err(anyhow::anyhow!("fixture expects native floating parameters").into())
+            }
         };
         let allocated = self.owner.allocate_numeric(HostNumericTensorOwned {
             data,
