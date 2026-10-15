@@ -1,12 +1,14 @@
 use super::cache::persist::PipelineMeta;
 use super::cache::persist::PIPELINE_CACHE_VERSION;
 use super::types::NumericPrecision;
-use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
+
+mod shader;
 
 pub fn warmup_from_disk<FHash, FCompile>(
     cache_dir: Option<&Path>,
     target_precision: NumericPrecision,
+    device_features: wgpu::Features,
     compute_hash: FHash,
     compile: FCompile,
 ) where
@@ -74,20 +76,23 @@ pub fn warmup_from_disk<FHash, FCompile>(
             let _ = std::fs::remove_file(&wgsl_path);
             continue;
         }
-        // Parsing/IO stay outside device access. The owner encloses one complete
-        // compile+submit transaction and releases access before progress waits.
-        let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| {
-            compile(key, layout_tag, wgsl_str, &wgsl_bytes, meta.workgroup_size)
-        }));
-        match compiled_pipeline {
-            Ok(Ok(true)) => {
+        if let Err(error) = shader::validate(wgsl_str, device_features) {
+            log::warn!("warmup: rejecting cached pipeline {stem}: {error}");
+            continue;
+        }
+        // Parsing/IO stay outside device access. The owner validates driver
+        // construction before publishing or reporting a successfully warmed entry.
+        // Validation failures are ordinary per-entry rejections. An unexpected
+        // driver panic must propagate: its exclusive device gate may be
+        // poisoned, so continuing would falsely claim a recovered provider.
+        match compile(key, layout_tag, wgsl_str, &wgsl_bytes, meta.workgroup_size) {
+            Ok(true) => {
                 compiled += 1;
             }
-            Ok(Ok(false)) => continue,
-            Ok(Err(_)) | Err(_) => {
+            Ok(false) => continue,
+            Err(error) => {
                 log::warn!(
-                    "warmup: failed to precompile pipeline {}; removing incompatible cache entry",
-                    stem
+                    "warmup: failed to precompile pipeline {stem}; removing incompatible cache entry: {error}"
                 );
                 let _ = std::fs::remove_file(&path);
                 let _ = std::fs::remove_file(&wgsl_path);
@@ -101,26 +106,4 @@ pub fn warmup_from_disk<FHash, FCompile>(
             compiled
         );
     }
-}
-
-pub(crate) fn noop_after_create(
-    emission: &runmat_accelerate_api::WgpuEmission<'_>,
-    pending: &mut super::dispatch::observation::PendingSubmissions,
-    pipeline: &wgpu::ComputePipeline,
-) -> anyhow::Result<()> {
-    let mut enc = pending.profiled_encoder(
-        emission,
-        &wgpu::CommandEncoderDescriptor {
-            label: Some("warmup-noop-precompiled-enc"),
-        },
-    );
-    {
-        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("warmup-noop-precompiled-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(pipeline);
-    }
-    super::dispatch::common::submit(emission, pending, enc)?;
-    Ok(())
 }

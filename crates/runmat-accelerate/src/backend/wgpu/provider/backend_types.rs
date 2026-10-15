@@ -116,6 +116,10 @@ pub struct WgpuProvider {
 #[path = "authority_tests.rs"]
 mod authority_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "warmup_tests.rs"]
+mod warmup_tests;
+
 #[derive(Clone)]
 pub(super) struct BufferEntry {
     /// Operation-local interpretation copied from an admitted view. The owning

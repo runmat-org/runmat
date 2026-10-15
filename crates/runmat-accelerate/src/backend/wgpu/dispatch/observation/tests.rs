@@ -462,7 +462,7 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
         .access
         .with_shared(|emission| emission.device().features())
         .unwrap();
-    assert!(features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS));
+    assert!(features.contains(wgpu::Features::TIMESTAMP_QUERY));
     let value = ProviderRepresentation {
         element_type: ProviderElementType::F32,
         storage: ProviderStorage::DenseReal,
@@ -501,7 +501,7 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             panic_on_submit: panicking,
         });
         let mut pending = PendingSubmissions::new(context.access.clone()).with_profiling(
-            TimestampCapability::new(1.0, true),
+            TimestampCapability::new(1.0, false),
             budget.clone(),
             Some(gate.clone()),
         );
@@ -515,7 +515,7 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
         context
             .access
             .with_shared(|emission| {
-                let encoder = with_command_profiling(Some(command_a.receipt()), || {
+                let mut encoder = with_command_profiling(Some(command_a.receipt()), || {
                     if scope_case == 3 || matched_provider {
                         with_provider_observation(Some(provider_a.recorder()), || {
                             pending.profiled_encoder(emission, &Default::default())
@@ -524,6 +524,10 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
                         pending.profiled_encoder(emission, &Default::default())
                     }
                 });
+                // Exercise a real query owner on every supported backend,
+                // without requiring unreliable encoder-wide timestamps.
+                // No numerical dispatch is needed for this retirement test.
+                drop(encoder.begin_compute_pass(&Default::default()));
                 assert!(budget
                     .try_reserve_wgpu_query(MAX_QUERY_REQUESTED_BYTES)
                     .is_none());

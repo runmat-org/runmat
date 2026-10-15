@@ -86,6 +86,8 @@ Use telemetry when deciding whether a benchmark is measuring the intended execut
 
 GPU submission time measures how long the host takes to enqueue work; it does not measure completed device execution. Fusion placement traces report successful submission as a queue event, without a completion event or a successful execution-cost sample. Measure device completion and any required transfers or synchronization when comparing CPU and GPU latency. A CPU-selected fusion region records completion only after its bytecode reaches the region's normal exit; errors, cancellation, and abandoned execution do not contribute successful timing samples.
 
+On Metal, RunMat uses compute-pass timestamp queries but does not enable encoder-wide timestamp writes, which can prevent submissions from completing. The full-command device interval is therefore unavailable; it is not replaced by the sum of compute-pass times or a host synchronization time. Compare completed end-to-end latency when transfer and synchronization costs matter.
+
 ## Performance Smoke Tests
 
 Some performance checks live as Rust tests. They are not a replacement for benchmark runs, but they catch severe regressions in JIT, residency, and GPU dispatch behavior.

@@ -6,6 +6,10 @@ use runmat_accelerate_api::{
     WgpuScopeErrorKind, WgpuScopeErrors,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/metal_observation_diagnostic.rs"]
+mod metal_observation_diagnostic;
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn selected_elementwise_limits_refuse_before_driver_creation() {

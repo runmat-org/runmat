@@ -324,6 +324,7 @@ impl WgpuProvider {
         self.cache_device_id
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn warmup_from_disk(&self) {
         if std::env::var("RUNMAT_DISABLE_PIPELINE_WARMUP").is_ok() {
             return;
@@ -338,37 +339,46 @@ impl WgpuProvider {
         crate::backend::wgpu::warmup::warmup_from_disk(
             self.pipeline_cache_dir.as_deref(),
             self.precision,
+            self.access.enabled_features(),
             |bytes, tag, wg| self.compute_pipeline_hash_bytes(bytes, tag, wg),
-            |key, tag, src, bytes, wg| {
-                self.with_emission(|emission, pending| -> Result<bool> {
-                    let Some(bgl) =
-                        crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
-                    else {
-                        return Ok(false);
-                    };
-                    let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-                        emission,
-                        "warmup-pipeline-layout",
-                        &bgl,
-                    );
-                    let module = crate::backend::wgpu::pipelines::create_shader_module(
-                        emission,
-                        "warmup-shader-module",
-                        src,
-                    );
-                    let pipeline = self.get_or_create_pipeline(
-                        emission,
-                        key,
-                        &pl,
-                        &module,
-                        "warmup-precompiled-pipeline",
-                        Some(bytes),
-                        Some(tag),
-                        wg,
-                    )?;
-                    crate::backend::wgpu::warmup::noop_after_create(emission, pending, &pipeline)?;
-                    Ok(true)
-                })?
+            |key, tag, src, _bytes, _wg| {
+                // Build under the device's exclusive validation scopes, but
+                // resolve their detached receipt only after releasing access.
+                // Never publish an invalid driver object into the shared cache.
+                let receipt =
+                    self.access
+                        .with_profiled_scoped(&self.emission_authority, |emission| {
+                            let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
+                                emission, tag,
+                            )?;
+                            let pl =
+                                crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                                    emission,
+                                    "warmup-pipeline-layout",
+                                    &bgl,
+                                );
+                            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                                emission,
+                                "warmup-shader-module",
+                                src,
+                            );
+                            Some(
+                                crate::backend::wgpu::cache::factory::create_compute_pipeline(
+                                    emission,
+                                    "warmup-precompiled-pipeline",
+                                    &pl,
+                                    &module,
+                                ),
+                            )
+                        })?;
+                let Some(pipeline) = pollster::block_on(receipt.resolve())? else {
+                    return Ok(false);
+                };
+                self.fused_pipeline_cache
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("warmup pipeline cache is poisoned"))?
+                    .insert(key, Arc::new(pipeline));
+                Ok(true)
             },
         );
     }

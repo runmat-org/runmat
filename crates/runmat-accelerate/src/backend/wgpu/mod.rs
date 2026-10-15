@@ -13,6 +13,8 @@ pub mod residency;
 pub mod resources;
 pub mod shaders;
 pub mod types;
+// Browser startup has no process-local filesystem cache to replay.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod warmup;
 
 #[cfg(test)]

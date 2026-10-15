@@ -419,6 +419,7 @@ impl WgpuProvider {
         }
 
         let start = Instant::now();
+        #[cfg(not(target_arch = "wasm32"))]
         self.warmup_from_disk();
         let warmup = self
             .with_emission(|emission, pending| -> Result<()> {

@@ -22,6 +22,9 @@ use crate::backend::wgpu::pipelines::{FrozenLinearLaunch, ImageNormalizeBootstra
 use crate::backend::wgpu::resources::KernelResourceRegistry;
 use crate::telemetry::AccelTelemetry;
 
+#[path = "init/timestamp_features.rs"]
+mod timestamp_features;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn native_required_features(
     precision: NumericPrecision,
@@ -248,13 +251,7 @@ impl WgpuProvider {
         };
 
         let optional_timestamp_features =
-            if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY) {
-                adapter_features
-                    & (wgpu::Features::TIMESTAMP_QUERY
-                        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
-            } else {
-                wgpu::Features::empty()
-            };
+            timestamp_features::requested(adapter_info.backend, adapter_features);
         #[cfg(not(target_arch = "wasm32"))]
         let required_features =
             native_required_features(precision, adapter_features) | optional_timestamp_features;

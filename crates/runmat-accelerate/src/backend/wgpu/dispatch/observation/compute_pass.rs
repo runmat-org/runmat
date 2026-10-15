@@ -41,6 +41,14 @@ impl TimestampCapability {
     pub(crate) fn inside_encoders(self) -> bool {
         self.inside_encoders
     }
+
+    #[cfg(test)]
+    pub(crate) fn without_encoder_timestamps_for_test(self) -> Self {
+        Self {
+            inside_encoders: false,
+            ..self
+        }
+    }
 }
 
 pub(crate) struct TimestampReadback {
