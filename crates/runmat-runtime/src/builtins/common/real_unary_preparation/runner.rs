@@ -6,6 +6,37 @@ use runmat_accelerate_api::{
 };
 use std::error::Error;
 
+pub(crate) trait BeforeHost:
+    FnOnce(&GpuTensorHandle, RealUnaryClassification) -> BuiltinResult<()>
+{
+}
+impl<T> BeforeHost for T where
+    T: FnOnce(&GpuTensorHandle, RealUnaryClassification) -> BuiltinResult<()>
+{
+}
+
+pub(crate) trait HostPublication:
+    FnOnce(&'static dyn AccelProvider, &GpuTensorHandle, Value) -> BuiltinResult<Value>
+{
+}
+impl<T> HostPublication for T where
+    T: FnOnce(&'static dyn AccelProvider, &GpuTensorHandle, Value) -> BuiltinResult<Value>
+{
+}
+
+pub(crate) trait DevicePublication:
+    FnOnce(&'static dyn AccelProvider, &GpuTensorHandle, GpuTensorHandle) -> BuiltinResult<Value>
+{
+}
+impl<T> DevicePublication for T where
+    T: FnOnce(
+        &'static dyn AccelProvider,
+        &GpuTensorHandle,
+        GpuTensorHandle,
+    ) -> BuiltinResult<Value>
+{
+}
+
 pub(crate) struct RealUnaryAdapter<B, H, R> {
     pub internal_error: &'static runmat_builtins::BuiltinErrorDescriptor,
     pub before_host: B,
@@ -23,13 +54,9 @@ pub(super) async fn execute<F, Fut, B, H, R>(
 where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
-    B: FnOnce(&GpuTensorHandle, RealUnaryClassification) -> BuiltinResult<()>,
-    H: FnOnce(&'static dyn AccelProvider, &GpuTensorHandle, Value) -> BuiltinResult<Value>,
-    R: FnOnce(
-        &'static dyn AccelProvider,
-        &GpuTensorHandle,
-        GpuTensorHandle,
-    ) -> BuiltinResult<Value>,
+    B: BeforeHost,
+    H: HostPublication,
+    R: DevicePublication,
 {
     let result = execute_inner(runtime, &plan, &value, body, adapter).await;
     result.map_err(|mut cause| {
@@ -48,13 +75,9 @@ async fn execute_inner<F, Fut, B, H, R>(
 where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
-    B: FnOnce(&GpuTensorHandle, RealUnaryClassification) -> BuiltinResult<()>,
-    H: FnOnce(&'static dyn AccelProvider, &GpuTensorHandle, Value) -> BuiltinResult<Value>,
-    R: FnOnce(
-        &'static dyn AccelProvider,
-        &GpuTensorHandle,
-        GpuTensorHandle,
-    ) -> BuiltinResult<Value>,
+    B: BeforeHost,
+    H: HostPublication,
+    R: DevicePublication,
 {
     let recorder = runmat_accelerate_api::observation::current_provider_observation();
     if recorder

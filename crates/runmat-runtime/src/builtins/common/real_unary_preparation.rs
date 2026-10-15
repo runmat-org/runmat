@@ -13,7 +13,7 @@ use std::future::Future;
 mod continuation;
 pub use continuation::RealUnaryPublication;
 mod runner;
-pub(crate) use runner::RealUnaryAdapter;
+pub(crate) use runner::{BeforeHost, DevicePublication, HostPublication, RealUnaryAdapter};
 
 pub(crate) async fn execute<F, Fut, B, H, R>(
     runtime: Option<&RuntimeContext>,
@@ -27,20 +27,9 @@ pub(crate) async fn execute<F, Fut, B, H, R>(
 where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
-    B: FnOnce(
-        &runmat_accelerate_api::GpuTensorHandle,
-        RealUnaryClassification,
-    ) -> BuiltinResult<()>,
-    H: FnOnce(
-        &'static dyn runmat_accelerate_api::AccelProvider,
-        &runmat_accelerate_api::GpuTensorHandle,
-        Value,
-    ) -> BuiltinResult<Value>,
-    R: FnOnce(
-        &'static dyn runmat_accelerate_api::AccelProvider,
-        &runmat_accelerate_api::GpuTensorHandle,
-        runmat_accelerate_api::GpuTensorHandle,
-    ) -> BuiltinResult<Value>,
+    B: BeforeHost,
+    H: HostPublication,
+    R: DevicePublication,
 {
     let predicate = operation.real_predicate().ok_or_else(|| {
         crate::build_runtime_error("real unary preparation requires a promoting-domain instruction")

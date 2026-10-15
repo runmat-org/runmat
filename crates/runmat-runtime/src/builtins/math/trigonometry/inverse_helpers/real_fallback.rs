@@ -10,17 +10,9 @@ pub(in crate::builtins::math::trigonometry) fn adapter(
     extension: &'static BuiltinExtensionDescriptor,
     internal_error: &'static runmat_builtins::BuiltinErrorDescriptor,
 ) -> crate::builtins::common::real_unary_preparation::RealUnaryAdapter<
-    impl FnOnce(&GpuTensorHandle, runmat_types::RealUnaryClassification) -> BuiltinResult<()>,
-    impl FnOnce(
-        &'static dyn runmat_accelerate_api::AccelProvider,
-        &GpuTensorHandle,
-        Value,
-    ) -> BuiltinResult<Value>,
-    impl FnOnce(
-        &'static dyn runmat_accelerate_api::AccelProvider,
-        &GpuTensorHandle,
-        GpuTensorHandle,
-    ) -> BuiltinResult<Value>,
+    impl crate::builtins::common::real_unary_preparation::BeforeHost,
+    impl crate::builtins::common::real_unary_preparation::HostPublication,
+    impl crate::builtins::common::real_unary_preparation::DevicePublication,
 > {
     crate::builtins::common::real_unary_preparation::RealUnaryAdapter {
         internal_error,
