@@ -7,17 +7,16 @@ mod sendmail_helpers;
 use sendmail_helpers::*;
 use websave_helpers::*;
 
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_builtins::{SendmailFailure, SENDMAIL_DESCRIPTOR, SENDMAIL_ERROR_OUTPUTS};
+use runmat_builtins::{
+    UrldecodeFailure, UrlencodeFailure, URLDECODE_DESCRIPTOR, URLDECODE_ERROR_TOO_MANY_OUTPUTS,
+    URLENCODE_DESCRIPTOR, URLENCODE_ERROR_TOO_MANY_OUTPUTS,
+};
 use runmat_builtins::{WEBSAVE_DESCRIPTOR, WEBSAVE_ERROR_OUTPUTS, WEBSAVE_EXPLICIT_GPU_EXTENSION};
 use runmat_value::NumericScalar;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
@@ -34,61 +33,6 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const USER_AGENT: &str = "RunMat websave/0.0";
 
-const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "input",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input argument.",
-}];
-const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Result value.",
-}];
-
-macro_rules! simple_descriptor {
-    ($sig:ident, $desc:ident, $label:expr, $inputs:expr) => {
-        const $sig: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUTPUT_VALUE,
-        }];
-        pub const $desc: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$sig,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &[],
-        };
-    };
-}
-
-simple_descriptor!(
-    URLENCODE_SIGNATURES,
-    URLENCODE_DESCRIPTOR,
-    "encoded = urlencode(text)",
-    &INPUTS_ONE
-);
-pub const URLENCODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "urlencode accepts host text only; integer and resident numeric values reject before provider access or encoding.",
-    };
-simple_descriptor!(
-    URLDECODE_SIGNATURES,
-    URLDECODE_DESCRIPTOR,
-    "decoded = urldecode(text)",
-    &INPUTS_ONE
-);
-pub const URLDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding.",
-    };
 fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -134,34 +78,42 @@ fn char_value(text: &str) -> Value {
 
 #[runtime_builtin(
     name = "urlencode",
-    category = "io/http",
-    summary = "Percent-encode text for use in URLs.",
-    keywords = "urlencode,url,percent encode,web",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::http::compat::URLENCODE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::http::compat::URLENCODE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 1 {
-        return Err(compat_error(
-            "urlencode",
-            "urlencode: expected exactly one input",
-        ));
-    }
-    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
-        return Err(compat_error(
-            "urlencode",
-            "urlencode: text must be a host string scalar or character vector",
-        ));
-    }
-    let args = gather_args("urlencode", &args).await?;
-    Ok(char_value(&percent_encode(&scalar_text(
-        &args[0],
+    crate::output_count::validate_fixed_outputs(
+        &URLENCODE_DESCRIPTOR,
+        &URLENCODE_ERROR_TOO_MANY_OUTPUTS,
         "urlencode",
-        "text",
-    )?)))
+    )?;
+    if args.len() != 1 {
+        return Err(urlencode_error(UrlencodeFailure::WrongArity));
+    }
+    // Admit only host text before any provider or aggregate traversal.
+    let text =
+        url_text_input(&args[0]).ok_or_else(|| urlencode_error(UrlencodeFailure::InvalidText))?;
+    Ok(char_value(&percent_encode(&text)))
+}
+
+fn url_text_input(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::CharArray(array)
+            if array.rows == 1 && array.shape.iter().skip(2).all(|extent| *extent == 1) =>
+        {
+            Some(array.data.iter().collect())
+        }
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        _ => None,
+    }
+}
+
+fn urlencode_error(failure: UrlencodeFailure) -> RuntimeError {
+    build_runtime_error(failure.descriptor().message)
+        .with_builtin("urlencode")
+        .with_identifier(failure.identifier())
+        .build()
 }
 
 fn percent_encode(text: &str) -> String {
@@ -179,34 +131,28 @@ fn percent_encode(text: &str) -> String {
 
 #[runtime_builtin(
     name = "urldecode",
-    category = "io/http",
-    summary = "Decode percent-encoded URL text.",
-    keywords = "urldecode,url,percent decode,web",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::http::compat::URLDECODE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::http::compat::URLDECODE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urldecode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 1 {
-        return Err(compat_error(
-            "urldecode",
-            "urldecode: expected exactly one input",
-        ));
-    }
-    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
-        return Err(compat_error(
-            "urldecode",
-            "urldecode: text must be a host string scalar or character vector",
-        ));
-    }
-    let args = gather_args("urldecode", &args).await?;
-    Ok(char_value(&percent_decode(&scalar_text(
-        &args[0],
+    crate::output_count::validate_fixed_outputs(
+        &URLDECODE_DESCRIPTOR,
+        &URLDECODE_ERROR_TOO_MANY_OUTPUTS,
         "urldecode",
-        "text",
-    )?)?))
+    )?;
+    if args.len() != 1 {
+        return Err(urldecode_error(UrldecodeFailure::WrongArity));
+    }
+    let text =
+        url_text_input(&args[0]).ok_or_else(|| urldecode_error(UrldecodeFailure::InvalidText))?;
+    Ok(char_value(&percent_decode(&text)?))
+}
+
+fn urldecode_error(failure: UrldecodeFailure) -> RuntimeError {
+    build_runtime_error(failure.descriptor().message)
+        .with_builtin("urldecode")
+        .with_identifier(failure.identifier())
+        .build()
 }
 
 fn percent_decode(text: &str) -> BuiltinResult<String> {
@@ -216,12 +162,12 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
     while idx < bytes.len() {
         if bytes[idx] == b'%' {
             if idx + 2 >= bytes.len() {
-                return Err(compat_error("urldecode", "urldecode: incomplete escape"));
+                return Err(urldecode_error(UrldecodeFailure::IncompleteEscape));
             }
             let hex = std::str::from_utf8(&bytes[idx + 1..idx + 3])
-                .map_err(|_| compat_error("urldecode", "urldecode: invalid escape"))?;
+                .map_err(|_| urldecode_error(UrldecodeFailure::InvalidEscape))?;
             let byte = u8::from_str_radix(hex, 16)
-                .map_err(|_| compat_error("urldecode", "urldecode: invalid escape"))?;
+                .map_err(|_| urldecode_error(UrldecodeFailure::InvalidEscape))?;
             out.push(byte);
             idx += 3;
         } else if bytes[idx] == b'+' {
@@ -232,7 +178,7 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
             idx += 1;
         }
     }
-    String::from_utf8(out).map_err(|err| compat_error("urldecode", err.to_string()))
+    String::from_utf8(out).map_err(|_| urldecode_error(UrldecodeFailure::InvalidUtf8))
 }
 
 #[runtime_builtin(

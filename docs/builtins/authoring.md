@@ -110,13 +110,13 @@ During the C00–C07 catalog migration, an unmigrated identity may still use its
 Audit each cutover against its pre-slice Git baseline after deleting the old editable files:
 
 ```bash
-node scripts/development/audit-builtin-documentation-cutover.mjs NAME \
+node scripts/development/audit-builtin-documentation-cutover.mjs NAME [NAME ...] \
   --baseline HEAD \
-  --reviewed description,behaviors,examples,faqs,links,source \
+  --dispositions /tmp/reviewed-source-dispositions.json \
   --output /tmp/NAME-documentation-cutover.json
 ```
 
-The audit verifies direct fields, complete typed examples, catalog authority, sidecar removal, and the destination for every populated legacy field. Fields whose meaning cannot be compared mechanically must be named with `--reviewed` only after their source and catalog values have been read. Use `--new` when the public identity had no sidecar or runtime shadow; this is an explicit assertion, and the command rejects it when the baseline contains an old source. The report is temporary migration evidence, not another builtin-definition file. Record its result and any justified corrections in the progress ledger rather than committing the report.
+Supply the complete reviewed source-field disposition records produced by the existing migration preparation machinery (an array, or the existing documentation gate input object). Every original leaf, including empty/null values, needs an exact destination or an explicit justified disposition; changed values require reasons and evidence. The audit reads original source bytes from the resolved Git baseline, requires their old editable paths to be absent, freezes current Git/source bytes before and after invoking the owning compiled exporter, and uses the same leaf/destination reconciliation as the factory gate. Its distinct local-source receipt is conservation evidence only: it does not claim factory control/lease authority, example execution, full feature/platform coverage, or global strict-zero completion. Old v1 `--reviewed`/`--new` reports are not completion proof. Keep these temporary reports outside the source tree and record actual qualification in the progress ledger.
 
 ## Runtime Semantics
 

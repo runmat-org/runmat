@@ -6,6 +6,27 @@ import { array, digest, enumValue, exact, identity, integer, kind, nonempty, rep
 export function buildDocumentationCutoverArtifact(input) {
   exact(input, ["catalog_export", "catalog_export_bytes", "source_dispositions", "expected_sources", "provenance"], "documentation cutover input");
   const provenance = parseProvenance(input.provenance);
+  const conservation = reconcileDocumentationSourceFields({
+    catalog_export: input.catalog_export, catalog_export_bytes: input.catalog_export_bytes,
+    source_dispositions: input.source_dispositions, expected_sources: input.expected_sources,
+    identities: provenance.identities,
+  });
+  const payload = {
+    schema_version: 2, kind: "runmat-builtin-documentation-cutover-evidence", authority: "derived-machine-evidence-only",
+    provenance: { ...provenance, source_dispositions_digest: conservation.source_dispositions_digest },
+    catalog_export: conservation.catalog_export, rows: conservation.rows,
+    summary: conservation.summary, result: conservation.result,
+  };
+  return { ...payload, digest: evidenceDigest(payload) };
+}
+
+// Pure source-field conservation, independent of migration-factory authority.
+// Callers own the provenance of baseline bytes and the actual compiled export;
+// this routine grants neither execution qualification nor a factory receipt.
+export function reconcileDocumentationSourceFields(input) {
+  exact(input, ["catalog_export", "catalog_export_bytes", "source_dispositions", "expected_sources", "identities"], "documentation conservation input");
+  const identities = uniqueStrings(input.identities, "documentation identities", { lower: true }).sort(compareCodePoint);
+  identities.forEach((name) => identity(name, "documentation identity"));
   const encoded = Buffer.from(input.catalog_export_bytes);
   const parsedBytes = JSON.parse(encoded.toString("utf8"));
   if (JSON.stringify(parsedBytes) !== JSON.stringify(input.catalog_export)) throw new Error("catalog export bytes and parsed value differ");
@@ -15,15 +36,15 @@ export function buildDocumentationCutoverArtifact(input) {
   const rows = [];
   const observedIdentities = new Set();
   const observedSources = new Map();
-  exact(input.expected_sources, provenance.identities, "documentation expected sources");
+  exact(input.expected_sources, identities, "documentation expected sources");
   for (const record of array(input.source_dispositions, "documentation source dispositions", { empty: true })) {
     exact(record, ["baseline_digest", "value"], "documentation source disposition input");
     const expectedIdentity = String(record.value?.identity ?? "").toLowerCase();
+    if (!identities.includes(expectedIdentity)) throw new Error(`${expectedIdentity}: documentation disposition is outside the reviewed identity scope`);
     const expectedSources = parseExpectedSources(input.expected_sources[expectedIdentity], expectedIdentity);
     const derivedBaselineDigest = evidenceDigest({ identity: expectedIdentity, sources: expectedSources });
     if (record.baseline_digest !== derivedBaselineDigest) throw new Error(`${expectedIdentity}: supplied disposition baseline differs from the frozen source documents`);
     const disposition = parseCompletedSourceDisposition(record.value, expectedIdentity, derivedBaselineDigest);
-    if (!provenance.identities.includes(expectedIdentity)) throw new Error(`${expectedIdentity}: documentation disposition is outside the reviewed bundle`);
     if (observedIdentities.has(expectedIdentity)) throw new Error(`${expectedIdentity}: duplicate documentation disposition`);
     observedIdentities.add(expectedIdentity);
     observedSources.set(expectedIdentity, disposition.sources.map((entry) => entry.path).sort(compareCodePoint));
@@ -31,15 +52,13 @@ export function buildDocumentationCutoverArtifact(input) {
     if (!document || document.authority !== "catalog") throw new Error(`${expectedIdentity}: canonical catalog export document is absent`);
     for (const source of disposition.sources) for (const leaf of source.leaves) rows.push(reconcileLeaf(expectedIdentity, source, leaf, document));
   }
-  for (const identityName of provenance.identities) {
+  for (const identityName of identities) {
     const expectedPaths = parseExpectedSources(input.expected_sources[identityName], identityName).map((entry) => entry.path);
     if (JSON.stringify(expectedPaths) !== JSON.stringify(observedSources.get(identityName) ?? [])) throw new Error(`${identityName}: source dispositions do not exactly cover the baseline legacy documentation sources`);
   }
   rows.sort((left, right) => compareCodePoint(`${left.identity}\0${left.source_path}\0${left.pointer}`, `${right.identity}\0${right.source_path}\0${right.pointer}`));
-  const artifactProvenance = { ...provenance, source_dispositions_digest: evidenceDigest(input.source_dispositions) };
-  const payload = {
-    schema_version: 2, kind: "runmat-builtin-documentation-cutover-evidence", authority: "derived-machine-evidence-only",
-    provenance: artifactProvenance,
+  return {
+    source_dispositions_digest: evidenceDigest(input.source_dispositions),
     catalog_export: {
       schema_version: input.catalog_export.schema_version,
       content_digest: exportDigest,
@@ -50,7 +69,6 @@ export function buildDocumentationCutoverArtifact(input) {
     rows, summary: { identities: observedIdentities.size, leaves: rows.length, passed: rows.filter((entry) => entry.result === "pass").length },
     result: rows.every((entry) => entry.result === "pass") ? "pass" : "fail",
   };
-  return { ...payload, digest: evidenceDigest(payload) };
 }
 
 export function parseDocumentationCutoverArtifact(value, expected = null) {

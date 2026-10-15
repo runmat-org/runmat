@@ -8,10 +8,15 @@ mod webwrite;
 mod weboptions;
 mod sendmail;
 mod route;
+mod url_text;
+mod urlencode;
+mod urldecode;
 
 pub use self::response_mode::*;
 pub use self::route::*;
 pub use self::sendmail::*;
+pub use self::urldecode::*;
+pub use self::urlencode::*;
 pub use self::weboptions::*;
 pub use self::webread::*;
 pub use self::websave::*;
@@ -23,4 +28,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(webwrite::ENTRIES.iter().copied());
     values.extend(weboptions::ENTRIES.iter().copied());
     values.extend(sendmail::ENTRIES.iter().copied());
+    values.extend(urlencode::ENTRIES.iter().copied());
+    values.extend(urldecode::ENTRIES.iter().copied());
 }

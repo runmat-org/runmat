@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::{BuiltinIntegerAuditKind, URLDECODE_INTEGER_AUDIT, URLENCODE_INTEGER_AUDIT};
 use runmat_value::Tensor;
 
 #[cfg(target_arch = "wasm32")]
@@ -67,6 +68,83 @@ fn url_round_trip_uses_percent_encoding() {
 }
 
 #[test]
+fn url_text_unicode_empty_plus_and_result_container() {
+    for (input, expected) in [
+        ("", ""),
+        ("AZaz09-_.~", "AZaz09-_.~"),
+        ("é/+", "%C3%A9%2F%2B"),
+    ] {
+        let encoded = run(urlencode_builtin(vec![Value::from(input)])).unwrap();
+        assert_eq!(encoded, char_value(expected));
+        assert_eq!(
+            run(urldecode_builtin(vec![encoded])).unwrap(),
+            char_value(input)
+        );
+    }
+    assert_eq!(
+        run(urldecode_builtin(vec![Value::from("a+b%2bc")])).unwrap(),
+        char_value("a b+c")
+    );
+    let output = run(urlencode_builtin(vec![Value::from("a b")])).unwrap();
+    let Value::CharArray(array) = output else {
+        panic!("result must be a character row")
+    };
+    assert_eq!((array.rows, array.cols), (1, 5));
+}
+
+#[test]
+fn url_text_typed_failures_and_output_precedence() {
+    for (input, identifier) in [
+        ("%", "RunMat:urldecode:IncompleteEscape"),
+        ("%0", "RunMat:urldecode:IncompleteEscape"),
+        ("%GG", "RunMat:urldecode:InvalidEscape"),
+        ("%é", "RunMat:urldecode:InvalidEscape"),
+        ("%FF", "RunMat:urldecode:InvalidUtf8"),
+    ] {
+        assert_eq!(
+            run(urldecode_builtin(vec![Value::from(input)]))
+                .unwrap_err()
+                .identifier(),
+            Some(identifier)
+        );
+    }
+    assert_eq!(
+        run(urlencode_builtin(vec![])).unwrap_err().identifier(),
+        Some("RunMat:urlencode:WrongArity")
+    );
+    assert_eq!(
+        run(urldecode_builtin(vec![])).unwrap_err().identifier(),
+        Some("RunMat:urldecode:WrongArity")
+    );
+    let pages = Value::CharArray(
+        CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).unwrap(),
+    );
+    assert_eq!(
+        run(urlencode_builtin(vec![pages.clone()]))
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:urlencode:InvalidText")
+    );
+    assert_eq!(
+        run(urldecode_builtin(vec![pages]))
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:urldecode:InvalidText")
+    );
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    assert_eq!(
+        run(urlencode_builtin(vec![])).unwrap_err().identifier(),
+        Some("RunMat:urlencode:TooManyOutputs")
+    );
+    assert_eq!(
+        run(urldecode_builtin(vec![Value::from("%")]))
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:urldecode:TooManyOutputs")
+    );
+}
+
+#[test]
 fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() {
     assert_eq!(
         URLENCODE_INTEGER_AUDIT.kind,
@@ -93,6 +171,14 @@ fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() 
             runmat_value::IntValue::U64(u64::MAX),
         )]))
         .expect_err("integer text must reject"),
+        run(urldecode_builtin(vec![Value::Int(
+            runmat_value::IntValue::I8(-1),
+        )]))
+        .expect_err("integer decode input must reject"),
+        run(urlencode_builtin(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]))
+        .expect_err("resident encode input must reject"),
         run(urldecode_builtin(vec![Value::GpuTensor(
             allocation.handle.clone(),
         )]))
@@ -102,6 +188,10 @@ fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() 
             .message()
             .contains("host string scalar or character vector"));
         assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        assert!(matches!(
+            error.identifier(),
+            Some("RunMat:urlencode:InvalidText" | "RunMat:urldecode:InvalidText")
+        ));
     }
     assert_eq!(allocation.handle.wire_descriptor(), original);
     assert_eq!(allocation.probe.retirements(), 0);

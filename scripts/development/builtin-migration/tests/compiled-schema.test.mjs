@@ -3,6 +3,17 @@ import test from "node:test";
 
 import { catalogEntry, constant, legacyFunction } from "../compiled-schema.mjs";
 import { compiledInventoryFixture } from "./helpers.mjs";
+import { parseCompiledInventory } from "../compiled-inventory.mjs";
+import { contentDigest } from "../evidence.mjs";
+
+test("compiled inventory accepts the actual declared feature set without widening to unknown features", () => {
+  const fixture = compiledInventoryFixture();
+  assert.ok(fixture.snapshot.build.crate_feature_inventory.known_features.includes("fea-example-fixtures"));
+  assert.doesNotThrow(() => parseCompiledInventory(fixture));
+  fixture.snapshot.build.crate_feature_inventory.known_features.push("guessed-feature");
+  fixture.digest.value = contentDigest(Buffer.from(JSON.stringify(fixture.snapshot))).slice("sha256:".length);
+  assert.throws(() => parseCompiledInventory(fixture), /known_features must exactly match/);
+});
 
 test("compiled catalog parses typed audience and operand preparation forms", () => {
   const entry = compiledInventoryFixture().snapshot.declared.catalog_entries[0];
@@ -16,17 +27,40 @@ test("compiled catalog parses typed audience and operand preparation forms", () 
   assert.doesNotThrow(() => catalogEntry(entry));
   entry.placement.preparation.Forms[0].operation = { RealUnary: "closed_unit_interval" };
   assert.doesNotThrow(() => catalogEntry(entry));
-  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "Modulus" };
+  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "modulus" };
   assert.doesNotThrow(() => catalogEntry(entry));
   entry.placement.preparation.Forms[0].operation = { Sink: "Gather" };
   assert.doesNotThrow(() => catalogEntry(entry));
-  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "modulus" };
+  entry.placement.preparation.Forms[0].operation = { FloatingRemainder: "Modulus" };
   assert.throws(() => catalogEntry(entry), /floating remainder kind/);
   entry.placement.preparation.Forms[0].operation = "Unary";
   entry.placement.preparation.Forms[0].data_arguments = [1, 0];
   assert.throws(() => catalogEntry(entry), /strictly increasing/);
   entry.placement.preparation = { Forms: [], guessed: true };
   assert.throws(() => catalogEntry(entry), /operand preparation fields/);
+});
+
+test("foreign runtime link policy retains its actual typed adapter family", () => {
+  const entry = compiledInventoryFixture().snapshot.declared.catalog_entries[0];
+  for (const family of ["NativeFfi", "Mex", "Java", "Python"]) {
+    entry.link.policy = { ForeignRuntime: family };
+    assert.doesNotThrow(() => catalogEntry(entry));
+  }
+  entry.link.policy = "ForeignRuntime";
+  assert.throws(() => catalogEntry(entry), /link policy/);
+  entry.link.policy = { ForeignRuntime: "guessed-adapter" };
+  assert.throws(() => catalogEntry(entry), /foreign adapter family/);
+});
+
+test("catalog and legacy semantics retain the declared current-workspace eval effect", () => {
+  const entry = compiledInventoryFixture().snapshot.declared.catalog_entries[0];
+  entry.contract.workspace_effect = "DynamicEvalCurrentWorkspace";
+  assert.doesNotThrow(() => catalogEntry(entry));
+  const legacy = legacyFunctionFixture([]);
+  legacy.semantics.workspace_effect = "DynamicEvalCurrentWorkspace";
+  assert.doesNotThrow(() => legacyFunction(legacy));
+  legacy.semantics.workspace_effect = "guessed-workspace-effect";
+  assert.throws(() => legacyFunction(legacy), /workspace effect/);
 });
 
 test("extension schema distinguishes rejected forms and profile-dependent behavior", () => {
