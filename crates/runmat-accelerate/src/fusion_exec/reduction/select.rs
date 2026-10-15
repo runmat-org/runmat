@@ -142,7 +142,7 @@ pub(super) fn choose(
                 preparation: CandidatePreparationState::Cold,
                 preparation_program: Some(ProviderPreparationProgram::TypedReduction { selection }),
                 shader_requirements: None,
-                fallback: cost(execution_ns),
+                fallback: runmat_execution::CandidateCostEvidence::Estimated(cost(execution_ns)),
                 required_upload_bytes: Some(resources.required_upload_bytes),
                 required_download_bytes: 0,
                 downstream_materialization: false,
@@ -162,7 +162,7 @@ pub(super) fn choose(
             prepared_authority: None,
             vm_right,
             family: ProviderOperationFamily::Fusion,
-            cpu,
+            cpu: cpu.into(),
             cpu_admission,
             physical,
             compare_profitability: request.placement.is_some(),
@@ -199,7 +199,7 @@ pub(super) fn choose(
             observer.selected(
                 PlacementVariant::ProviderFusion,
                 "typed_reduction_complete_cost",
-                provider_cost.checked_total_ns(),
+                provider_cost.and_then(|cost| cost.checked_total_ns()),
             );
             let mut ticket = if vm_right.is_some() {
                 FusionPlacementSelection::new_vm(
@@ -238,7 +238,7 @@ pub(super) fn choose(
             observer.selected(
                 PlacementVariant::SharedRuntime,
                 "typed_reduction_complete_cost",
-                cpu_cost.checked_total_ns(),
+                cpu_cost.estimate().and_then(|cost| cost.checked_total_ns()),
             );
             if host.is_none() {
                 return Err(anyhow!(

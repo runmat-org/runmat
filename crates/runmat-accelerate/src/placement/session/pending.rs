@@ -1,7 +1,7 @@
 //! Bounded owner-thread delivery. Device callbacks mutate receipts, never this
 //! RefCell/session. Source polling happens outside every mutable borrow.
-use runmat_execution::{PlacementFeedback, PlacementInvalidation};
-use runmat_runtime::context::RuntimePlacementFeedbackSource;
+use runmat_execution::PlacementInvalidation;
+use runmat_runtime::context::{RuntimePlacementFeedbackDelivery, RuntimePlacementFeedbackSource};
 use std::cell::{Cell, RefCell};
 
 const MAX_PENDING: usize = 64;
@@ -32,7 +32,7 @@ impl PendingFeedback {
         Ok(())
     }
 
-    pub(super) fn take_ready(&self) -> Vec<PlacementFeedback> {
+    pub(super) fn take_ready(&self) -> Vec<RuntimePlacementFeedbackDelivery> {
         if self.draining.replace(true) {
             return Vec::new();
         }

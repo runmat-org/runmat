@@ -408,11 +408,9 @@ mod tests {
         (
             LocalPlacementFeedback {
                 runtime,
-                permit: Some(session.test_graph_observation_permit(
-                    signature.clone(),
-                    candidate,
-                    kind,
-                )),
+                authority: crate::placement::LocalPlacementFeedbackAuthority::Graph(
+                    session.test_graph_observation_permit(signature.clone(), candidate, kind),
+                ),
                 signature,
                 candidate: candidate.into(),
                 kind,

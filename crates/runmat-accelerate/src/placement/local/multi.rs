@@ -1,8 +1,9 @@
 //! One canonical CPU/provider candidate set for a local placement decision.
 //! Each physical record is normalized before a single service plan call.
 use super::{
-    observation_revision, observation_semantic_identity, rejected_cpu_feedback, session_facts,
-    signature, transfer_prior_ns, LocalPlacementFeedback, LocalPlacementOutcome, PlacementPolicy,
+    observation_revision, observation_semantic_identity, plan_error, rejected_cpu_feedback,
+    signature, transfer_prior_ns, LocalCpuCandidate, LocalPlacementFeedback,
+    LocalPlacementFeedbackAuthority, LocalPlacementOutcome, PlacementPolicy,
     RejectedCpuFeedbackRequest, TotalCandidateObservationContract,
 };
 use crate::placement::{select_candidate, summarize_values, tensor_representation};
@@ -42,7 +43,7 @@ pub(crate) struct LocalPhysicalCandidate<'a> {
     pub(crate) preparation: CandidatePreparationState,
     pub(crate) preparation_program: Option<ProviderPreparationProgram<'a>>,
     pub(crate) shader_requirements: Option<ProviderShaderRequirements>,
-    pub(crate) fallback: ExecutionCostEstimate,
+    pub(crate) fallback: runmat_execution::CandidateCostEvidence,
     pub(crate) required_upload_bytes: Option<u64>,
     pub(crate) required_download_bytes: u64,
     pub(crate) downstream_materialization: bool,
@@ -80,7 +81,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(crate) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
     pub(crate) family: ProviderOperationFamily,
-    pub(crate) cpu: ExecutionCandidateDescriptor,
+    pub(crate) cpu: LocalCpuCandidate,
     pub(crate) cpu_admission: LocalCpuAdmission,
     pub(crate) physical: Vec<LocalPhysicalCandidate<'a>>,
     pub(crate) compare_profitability: bool,
@@ -90,7 +91,8 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
 mod decision;
 mod graph;
 mod inputs;
-use graph::{candidate_name, candidate_resource, cpu_resource, Admitted};
+mod unpriced;
+use graph::{candidate_name, candidate_resource, Admitted};
 
 pub(crate) fn plan_local_multi(
     provider: &dyn AccelProvider,
@@ -139,10 +141,31 @@ pub(super) fn plan_local_multi_with_provider(
         _ => None,
     };
     let cpu_resources = match cpu_admission {
-        LocalCpuAdmission::Legacy => Some(cpu_resource(&cpu)),
+        LocalCpuAdmission::Legacy => Some(cpu.route.resources),
         LocalCpuAdmission::Exact(resources) => Some(*resources),
         LocalCpuAdmission::ExactReadbacks { resources, .. } => Some(*resources),
         LocalCpuAdmission::Unavailable => None,
+    };
+    let constraint = physical
+        .first()
+        .and_then(|candidate| {
+            candidate.data_inputs.iter().find_map(|value| match value {
+                Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
+                    Some(runmat_execution::WholeWorkConstraint::ProviderRequired {
+                        device_id: handle.device_id(),
+                    })
+                }
+                _ => None,
+            })
+        })
+        .unwrap_or(runmat_execution::WholeWorkConstraint::AnyLegal);
+    let cpu_resources = if matches!(
+        constraint,
+        runmat_execution::WholeWorkConstraint::ProviderRequired { .. }
+    ) {
+        None
+    } else {
+        cpu_resources
     };
     let inputs::SourcePreflight {
         digest: source_digest,
@@ -154,36 +177,30 @@ pub(super) fn plan_local_multi_with_provider(
         .values()
         .copied()
         .fold(0_u64, u64::saturating_add);
-    if let Some((bytes, count)) = exact_readbacks {
-        cpu.cost.components.synchronization_ns = cpu
-            .cost
-            .components
-            .synchronization_ns
-            .saturating_add(5_000_u64.saturating_mul(count));
-        cpu.cost.components.download_ns = cpu
-            .cost
-            .components
-            .download_ns
-            .saturating_add(transfer_prior_ns(bytes));
-    } else if resident_bytes > 0 {
-        cpu.cost.components.synchronization_ns =
-            cpu.cost.components.synchronization_ns.saturating_add(5_000);
-        cpu.cost.components.download_ns = cpu
-            .cost
-            .components
-            .download_ns
-            .saturating_add(transfer_prior_ns(resident_bytes));
+    if let Some(mut cost) = cpu.route.cost.estimate() {
+        if let Some((bytes, count)) = exact_readbacks {
+            cost.components.synchronization_ns = cost
+                .components
+                .synchronization_ns
+                .saturating_add(5_000_u64.saturating_mul(count));
+            cost.components.download_ns = cost
+                .components
+                .download_ns
+                .saturating_add(transfer_prior_ns(bytes));
+        } else if resident_bytes > 0 {
+            cost.components.synchronization_ns =
+                cost.components.synchronization_ns.saturating_add(5_000);
+            cost.components.download_ns = cost
+                .components
+                .download_ns
+                .saturating_add(transfer_prior_ns(resident_bytes));
+        }
+        cpu.route.cost = runmat_execution::CandidateCostEvidence::Estimated(cost);
     }
-    let cpu_cost = cpu.cost;
+    let cpu_cost = cpu.route.cost;
     let mut admitted = Vec::new();
     let mut rejected = Vec::new();
-    let mut session = None;
-    if let Some(runtime) = runtime.filter(|_| compare_profitability) {
-        if runtime.service_ports().placement().is_some() {
-            let facts = session_facts(provider, runtime);
-            session = Some(facts);
-        }
-    }
+    let physical_facts = super::session_facts::physical_facts(provider, runtime);
     for ((original_index, candidate), route) in physical.into_iter().enumerate().zip(routes) {
         debug_assert!(candidate.provider_kind.is_provider());
         let candidate_residency = summarize_values(candidate.data_inputs);
@@ -238,7 +255,10 @@ pub(super) fn plan_local_multi_with_provider(
                 continue;
             }
         };
-        if compare_profitability && estimate.output_bytes.is_none() {
+        if compare_profitability
+            && estimate.output_bytes.is_none()
+            && query.workload.typed_reduction.is_none()
+        {
             rejected.push((
                 candidate.physical_identity,
                 query,
@@ -280,9 +300,11 @@ pub(super) fn plan_local_multi_with_provider(
         };
         let cost = provider
             .estimate_cost(&cost_query)
-            .map(|estimate| estimate.cost)
+            .map(|estimate| runmat_execution::CandidateCostEvidence::Estimated(estimate.cost))
             .unwrap_or_else(|| {
-                let mut cost = candidate.fallback;
+                let Some(mut cost) = candidate.fallback.estimate() else {
+                    return candidate.fallback;
+                };
                 cost.components.upload_ns = transfer_prior_ns(upload_bytes);
                 cost.components.download_ns = transfer_prior_ns(candidate.required_download_bytes);
                 cost.components.synchronization_ns = if candidate.required_download_bytes == 0 {
@@ -290,10 +312,11 @@ pub(super) fn plan_local_multi_with_provider(
                 } else {
                     cost.components.synchronization_ns.max(5_000)
                 };
-                cost
+                runmat_execution::CandidateCostEvidence::Estimated(cost)
             });
-        let descriptor = ExecutionCandidateDescriptor {
-            identity: candidate_name(provider, operation, candidate.physical_identity),
+        let identity = candidate_name(provider, operation, candidate.physical_identity);
+        let descriptor = cost.estimate().map(|cost| ExecutionCandidateDescriptor {
+            identity: identity.clone(),
             region: cpu.region,
             kind: candidate.provider_kind,
             execution_location: CandidateExecutionLocation::Provider {
@@ -306,7 +329,7 @@ pub(super) fn plan_local_multi_with_provider(
             },
             presentation: runmat_execution::CandidateOutputPresentation::Direct,
             guards: cpu.guards.clone(),
-        };
+        });
         let typed_peak = cost_query
             .operation
             .workload
@@ -330,12 +353,19 @@ pub(super) fn plan_local_multi_with_provider(
             .workload
             .typed_reduction
             .as_ref()
-            .map_or(estimate.output_bytes.unwrap_or(0), |typed| {
-                estimate
-                    .output_bytes
-                    .unwrap_or(0)
-                    .max(typed.work.output_requested_bytes)
-            });
+            .map_or(estimate.output_bytes, |typed| {
+                Some(
+                    estimate
+                        .output_bytes
+                        .map_or(typed.work.output_requested_bytes, |bytes| {
+                            bytes.max(typed.work.output_requested_bytes)
+                        }),
+                )
+            })
+            .map_or(
+                ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
+                ResourceByteBound::Known,
+            );
         let transient_bytes = estimate
             .transient_bytes
             .map(|observed| observed.max(typed_peak.unwrap_or(0)));
@@ -361,15 +391,18 @@ pub(super) fn plan_local_multi_with_provider(
         admitted.push(Admitted {
             original_index,
             descriptor,
+            identity,
+            kind: candidate.provider_kind,
+            cost,
             cost_query,
             output_bytes,
             transient_bytes,
-            transactional: session.as_ref().is_some_and(|facts| facts.3),
+            transactional: physical_facts.3,
             input_resources,
         });
     }
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
-    if admitted.is_empty() {
+    if admitted.is_empty() && cpu.route.cost.estimate().is_some() {
         if cpu_resources.is_none() {
             return Err(Box::new(
                 runmat_runtime::build_runtime_error(
@@ -380,6 +413,19 @@ pub(super) fn plan_local_multi_with_provider(
             ));
         }
         let (identity, query, code) = rejected.first().expect("at least one physical record");
+        // Provider rejection does not certify the fallback host's resource
+        // legality. Admit that exact single route without observation rights.
+        let resources = &physical_facts.0;
+        let mut host = cpu.route.clone();
+        host.resources = cpu_resources.expect("checked host candidate");
+        crate::placement::session::select_unobserved(
+            operation,
+            std::slice::from_ref(&host),
+            runmat_execution::WholeWorkConstraint::AnyLegal,
+            resources,
+            true,
+        )
+        .map_err(plan_error)?;
         let rejection_identity = if rejected.len() == 1 {
             semantic_identity
         } else {
@@ -393,6 +439,7 @@ pub(super) fn plan_local_multi_with_provider(
                 .expect("rejected candidate set serializes"),
             )
         };
+        let cpu = cpu.into_priced().expect("priced rejection route");
         let feedback = rejected_cpu_feedback(
             provider,
             RejectedCpuFeedbackRequest {
@@ -418,6 +465,7 @@ pub(super) fn plan_local_multi_with_provider(
         });
     }
     decision::select_decision(decision::DecisionRequest {
+        constraint,
         provider,
         operation,
         semantic_identity,
@@ -431,7 +479,7 @@ pub(super) fn plan_local_multi_with_provider(
         rejected,
         source_digest,
         residency,
-        session,
+        physical_facts,
         compare_profitability,
         runtime,
         policy,

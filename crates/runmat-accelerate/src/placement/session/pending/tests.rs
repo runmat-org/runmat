@@ -1,6 +1,6 @@
 use super::*;
 use runmat_accelerate_api::observation::ProviderObservationFailure;
-use runmat_execution::{Digest, PlacementRevision, PlacementSignature};
+use runmat_execution::{Digest, PlacementFeedback, PlacementRevision, PlacementSignature};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
@@ -15,15 +15,20 @@ impl RuntimePlacementFeedbackSource for Source {
     fn signature(&self) -> &PlacementSignature {
         &self.signature
     }
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<RuntimePlacementFeedbackDelivery> {
         self.ready
             .load(Ordering::Acquire)
-            .then(|| PlacementFeedback {
-                signature: self.signature.clone(),
-                candidate: "provider.test".into(),
-                kind: runmat_execution::ExecutionCandidateKind::ProviderOperation,
-                total_elapsed_ns: 19,
-                succeeded: true,
+            .then(|| RuntimePlacementFeedbackDelivery::Graph {
+                feedback: PlacementFeedback {
+                    signature: self.signature.clone(),
+                    candidate: "provider.fixture".into(),
+                    kind: runmat_execution::ExecutionCandidateKind::ProviderOperation,
+                    total_elapsed_ns: 19,
+                    succeeded: true,
+                },
+                permit: Arc::new(crate::placement::completion::ReceiptFixturePermit(
+                    self.signature.cache_key(),
+                )),
             })
     }
 }
@@ -59,7 +64,7 @@ impl RuntimePlacementFeedbackSource for TerminalSource {
     fn signature(&self) -> &PlacementSignature {
         &self.0.signature
     }
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<RuntimePlacementFeedbackDelivery> {
         None
     }
     fn terminal_without_feedback(&self) -> bool {

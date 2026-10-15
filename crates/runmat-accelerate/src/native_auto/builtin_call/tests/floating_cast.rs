@@ -1,39 +1,10 @@
 //! Actual dispatcher/body/provider path. The test placement service chooses a
 //! candidate deterministically; it is not evidence of profitable auto selection.
 use super::*;
-use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedBuiltinOperands};
-use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServiceFuture};
 
 mod fallback;
 #[cfg(not(target_arch = "wasm32"))]
 mod submitted;
-
-struct Adapter(&'static dyn AccelProvider, u16);
-impl RuntimeAccelerationService for Adapter {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-    fn prepare_admitted(
-        &self,
-        context: RuntimeContext,
-        request: AdmittedBuiltinPreparation,
-    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
-        let provider = self.0;
-        let expected_form = self.1;
-        Box::pin(async move {
-            assert_eq!(
-                request.form().id,
-                runmat_builtins::BuiltinPreparationFormId(expected_form)
-            );
-            let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
-            let prepared = super::super::admitted::prepare_with(&auto, &context, request)
-                .map_err(|error| *error)?;
-            let (operands, guard) = prepared.into_execution();
-            PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
-        })
-    }
-}
-
 #[test]
 #[ignore = "requires actual WGPU device; execute explicitly for direct receipt qualification"]
 fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt() {

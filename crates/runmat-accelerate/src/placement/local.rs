@@ -3,13 +3,15 @@ use runmat_accelerate_api::{
     ProviderRepresentation, ProviderWorkload,
 };
 use runmat_execution::{
-    CandidatePreparationState, Digest, ExecutionCandidateDescriptor, ExecutionCandidateKind,
-    ExecutionCostEstimate, PlacementRevision, PlacementSignature,
+    CandidatePreparationState, Digest, ExecutionCandidateKind, ExecutionCostEstimate,
+    PlacementRevision, PlacementSignature,
 };
 use runmat_value::Value;
 
 use super::PlacementPolicy;
 mod multi;
+mod cpu;
+pub(crate) use cpu::LocalCpuCandidate;
 pub(crate) use multi::{
     plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
     LocalProviderAdmission,
@@ -19,6 +21,15 @@ mod session_facts;
 mod signature;
 use rejected::{rejected_cpu_feedback, RejectedCpuFeedbackRequest};
 use session_facts::session_facts;
+fn plan_error(error: crate::placement::PlacementPlanError) -> Box<runmat_runtime::RuntimeError> {
+    Box::new(
+        runmat_runtime::build_runtime_error(error.message.clone())
+            .with_identifier(error.code)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .with_source(error)
+            .build(),
+    )
+}
 #[cfg(test)]
 mod resource_tests;
 
@@ -40,10 +51,10 @@ pub(crate) struct LocalPlacementRequest<'a> {
     /// Requirement sealed by the selected shader producer. This is checked
     /// through the same rejection/feedback path as provider feasibility.
     pub(crate) shader_requirements: Option<runmat_accelerate_api::ProviderShaderRequirements>,
-    pub(crate) cpu: ExecutionCandidateDescriptor,
-    /// Provider execution prior without transfer components. It is used only
-    /// when the provider has no trustworthy estimate of its own.
-    pub(crate) provider_fallback: ExecutionCostEstimate,
+    pub(crate) cpu: LocalCpuCandidate,
+    /// Explicit physical execution evidence without transfer components, or
+    /// typed absence. Provider-owned quotes take precedence over this evidence.
+    pub(crate) provider_fallback: runmat_execution::CandidateCostEvidence,
     /// Physical transfer bytes when an admitted preparation changes the input
     /// representation. None preserves ordinary residency-based accounting.
     pub(crate) required_upload_bytes: Option<u64>,
@@ -132,9 +143,12 @@ fn observation_semantic_identity(
 #[derive(Clone, Debug)]
 pub(crate) enum LocalPlacementOutcome {
     Selected {
-        selected: Box<ExecutionCandidateDescriptor>,
-        cpu_cost: ExecutionCostEstimate,
-        provider_cost: ExecutionCostEstimate,
+        selected: Box<runmat_execution::SelectedExecutionCandidate>,
+        cpu_cost: runmat_execution::CandidateCostEvidence,
+        provider_cost: Option<ExecutionCostEstimate>,
+        provider_rejection: Option<ProviderRejectionCode>,
+        decision_kind: runmat_execution::WholeWorkDecisionKind,
+        predicted_total_ns: Option<u64>,
         feedback: Option<Box<LocalPlacementFeedback>>,
         /// Exact compact query already validated by this placement authority.
         provider_query: Box<ProviderFeasibilityQuery>,
@@ -145,32 +159,120 @@ pub(crate) enum LocalPlacementOutcome {
     },
     ProviderRejected {
         code: ProviderRejectionCode,
-        cpu_cost: ExecutionCostEstimate,
+        cpu_cost: runmat_execution::CandidateCostEvidence,
         feedback: Option<Box<LocalPlacementFeedback>>,
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct LocalPlacementFeedback {
     pub(crate) runtime: runmat_runtime::context::RuntimeContext,
     pub(crate) signature: PlacementSignature,
     pub(crate) candidate: String,
     pub(crate) kind: ExecutionCandidateKind,
-    pub(crate) permit:
-        Option<std::sync::Arc<dyn runmat_runtime::context::RuntimeGraphObservationPermit>>,
+    pub(crate) authority: LocalPlacementFeedbackAuthority,
+}
+
+#[derive(Clone)]
+pub(crate) enum LocalPlacementFeedbackAuthority {
+    Graph(std::sync::Arc<dyn runmat_runtime::context::RuntimeGraphObservationPermit>),
+    /// Shared one-shot selection: the probe is Send, not Sync. The mutex
+    /// transports that same lease into deferred completion without retaining
+    /// a RuntimeContext/service or cloning its authority.
+    WholeWork(
+        std::sync::Arc<
+            std::sync::Mutex<Option<runmat_runtime::context::RuntimeWholeWorkSelection>>,
+        >,
+    ),
+}
+
+impl LocalPlacementFeedbackAuthority {
+    pub(super) fn authorizes(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> bool {
+        match self {
+            Self::Graph(permit) => permit.authorizes(signature, candidate, kind),
+            Self::WholeWork(slot) => {
+                // No permit callback, service call, or probe destruction may
+                // run under this transport lock. Reentry sees the selection
+                // temporarily unavailable and therefore fails closed.
+                let selection = match slot.lock() {
+                    Ok(mut slot) => slot.take(),
+                    Err(_) => None,
+                };
+                let Some(selection) = selection else {
+                    return false;
+                };
+                let current = selection.observation_permit.is_some()
+                    && selection.observation_is_current()
+                    && selection.decision.signature == *signature
+                    && selection.decision.selected.candidate == candidate
+                    && selection.decision.selected.kind == kind;
+                let restored = match slot.lock() {
+                    Ok(mut slot) => {
+                        *slot = Some(selection);
+                        true
+                    }
+                    Err(_) => false,
+                };
+                current && restored
+            }
+        }
+    }
+
+    pub(super) fn delivery(
+        &self,
+        feedback: runmat_execution::PlacementFeedback,
+    ) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
+        use runmat_runtime::context::RuntimePlacementFeedbackDelivery;
+        if !self.authorizes(&feedback.signature, &feedback.candidate, feedback.kind) {
+            return None;
+        }
+        match self {
+            Self::Graph(permit) => Some(RuntimePlacementFeedbackDelivery::Graph {
+                feedback,
+                permit: std::sync::Arc::clone(permit),
+            }),
+            Self::WholeWork(selection) => {
+                let selected = selection.lock().ok()?.take()?;
+                Some(RuntimePlacementFeedbackDelivery::WholeWork {
+                    selected,
+                    elapsed_ns: feedback.total_elapsed_ns,
+                    outcome: if feedback.succeeded {
+                        runmat_execution::WholeWorkObservationOutcome::Success
+                    } else {
+                        runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+                    },
+                })
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for LocalPlacementFeedback {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalPlacementFeedback")
+            .field("signature", &self.signature)
+            .field("candidate", &self.candidate)
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalPlacementFeedback {
     pub(crate) fn is_current(&self) -> bool {
-        self.permit
-            .as_ref()
-            .is_some_and(|permit| permit.authorizes(&self.signature, &self.candidate, self.kind))
+        self.authority
+            .authorizes(&self.signature, &self.candidate, self.kind)
     }
 
     pub(crate) fn observe(self, total_elapsed_ns: u64, succeeded: bool) {
-        let Some(permit) = self.permit else {
+        if !self.is_current() {
             return;
-        };
+        }
         let Some(service) = self.runtime.service_ports().placement() else {
             return;
         };
@@ -181,7 +283,16 @@ impl LocalPlacementFeedback {
             total_elapsed_ns,
             succeeded,
         };
-        let _ = service.observe_selected_graph(permit.as_ref(), feedback);
+        match &self.authority {
+            LocalPlacementFeedbackAuthority::Graph(permit) => {
+                let _ = service.observe_selected_graph(permit.as_ref(), feedback);
+            }
+            LocalPlacementFeedbackAuthority::WholeWork(_) => {
+                if let Some(delivery) = self.authority.delivery(feedback) {
+                    let _ = service.observe_deferred_feedback(delivery);
+                }
+            }
+        }
     }
 }
 

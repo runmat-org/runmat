@@ -216,27 +216,39 @@ pub struct WholeWorkPlacementRequestRef<'a> {
 impl WholeWorkPlacementRequestRef<'_> {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.signature.validate()?;
-        self.resources.validate()?;
-        let limits = PlacementGraphLimits::default();
-        if self.resources.providers.len() > limits.max_providers as usize {
+        self.constraint
+            .validate_candidates(self.candidates, self.resources)
+    }
+}
+
+impl WholeWorkConstraint {
+    /// Validate the same physical set without requiring an observation/session
+    /// signature. Context-free selection gains no execution or learning grant.
+    pub fn validate_candidates(
+        self,
+        candidates: &[WholeWorkCandidate],
+        resources: &PlacementResourceSnapshot,
+    ) -> Result<(), &'static str> {
+        resources.validate()?;
+        if resources.providers.len() > PlacementGraphLimits::default().max_providers as usize {
             return Err("whole-work resources exceed provider limit");
         }
-        if self.candidates.is_empty()
-            || self.candidates.len() > limits.max_candidates_per_node as usize
+        if candidates.is_empty()
+            || candidates.len() > PlacementGraphLimits::default().max_candidates_per_node as usize
         {
             return Err("whole-work candidate count is invalid");
         }
         let mut identities = BTreeSet::new();
-        for candidate in self.candidates {
+        for candidate in candidates {
             candidate.validate()?;
-            if let WholeWorkConstraint::ProviderRequired { device_id } = self.constraint {
+            if let WholeWorkConstraint::ProviderRequired { device_id } = self {
                 if candidate.execution_location
                     != (CandidateExecutionLocation::Provider { device_id })
                 {
                     return Err("provider-required work contains a host or foreign-device route");
                 }
             }
-            if self.candidates.len() > 1 && !identities.insert(candidate.identity_digest()) {
+            if candidates.len() > 1 && !identities.insert(candidate.identity_digest()) {
                 return Err("whole-work candidate route identity is duplicated");
             }
         }
@@ -249,10 +261,12 @@ pub enum WholeWorkDecisionKind {
     Compared,
     Exploratory,
     ProviderRequired,
-    /// No complete legal host route was offered, so no CPU comparison exists.
+    /// Only one legal route or only provider routes were offered, so no
+    /// host-versus-provider profitability comparison was made.
     Uncompared,
-    /// A legal invocation ran while a cohort probe was already in flight.
-    /// The duration can still be recorded, but no cost comparison was made.
+    /// A legal route ran without sufficient cross-route pricing evidence
+    /// (including when a cohort probe was already in flight). A valid selected
+    /// route estimate and genuine completion observation remain usable.
     Unmeasured,
 }
 
@@ -263,8 +277,8 @@ pub struct WholeWorkDecision {
     pub signature: PlacementSignature,
     pub selected: SelectedExecutionCandidate,
     pub kind: WholeWorkDecisionKind,
-    /// Unavailable during exploration/provider-required execution; never a
-    /// fabricated zero or huge number.
+    /// The selected route's valid estimate, when available. Missing prices
+    /// and exploration never become a fabricated zero or huge number.
     pub predicted_total_ns: Option<u64>,
 }
 

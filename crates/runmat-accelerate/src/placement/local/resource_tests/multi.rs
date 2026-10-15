@@ -7,9 +7,100 @@ use super::*;
 use crate::placement::tensor_representation;
 use runmat_accelerate_api::test_support::TestAllocationOwner;
 use runmat_accelerate_api::ProviderFeasibility;
-use runmat_execution::{CandidateExecutionLocation, CandidateOutputResidency};
 use std::sync::atomic::{AtomicUsize, Ordering};
 mod checked_recipe;
+
+#[test]
+fn quote_availability_does_not_bypass_physical_admission_or_erase_receipts() {
+    let provider = MultiProvider {
+        device: 7,
+        owner: None,
+        reject: None,
+        queries: AtomicUsize::new(0),
+    };
+    for quoted in [false, true] {
+        for host_available in [false, true] {
+            for cpu_price in [Some(100), None] {
+                let capture = Rc::new(Capture::default());
+                let mut route = physical(19, 1, CandidatePreparationState::Cold);
+                route.fallback = if quoted {
+                    // Exact fixture quote, but its scratch plus retained output
+                    // exceeds this provider's actual finite capacity.
+                    runmat_execution::CandidateCostEvidence::Estimated(cost(1, 1 << 20))
+                } else {
+                    runmat_execution::CandidateCostEvidence::Unavailable(
+                        runmat_execution::CandidateCostUnavailable::NoEstimate,
+                    )
+                };
+                let outcome = try_plan_physical_set_with_admission(
+                    &provider,
+                    &capture,
+                    cpu_price,
+                    vec![route],
+                    if host_available {
+                        LocalCpuAdmission::Legacy
+                    } else {
+                        LocalCpuAdmission::Unavailable
+                    },
+                    LocalProviderAdmission::Available,
+                );
+                if !host_available {
+                    let error =
+                        outcome.expect_err("finite provider budget requires a real scratch bound");
+                    assert_eq!(
+                        error.identifier(),
+                        Some(if quoted {
+                            "RunMat:Placement:NoLegalCandidate"
+                        } else {
+                            "RunMat:Placement:InsufficientResourceEvidence"
+                        })
+                    );
+                    assert!(capture.requests.borrow().is_empty());
+                    continue;
+                }
+                let outcome = outcome.expect("the independently admitted host remains legal");
+                let LocalPlacementOutcome::Selected {
+                    selected,
+                    cpu_cost,
+                    provider_cost,
+                    predicted_total_ns,
+                    provider_query,
+                    provider_index,
+                    feedback,
+                    decision_kind,
+                    ..
+                } = outcome
+                else {
+                    panic!("legal host/provider-only execution")
+                };
+                assert!(!selected.kind.is_provider());
+                assert_eq!(provider_index, None);
+                assert_eq!(provider_query.workload.elements, Some(19));
+                assert_eq!(provider_cost.is_some(), quoted);
+                assert_eq!(predicted_total_ns, cpu_price);
+                assert_eq!(cpu_cost.estimate().is_some(), cpu_price.is_some());
+                if !quoted || cpu_price.is_none() {
+                    assert!(
+                        feedback.is_none(),
+                        "unpriced partial calls cannot mint complete-route learning"
+                    );
+                }
+                assert_eq!(
+                    decision_kind,
+                    if cpu_price.is_some() {
+                        runmat_execution::WholeWorkDecisionKind::Uncompared
+                    } else {
+                        runmat_execution::WholeWorkDecisionKind::Unmeasured
+                    }
+                );
+                assert_eq!(
+                    capture.requests.borrow().len(),
+                    usize::from(quoted && cpu_price.is_some())
+                );
+            }
+        }
+    }
+}
 
 struct MultiProvider {
     device: u32,
@@ -114,7 +205,7 @@ fn physical(
         preparation,
         preparation_program: None,
         shader_requirements: None,
-        fallback: cost(ns, 0),
+        fallback: runmat_execution::CandidateCostEvidence::Estimated(cost(ns, 0)),
         required_upload_bytes: Some(0),
         required_download_bytes: 0,
         downstream_materialization: false,
@@ -139,7 +230,7 @@ fn try_plan_physical_set<'a>(
     try_plan_physical_set_with_admission(
         provider,
         capture,
-        cpu_ns,
+        Some(cpu_ns),
         physical,
         LocalCpuAdmission::Legacy,
         LocalProviderAdmission::Available,
@@ -149,15 +240,37 @@ fn try_plan_physical_set<'a>(
 fn try_plan_physical_set_with_admission<'a>(
     provider: &MultiProvider,
     capture: &Rc<Capture>,
-    cpu_ns: u64,
+    cpu_ns: Option<u64>,
     physical: Vec<LocalPhysicalCandidate<'a>>,
     cpu_admission: LocalCpuAdmission,
     implementation: LocalProviderAdmission,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    let runtime = RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
-    .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()));
+    try_plan_physical_set_with_context(
+        provider,
+        capture,
+        cpu_ns,
+        physical,
+        cpu_admission,
+        implementation,
+        true,
+    )
+}
+
+fn try_plan_physical_set_with_context<'a>(
+    provider: &MultiProvider,
+    capture: &Rc<Capture>,
+    cpu_ns: Option<u64>,
+    physical: Vec<LocalPhysicalCandidate<'a>>,
+    cpu_admission: LocalCpuAdmission,
+    implementation: LocalProviderAdmission,
+    with_context: bool,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    let runtime = with_context.then(|| {
+        RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()))
+    });
     plan_local_multi_with_provider(
         provider,
         LocalMultiPlacementRequest {
@@ -167,25 +280,97 @@ fn try_plan_physical_set_with_admission<'a>(
             prepared_authority: None,
             vm_right: None,
             family: ProviderOperationFamily::Fusion,
-            cpu: ExecutionCandidateDescriptor {
-                identity: "cpu.shared.fusion.reduction".into(),
-                region: None,
-                kind: ExecutionCandidateKind::SharedRuntime,
-                execution_location: CandidateExecutionLocation::Host,
-                preparation: CandidatePreparationState::Ready,
-                cost: cost(cpu_ns, 0),
-                output_residency: CandidateOutputResidency::Host,
-                presentation: runmat_execution::CandidateOutputPresentation::Direct,
-                guards: vec![],
-            },
+            cpu: LocalCpuCandidate::host(
+                "cpu.shared.fusion.reduction".into(),
+                cpu_ns.map_or(
+                    runmat_execution::CandidateCostEvidence::Unavailable(
+                        runmat_execution::CandidateCostUnavailable::NoEstimate,
+                    ),
+                    |ns| runmat_execution::CandidateCostEvidence::Estimated(cost(ns, 0)),
+                ),
+            ),
             cpu_admission,
             physical,
             compare_profitability: true,
-            runtime: Some(&runtime),
+            runtime: runtime.as_ref(),
         },
         PlacementPolicy::default(),
         implementation,
     )
+}
+
+#[test]
+fn context_free_overflowing_price_refuses_without_panicking_and_keeps_legal_alternative() {
+    let provider = MultiProvider {
+        device: 7,
+        owner: None,
+        reject: None,
+        queries: AtomicUsize::new(0),
+    };
+    for legal_alternative in [false, true] {
+        let capture = Rc::new(Capture::default());
+        let mut routes = vec![physical(19, u64::MAX, CandidatePreparationState::Ready)];
+        if legal_alternative {
+            routes.push(physical(20, 100, CandidatePreparationState::Ready));
+        }
+        let result = try_plan_physical_set_with_context(
+            &provider,
+            &capture,
+            Some(1000),
+            routes,
+            LocalCpuAdmission::Unavailable,
+            LocalProviderAdmission::Available,
+            false,
+        );
+        if legal_alternative {
+            assert!(matches!(
+                result.unwrap(),
+                LocalPlacementOutcome::Selected {
+                    provider_index: Some(1),
+                    ..
+                }
+            ));
+        } else {
+            assert_eq!(
+                result
+                    .expect_err("unpriceable numeric candidates fail closed")
+                    .identifier(),
+                Some("RunMat:Placement:NoLegalCandidate")
+            );
+        }
+        assert!(capture.requests.borrow().is_empty());
+    }
+    // An invalid provider price cannot create a comparison with a valid host
+    // or reach a service graph, regardless of session availability.
+    for with_context in [false, true] {
+        let capture = Rc::new(Capture::default());
+        let outcome = try_plan_physical_set_with_context(
+            &provider,
+            &capture,
+            Some(1000),
+            vec![physical(19, u64::MAX, CandidatePreparationState::Ready)],
+            LocalCpuAdmission::Legacy,
+            LocalProviderAdmission::Available,
+            with_context,
+        )
+        .unwrap();
+        assert!(matches!(
+            outcome,
+            LocalPlacementOutcome::Selected {
+                provider_index: None,
+                decision_kind: runmat_execution::WholeWorkDecisionKind::Uncompared,
+                predicted_total_ns: Some(1000),
+                ..
+            }
+        ));
+        let requests = capture.requests.borrow();
+        assert_eq!(requests.len(), usize::from(with_context));
+        if with_context {
+            let candidates = &requests[0].graph.nodes[0].candidates;
+            assert_eq!(candidates.len(), 1);
+            assert!(!candidates[0].descriptor.kind.is_provider());
+        }
+    }
 }
 
 #[test]
@@ -216,7 +401,7 @@ fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_i
             let outcome = try_plan_physical_set_with_admission(
                 &provider,
                 &capture,
-                1_000,
+                Some(1_000),
                 vec![physical(7, 1, CandidatePreparationState::Unknown)],
                 LocalCpuAdmission::ExactReadbacks {
                     resources: Box::new(demand),

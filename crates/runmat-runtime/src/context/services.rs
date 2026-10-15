@@ -456,11 +456,53 @@ pub trait RuntimeAccelerationService {
 /// not deliver feedback themselves. The owning session polls nonblocking.
 pub trait RuntimePlacementFeedbackSource: Send {
     fn signature(&self) -> &runmat_execution::PlacementSignature;
-    fn take_ready(&mut self) -> Option<runmat_execution::PlacementFeedback>;
+    fn take_ready(&mut self) -> Option<RuntimePlacementFeedbackDelivery>;
     /// A completed cancellation or abandonment has no feedback sample. The
     /// owner may retire its source without manufacturing a failed observation.
     fn terminal_without_feedback(&self) -> bool {
         false
+    }
+}
+
+/// Completion delivery preserves the selecting authority domain. A whole-work
+/// selection retains its exact permit and exploratory lease until owner-thread
+/// insertion; it is never represented as a graph observation permit.
+pub enum RuntimePlacementFeedbackDelivery {
+    Graph {
+        feedback: runmat_execution::PlacementFeedback,
+        permit: std::sync::Arc<dyn RuntimeGraphObservationPermit>,
+    },
+    WholeWork {
+        selected: RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    },
+}
+
+impl RuntimePlacementFeedbackDelivery {
+    /// Portable diagnostic snapshot only; this does not transfer authority.
+    pub fn snapshot(&self) -> Option<runmat_execution::PlacementFeedback> {
+        match self {
+            Self::Graph { feedback, .. } => Some(feedback.clone()),
+            Self::WholeWork {
+                selected,
+                elapsed_ns,
+                outcome,
+            } => {
+                let succeeded = match outcome {
+                    runmat_execution::WholeWorkObservationOutcome::Success => true,
+                    runmat_execution::WholeWorkObservationOutcome::OperationalFailure => false,
+                    _ => return None,
+                };
+                Some(runmat_execution::PlacementFeedback {
+                    signature: selected.decision.signature.clone(),
+                    candidate: selected.decision.selected.candidate.clone(),
+                    kind: selected.decision.selected.kind,
+                    total_elapsed_ns: *elapsed_ns,
+                    succeeded,
+                })
+            }
+        }
     }
 }
 
@@ -847,6 +889,22 @@ pub trait RuntimePlacementService {
     ) -> Result<runmat_execution::PlacementDecision, RuntimeError>;
 
     fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError>;
+
+    fn observe_deferred_feedback(
+        &self,
+        delivery: RuntimePlacementFeedbackDelivery,
+    ) -> Result<(), RuntimeError> {
+        match delivery {
+            RuntimePlacementFeedbackDelivery::Graph { feedback, permit } => {
+                self.observe_selected_graph(permit.as_ref(), feedback)
+            }
+            RuntimePlacementFeedbackDelivery::WholeWork {
+                selected,
+                elapsed_ns,
+                outcome,
+            } => self.observe_selected_whole_work(&selected, elapsed_ns, outcome),
+        }
+    }
 
     /// Optional bounded retention. Rejection is dropped measurement, never an
     /// execution failure; returning the source lets the caller release it safely.

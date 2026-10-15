@@ -6,8 +6,8 @@ use runmat_accelerate_api::{
 };
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, EstimateConfidence, EstimateSource,
-    ExecutionCostComponents, PlacementDecision, PlacementFeedback, PlacementInvalidation,
-    PlacementPlanRequest, ProviderResourceSnapshot,
+    ExecutionCandidateDescriptor, ExecutionCostComponents, PlacementDecision, PlacementFeedback,
+    PlacementInvalidation, PlacementPlanRequest, ProviderResourceSnapshot,
 };
 use runmat_runtime::context::{RuntimeContext, RuntimePlacementService, RuntimeServicePorts};
 use std::{cell::RefCell, rc::Rc};
@@ -227,8 +227,9 @@ fn try_plan_with_outputs(
                 output_residency: CandidateOutputResidency::Host,
                 presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 guards: vec![],
-            },
-            provider_fallback: cost(1, scratch),
+            }
+            .into(),
+            provider_fallback: runmat_execution::CandidateCostEvidence::Estimated(cost(1, scratch)),
             required_upload_bytes: Some(0),
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -286,9 +287,13 @@ fn observation_scratch_participates_in_admission_before_any_execution() {
         );
         assert_eq!(is_provider(outcome), capacity == 24);
         let requests = observed.requests.borrow();
-        let demand = requests[0].graph.nodes[0].candidates[1].resources;
-        assert_eq!(demand.retained_bytes, 8.into());
-        assert_eq!(demand.scratch_bytes, 16.into());
+        let candidates = &requests[0].graph.nodes[0].candidates;
+        assert_eq!(candidates.len(), if capacity == 24 { 2 } else { 1 });
+        if capacity == 24 {
+            let demand = candidates[1].resources;
+            assert_eq!(demand.retained_bytes, 8.into());
+            assert_eq!(demand.scratch_bytes, 16.into());
+        }
         assert_eq!(
             requests[0].graph.nodes[0].candidates[0]
                 .resources
@@ -314,7 +319,7 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()));
-    let _ = plan_local(
+    let outcome = plan_local(
         &provider,
         LocalPlacementRequest {
             operation: "sum",
@@ -351,8 +356,9 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
                 output_residency: CandidateOutputResidency::Host,
                 presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 guards: vec![],
-            },
-            provider_fallback: cost(1, 16),
+            }
+            .into(),
+            provider_fallback: runmat_execution::CandidateCostEvidence::Estimated(cost(1, 16)),
             required_upload_bytes: Some(0),
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -362,13 +368,13 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
         PlacementPolicy::default(),
     )
     .unwrap();
-    let demand = capture.requests.borrow()[0].graph.nodes[0].candidates[1].resources;
-    assert_eq!(demand.retained_bytes, 8.into());
+    assert!(
+        !is_provider(outcome),
+        "unknown peak cannot satisfy finite quota"
+    );
     assert_eq!(
-        demand.scratch_bytes,
-        runmat_execution::ResourceByteBound::Unavailable(
-            runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound
-        )
+        capture.requests.borrow()[0].graph.nodes[0].candidates.len(),
+        1
     );
 }
 
@@ -399,7 +405,10 @@ fn explicit_unobserved_selection_does_not_price_or_start_fences() {
         panic!("explicit provider selection");
     };
     assert!(!provider_observation);
-    assert_eq!(provider_cost.scratch_bytes, Some(0));
+    assert_eq!(
+        provider_cost.expect("fixture physical prior").scratch_bytes,
+        Some(0)
+    );
     assert!(capture.requests.borrow().is_empty());
 }
 
@@ -415,9 +424,13 @@ fn physical_output_bytes_reach_budget_even_without_query_output_facts() {
         };
         assert_eq!(is_provider(plan(&provider, &capture, true, 0)), bytes <= 64);
         let requests = capture.requests.borrow();
-        let demand = requests[0].graph.nodes[0].candidates[1].resources;
-        assert_eq!(demand.retained_bytes, bytes.into());
-        assert_eq!(demand.scratch_bytes, 0.into());
+        let candidates = &requests[0].graph.nodes[0].candidates;
+        assert_eq!(candidates.len(), if bytes <= 64 { 2 } else { 1 });
+        if bytes <= 64 {
+            let demand = candidates[1].resources;
+            assert_eq!(demand.retained_bytes, bytes.into());
+            assert_eq!(demand.scratch_bytes, 0.into());
+        }
     }
 }
 
@@ -507,10 +520,15 @@ fn known_output_and_scratch_overflow_fails_closed_without_saturation() {
     };
     assert!(!is_provider(plan(&provider, &capture, true, 1)));
     assert_eq!(
-        capture.requests.borrow()[0].graph.nodes[0].candidates[1]
-            .resources
-            .retained_bytes,
-        u64::MAX.into()
+        capture.requests.borrow()[0].graph.nodes[0].candidates.len(),
+        1,
+        "overflowing provider demand is filtered before service selection"
+    );
+    let error = try_plan_with_outputs(&provider, &capture, false, 1, None, vec![])
+        .expect_err("a mandatory overflowing route cannot use the host alternative");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:NoLegalCandidate")
     );
 }
 
@@ -543,7 +561,12 @@ fn unknown_is_not_zero_or_exceeded_capacity_and_explicit_execution_stays_support
     drop(requests);
     feedback.observe(13, true);
     assert!(capture.session.profile_snapshot().feedback.is_empty());
-    assert!(is_provider(plan(&provider, &capture, false, 0)));
+    let error = try_plan_with_outputs(&provider, &capture, false, 0, None, vec![])
+        .expect_err("explicit intent cannot prove unavailable retained bytes");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
     assert_eq!(capture.requests.borrow().len(), 1);
     let encoded = serde_json::to_string(&ProviderRejectionCode::UnknownResourceEstimate).unwrap();
     assert_eq!(encoded, "\"unknown_resource_estimate\"");

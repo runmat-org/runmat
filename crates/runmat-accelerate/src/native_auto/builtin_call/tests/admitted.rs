@@ -22,6 +22,43 @@ fn logical_request() -> AdmittedBuiltinPreparation {
     .unwrap()
 }
 
+#[test]
+fn unquoted_dispatcher_call_observes_only_after_exact_full_call_publication() {
+    let session = Rc::new(crate::placement::PlacementSession::default());
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_placement(session.clone())
+            .with_acceleration(Rc::new(Adapter(&UNQUOTED_PROVIDER, 0))),
+    );
+    let input = Value::Tensor(Tensor::new(vec![0., 2., -3., 0.], vec![1, 4]).unwrap());
+    let args = [input];
+    let pending =
+        runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "logical", &args);
+    assert!(session.profile_snapshot().feedback.is_empty());
+    let output = futures::executor::block_on(context.scope(pending)).unwrap();
+    let Value::LogicalArray(logical) = output.value() else {
+        panic!("ordinary host logical output")
+    };
+    assert_eq!(logical.shape, [1, 4]);
+    assert_eq!(logical.data.as_slice(), &[0, 1, 1, 0]);
+    let snapshot = session.profile_snapshot();
+    assert_eq!(snapshot.feedback.len(), 1);
+    let sample = &snapshot.feedback[0];
+    assert_eq!(
+        sample.kind,
+        runmat_execution::ExecutionCandidateKind::SharedRuntime
+    );
+    assert_eq!(sample.samples, 1);
+    assert_eq!(sample.failures, 0);
+    assert!(matches!(
+        sample.signature.revision.authority,
+        runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+    ));
+}
+
 fn conversion_like_request(name: &str) -> AdmittedBuiltinPreparation {
     let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
     AdmittedBuiltinPreparation::new(

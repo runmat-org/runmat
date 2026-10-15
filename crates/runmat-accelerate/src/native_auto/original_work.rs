@@ -152,17 +152,24 @@ mod tests {
         };
         let auto = NativeAutoOffload::new(&OWNER, config);
         let evaluation = auto.evaluate_reduction(8);
-        let (evaluation, rejection, plan) = auto.plan_operation(
-            evaluation,
-            "legacy.reduction",
-            ProviderOperationFamily::Reduction,
-            &[],
-            ProviderWorkload::default(),
-            Default::default(),
-        );
+        let (evaluation, rejection, plan) = auto
+            .plan_operation(
+                evaluation,
+                "legacy.reduction",
+                ProviderOperationFamily::Reduction,
+                &[],
+                ProviderWorkload::default(),
+                Default::default(),
+            )
+            .expect("the ordinary host route remains legal without a price");
         assert!(!evaluation.recommend_gpu);
-        assert_eq!(evaluation.reason, DecisionReason::CostUnavailable);
-        assert!(rejection.is_none() && plan.feedback.is_none() && plan.provider_query.is_none());
+        assert_eq!(evaluation.reason, DecisionReason::ProviderRejected);
+        assert!(evaluation.cpu_secs.is_none());
+        assert!(plan.feedback.is_none());
+        assert_eq!(rejection, Some(ProviderRejectionCode::UnsupportedOperation));
+        // Absence of a host price no longer bypasses actual provider query/
+        // resource admission. This context-free call gains no learning right.
+        assert!(plan.provider_query.is_some());
     }
     #[test]
     fn cache_identity_and_rates_are_checked() {

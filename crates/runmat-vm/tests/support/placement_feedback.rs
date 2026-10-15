@@ -27,9 +27,11 @@ impl RuntimePlacementFeedbackSource for CapturingDeferredSource {
         self.inner.signature()
     }
 
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
         let ready = self.inner.take_ready()?;
-        self.delivered.lock().unwrap().push(ready.clone());
+        if let Some(snapshot) = ready.snapshot() {
+            self.delivered.lock().unwrap().push(snapshot);
+        }
         Some(ready)
     }
 

@@ -9,20 +9,29 @@ pub(super) fn session_facts(
     provider: &dyn AccelProvider,
     runtime: &RuntimeContext,
 ) -> (PlacementResourceSnapshot, Digest, u64, bool) {
+    physical_facts(provider, Some(runtime))
+}
+
+/// Physical resource/capability facts do not confer session or observation
+/// authority. Context-free callers use the same provider snapshot and the
+/// existing unspecified-host-resource defaults, without creating a runtime.
+pub(super) fn physical_facts(
+    provider: &dyn AccelProvider,
+    runtime: Option<&RuntimeContext>,
+) -> (PlacementResourceSnapshot, Digest, u64, bool) {
     let capability = provider.capability_snapshot();
     let provider_digest = Digest::sha256(
         serde_json::to_vec(&capability).expect("provider capability snapshot must serialize"),
     );
     let provider_resources = provider.placement_resources();
     let host_resources = runtime
-        .service_ports()
-        .parallel()
+        .and_then(|runtime| runtime.service_ports().parallel())
         .map(|service| service.placement_resources())
         .unwrap_or_default();
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: host_resources.cpu_millicores_available,
         memory_available_bytes: host_resources.memory_available_bytes,
-        cancellation_requested: runtime.is_cancelled(),
+        cancellation_requested: runtime.is_some_and(RuntimeContext::is_cancelled),
         providers: vec![provider_resources.clone()],
         epoch: provider_resources.epoch ^ host_resources.epoch.rotate_left(32),
     };

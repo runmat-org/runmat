@@ -90,6 +90,7 @@ fn managed_selection_uses_one_precharged_slot_and_fences_late_invalidation() {
 struct CountedReadyFeedback {
     signature: PlacementSignature,
     polls: Arc<AtomicUsize>,
+    permit: Arc<dyn runmat_runtime::context::RuntimeGraphObservationPermit>,
 }
 
 impl RuntimePlacementFeedbackSource for CountedReadyFeedback {
@@ -97,15 +98,20 @@ impl RuntimePlacementFeedbackSource for CountedReadyFeedback {
         &self.signature
     }
 
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
         self.polls.fetch_add(1, Ordering::SeqCst);
-        Some(PlacementFeedback {
-            signature: self.signature.clone(),
-            candidate: "unrelated-provider".into(),
-            kind: ExecutionCandidateKind::ProviderOperation,
-            total_elapsed_ns: 11,
-            succeeded: true,
-        })
+        Some(
+            runmat_runtime::context::RuntimePlacementFeedbackDelivery::Graph {
+                feedback: PlacementFeedback {
+                    signature: self.signature.clone(),
+                    candidate: "unrelated-provider".into(),
+                    kind: ExecutionCandidateKind::ProviderOperation,
+                    total_elapsed_ns: 11,
+                    succeeded: true,
+                },
+                permit: Arc::clone(&self.permit),
+            },
+        )
     }
 }
 
@@ -131,6 +137,11 @@ fn managed_selection_does_not_drain_unrelated_dynamic_feedback() {
         Box::new(CountedReadyFeedback {
             signature: route.signature.clone(),
             polls: polls.clone(),
+            permit: session.test_graph_observation_permit(
+                route.signature.clone(),
+                "unrelated-provider",
+                ExecutionCandidateKind::ProviderOperation
+            ),
         }),
     )
     .is_ok());
@@ -280,6 +291,41 @@ fn owned_and_borrowed_compared_routes_use_the_same_graph_policy() {
     host.cost = estimate(100);
     let mut provider = candidate(ExecutionCandidateKind::ProviderGraph);
     provider.cost = estimate(20);
+    let (_, kind, prediction) = select_unobserved(
+        "network",
+        std::slice::from_ref(&host),
+        WholeWorkConstraint::AnyLegal,
+        &request(vec![host.clone()]).resources,
+        true,
+    )
+    .expect("a context-free host quote needs no synthetic session");
+    assert_eq!(kind, WholeWorkDecisionKind::Uncompared);
+    assert_eq!(prediction, Some(100));
+    let single = PlacementSession::default()
+        .select_whole_work(request(vec![host.clone()]))
+        .expect("one valid host price remains executable");
+    assert_eq!(single.decision.kind, WholeWorkDecisionKind::Uncompared);
+    assert_eq!(single.decision.predicted_total_ns, Some(100));
+    assert!(single.observation_is_current());
+
+    let mut unquoted = provider.clone();
+    unquoted.cost = CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate);
+    let unpriced = request(vec![host.clone(), unquoted]);
+    let session = PlacementSession::default();
+    let probe = session
+        .select_whole_work(unpriced.clone())
+        .expect("real bounded provider probe");
+    assert_eq!(probe.decision.kind, WholeWorkDecisionKind::Exploratory);
+    let ordinary = session
+        .select_whole_work(unpriced)
+        .expect("live probe does not block host work");
+    assert_eq!(ordinary.decision.kind, WholeWorkDecisionKind::Unmeasured);
+    assert_eq!(ordinary.decision.predicted_total_ns, Some(100));
+    assert_eq!(
+        ordinary.decision.selected.kind,
+        ExecutionCandidateKind::SharedRuntime
+    );
+    drop(probe);
     let routes = request(vec![host, provider]);
     let owned = PlacementSession::default()
         .select_whole_work(routes.clone())
@@ -715,6 +761,86 @@ fn failed_host_baseline_does_not_starve_a_legal_provider_probe() {
 }
 
 #[test]
+fn deferred_whole_work_delivery_keeps_exact_probe_until_terminal_fence() {
+    use runmat_accelerate_api::observation::{
+        ProviderObservationFailure, ProviderOperationReceipt,
+    };
+    // Receipt/authority mechanism fixture, not an executed provider workload
+    // or a qualification of a numerical FullCall route.
+    for terminal in ["complete", "cancel", "invalidate", "drop"] {
+        let session = PlacementSession::default();
+        let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+        host.cost = CandidateCostEvidence::Estimated(runmat_execution::ExecutionCostEstimate {
+            components: runmat_execution::ExecutionCostComponents {
+                execution_ns: 100,
+                ..Default::default()
+            },
+            scratch_bytes: Some(8),
+            confidence: runmat_execution::EstimateConfidence::Exact,
+            source: runmat_execution::EstimateSource::Compiler,
+        });
+        let routes = request(vec![host, candidate(ExecutionCandidateKind::ProviderGraph)]);
+        let selected = session.select_whole_work(routes.clone()).unwrap();
+        assert_eq!(selected.decision.kind, WholeWorkDecisionKind::Exploratory);
+        let mut receipt = ProviderOperationReceipt::new();
+        let recorder = receipt.recorder();
+        let submission = recorder.submission().unwrap();
+        receipt.publish().unwrap();
+        let mut source =
+            crate::placement::completion::whole_work_source_for_test(receipt, selected);
+        assert!(source.take_ready().is_none());
+        assert!(!source.terminal_without_feedback());
+        let while_pending = session.select_whole_work(routes.clone()).unwrap();
+        assert_eq!(
+            while_pending.decision.kind,
+            WholeWorkDecisionKind::Unmeasured
+        );
+        drop(while_pending);
+        match terminal {
+            "complete" => {
+                submission.complete();
+                let delivery = source.take_ready().expect("terminal provider fence");
+                assert!(matches!(
+                    &delivery,
+                    runmat_runtime::context::RuntimePlacementFeedbackDelivery::WholeWork { .. }
+                ));
+                RuntimePlacementService::observe_deferred_feedback(&session, delivery).unwrap();
+                assert_eq!(session.profile_snapshot().feedback.len(), 1);
+                assert_eq!(
+                    session.profile_snapshot().feedback[0].kind,
+                    ExecutionCandidateKind::ProviderGraph
+                );
+                assert!(source.take_ready().is_none(), "one terminal delivery only");
+            }
+            "cancel" => {
+                recorder.fail(ProviderObservationFailure::Cancelled);
+                submission.complete();
+                assert!(source.take_ready().is_none());
+                assert!(source.terminal_without_feedback());
+            }
+            "invalidate" => {
+                session.invalidate(runmat_execution::PlacementInvalidation::All);
+                submission.complete();
+                assert!(source.take_ready().is_none());
+                assert!(source.terminal_without_feedback());
+            }
+            "drop" => drop(submission),
+            _ => unreachable!(),
+        }
+        drop(source);
+        if terminal != "complete" {
+            assert!(session.profile_snapshot().feedback.is_empty());
+        }
+        let fresh = session.select_whole_work(routes).unwrap();
+        assert_eq!(
+            fresh.decision.kind,
+            WholeWorkDecisionKind::Exploratory,
+            "terminal route releases its original probe"
+        );
+    }
+}
+
+#[test]
 fn explicit_provider_can_execute_without_invented_host_cost() {
     let session = PlacementSession::default();
     let mut routes = request(vec![candidate(ExecutionCandidateKind::ProviderGraph)]);
@@ -725,6 +851,83 @@ fn explicit_provider_can_execute_without_invented_host_cost() {
         WholeWorkDecisionKind::ProviderRequired
     );
     assert_eq!(selected.decision.predicted_total_ns, None);
+    let route = candidate(ExecutionCandidateKind::ProviderGraph);
+    let (direct, kind, predicted) = select_unobserved(
+        "network",
+        std::slice::from_ref(&route),
+        WholeWorkConstraint::ProviderRequired { device_id: 7 },
+        &request(vec![route.clone()]).resources,
+        true,
+    )
+    .expect("same context-free provider-only policy");
+    assert_eq!(direct, route.selected("network"));
+    assert_eq!(kind, WholeWorkDecisionKind::ProviderRequired);
+    assert_eq!(predicted, None);
+
+    // Missing observation rights do not remove physical resource admission.
+    // Keep the same unquoted route/identity while varying actual constraints.
+    for failure in ["lost", "queue", "quota", "unknown-scratch", "cancel"] {
+        let mut provider = route.clone();
+        let mut resources = request(vec![provider.clone()]).resources;
+        match failure {
+            "lost" => resources.providers[0].lost = true,
+            "queue" => resources.providers[0].queue_depth = resources.providers[0].queue_limit,
+            "quota" => {
+                resources.providers[0].capacity_bytes = Some(16);
+                resources.providers[0].scratch_available_bytes = Some(16);
+            }
+            "unknown-scratch" => {
+                provider.resources.scratch_bytes = ResourceByteBound::Unavailable(
+                    runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                )
+            }
+            "cancel" => resources.cancellation_requested = true,
+            _ => unreachable!(),
+        }
+        let error = select_unobserved(
+            "network",
+            std::slice::from_ref(&provider),
+            WholeWorkConstraint::ProviderRequired { device_id: 7 },
+            &resources,
+            true,
+        )
+        .expect_err("provider intent cannot bypass physical admission");
+        assert_eq!(
+            error.code,
+            match failure {
+                "unknown-scratch" => "RunMat:Placement:InsufficientResourceEvidence",
+                "cancel" => "RunMat:Placement:Cancelled",
+                _ => "RunMat:Placement:NoLegalCandidate",
+            }
+        );
+        let host = candidate(ExecutionCandidateKind::SharedRuntime);
+        let ordinary = select_unobserved(
+            "network",
+            &[host, provider],
+            WholeWorkConstraint::AnyLegal,
+            &resources,
+            true,
+        );
+        if failure == "cancel" {
+            assert_eq!(ordinary.unwrap_err().code, "RunMat:Placement:Cancelled");
+        } else {
+            let (selected, _, _) = ordinary.expect("independently legal host remains available");
+            assert_eq!(selected.kind, ExecutionCandidateKind::SharedRuntime);
+        }
+    }
+
+    let host = candidate(ExecutionCandidateKind::SharedRuntime);
+    let resources = request(vec![host.clone(), route.clone()]).resources;
+    let (_, kind, predicted) = select_unobserved(
+        "network",
+        &[host, route],
+        WholeWorkConstraint::AnyLegal,
+        &resources,
+        true,
+    )
+    .expect("ordinary host needs no invented session or learning permit");
+    assert_eq!(kind, WholeWorkDecisionKind::Unmeasured);
+    assert_eq!(predicted, None);
 }
 
 #[test]

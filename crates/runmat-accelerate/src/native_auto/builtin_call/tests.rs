@@ -23,7 +23,38 @@ fn rooted(value: Value) -> runmat_runtime::execution::RootedValue {
     runmat_runtime::execution::RootedValue::new(value).expect("fixture output root")
 }
 
-struct UploadRejectingProvider;
+use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedBuiltinOperands};
+use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServiceFuture};
+
+struct Adapter(&'static dyn AccelProvider, u16);
+impl RuntimeAccelerationService for Adapter {
+    fn supports_operation(&self, _: &str) -> bool {
+        true
+    }
+    fn prepare_admitted(
+        &self,
+        context: RuntimeContext,
+        request: AdmittedBuiltinPreparation,
+    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
+        let provider = self.0;
+        let expected_form = self.1;
+        Box::pin(async move {
+            assert_eq!(
+                request.form().id,
+                runmat_builtins::BuiltinPreparationFormId(expected_form)
+            );
+            let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
+            let prepared =
+                super::admitted::prepare_with(&auto, &context, request).map_err(|error| *error)?;
+            let (operands, guard) = prepared.into_execution();
+            PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
+        })
+    }
+}
+
+struct UploadRejectingProvider {
+    quote: bool,
+}
 impl AccelProvider for UploadRejectingProvider {
     fn upload(&self, _: &HostTensorView<'_>) -> Result<runmat_accelerate_api::GpuTensorHandle> {
         Err(anyhow!("test upload failure"))
@@ -46,8 +77,27 @@ impl AccelProvider for UploadRejectingProvider {
     ) -> runmat_accelerate_api::ProviderFeasibility {
         known_fixture_resources(query)
     }
+    fn estimate_cost(
+        &self,
+        _: &runmat_accelerate_api::ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        self.quote.then(fixture_quote)
+    }
 }
-static PROVIDER: UploadRejectingProvider = UploadRejectingProvider;
+static PROVIDER: UploadRejectingProvider = UploadRejectingProvider { quote: true };
+static UNQUOTED_PROVIDER: UploadRejectingProvider = UploadRejectingProvider { quote: false };
+
+// A fixed quote lets the existing forced graph/lifetime fixtures select either
+// route. It is not measured provider performance or profitability evidence.
+fn fixture_quote() -> runmat_accelerate_api::ProviderCostEstimate {
+    runmat_accelerate_api::ProviderCostEstimate::static_prior(
+        ExecutionCostComponents {
+            execution_ns: 1,
+            ..Default::default()
+        },
+        0,
+    )
+}
 
 struct FeasibilityRejectingProvider;
 impl AccelProvider for FeasibilityRejectingProvider {
@@ -177,35 +227,40 @@ fn runtime(probe: &Rc<Probe>) -> RuntimeContext {
 }
 fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuiltinCall {
     let digest = || Digest::sha256(b"builtin-lifecycle-test");
-    let mut feedback = LocalPlacementFeedback {
-        runtime: runtime(probe),
-        candidate: if provider { "provider" } else { "cpu" }.into(),
-        kind: if provider {
-            runmat_execution::ExecutionCandidateKind::ProviderOperation
-        } else {
-            runmat_execution::ExecutionCandidateKind::SharedRuntime
-        },
-        signature: PlacementSignature {
-            operation: "test".into(),
-            region: None,
-            runtime_facts: digest(),
-            provider_provenance: None,
-            graph_output_authority: None,
-            revision: PlacementRevision {
-                program: None,
-                catalog: digest(),
-                compiler: digest(),
-                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest()),
-                policy: digest(),
-            },
-        },
-        permit: None,
+    let candidate: String = if provider { "provider" } else { "cpu" }.into();
+    let kind = if provider {
+        runmat_execution::ExecutionCandidateKind::ProviderOperation
+    } else {
+        runmat_execution::ExecutionCandidateKind::SharedRuntime
     };
-    feedback.permit = Some(std::sync::Arc::new(LifecycleFixturePermit {
-        signature: feedback.signature.cache_key(),
-        candidate: feedback.candidate.clone(),
-        kind: feedback.kind,
-    }));
+    let signature = PlacementSignature {
+        operation: "test".into(),
+        region: None,
+        runtime_facts: digest(),
+        provider_provenance: None,
+        graph_output_authority: None,
+        revision: PlacementRevision {
+            program: None,
+            catalog: digest(),
+            compiler: digest(),
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest()),
+            policy: digest(),
+        },
+    };
+    let authority = crate::placement::LocalPlacementFeedbackAuthority::Graph(std::sync::Arc::new(
+        LifecycleFixturePermit {
+            signature: signature.cache_key(),
+            candidate: candidate.clone(),
+            kind,
+        },
+    ));
+    let feedback = LocalPlacementFeedback {
+        runtime: runtime(probe),
+        candidate,
+        kind,
+        signature,
+        authority,
+    };
     let observation = BuiltinCallObservation::new(
         Some(Box::new(feedback)),
         begin_trace("test", None),
@@ -394,7 +449,10 @@ fn upload_failure_closes_selected_provider_attempt_before_call() {
     let probe = Rc::new(Probe::default());
     probe.provider.set(true);
     let runtime = runtime(&probe);
-    let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
+    // Admission comes from the genuine numeric owner; only its upload is
+    // injected to fail, before a numeric operation can execute.
+    let provider = admitted_owners::owner_with_upload_failure(true);
+    let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
     let input = Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
     assert!(auto
         .prepare_operation(

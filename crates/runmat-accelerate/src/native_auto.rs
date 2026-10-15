@@ -11,7 +11,8 @@ use crate::{
     fusion::{active_fusion, FusionKind},
     fusion_residency,
     placement::{
-        plan_local, LocalPlacementOutcome, LocalPlacementRequest, PlacementAttribute,
+        plan_local_vm_cpu_with_provider, LocalCpuAdmission, LocalCpuCandidate,
+        LocalPlacementOutcome, LocalPlacementRequest, LocalProviderAdmission, PlacementAttribute,
         PlacementEventKind, PlacementPolicy, PlacementTraceContext, PlacementVariant,
     },
     precision::ensure_provider_supports_dtype,
@@ -28,8 +29,7 @@ use runmat_accelerate_api::{
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult};
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    CandidatePreparationState, EstimateConfidence, EstimateSource, ExecutionCandidateKind,
     ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_runtime::builtins::common::{
@@ -703,36 +703,6 @@ fn ns_to_seconds(nanoseconds: u64) -> f64 {
     nanoseconds as f64 / 1_000_000_000.0
 }
 
-fn provider_prior(evaluation: &DecisionEvaluation, cpu_ns: u64) -> ExecutionCostEstimate {
-    let modeled_execution = evaluation.gpu_secs.and_then(seconds_to_ns);
-    let execution_ns = modeled_execution.unwrap_or_else(|| {
-        if evaluation.recommend_gpu {
-            cpu_ns.saturating_mul(3) / 4
-        } else {
-            cpu_ns.saturating_mul(5) / 4
-        }
-    });
-    ExecutionCostEstimate {
-        components: ExecutionCostComponents {
-            allocation_ns: 5_000,
-            queue_ns: 10_000,
-            execution_ns,
-            ..ExecutionCostComponents::default()
-        },
-        scratch_bytes: Some(0),
-        confidence: if modeled_execution.is_some() {
-            EstimateConfidence::Medium
-        } else {
-            EstimateConfidence::Prior
-        },
-        source: if modeled_execution.is_some() {
-            EstimateSource::Calibration
-        } else {
-            EstimateSource::StaticPrior
-        },
-    }
-}
-
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => Some(&[1, 1]),
@@ -1145,7 +1115,7 @@ impl NativeAutoOffload {
                         elements: u64::try_from(elems).ok(),
                         ..ProviderWorkload::default()
                     },
-                );
+                )?;
                 let trace =
                     record_decision(decision_entry("elementwise", Some(elems), None, &eval));
                 record_provider_rejection(&trace, rejection);
@@ -1180,7 +1150,7 @@ impl NativeAutoOffload {
                             flops: u64::try_from(flops).ok(),
                             ..ProviderWorkload::default()
                         },
-                    );
+                    )?;
                     let trace = record_decision(decision_entry("matmul", None, Some(flops), &eval));
                     record_provider_rejection(&trace, rejection);
                     if eval.recommend_gpu {
@@ -1226,7 +1196,7 @@ impl NativeAutoOffload {
                 elements: u64::try_from(elems).ok(),
                 ..ProviderWorkload::default()
             },
-        );
+        )?;
         let trace = record_decision(decision_entry(op_label, Some(elems), None, &eval));
         record_provider_rejection(&trace, rejection);
         if eval.recommend_gpu {
@@ -1259,7 +1229,7 @@ impl NativeAutoOffload {
                 elements: u64::try_from(elems).ok(),
                 ..ProviderWorkload::default()
             },
-        );
+        )?;
         let trace = record_decision(decision_entry("reduction", Some(elems), None, &eval));
         record_provider_rejection(&trace, rejection);
         if !eval.recommend_gpu {
@@ -1287,7 +1257,7 @@ impl NativeAutoOffload {
         family: ProviderOperationFamily,
         values: &[&Value],
         workload: ProviderWorkload,
-    ) -> (DecisionEvaluation, Option<ProviderRejectionCode>) {
+    ) -> ProviderExecutionResult<(DecisionEvaluation, Option<ProviderRejectionCode>)> {
         let (evaluation, rejection, _) = self.plan_operation(
             evaluation,
             operation,
@@ -1295,8 +1265,8 @@ impl NativeAutoOffload {
             values,
             workload,
             Default::default(),
-        );
-        (evaluation, rejection)
+        )?;
+        Ok((evaluation, rejection))
     }
 
     fn plan_operation(
@@ -1307,128 +1277,156 @@ impl NativeAutoOffload {
         values: &[&Value],
         workload: ProviderWorkload,
         planning: builtin_call::observation::BuiltinPlanningContext<'_>,
-    ) -> (
+    ) -> ProviderExecutionResult<(
         DecisionEvaluation,
         Option<ProviderRejectionCode>,
         builtin_call::observation::BuiltinObservationPlan,
-    ) {
-        let Some(cpu_ns) = evaluation.cpu_secs.and_then(seconds_to_ns) else {
-            // Missing comparative evidence does not invalidate ordinary
-            // execution or turn it into an infinitely expensive CPU route.
-            // Return unchanged operands through the existing preparation path,
-            // without minting a numerical candidate or feedback authority.
-            evaluation.recommend_gpu = false;
-            evaluation.reason = DecisionReason::CostUnavailable;
-            return (evaluation, None, Default::default());
-        };
-        let cpu_cost = ExecutionCostEstimate {
-            components: ExecutionCostComponents {
-                execution_ns: cpu_ns,
-                ..ExecutionCostComponents::default()
-            },
-            scratch_bytes: Some(0),
-            confidence: EstimateConfidence::Low,
-            source: EstimateSource::StaticPrior,
-        };
-        let cpu = ExecutionCandidateDescriptor {
-            identity: format!("cpu.shared.{operation}"),
-            region: None,
-            kind: ExecutionCandidateKind::SharedRuntime,
-            execution_location: CandidateExecutionLocation::Host,
-            preparation: CandidatePreparationState::Ready,
-            cost: cpu_cost,
-            output_residency: CandidateOutputResidency::Host,
-            presentation: runmat_execution::CandidateOutputPresentation::Direct,
-            guards: Vec::new(),
-        };
+    )> {
+        let cpu_cost = evaluation
+            .cpu_secs
+            .and_then(seconds_to_ns)
+            .map(|cpu_ns| ExecutionCostEstimate {
+                components: ExecutionCostComponents {
+                    execution_ns: cpu_ns,
+                    ..ExecutionCostComponents::default()
+                },
+                scratch_bytes: Some(0),
+                confidence: EstimateConfidence::Low,
+                source: EstimateSource::StaticPrior,
+            })
+            .map_or(
+                runmat_execution::CandidateCostEvidence::Unavailable(
+                    runmat_execution::CandidateCostUnavailable::NoEstimate,
+                ),
+                runmat_execution::CandidateCostEvidence::Estimated,
+            );
+        let cpu = LocalCpuCandidate::host(format!("cpu.shared.{operation}"), cpu_cost);
         let provider_kind = match family {
             ProviderOperationFamily::MatrixMultiply => ExecutionCandidateKind::ProviderLibrary,
             _ if evaluation.fusion_kind.is_some() => ExecutionCandidateKind::ProviderFusion,
             _ => ExecutionCandidateKind::ProviderOperation,
         };
-        let provider_fallback = provider_prior(&evaluation, cpu_ns);
+        let provider_fallback = runmat_execution::CandidateCostEvidence::Unavailable(
+            runmat_execution::CandidateCostUnavailable::NoEstimate,
+        );
         let sum_preparation_unknown = workload.sum.is_some();
-        match plan_local(
-            self.provider,
-            LocalPlacementRequest {
-                operation,
-                semantic_identity: None,
-                observation_contract: if planning.prepared_authority.is_some() {
-                    crate::placement::TotalCandidateObservationContract::FullCall
-                } else {
-                    crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
+        // These are the operation's data leaves, never unrelated controls.
+        // This synchronous boundary has no admitted resident-to-host route;
+        // VM-certified host overlays already arrive here as host values.
+        let cpu_admission = if values
+            .iter()
+            .any(|value| runmat_runtime::dispatcher::value_contains_gpu(value))
+        {
+            LocalCpuAdmission::Unavailable
+        } else {
+            LocalCpuAdmission::Legacy
+        };
+        Ok(
+            match plan_local_vm_cpu_with_provider(
+                self.provider,
+                LocalPlacementRequest {
+                    operation,
+                    semantic_identity: None,
+                    observation_contract: if planning.prepared_authority.is_some() {
+                        crate::placement::TotalCandidateObservationContract::FullCall
+                    } else {
+                        crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
+                    },
+                    prepared_authority: planning.prepared_authority,
+                    family,
+                    provider_kind,
+                    inputs: values,
+                    outputs: Vec::new(),
+                    workload,
+                    preparation: if sum_preparation_unknown {
+                        // No exact cache snapshot for the ordinary sum's kernel
+                        // inventory yet; charging Warm would assert an unseen hit.
+                        CandidatePreparationState::Cold
+                    } else {
+                        CandidatePreparationState::Warm
+                    },
+                    preparation_program: planning.preparation_program,
+                    shader_requirements: None,
+                    cpu,
+                    provider_fallback,
+                    required_upload_bytes: None,
+                    required_download_bytes: 0,
+                    downstream_materialization: false,
+                    compare_profitability: true,
+                    runtime: planning.runtime,
                 },
-                prepared_authority: planning.prepared_authority,
-                family,
-                provider_kind,
-                inputs: values,
-                outputs: Vec::new(),
-                workload,
-                preparation: if sum_preparation_unknown {
-                    // No exact cache snapshot for the ordinary sum's kernel
-                    // inventory yet; charging Warm would assert an unseen hit.
-                    CandidatePreparationState::Cold
-                } else {
-                    CandidatePreparationState::Warm
-                },
-                preparation_program: planning.preparation_program,
-                shader_requirements: None,
-                cpu,
-                provider_fallback,
-                required_upload_bytes: None,
-                required_download_bytes: 0,
-                downstream_materialization: false,
-                compare_profitability: true,
-                runtime: planning.runtime,
+                PlacementPolicy::default(),
+                None,
+                cpu_admission,
+                LocalProviderAdmission::Available,
+            ) {
+                Ok(LocalPlacementOutcome::ProviderRejected {
+                    code,
+                    cpu_cost,
+                    feedback,
+                }) => {
+                    evaluation.recommend_gpu = false;
+                    evaluation.reason = DecisionReason::ProviderRejected;
+                    evaluation.cpu_secs = cpu_cost
+                        .estimate()
+                        .and_then(|cost| cost.checked_total_ns())
+                        .map(ns_to_seconds);
+                    (
+                        evaluation,
+                        Some(code),
+                        builtin_call::observation::BuiltinObservationPlan {
+                            feedback,
+                            ..Default::default()
+                        },
+                    )
+                }
+                Ok(LocalPlacementOutcome::Selected {
+                    selected,
+                    cpu_cost,
+                    provider_cost,
+                    provider_rejection,
+                    decision_kind,
+                    predicted_total_ns,
+                    feedback,
+                    provider_query,
+                    provider_observation,
+                    ..
+                }) => {
+                    evaluation.recommend_gpu = selected.kind.is_provider();
+                    evaluation.reason = if provider_rejection.is_some() {
+                        DecisionReason::ProviderRejected
+                    } else if decision_kind == runmat_execution::WholeWorkDecisionKind::Compared {
+                        DecisionReason::CostModel
+                    } else {
+                        DecisionReason::CostUnavailable
+                    };
+                    evaluation.cpu_secs = cpu_cost
+                        .estimate()
+                        .and_then(|cost| cost.checked_total_ns())
+                        .map(ns_to_seconds);
+                    evaluation.gpu_secs = if selected.kind.is_provider() {
+                        predicted_total_ns
+                    } else {
+                        provider_cost.and_then(|cost| cost.checked_total_ns())
+                    }
+                    .map(ns_to_seconds);
+                    (
+                        evaluation,
+                        provider_rejection,
+                        builtin_call::observation::BuiltinObservationPlan {
+                            feedback,
+                            provider_query: Some(provider_query),
+                            provider_observation,
+                        },
+                    )
+                }
+                Err(error) => {
+                    let mut error = *error;
+                    error.gpu_gather_retry = runmat_runtime::GpuGatherRetry::Never;
+                    return Err(ProviderExecutionError::from_source(error).with_unproven_effects());
+                }
             },
-            PlacementPolicy::default(),
-        ) {
-            Ok(LocalPlacementOutcome::ProviderRejected {
-                code,
-                cpu_cost,
-                feedback,
-            }) => {
-                evaluation.recommend_gpu = false;
-                evaluation.reason = DecisionReason::ProviderRejected;
-                evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                (
-                    evaluation,
-                    Some(code),
-                    builtin_call::observation::BuiltinObservationPlan {
-                        feedback,
-                        ..Default::default()
-                    },
-                )
-            }
-            Ok(LocalPlacementOutcome::Selected {
-                selected,
-                cpu_cost,
-                provider_cost,
-                feedback,
-                provider_query,
-                provider_observation,
-                ..
-            }) => {
-                evaluation.recommend_gpu = selected.kind.is_provider();
-                evaluation.reason = DecisionReason::CostModel;
-                evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                evaluation.gpu_secs = provider_cost.checked_total_ns().map(ns_to_seconds);
-                (
-                    evaluation,
-                    None,
-                    builtin_call::observation::BuiltinObservationPlan {
-                        feedback,
-                        provider_query: Some(provider_query),
-                        provider_observation,
-                    },
-                )
-            }
-            Err(_) => {
-                evaluation.recommend_gpu = false;
-                evaluation.reason = DecisionReason::Disabled;
-                (evaluation, None, Default::default())
-            }
-        }
+        )
     }
 
     fn evaluate_elementwise(&self, elements: usize, values: &[&Value]) -> DecisionEvaluation {
@@ -1764,6 +1762,7 @@ mod tests {
     struct CostedProvider {
         uploads: AtomicUsize,
         owner: OnceLock<TestAllocationOwner>,
+        quote: bool,
     }
 
     impl CostedProvider {
@@ -1815,6 +1814,9 @@ mod tests {
         }
 
         fn estimate_cost(&self, query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {
+            if !self.quote {
+                return None;
+            }
             Some(ProviderCostEstimate {
                 cost: ExecutionCostEstimate {
                     components: ExecutionCostComponents {
@@ -1833,7 +1835,88 @@ mod tests {
     static COSTED_PROVIDER: CostedProvider = CostedProvider {
         uploads: AtomicUsize::new(0),
         owner: OnceLock::new(),
+        quote: true,
     };
+
+    static UNQUOTED_PROVIDER: CostedProvider = CostedProvider {
+        uploads: AtomicUsize::new(0),
+        owner: OnceLock::new(),
+        quote: false,
+    };
+
+    #[test]
+    fn missing_provider_quotes_ignore_threshold_prices_and_preserve_explicit_intent() {
+        for threshold in [1, usize::MAX] {
+            for cpu_price in [DEFAULT_CPU_ELEM_PER_ELEM, f64::NAN] {
+                let auto = NativeAutoOffload::new(
+                    &UNQUOTED_PROVIDER,
+                    ThresholdConfig {
+                        binary_min_elems: threshold,
+                        cpu_elem_per_elem: cpu_price,
+                        ..ThresholdConfig::default()
+                    },
+                );
+                let tensor = Value::Tensor(Tensor::new(vec![1.; 8], vec![1, 8]).unwrap());
+                let ((left, right), decisions) = capture_promotion(|| {
+                    auto.promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
+                        .unwrap()
+                });
+                assert!(matches!(left, Value::Tensor(_)) && matches!(right, Value::Tensor(_)));
+                assert_eq!(decisions[0].reason, DecisionReason::CostUnavailable);
+                assert!(decisions[0].gpu_estimate_ms.is_none());
+                assert_eq!(
+                    decisions[0].cpu_estimate_ms.is_some(),
+                    cpu_price.is_finite()
+                );
+
+                let allocation = UNQUOTED_PROVIDER
+                    .owner()
+                    .allocate_zeroed(
+                        vec![1, 8],
+                        NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap();
+                let explicit = allocation
+                    .handle
+                    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                    .unwrap();
+                let value = Value::GpuTensor(explicit.clone());
+                let (result, decisions) = capture_promotion(|| {
+                    auto.promote_binary(BinaryOp::Elementwise, &value, &value)
+                });
+                // This promotion-only fixture declares no transactional body
+                // capability. Explicit intent cannot turn that absence into a
+                // legal execution by returning unchanged GPU operands.
+                let error =
+                    result.expect_err("mandatory resident route requires physical admission");
+                let mut cause: &(dyn std::error::Error + 'static) = &error;
+                let original = loop {
+                    if let Some(runtime) = cause.downcast_ref::<runmat_runtime::RuntimeError>() {
+                        break runtime;
+                    }
+                    cause = cause
+                        .source()
+                        .expect("original typed planning failure retained");
+                };
+                assert_eq!(
+                    original.identifier(),
+                    Some("RunMat:Placement:NoLegalCandidate")
+                );
+                assert_eq!(
+                    original.gpu_gather_retry,
+                    runmat_runtime::GpuGatherRetry::Never
+                );
+                assert!(
+                    decisions.is_empty(),
+                    "no Disabled/success decision disguises refusal"
+                );
+                assert!(runmat_accelerate_api::handle_is_explicit(&explicit));
+                explicit.allocation_lease().validate_live().unwrap();
+            }
+        }
+        assert_eq!(UNQUOTED_PROVIDER.uploads.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1892,7 +1975,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_cost_keeps_transfer_dominated_work_on_cpu() {
+    fn quoted_nontransactional_provider_keeps_legal_host_work_without_upload() {
         COSTED_PROVIDER.uploads.store(0, Ordering::Relaxed);
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
         let tensor = Value::Tensor(Tensor::new(vec![1.0; 128], vec![1, 128]).unwrap());
@@ -1905,7 +1988,7 @@ mod tests {
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].operation, "elementwise");
         assert_eq!(decisions[0].decision, AutoOffloadDisposition::Cpu);
-        assert_eq!(decisions[0].reason, DecisionReason::CostModel);
+        assert_eq!(decisions[0].reason, DecisionReason::CostUnavailable);
     }
 
     #[test]
@@ -1919,7 +2002,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_cost_keeps_a_profitable_resident_chain_on_provider() {
+    fn quoted_nontransactional_resident_route_is_rejected_without_retiring_inputs() {
         let left = COSTED_PROVIDER
             .owner()
             .allocate_zeroed(
@@ -1941,24 +2024,35 @@ mod tests {
         let left_probe = left.probe;
         let right_probe = right.probe;
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
-        let ((left, right), decisions) = capture_promotion(|| {
-            auto.promote_binary(
-                BinaryOp::Elementwise,
-                &Value::GpuTensor(left.handle),
-                &Value::GpuTensor(right.handle),
-            )
-            .unwrap()
-        });
+        let left = Value::GpuTensor(left.handle);
+        let right = Value::GpuTensor(right.handle);
+        let (result, decisions) =
+            capture_promotion(|| auto.promote_binary(BinaryOp::Elementwise, &left, &right));
+        let error = result.expect_err("a quote does not prove transactional execution");
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let original = loop {
+            if let Some(runtime) = cause.downcast_ref::<runmat_runtime::RuntimeError>() {
+                break runtime;
+            }
+            cause = cause
+                .source()
+                .expect("original typed planning failure retained");
+        };
+        assert_eq!(
+            original.identifier(),
+            Some("RunMat:Placement:NoLegalCandidate")
+        );
+        assert_eq!(
+            original.gpu_gather_retry,
+            runmat_runtime::GpuGatherRetry::Never
+        );
         assert!(
             matches!(left, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&left_weak.acquire().unwrap()))
         );
         assert!(
             matches!(right, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&right_weak.acquire().unwrap()))
         );
-        assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].operation, "elementwise");
-        assert_eq!(decisions[0].decision, AutoOffloadDisposition::Gpu);
-        assert_eq!(decisions[0].reason, DecisionReason::CostModel);
+        assert!(decisions.is_empty());
         assert_eq!(left_probe.retirements(), 0);
         assert_eq!(right_probe.retirements(), 0);
         drop((left, right));

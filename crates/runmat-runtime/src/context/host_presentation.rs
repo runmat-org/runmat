@@ -3,7 +3,7 @@
 //! the caller; this owner never chooses or replays an execution route.
 
 use super::{
-    RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkProbeLease,
+    RuntimeContext, RuntimePlacementFeedbackDelivery, RuntimePlacementFeedbackSource,
     RuntimeWholeWorkSelection,
 };
 use crate::{build_runtime_error, BuiltinResult};
@@ -13,8 +13,7 @@ use runmat_accelerate_api::observation::{
 };
 use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
 use runmat_execution::{
-    cancellation::CancellationToken, PlacementFeedback, PlacementSignature,
-    SelectedExecutionCandidate,
+    cancellation::CancellationToken, PlacementSignature, WholeWorkObservationOutcome,
 };
 use runmat_time::duration_ns_saturating;
 
@@ -152,17 +151,15 @@ impl HostPresentationReceipt {
             receipt: self.receipt,
             command_contribution: self.command_contribution.take(),
             signature: self.selected.decision.signature.clone(),
-            selected: self.selected.decision.selected.clone(),
             // Exploration remains reserved until completion evidence or a
             // terminal non-sample; enqueue/publication is not completion.
-            _probe: self.selected.probe.take(),
-            observation_permit: self.selected.observation_permit.take(),
+            selected: Some(self.selected),
             cancellation: self.runtime.cancellation(),
             terminal_without_feedback: false,
         };
         if let Some(service) = self.runtime.service_ports().placement() {
             if let Some(ready) = deferred.take_ready() {
-                let _ = service.observe(ready);
+                let _ = service.observe_deferred_feedback(ready);
             } else if !deferred.terminal_without_feedback()
                 && service.defer_feedback(Box::new(deferred)).is_err()
             {
@@ -176,9 +173,7 @@ struct DeferredPresentationFeedback {
     receipt: ProviderOperationReceipt,
     command_contribution: Option<CommandProviderContribution>,
     signature: PlacementSignature,
-    selected: SelectedExecutionCandidate,
-    _probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
-    observation_permit: Option<super::RuntimeWholeWorkObservationAuthority>,
+    selected: Option<RuntimeWholeWorkSelection>,
     cancellation: CancellationToken,
     terminal_without_feedback: bool,
 }
@@ -188,11 +183,11 @@ impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {
         &self.signature
     }
 
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<RuntimePlacementFeedbackDelivery> {
         if self
-            .observation_permit
+            .selected
             .as_ref()
-            .is_some_and(|permit| !permit.is_current())
+            .is_none_or(|selected| !selected.observation_is_current())
         {
             if let Some(contribution) = self.command_contribution.take() {
                 contribution.complete(ProviderObservationTerminal::Missing);
@@ -234,12 +229,14 @@ impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {
             }
             ProviderObservationStatus::Pending => return None,
         };
-        Some(PlacementFeedback {
-            signature: self.signature.clone(),
-            candidate: self.selected.candidate.clone(),
-            kind: self.selected.kind,
-            total_elapsed_ns: elapsed,
-            succeeded,
+        Some(RuntimePlacementFeedbackDelivery::WholeWork {
+            selected: self.selected.take()?,
+            elapsed_ns: elapsed,
+            outcome: if succeeded {
+                WholeWorkObservationOutcome::Success
+            } else {
+                WholeWorkObservationOutcome::OperationalFailure
+            },
         })
     }
 

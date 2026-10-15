@@ -2,12 +2,10 @@ use super::*;
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
-use std::sync::OnceLock;
 
 #[test]
 fn integer_family_real_provider_preparation_and_execution_use_existing_observer() {
-    static PROVIDER: OnceLock<crate::simple_provider::InProcessProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(crate::simple_provider::InProcessProvider::new);
+    let provider = super::admitted_owners::owner();
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     for name in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",

@@ -104,8 +104,14 @@ pub(super) fn runtime_facts(
 /// The entire executable/rejected physical set shares one feedback signature.
 /// Candidate names are sorted by the caller, so provider probe order cannot
 /// split warm/cold histories or change the service's graph identity.
+/// Known byte bounds retain their original JSON number encoding. Unavailable
+/// bounds are distinct facts, never a zero-byte resource permission.
 pub(super) fn candidate_set_facts(
-    admitted: &[(&String, &ProviderCostQuery, u64)],
+    admitted: &[(
+        &String,
+        &ProviderCostQuery,
+        runmat_execution::ResourceByteBound,
+    )],
     rejected: &[(
         Option<Digest>,
         ProviderFeasibilityQuery,
