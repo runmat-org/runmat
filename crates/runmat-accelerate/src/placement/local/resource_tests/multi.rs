@@ -371,6 +371,94 @@ fn context_free_overflowing_price_refuses_without_panicking_and_keeps_legal_alte
             assert!(!candidates[0].descriptor.kind.is_provider());
         }
     }
+    // Missing CPU prices use whole-work selection. An invalid provider quote
+    // cannot poison that set, even when no observation service/right exists.
+    for with_context in [false, true] {
+        for host_available in [false, true] {
+            let capture = Rc::new(Capture::default());
+            let outcome = try_plan_physical_set_with_context(
+                &provider,
+                &capture,
+                None,
+                vec![physical(19, u64::MAX, CandidatePreparationState::Ready)],
+                if host_available {
+                    LocalCpuAdmission::Legacy
+                } else {
+                    LocalCpuAdmission::Unavailable
+                },
+                LocalProviderAdmission::Available,
+                with_context,
+            );
+            if host_available {
+                assert!(matches!(
+                    outcome.unwrap(),
+                    LocalPlacementOutcome::Selected {
+                        provider_index: None,
+                        decision_kind: runmat_execution::WholeWorkDecisionKind::Unmeasured,
+                        predicted_total_ns: None,
+                        feedback: None,
+                        ..
+                    }
+                ));
+            } else {
+                assert_eq!(
+                    outcome.unwrap_err().identifier(),
+                    Some("RunMat:Placement:NoLegalCandidate")
+                );
+            }
+            assert!(capture.requests.borrow().is_empty());
+        }
+        // A genuinely unavailable quote still enters physical resource
+        // admission. It cannot hide the later valid route's original ordinal.
+        for cpu_price in [None, Some(1000)] {
+            let capture = Rc::new(Capture::default());
+            let mut unquoted = physical(20, 1, CandidatePreparationState::Cold);
+            unquoted.fallback = runmat_execution::CandidateCostEvidence::Unavailable(
+                runmat_execution::CandidateCostUnavailable::NoEstimate,
+            );
+            let before = provider.queries.load(Ordering::SeqCst);
+            let outcome = try_plan_physical_set_with_context(
+                &provider,
+                &capture,
+                cpu_price,
+                vec![
+                    physical(19, u64::MAX, CandidatePreparationState::Ready),
+                    unquoted,
+                    physical(21, 100, CandidatePreparationState::Ready),
+                ],
+                LocalCpuAdmission::Unavailable,
+                LocalProviderAdmission::Available,
+                with_context,
+            )
+            .unwrap();
+            let LocalPlacementOutcome::Selected {
+                provider_index,
+                provider_query,
+                provider_cost,
+                predicted_total_ns,
+                decision_kind,
+                feedback,
+                ..
+            } = outcome
+            else {
+                panic!("valid physical route remains executable");
+            };
+            assert_eq!(provider_index, Some(2));
+            assert_eq!(provider_query.workload.elements, Some(21));
+            assert_eq!(
+                provider_cost.and_then(|cost| cost.checked_total_ns()),
+                Some(100)
+            );
+            assert_eq!(predicted_total_ns, Some(100));
+            assert_eq!(
+                decision_kind,
+                runmat_execution::WholeWorkDecisionKind::Uncompared
+            );
+            assert!(feedback.is_none());
+            assert_eq!(provider.queries.load(Ordering::SeqCst) - before, 3);
+            assert!(capture.requests.borrow().is_empty());
+        }
+    }
 }
 
 #[test]
