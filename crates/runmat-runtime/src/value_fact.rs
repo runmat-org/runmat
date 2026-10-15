@@ -33,7 +33,14 @@ pub fn value_fact(value: &Value) -> ValueFact {
             let kind = value
                 .numeric_dtype()
                 .map_or(ValueKindFact::Logical, |dtype| {
-                    numeric_kind(dtype_class(dtype), NumericDomain::Real)
+                    numeric_kind(
+                        dtype_class(dtype),
+                        if value.is_complex() {
+                            NumericDomain::Complex
+                        } else {
+                            NumericDomain::Real
+                        },
+                    )
                 });
             sparse(kind, &value.shape())
         }
@@ -477,11 +484,13 @@ mod tests {
     use super::*;
     use runmat_accelerate_api::test_support::TestAllocationOwner;
     use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
-    use runmat_value::{CellArray, ComplexTensor, ForeignRef, ForeignResourceKey, Tensor};
+    use runmat_value::{
+        CellArray, ComplexTensor, ForeignRef, ForeignResourceKey, SparseTensor, Tensor,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn dense_numeric_facts_preserve_low_rank_shape_and_domain() {
+    fn numeric_facts_preserve_storage_class_shape_and_domain() {
         for dimensions in [Vec::new(), vec![2]] {
             let len = dimensions.iter().product::<usize>();
             let real = Value::Tensor(Tensor::from_f32(vec![1.0; len], dimensions.clone()).unwrap());
@@ -499,6 +508,36 @@ mod tests {
                     ValueKindFact::Numeric(NumericFact { class, domain })
                 );
                 assert_eq!(fact.storage, StorageFact::Dense);
+            }
+        }
+        for (rows, columns) in [(0, 2), (2, 3)] {
+            for (value, class, domain) in [
+                (
+                    SparseTensor::zeros(rows, columns),
+                    NumericClass::Double,
+                    NumericDomain::Real,
+                ),
+                (
+                    SparseTensor::zeros_f32(rows, columns),
+                    NumericClass::Single,
+                    NumericDomain::Real,
+                ),
+                (
+                    SparseTensor::zeros_complex(rows, columns),
+                    NumericClass::Double,
+                    NumericDomain::Complex,
+                ),
+                (
+                    SparseTensor::zeros_complex_f32(rows, columns),
+                    NumericClass::Single,
+                    NumericDomain::Complex,
+                ),
+            ] {
+                let fact = value_fact(&Value::SparseTensor(value));
+                assert_eq!(fact.kind, numeric_kind(class, domain));
+                assert_eq!(fact.shape, shape(&[rows, columns]));
+                assert_eq!(fact.storage, StorageFact::Sparse);
+                assert_eq!(fact.residency, ResidencyFact::Host);
             }
         }
     }

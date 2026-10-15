@@ -3030,22 +3030,17 @@ fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
             )
         });
     }
-    let raw = match value {
-        Value::Num(n) => *n,
-        Value::Bool(b) => {
-            if *b {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        _ => {
-            return Err(sparse_error(
+    // Integer storage was decoded exactly above; the shared scalar adapter
+    // handles the equivalent floating/logical host and gathered carriers.
+    let raw = tensor_utils::scalar_f64_from_host_value(value)
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            sparse_error(
                 &SPARSE_ERROR_INVALID_INPUT,
                 format!("sparse: {name} must be a scalar size"),
-            ))
-        }
-    };
+            )
+        })?;
     if !raw.is_finite() || raw < 0.0 || raw.fract() != 0.0 {
         return Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -3221,7 +3216,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sparse_size_args_accept_typed_integer_scalar_tensors_exactly() {
+    fn sparse_size_args_preserve_scalar_carriers_and_exact_integer_extents() {
         let large = 9_007_199_254_740_993_u64;
         let rows = exact_integer_tensor(IntegerStorage::U64(vec![large]), vec![1, 1]);
         let cols = exact_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
@@ -3231,6 +3226,39 @@ pub(crate) mod tests {
         );
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
         assert_eq!(sparse.nnz(), 0);
+
+        test_support::with_test_provider(|provider| {
+            for tensor in [
+                Tensor::new(vec![3.0], vec![1, 1]).unwrap(),
+                Tensor::from_f32(vec![3.0], vec![1, 1]).unwrap(),
+            ] {
+                let host = expect_sparse(
+                    sparse_builtin(vec![Value::Tensor(tensor.clone()), Value::Num(1.0)]).unwrap(),
+                );
+                let handle =
+                    gpu_helpers::upload_tensor(provider, &tensor).expect("scalar size upload");
+                let resident = expect_sparse(
+                    sparse_builtin(vec![Value::GpuTensor(handle), Value::Num(1.0)]).unwrap(),
+                );
+                assert_eq!(host, resident);
+                assert_eq!(host.shape(), vec![3, 1]);
+            }
+        });
+        test_support::with_native_logical_test_provider(|provider| {
+            let logical = Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap());
+            let host = expect_sparse(sparse_builtin(vec![logical, Value::Num(2.0)]).unwrap());
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
+                })
+                .expect("logical scalar size upload");
+            let resident = expect_sparse(
+                sparse_builtin(vec![Value::GpuTensor(handle), Value::Num(2.0)]).unwrap(),
+            );
+            assert_eq!(host, resident);
+            assert_eq!(host.shape(), vec![1, 2]);
+        });
     }
 
     #[test]
