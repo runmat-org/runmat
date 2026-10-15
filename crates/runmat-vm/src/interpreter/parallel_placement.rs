@@ -2,7 +2,7 @@ use std::fmt;
 
 use runmat_execution::PoolBackend;
 use runmat_runtime::execution::{RootedValueLease, RootedValuesBuilder};
-use runmat_types::{EffectKind, ParallelVariableRole};
+use runmat_types::{EffectKind, EffectSet, ParallelVariableRole};
 use runmat_value::Value;
 
 use crate::BytecodeParforRegion;
@@ -93,14 +93,7 @@ pub(crate) async fn prepare(
     if backend == PoolBackend::Serial || worker_budget <= 1 {
         return Err(ParallelPlacementRejection::NoWorkerCapacity);
     }
-    if let Some(effect) = executable
-        .contract
-        .effects
-        .0
-        .iter()
-        .copied()
-        .find(|effect| !matches!(effect, EffectKind::MayThrow | EffectKind::Randomness))
-    {
+    if let Some(effect) = unsupported_worker_effect(backend, &executable.contract.effects) {
         return Err(ParallelPlacementRejection::UnsafeEffect(effect));
     }
 
@@ -182,6 +175,21 @@ pub(crate) async fn prepare(
     })
 }
 
+/// A suspended builtin call is portable through the native process and browser
+/// worker program executors: both await the VM region interpreter. This is not
+/// authority for ambient effects (I/O, workspace mutation, callbacks, etc.),
+/// nor proof that an arbitrary remote backend provides the same async contract.
+fn unsupported_worker_effect(backend: PoolBackend, effects: &EffectSet) -> Option<EffectKind> {
+    effects.0.iter().copied().find(|effect| match effect {
+        EffectKind::MayThrow | EffectKind::Randomness => false,
+        EffectKind::MaySuspend => !matches!(
+            backend,
+            PoolBackend::LocalProcesses | PoolBackend::BrowserWorkers
+        ),
+        _ => true,
+    })
+}
+
 fn value_family(value: &Value) -> &'static str {
     match value {
         Value::Num(_) => "double scalar",
@@ -197,8 +205,9 @@ fn value_family(value: &Value) -> &'static str {
     }
 }
 
-#[cfg(all(test, feature = "native-accel"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(feature = "native-accel")]
     use runmat_accelerate_api::{
         test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorStorage,
         NumericElementType,
@@ -206,6 +215,69 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn worker_async_admission_is_backend_and_effect_specific() {
+        let effects = EffectSet(
+            [EffectKind::MayThrow, EffectKind::MaySuspend]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(
+            unsupported_worker_effect(PoolBackend::LocalProcesses, &effects),
+            None
+        );
+        assert_eq!(
+            unsupported_worker_effect(PoolBackend::BrowserWorkers, &effects),
+            None
+        );
+        assert_eq!(
+            unsupported_worker_effect(PoolBackend::Remote, &effects),
+            Some(EffectKind::MaySuspend)
+        );
+
+        for unsafe_effect in [
+            EffectKind::WorkspaceWrite,
+            EffectKind::FilesystemRead,
+            EffectKind::HostCallback,
+            EffectKind::Unknown,
+        ] {
+            let effects = EffectSet([unsafe_effect].into_iter().collect());
+            assert_eq!(
+                unsupported_worker_effect(PoolBackend::LocalProcesses, &effects),
+                Some(unsafe_effect)
+            );
+        }
+        let randomness = EffectSet([EffectKind::Randomness].into_iter().collect());
+        assert_eq!(
+            unsupported_worker_effect(PoolBackend::Remote, &randomness),
+            None,
+            "randomness admission remains governed by the existing policy"
+        );
+    }
+
+    #[test]
+    fn ordinary_numeric_parfor_retains_suspend_effect_and_passes_native_admission() {
+        let ast =
+            runmat_parser::parse("out = cell(1, 2); parfor i = 1:2; out{i} = sum(sin(i)); end")
+                .expect("parse numeric parfor");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower numeric parfor HIR");
+        let mir =
+            runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower numeric parfor MIR");
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let region = analysis
+            .parallel
+            .parfor_regions
+            .first()
+            .expect("classified numeric parfor");
+        assert!(region.effects.0.contains(&EffectKind::MaySuspend));
+        assert_eq!(
+            unsupported_worker_effect(PoolBackend::LocalProcesses, &region.effects),
+            None
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
     #[test]
     fn explicit_device_intent_has_a_distinct_placement_rejection() {
         let owner = TestAllocationOwner::new();
