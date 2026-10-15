@@ -965,7 +965,7 @@ fn validated_sequence_output(
         ));
     }
     let mut output = output;
-    if let Some(source) = source {
+    if source.is_some() {
         gpu_helpers::propagate_output_provenance(&mut output, protected.iter().copied())?;
     }
     gpu_helpers::resident_gpu_value(output)
