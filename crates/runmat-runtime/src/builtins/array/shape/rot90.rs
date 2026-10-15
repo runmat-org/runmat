@@ -571,7 +571,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps)? {
+            if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps).await? {
                 gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
@@ -595,7 +595,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     gpu_helpers::restore_class_preserving_value(&handle, rotated, "rot90")
 }
 
-fn rot90_gpu_via_provider(
+async fn rot90_gpu_via_provider(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     steps: usize,
@@ -611,15 +611,27 @@ fn rot90_gpu_via_provider(
         return Ok(None);
     }
     if steps == 2 {
-        // Independent legacy flip-only route; no typed permutation preceded it.
-        return Ok(provider.flip(handle, &[0, 1]).ok());
+        let output = provider.flip(handle, &[0, 1]).map_err(failure)?;
+        if let Some(output) = output {
+            if !gpu_helpers::flip_output_matches(handle, &output, provider, &[0, 1]) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    rot90_error_with_message(
+                        "rot90: invalid provider flip output",
+                        &ROT90_ERROR_INTERNAL,
+                    ),
+                ));
+            }
+            return Ok(Some(output));
+        }
+        return Ok(None);
     }
     if !matches!(steps, 1 | 3) {
         return Ok(None);
     }
     let mut order: Vec<usize> = (0..rank).collect();
     order.swap(0, 1);
-    let Some(permuted) = provider.permute(handle, &order).map_err(failure)? else {
+    let Some(mut permuted) = provider.permute(handle, &order).map_err(failure)? else {
         return Ok(None);
     };
     if !gpu_helpers::permutation_output_matches(handle, &permuted, provider, &order) {
@@ -631,14 +643,42 @@ fn rot90_gpu_via_provider(
             ),
         ));
     }
-    let output = provider
-        .flip(&permuted, &[if steps == 1 { 0 } else { 1 }])
-        .map_err(|source| {
-            failure(runmat_accelerate_api::ProviderExecutionError::from(source).after_effect())
+    gpu_helpers::propagate_output_provenance(&mut permuted, [handle])?;
+    let axes = [if steps == 1 { 0 } else { 1 }];
+    let stage_failure = |source: runmat_accelerate_api::ProviderExecutionError| {
+        failure(if permuted.shares_allocation_with(handle) {
+            source.with_unproven_effects()
+        } else {
+            source.after_effect()
+        })
+    };
+    let output = provider.flip(&permuted, &axes).map_err(stage_failure)?;
+    let output = if let Some(output) = output {
+        output
+    } else {
+        // Only the remaining flip is adapted. The completed permutation and
+        // its lease stay owned; never replay the original rotation.
+        let value = super::flip::flip_gpu_fallback_with(
+            "rot90",
+            provider,
+            permuted.clone(),
+            &[axes[0] + 1],
+        )
+        .await
+        .map_err(|error| {
+            stage_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
         })?;
-    if !gpu_helpers::replication_output_matches(&permuted, &output, provider, permuted.shape())
-        || output.shares_allocation_with(handle)
-    {
+        let Value::GpuTensor(output) = value else {
+            return Err(rot90_error_with_message(
+                "rot90: flip adaptation lost residency",
+                &ROT90_ERROR_INTERNAL,
+            ));
+        };
+        output
+    };
+    if !gpu_helpers::flip_output_matches(&permuted, &output, provider, &axes) {
         return Err(gpu_helpers::reject_gpu_output(
             output,
             rot90_error_with_message("rot90: invalid provider flip output", &ROT90_ERROR_INTERNAL),

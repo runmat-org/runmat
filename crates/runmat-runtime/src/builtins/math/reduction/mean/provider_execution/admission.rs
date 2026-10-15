@@ -2,6 +2,11 @@
 use super::*;
 use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
 use runmat_accelerate_api::GpuTensorStorage;
+#[path = "admission/include.rs"]
+mod include;
+pub(super) use include::{
+    admit_include_permutation, admit_include_reduction, admit_include_reshape,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum OmitNanStageAlias<'a> {

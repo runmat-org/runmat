@@ -184,9 +184,7 @@ fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
             .data,
         HostNumericDataOwned::F32(vec![2.0, 2.0])
     );
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.flip(&single, &[1]).unwrap_err()
-    ));
+    assert!(provider.flip(&single, &[1]).unwrap().is_none());
     let real = provider
         .upload(&HostTensorView {
             data: &[1.0, 2.0],
@@ -216,7 +214,10 @@ fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
             shape: &[1, 2],
         })
         .unwrap();
-    let flipped = provider.flip(&logical, &[1]).unwrap();
+    let flipped = provider
+        .flip(&logical, &[1])
+        .unwrap()
+        .expect("admitted logical flip");
     assert!(flipped.view().is_logical());
     assert_eq!(
         block_on(provider.download(&flipped)).unwrap().data,

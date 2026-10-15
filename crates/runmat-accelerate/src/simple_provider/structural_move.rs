@@ -2,6 +2,62 @@
 use super::*;
 
 impl InProcessProvider {
+    pub(super) fn flip_structural(
+        &self,
+        handle: &GpuTensorHandle,
+        axes: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let allocated = std::cell::Cell::new(false);
+        let result = (|| -> Result<Option<GpuTensorHandle>> {
+            let data = {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("flip: allocation owner is poisoned"))?;
+                let data = guard
+                    .get(handle)
+                    .ok_or_else(|| anyhow!("flip: input is not a live owned allocation"))?;
+                if handle.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous
+                    || handle.physical().storage() == GpuTensorStorage::ComplexInterleaved
+                    || matches!(data, InProcessNumericData::F32(_))
+                    || (handle.shape().contains(&0) && handle.physical().element_capacity() != 0)
+                {
+                    return Ok(None);
+                }
+                if !runmat_types::geometry::FlipGeometry::new(handle.shape(), axes).has_effect() {
+                    return Ok(Some(handle.clone()));
+                }
+                data.clone()
+            };
+            let data = match data {
+                InProcessNumericData::F64(values) => {
+                    InProcessNumericData::F64(flip_data(&values, handle.shape(), axes)?)
+                }
+                InProcessNumericData::Integer(values) => {
+                    InProcessNumericData::Integer(flip_integer_data(&values, handle.shape(), axes)?)
+                }
+                InProcessNumericData::F32(_) => {
+                    unreachable!("native Single declined before cloning")
+                }
+            };
+            self.allocate_produced_observed(
+                data,
+                handle.shape().to_vec(),
+                handle.physical().storage(),
+                handle.view().is_logical(),
+                Some(&allocated),
+            )
+            .map(Some)
+        })();
+        result.map_err(|error| {
+            let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+            if allocated.get() {
+                error.after_effect()
+            } else {
+                error.with_unproven_effects()
+            }
+        })
+    }
+
     pub(super) fn permute_structural(
         &self,
         handle: &GpuTensorHandle,

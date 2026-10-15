@@ -87,6 +87,30 @@ impl<'a> Stages<'a> {
         &self.protected
     }
 
+    pub fn admit_flip(
+        &mut self,
+        output: Option<GpuTensorHandle>,
+        source: usize,
+        axis: usize,
+        shape: &[usize],
+    ) -> ProviderExecutionResult<usize> {
+        let output = output.ok_or_else(|| {
+            ProviderExecutionError::from(anyhow::anyhow!(
+                "iir_zero_phase: required flip stage unavailable"
+            ))
+        })?;
+        let input = self.get(source);
+        if !runmat_types::geometry::FlipGeometry::new(input.shape(), &[axis]).has_effect()
+            && output.shares_allocation_with(input)
+            && output.view() == input.view()
+            && output.shape() == shape
+        {
+            output.allocation_lease().validate_live()?;
+            return Ok(source);
+        }
+        self.admit(output, shape, StageClass::Real)
+    }
+
     pub fn admit(
         &mut self,
         handle: GpuTensorHandle,

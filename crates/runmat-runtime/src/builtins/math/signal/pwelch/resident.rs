@@ -114,7 +114,15 @@ pub(super) async fn output_gpu(
         WelchTrace::Mean => provider
             .reduce_mean_nd(&ps_frames, &[1])
             .await
-            .map_err(preparation_failure)?,
+            .map_err(|error| preparation_failure(error.after_effect()))?
+            .ok_or_else(|| {
+                preparation_failure(
+                    runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                        "pwelch: required resident mean unavailable"
+                    ))
+                    .after_effect(),
+                )
+            })?,
         WelchTrace::MaxHold | WelchTrace::MinHold => {
             let result = match options.trace {
                 WelchTrace::MaxHold => provider.reduce_max_dim(&ps_frames, 1).await,

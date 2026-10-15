@@ -19,15 +19,12 @@ fn complex_mean_dim_reports_capability_only_after_owner_and_dimension_admission(
         })
         .unwrap();
     for dim in 0..3 {
-        let error = block_on(provider.reduce_mean_dim(&input, dim)).unwrap_err();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &error
-        ));
+        assert!(block_on(provider.reduce_mean_dim(&input, dim))
+            .unwrap()
+            .is_none());
     }
     let error = block_on(provider.reduce_mean_dim(&input, 3)).unwrap_err();
-    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-        &error
-    ));
+    assert!(!error.is_unsupported());
     input.allocation_lease().validate_live().unwrap();
 }
 
@@ -265,8 +262,12 @@ fn native_means_preserve_single_and_double_without_a_host_roundtrip() {
             })
             .unwrap();
         provider.reset_telemetry();
-        let first = block_on(provider.reduce_mean_dim(&input, 0)).unwrap();
-        let second = block_on(provider.reduce_mean_dim(&input, 1)).unwrap();
+        let first = block_on(provider.reduce_mean_dim(&input, 0))
+            .unwrap()
+            .expect("admitted mean");
+        let second = block_on(provider.reduce_mean_dim(&input, 1))
+            .unwrap()
+            .expect("admitted mean");
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(first.shape(), &[1, 2]);
         assert_eq!(second.shape(), &[2, 1]);

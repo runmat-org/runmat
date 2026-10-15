@@ -7,24 +7,26 @@
 
 use super::{geometry::NdReductionGeometry, GpuTensorHandle, WgpuProvider};
 use anyhow::{ensure, Result};
-use runmat_accelerate_api::{unsupported_provider_operation, GpuTensorStorage};
+use runmat_accelerate_api::GpuTensorStorage;
 
 impl WgpuProvider {
     pub(crate) fn reduce_rank_n_mean_dim_exec(
         &self,
         input: &GpuTensorHandle,
         axis: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> Result<Option<GpuTensorHandle>> {
         let entry = self.real_floating_entry(input)?;
+        ensure!(
+            axis < entry.shape.len(),
+            "reduce_mean_dim: dimension out of bounds"
+        );
         if entry.shape.len() <= 2
             || axis >= entry.shape.len()
             || entry.shape.contains(&0)
             || entry.storage != GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(input)
         {
-            return Err(unsupported_provider_operation(
-                "rank-N resident dimensional mean requires a nonempty real floating tensor and an in-bounds axis",
-            ));
+            return Ok(None);
         }
         let axes = [axis];
         let geometry = NdReductionGeometry::new(&entry.shape, &axes, "reduce_mean_dim")?;
@@ -36,20 +38,18 @@ impl WgpuProvider {
                 "rank-N mean cache pair no longer matches the selected source"
             );
             self.validate_nd_moment_pair(input, &axes, pinned.mean(), pinned.ex2())?;
-            return Ok(pinned.into_mean());
+            return Ok(Some(pinned.into_mean()));
         }
-        let selected = self
-            .prepare_cold_mean_nd_exec(input, &axes)?
-            .ok_or_else(|| {
-                unsupported_provider_operation("rank-N mean has no qualified N-D route")
-            })?;
+        let Some(selected) = self.prepare_cold_mean_nd_exec(input, &axes)? else {
+            return Ok(None);
+        };
         ensure!(
             selected.output_shape() == geometry.out_shape.as_slice(),
             "rank-N mean cold route changed its output shape"
         );
         let executed = self.execute_cold_mean_nd_exec(selected)?;
         self.validate_nd_moment_pair(input, &axes, &executed.mean, &executed.ex2)?;
-        Ok(executed.mean)
+        Ok(Some(executed.mean))
     }
 }
 

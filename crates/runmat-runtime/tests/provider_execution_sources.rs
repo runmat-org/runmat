@@ -78,7 +78,16 @@ impl AccelProvider for Provider {
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.fail().map_err(ProviderExecutionError::from) })
     }
-    dimension_hook!(reduce_mean_dim);
+    fn reduce_mean_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            self.fail()
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
     dimension_hook!(reduce_integer_mean_native_dim);
     fn reduce_min_dim<'a>(
         &'a self,

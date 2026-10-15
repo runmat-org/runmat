@@ -270,13 +270,8 @@ async fn execute_staged(
         indices.state_shape(),
     )
     .await?;
-    let reversed = stages.admit(
-        provider
-            .flip(stages.get(first), &[request.axis])
-            .map_err(ProviderExecutionError::from)?,
-        shape,
-        StageClass::Real,
-    )?;
+    let flipped = provider.flip(stages.get(first), &[request.axis])?;
+    let reversed = stages.admit_flip(flipped, first, request.axis, shape)?;
     let second = pass(
         provider,
         request,
@@ -288,13 +283,8 @@ async fn execute_staged(
     )
     .await?;
     check_cancel(request)?;
-    let restored = stages.admit(
-        provider
-            .flip(stages.get(second), &[request.axis])
-            .map_err(ProviderExecutionError::from)?,
-        shape,
-        StageClass::Real,
-    )?;
+    let flipped = provider.flip(stages.get(second), &[request.axis])?;
+    let restored = stages.admit_flip(flipped, second, request.axis, shape)?;
     let output = provider
         .gather_linear(stages.get(restored), indices.trim(), request.input.shape())
         .map_err(ProviderExecutionError::from)?;

@@ -512,7 +512,19 @@ impl ImageNormalizeStageSession {
                     }
                 }
                 .map_err(|source| {
-                    let failure = ProviderExecutionError::from(source);
+                    let failure = source.with_unproven_effects();
+                    if first_stage && index == 0 {
+                        failure
+                    } else {
+                        failure.after_effect()
+                    }
+                })?
+                .ok_or_else(|| {
+                    let failure = ProviderExecutionError::from(
+                        runmat_accelerate_api::unsupported_provider_operation(
+                            "selected image mean stage unavailable",
+                        ),
+                    );
                     if first_stage && index == 0 {
                         failure
                     } else {

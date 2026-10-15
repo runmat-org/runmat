@@ -3695,10 +3695,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
         Ok(None)
     }
-    fn flip(&self, _handle: &GpuTensorHandle, _axes: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "flip not supported by provider",
-        ))
+    fn flip(
+        &self,
+        _handle: &GpuTensorHandle,
+        _axes: &[usize],
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // None certifies no staging, allocation or execution attempt.
+        Ok(None)
     }
     /// Read-only admission for the legacy unphased `circshift` hook. `false`
     /// proves only that no provider call was made and permits host fallback;
@@ -4014,19 +4017,22 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("cast_to_integer not supported by provider").into())
         })
     }
+    /// Optional global mean. None certifies no attempt, before provider effects;
+    /// every error retains its cause and is terminal, not a capability miss.
     fn reduce_mean<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_mean not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     /// Reduce mean across multiple zero-based dimensions in one device pass.
+    /// None certifies no attempt before effects; every error is terminal.
     fn reduce_mean_nd<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dims_zero_based: &'a [usize],
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_mean_nd not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     fn deep_learning_global_average_pool_1d<'a>(
         &'a self,
@@ -4231,12 +4237,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> AccelProviderFuture<'a, ProviderMoments2> {
         unsupported_future("reduce_moments_nd not supported by provider")
     }
+    /// Optional dimensional mean with the same no-attempt contract as global mean.
     fn reduce_mean_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_mean_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     fn reduce_std<'a>(
         &'a self,
@@ -5795,9 +5802,16 @@ mod tests {
         assert!(is_unsupported_provider_operation(
             &provider.ones(&[2, 3]).unwrap_err()
         ));
-        assert!(is_unsupported_provider_operation(
-            &provider.flip(&prototype, &[0]).unwrap_err()
-        ));
+        assert!(provider.flip(&prototype, &[0]).unwrap().is_none());
+        assert!(resolve_ready(provider.reduce_mean(&prototype))
+            .unwrap()
+            .is_none());
+        assert!(resolve_ready(provider.reduce_mean_dim(&prototype, 0))
+            .unwrap()
+            .is_none());
+        assert!(resolve_ready(provider.reduce_mean_nd(&prototype, &[0]))
+            .unwrap()
+            .is_none());
         assert!(is_unsupported_provider_operation(
             &provider.eye(&[2, 3]).unwrap_err()
         ));

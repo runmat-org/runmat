@@ -227,12 +227,18 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            self.intercept(Hook::Mean)?;
-            let mut shape = input.shape().to_vec();
-            shape[dim] = 1;
-            self.real(&shape)
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                self.intercept(Hook::Mean)?;
+                let mut shape = input.shape().to_vec();
+                shape[dim] = 1;
+                self.real(&shape)
+            }
+            .await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 

@@ -1022,21 +1022,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dims_zero_based: &'a [usize],
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let entry = self.get_entry_raw(a)?;
-            if entry.integer_type().is_some() {
-                self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a)
-            } else if entry.storage == GpuTensorStorage::ComplexInterleaved
-                && !dims_zero_based.is_empty()
-                && dims_zero_based.iter().all(|&dim| dim < entry.shape.len())
-            {
-                Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "complex resident mean requires a complex reduction kernel",
-                ))
-            } else {
-                self.reduce_nd_mean_exec(a, dims_zero_based).await
-            }
+            self.mean_nd_optional_exec(a, dims_zero_based)
+                .await
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })
         })
     }
 
@@ -2022,8 +2015,21 @@ impl AccelProvider for WgpuProvider {
             })
     }
 
-    fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
-        self.flip_exec(handle, axes)
+    fn flip(
+        &self,
+        handle: &GpuTensorHandle,
+        axes: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let allocated = std::cell::Cell::new(false);
+        self.flip_optional_exec(handle, axes, &allocated, &|_| Ok(()))
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if allocated.get() {
+                    error.after_effect()
+                } else {
+                    error.with_unproven_effects()
+                }
+            })
     }
 
     fn conv1d(
@@ -2753,26 +2759,11 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let entry = self.get_entry_raw(a)?;
-            if entry.integer_type().is_some() {
-                self.integer_reduce_mean_dim_exec(dim, "mean", a)
-            } else if entry.storage == GpuTensorStorage::ComplexInterleaved
-                && dim < entry.shape.len()
-            {
-                Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "complex resident mean requires a complex reduction kernel",
-                ))
-            } else if entry.shape.len() > 2 {
-                self.reduce_rank_n_mean_dim_exec(a, dim)
-            } else {
-                self.reduce_dim_sum_mean_exec(
-                    a,
-                    dim,
-                    crate::backend::wgpu::types::DimReduceOp::Mean,
-                )
-            }
+            self.mean_dim_optional_exec(a, dim).await.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
     fn reduce_any_dim<'a>(
@@ -2906,18 +2897,11 @@ impl AccelProvider for WgpuProvider {
     fn reduce_mean<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let entry = self.get_entry_raw(a)?;
-            if entry.integer_type().is_some() {
-                self.integer_reduce_mean_global_exec("mean", a)
-            } else if entry.storage == GpuTensorStorage::ComplexInterleaved {
-                Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "complex resident mean requires a complex reduction kernel",
-                ))
-            } else {
-                self.reduce_mean_global_exec(a)
-            }
+            self.mean_optional_exec(a).await.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
     fn reduce_std<'a>(

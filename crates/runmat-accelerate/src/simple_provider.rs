@@ -2829,41 +2829,28 @@ fn permute_integer_data(
 }
 
 fn flip_data<T: Copy>(data: &[T], shape: &[usize], axes: &[usize]) -> Result<Vec<T>> {
-    if axes.is_empty() || data.is_empty() {
-        return Ok(data.to_vec());
-    }
-    let mut ext_shape = shape.to_vec();
-    if let Some(max_dim) = axes.iter().copied().max() {
-        let needed = max_dim + 1;
-        if needed > ext_shape.len() {
-            ext_shape.extend(std::iter::repeat_n(1, needed - ext_shape.len()));
-        }
-    }
-    let total = product(&ext_shape);
+    let ext_shape = shape;
+    let total = logical_len_for_shape("flip", shape)?;
     ensure!(
         total == data.len(),
         "flip: shape/product mismatch ({} vs {})",
         total,
         data.len()
     );
-    let mut flip_flags = vec![false; ext_shape.len()];
-    for &axis in axes {
-        if axis < flip_flags.len() {
-            flip_flags[axis] = !flip_flags[axis];
-        }
-    }
-    if !flip_flags.iter().any(|&flag| flag) {
+    let geometry = runmat_types::geometry::FlipGeometry::new(shape, axes);
+    let flip_flags = geometry.reversed_axes();
+    if !geometry.has_effect() {
         return Ok(data.to_vec());
     }
     let mut out = Vec::with_capacity(total);
     for idx in 0..total {
-        let mut coords = unravel_index(idx, &ext_shape);
+        let mut coords = unravel_index(idx, ext_shape);
         for (axis, flag) in flip_flags.iter().enumerate() {
             if *flag && ext_shape[axis] > 1 {
                 coords[axis] = ext_shape[axis] - 1 - coords[axis];
             }
         }
-        let src_idx = ravel_index(&coords, &ext_shape);
+        let src_idx = ravel_index(&coords, ext_shape);
         out.push(data[src_idx]);
     }
     Ok(out)
@@ -7523,52 +7510,12 @@ impl AccelProvider for InProcessProvider {
         self.permute_structural(handle, order)
     }
 
-    fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
-        {
-            let guard = numeric_registry()
-                .lock_for(self.device_id)
-                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-            ensure!(
-                guard.get(handle).is_some(),
-                "flip: input is not a live owned allocation"
-            );
-        }
-        if handle.physical().storage() == GpuTensorStorage::ComplexInterleaved
-            || handle.physical().element_type() == NumericElementType::F32
-        {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "flip: representation requires typed host fallback",
-            ));
-        }
-        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            let data = integer_registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(handle)
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow!("flip: unknown integer tensor handle {}", handle.buffer_id())
-                })?;
-            return self.allocate_integer_tensor(
-                flip_integer_data(&data, handle.shape(), axes)?,
-                handle.shape().to_vec(),
-            );
-        }
-        let storage = runmat_accelerate_api::handle_storage(handle);
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(handle)
-                .ok_or_else(|| anyhow!("flip: unknown tensor handle {}", handle.buffer_id()))?
-                .clone()
-        };
-        let flipped = flip_data(&data, handle.shape(), axes)?;
-        self.allocate_produced(
-            InProcessNumericData::F64(flipped),
-            handle.shape().to_vec(),
-            storage,
-            handle.view().is_logical(),
-        )
+    fn flip(
+        &self,
+        handle: &GpuTensorHandle,
+        axes: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.flip_structural(handle, axes)
     }
 
     fn supports_circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> bool {
@@ -8163,23 +8110,34 @@ impl AccelProvider for InProcessProvider {
     fn reduce_mean<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_mean_native(a).await;
+            if !self.mean_hook_admitted(a, None).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })? {
+                return Ok(None);
             }
-            self.admit_mean_storage(a)?;
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let mean = if abuf.is_empty() {
-                0.0
-            } else {
-                abuf.iter().sum::<f64>() / (abuf.len() as f64)
-            };
-            drop(guard);
-            self.allocate_tensor_with_storage(vec![mean], vec![1, 1], GpuTensorStorage::Real)
+            let result: Result<GpuTensorHandle> = async {
+                if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                    return self.reduce_integer_mean_native(a).await;
+                }
+                self.admit_mean_storage(a)?;
+                let guard = registry(self.device_id).lock().unwrap();
+                let abuf = guard
+                    .get(a)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
+                let mean = if abuf.is_empty() {
+                    0.0
+                } else {
+                    abuf.iter().sum::<f64>() / (abuf.len() as f64)
+                };
+                drop(guard);
+                self.allocate_tensor_with_storage(vec![mean], vec![1, 1], GpuTensorStorage::Real)
+            }
+            .await;
+            result.map(Some).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -8187,12 +8145,23 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_mean_native_dim(a, dim).await;
+            if !self.mean_hook_admitted(a, Some(dim)).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })? {
+                return Ok(None);
             }
-            self.native_mean_dim(a, dim)
+            let result: Result<GpuTensorHandle> = async {
+                if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                    return self.reduce_integer_mean_native_dim(a, dim).await;
+                }
+                self.native_mean_dim(a, dim)
+            }
+            .await;
+            result.map(Some).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -10175,7 +10144,10 @@ mod tests {
             .permute(&input, &[1, 0])
             .expect("permute")
             .expect("supported");
-        let flipped = provider.flip(&permuted, &[0]).expect("flip");
+        let flipped = provider
+            .flip(&permuted, &[0])
+            .expect("flip")
+            .expect("admitted flip");
         let shifted = provider.circshift(&flipped, &[1, 0]).expect("circshift");
         let tiled = provider
             .repmat(&shifted, &[1, 2])
@@ -10268,7 +10240,9 @@ mod tests {
         let native_sum =
             block_on(provider.reduce_integer_sum_native(&input)).expect("native uint64 sum");
         let product = block_on(provider.reduce_prod(&input)).expect("public uint64 product");
-        let mean = block_on(provider.reduce_mean_dim(&input, 0)).expect("public uint64 mean");
+        let mean = block_on(provider.reduce_mean_dim(&input, 0))
+            .expect("public uint64 mean")
+            .expect("admitted integer mean");
 
         assert_eq!(runmat_accelerate_api::handle_integer_type(&sum), None);
         assert_eq!(
@@ -11241,8 +11215,9 @@ mod tests {
         assert_eq!(prod_values.shape, vec![1, 1]);
         assert_eq!(prod_values.data, vec![15.0]);
 
-        let mean_result =
-            futures::executor::block_on(provider.reduce_mean_dim(&handle, 1)).expect("mean dim1");
+        let mean_result = futures::executor::block_on(provider.reduce_mean_dim(&handle, 1))
+            .expect("mean dim1")
+            .expect("admitted mean");
         let mean_values =
             futures::executor::block_on(provider.download(&mean_result)).expect("mean values");
         assert_eq!(mean_values.shape, vec![1, 1]);

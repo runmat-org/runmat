@@ -17,6 +17,19 @@ enum Phase {
 }
 
 impl ResidentStageProgress {
+    pub(super) fn observe_optional<T>(
+        &mut self,
+        kind: ReductionKind,
+        result: runmat_accelerate_api::ProviderExecutionResult<Option<T>>,
+        detail: &'static str,
+    ) -> Result<T, Failure> {
+        match result {
+            Ok(Some(output)) => self.observe(kind, Ok::<T, ProviderExecutionError>(output)),
+            Ok(None) => Err(self.unavailable(kind, detail)),
+            Err(error) => self.observe(kind, Err(error.with_unproven_effects())),
+        }
+    }
+
     /// Observe a real provider hook, not static validation or a local identity
     /// return. A successful hook crosses the replay boundary before its output
     /// is admitted; a pending hook never reaches this method.

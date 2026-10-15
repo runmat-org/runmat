@@ -69,7 +69,9 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
         (1, vec![3, 1], vec![1.5, 3.5, 5.5], vec![2.5, 12.5, 30.5]),
     ] {
         let before = provider.telemetry_snapshot().download_bytes;
-        let mean = block_on(provider.reduce_mean_nd(&lazy, &[axis])).unwrap();
+        let mean = block_on(provider.reduce_mean_nd(&lazy, &[axis]))
+            .unwrap()
+            .expect("admitted mean");
         assert_eq!(provider.telemetry_snapshot().download_bytes, before);
         assert_eq!(mean.shape(), shape);
         assert_eq!(mean.physical().element_type(), class);
@@ -79,7 +81,9 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
         // A second call must reuse the cache under the original view, not a
         // transient materialized view whose lease has already been released.
         let before = provider.telemetry_snapshot().download_bytes;
-        let repeated = block_on(provider.reduce_mean_nd(&lazy, &[axis])).unwrap();
+        let repeated = block_on(provider.reduce_mean_nd(&lazy, &[axis]))
+            .unwrap()
+            .expect("admitted mean");
         assert_eq!(provider.telemetry_snapshot().download_bytes, before);
         assert!(repeated.shares_allocation_with(&mean));
         assert!(provider
@@ -155,7 +159,9 @@ fn exercise_source_retirement_with_cached_pair(poison_cache: bool) {
         })
         .unwrap();
     let input_weak = input.downgrade();
-    let mean = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let mean = block_on(provider.reduce_mean_nd(&input, &[0]))
+        .unwrap()
+        .expect("admitted mean");
     let (cached_mean, cached_ex2) = provider
         .reduction_reuse
         .lock()
@@ -206,7 +212,9 @@ fn actual_pinned_warm_pair_survives_source_retirement_until_consumed() {
             storage: runmat_accelerate_api::GpuTensorStorage::Real,
         })
         .unwrap();
-    let produced = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let produced = block_on(provider.reduce_mean_nd(&input, &[0]))
+        .unwrap()
+        .expect("admitted mean");
     let (cached_mean, cached_ex2) = provider
         .reduction_reuse
         .lock()
@@ -263,7 +271,9 @@ fn actual_selected_cold_mean_executes_one_exact_moments_route() {
     );
     // A concurrent ordinary call may warm the cache after selection. The
     // selected cold executor must not silently switch to that warm output.
-    let concurrently_warmed = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let concurrently_warmed = block_on(provider.reduce_mean_nd(&input, &[0]))
+        .unwrap()
+        .expect("admitted mean");
     let executed = provider.execute_cold_mean_nd(selected).unwrap();
     assert_eq!(executed.requested_pair_bytes, 16);
     assert!(executed.observed_pair_bytes >= executed.requested_pair_bytes);
@@ -301,7 +311,9 @@ fn dropped_source_view_is_pruned_while_physical_sibling_remains_live() {
     let view = provider.transpose_exec(&original).unwrap();
     assert_ne!(view.view_identity(), original.view_identity());
     let view_identity = view.view_identity();
-    let mean = block_on(provider.reduce_mean_nd(&view, &[0])).unwrap();
+    let mean = block_on(provider.reduce_mean_nd(&view, &[0]))
+        .unwrap()
+        .expect("admitted mean");
     let weak_mean = mean.downgrade();
     drop(mean);
     drop(view);
@@ -315,7 +327,9 @@ fn dropped_source_view_is_pruned_while_physical_sibling_remains_live() {
             .is_some(),
         "bounded cache retains pair until next insertion or eviction"
     );
-    let replacement = block_on(provider.reduce_mean_nd(&original, &[0])).unwrap();
+    let replacement = block_on(provider.reduce_mean_nd(&original, &[0]))
+        .unwrap()
+        .expect("admitted mean");
     assert!(
         provider
             .reduction_reuse

@@ -65,15 +65,25 @@ fn actual_nested_rank_three(precision: NumericPrecision) {
     assert!(cold.requested_uniform_bytes() > 0);
     assert!(cold.validate_live_source(&input).unwrap());
     drop(cold);
-    let mu_height = block_on(provider.reduce_mean_dim(&input, 1)).unwrap();
+    let mu_height = block_on(provider.reduce_mean_dim(&input, 1))
+        .unwrap()
+        .expect("admitted mean");
     assert_eq!(mu_height.shape(), [2, 1, 4]);
-    let warm = block_on(provider.reduce_mean_dim(&input, 1)).unwrap();
+    let warm = block_on(provider.reduce_mean_dim(&input, 1))
+        .unwrap()
+        .expect("admitted mean");
     assert!(warm.shares_allocation_with(&mu_height));
-    let mu = block_on(provider.reduce_mean_dim(&mu_height, 2)).unwrap();
+    let mu = block_on(provider.reduce_mean_dim(&mu_height, 2))
+        .unwrap()
+        .expect("admitted mean");
     assert_eq!(mu.shape(), [2, 1, 1]);
-    let width_first = block_on(provider.reduce_mean_dim(&input, 2)).unwrap();
+    let width_first = block_on(provider.reduce_mean_dim(&input, 2))
+        .unwrap()
+        .expect("admitted mean");
     assert_eq!(width_first.shape(), [2, 3, 1]);
-    let reverse = block_on(provider.reduce_mean_dim(&width_first, 1)).unwrap();
+    let reverse = block_on(provider.reduce_mean_dim(&width_first, 1))
+        .unwrap()
+        .expect("admitted mean");
     assert_eq!(reverse.shape(), [2, 1, 1]);
     assert_eq!(
         provider.telemetry_snapshot().download_bytes,
@@ -138,7 +148,9 @@ fn actual_rank_four(precision: NumericPrecision) {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let result = block_on(provider.reduce_mean_dim(&input, 3)).unwrap();
+    let result = block_on(provider.reduce_mean_dim(&input, 3))
+        .unwrap()
+        .expect("admitted mean");
     assert_eq!(result.shape(), [2, 3, 4, 1]);
     let downloaded = block_on(provider.download_numeric_exec(&result)).unwrap();
     match (precision, downloaded.data) {
@@ -192,7 +204,9 @@ fn actual_f64_owner_preserves_f32_rank_n_mean_and_hidden_pair() {
     assert_eq!(cold.requested_pair_bytes(), Some(64));
     assert!(cold.validate_live_source(&input).unwrap());
     drop(cold);
-    let first = block_on(provider.reduce_mean_dim(&input, 1)).unwrap();
+    let first = block_on(provider.reduce_mean_dim(&input, 1))
+        .unwrap()
+        .expect("admitted mean");
     let pair = provider
         .reserve_cached_mean_nd(&input, &[1])
         .unwrap()
@@ -204,9 +218,15 @@ fn actual_f64_owner_preserves_f32_rank_n_mean_and_hidden_pair() {
     );
     assert!(!pair.ex2().shares_allocation_with(&input));
     assert!(!pair.ex2().shares_allocation_with(&first));
-    let second = block_on(provider.reduce_mean_dim(&first, 2)).unwrap();
-    let combined = block_on(provider.reduce_mean_nd(&input, &[1, 2])).unwrap();
-    let unsorted_direct = block_on(provider.reduce_mean_nd(&input, &[2, 1])).unwrap();
+    let second = block_on(provider.reduce_mean_dim(&first, 2))
+        .unwrap()
+        .expect("admitted mean");
+    let combined = block_on(provider.reduce_mean_nd(&input, &[1, 2]))
+        .unwrap()
+        .expect("admitted mean");
+    let unsorted_direct = block_on(provider.reduce_mean_nd(&input, &[2, 1]))
+        .unwrap()
+        .expect("admitted mean");
     assert!(provider
         .prepare_cold_mean_nd(&input, &[2, 1])
         .unwrap()
