@@ -51,6 +51,22 @@ pub(crate) fn graphics_receiver_valid(_receiver: &runmat_value::GraphicsReceiver
     false
 }
 
+pub(crate) fn graphics_callback_payload_valid(
+    receiver: &runmat_value::GraphicsReceiverRef,
+    kind: runmat_value::GraphicsCallbackKind,
+    payload: &runmat_value::GraphicsCallbackRolePayload,
+) -> bool {
+    #[cfg(feature = "plot-core")]
+    {
+        crate::builtins::plotting::state::callback_payload_valid(receiver, kind, payload)
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = (receiver, kind, payload);
+        false
+    }
+}
+
 /// Preserve the owning builtin's public error while retaining the original
 /// cause, span, and retry disposition.
 pub(crate) fn with_render_cause(

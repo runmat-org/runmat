@@ -1,6 +1,6 @@
 //! Session-local graphics callback ingress and ordered drain.
 //!
-//! GUI/browser producers receive only a `Send` metadata port. Callable values,
+//! GUI/browser producers receive only a `Send` selection port. Callable values,
 //! selected invocation context, and workspaces remain on the session lane.
 //! The Core session must own this queue strongly; an installed presentation
 //! service may refer to it only weakly, because registrations retain selected
@@ -9,6 +9,7 @@
 use super::{RuntimeContext, RuntimeContextLocalId, RuntimeServiceFuture};
 use crate::{build_runtime_error, RuntimeError};
 pub use runmat_value::GraphicsCallbackIngressFailure;
+pub use runmat_value::GraphicsCallbackRolePayload;
 pub use runmat_value::{GraphicsCallbackKind, GraphicsCallbackResult};
 use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef};
 use std::cell::{Cell, RefCell};
@@ -52,12 +53,14 @@ struct Envelope {
     /// must never execute the new callable at that same registration slot.
     claim: Arc<CallbackClaim>,
     event: GraphicsCallbackHostEvent,
+    payload: Option<GraphicsCallbackRolePayload>,
     reply: Option<Arc<HostReply>>,
 }
 
 /// This is the sole part that may cross the GUI/worker boundary.
 #[derive(Clone)]
 pub struct GraphicsCallbackIngress {
+    representation: IngressRepresentation,
     registration: u64,
     figure: u32,
     kind: GraphicsCallbackKind,
@@ -65,6 +68,12 @@ pub struct GraphicsCallbackIngress {
     closed: Arc<AtomicBool>,
     sender: SyncSender<Envelope>,
     admission_wake: Arc<Notify>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum IngressRepresentation {
+    Metadata,
+    Bound,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,6 +105,12 @@ impl GraphicsCallbackIngress {
         &self,
         event: GraphicsCallbackHostEvent,
     ) -> Result<(), GraphicsCallbackIngressError> {
+        if self.representation != IngressRepresentation::Metadata {
+            return Err(GraphicsCallbackIngressError {
+                event,
+                failure: GraphicsCallbackIngressFailure::MismatchedScope,
+            });
+        }
         if event.figure != self.figure || event.kind != self.kind {
             return Err(GraphicsCallbackIngressError {
                 event,
@@ -113,6 +128,7 @@ impl GraphicsCallbackIngress {
                 registration: self.registration,
                 claim: Arc::clone(&self.live),
                 event,
+                payload: None,
                 reply: None,
             })
             .map_err(|error| match error {
@@ -148,6 +164,34 @@ impl GraphicsCallbackIngress {
         &self,
         event: GraphicsCallbackHostEvent,
     ) -> Result<GraphicsCallbackHostTicket, GraphicsCallbackIngressError> {
+        self.request_inner(event, None)
+    }
+
+    pub fn request_bound(
+        &self,
+        event: GraphicsCallbackHostEvent,
+        payload: GraphicsCallbackRolePayload,
+    ) -> Result<GraphicsCallbackHostTicket, GraphicsCallbackIngressError> {
+        if !payload.matches_role(event.kind) {
+            return Err(GraphicsCallbackIngressError {
+                event,
+                failure: GraphicsCallbackIngressFailure::MismatchedScope,
+            });
+        }
+        self.request_inner(event, Some(payload))
+    }
+
+    fn request_inner(
+        &self,
+        event: GraphicsCallbackHostEvent,
+        payload: Option<GraphicsCallbackRolePayload>,
+    ) -> Result<GraphicsCallbackHostTicket, GraphicsCallbackIngressError> {
+        if (self.representation == IngressRepresentation::Bound) != payload.is_some() {
+            return Err(GraphicsCallbackIngressError {
+                event,
+                failure: GraphicsCallbackIngressFailure::MismatchedScope,
+            });
+        }
         if event.figure != self.figure || event.kind != self.kind {
             return Err(GraphicsCallbackIngressError {
                 event,
@@ -166,6 +210,7 @@ impl GraphicsCallbackIngress {
                 registration: self.registration,
                 claim: Arc::clone(&self.live),
                 event,
+                payload,
                 reply: Some(Arc::clone(&reply)),
             })
             .map_err(|error| match error {
@@ -199,9 +244,36 @@ pub type GraphicsCallbackResponder =
         GraphicsCallbackHostEvent,
     ) -> RuntimeServiceFuture<Result<GraphicsCallbackResult, RuntimeError>>;
 
+pub type GraphicsBoundCallbackResponder =
+    dyn Fn(
+        GraphicsCallbackHostEvent,
+        GraphicsCallbackRolePayload,
+    ) -> RuntimeServiceFuture<Result<GraphicsCallbackResult, RuntimeError>>;
+
+#[derive(Clone)]
+enum RegisteredCallback {
+    Metadata(Rc<GraphicsCallbackResponder>),
+    Bound(Rc<GraphicsBoundCallbackResponder>),
+}
+
+impl From<Rc<GraphicsCallbackResponder>> for RegisteredCallback {
+    fn from(value: Rc<GraphicsCallbackResponder>) -> Self {
+        Self::Metadata(value)
+    }
+}
+
+impl RegisteredCallback {
+    fn representation(&self) -> IngressRepresentation {
+        match self {
+            Self::Metadata(_) => IngressRepresentation::Metadata,
+            Self::Bound(_) => IngressRepresentation::Bound,
+        }
+    }
+}
+
 struct Registration {
     selected: RuntimeContext,
-    callback: Rc<GraphicsCallbackResponder>,
+    callback: RegisteredCallback,
     figure: u32,
     kind: GraphicsCallbackKind,
     receiver: Option<GraphicsReceiverRef>,
@@ -264,7 +336,7 @@ impl WeakRuntimeGraphicsCallbackQueue {
         self.0.upgrade().map(RuntimeGraphicsCallbackQueue)
     }
 
-    fn points_to(&self, queue: &RuntimeGraphicsCallbackQueue) -> bool {
+    pub(crate) fn points_to(&self, queue: &RuntimeGraphicsCallbackQueue) -> bool {
         self.0
             .upgrade()
             .is_some_and(|owner| Rc::ptr_eq(&owner, &queue.0))
@@ -420,6 +492,37 @@ impl RuntimeGraphicsCallbackQueue {
         kind: GraphicsCallbackKind,
         callback: Rc<GraphicsCallbackResponder>,
     ) -> Result<GraphicsCallbackIngress, RuntimeError> {
+        self.replace_property(
+            selected,
+            receiver,
+            kind,
+            RegisteredCallback::Metadata(callback),
+        )
+    }
+
+    pub fn replace_graphics_bound_property_response(
+        &self,
+        selected: RuntimeContext,
+        receiver: GraphicsReceiverRef,
+        kind: GraphicsCallbackKind,
+        callback: Rc<GraphicsBoundCallbackResponder>,
+    ) -> Result<GraphicsCallbackIngress, RuntimeError> {
+        self.replace_property(
+            selected,
+            receiver,
+            kind,
+            RegisteredCallback::Bound(callback),
+        )
+    }
+
+    fn replace_property(
+        &self,
+        selected: RuntimeContext,
+        receiver: GraphicsReceiverRef,
+        kind: GraphicsCallbackKind,
+        callback: RegisteredCallback,
+    ) -> Result<GraphicsCallbackIngress, RuntimeError> {
+        let representation = callback.representation();
         let figure = self.validate_graphics_source(&selected, &receiver)?;
         self.prune_retired_graphics_properties();
         let mut properties = self.0.property_registrations.borrow_mut();
@@ -457,6 +560,7 @@ impl RuntimeGraphicsCallbackQueue {
             old_live.retire();
             drop(old);
             return Ok(GraphicsCallbackIngress {
+                representation,
                 registration: id,
                 figure,
                 kind,
@@ -468,7 +572,7 @@ impl RuntimeGraphicsCallbackQueue {
         }
         drop(properties);
         let (owner, ingress) =
-            self.register_graphics_response(selected, receiver.clone(), kind, callback)?;
+            self.register_inner(selected, figure, kind, Some(receiver.clone()), callback)?;
         self.0
             .property_registrations
             .borrow_mut()
@@ -507,11 +611,17 @@ impl RuntimeGraphicsCallbackQueue {
             let properties = self.0.property_registrations.borrow();
             properties
                 .iter()
-                .map(|property| (property.receiver.clone(), property.kind))
+                .map(|property| {
+                    (
+                        property.receiver.clone(),
+                        property.kind,
+                        property.owner.live.is_live(),
+                    )
+                })
                 .collect::<Vec<_>>()
         };
-        for (receiver, kind) in candidates {
-            if !crate::plotting_hooks::graphics_receiver_valid(&receiver) {
+        for (receiver, kind, live) in candidates {
+            if !live || !crate::plotting_hooks::graphics_receiver_valid(&receiver) {
                 self.clear_graphics_property_response(&receiver, kind);
             }
         }
@@ -523,8 +633,10 @@ impl RuntimeGraphicsCallbackQueue {
         figure: u32,
         kind: GraphicsCallbackKind,
         receiver: Option<GraphicsReceiverRef>,
-        callback: Rc<GraphicsCallbackResponder>,
+        callback: impl Into<RegisteredCallback>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
+        let callback = callback.into();
+        let representation = callback.representation();
         if self.is_closed() {
             return Err(build_runtime_error("graphics callback session has retired")
                 .with_identifier("RunMat:graphics:CallbackSessionRetired")
@@ -565,6 +677,7 @@ impl RuntimeGraphicsCallbackQueue {
                 live: live.clone(),
             },
             GraphicsCallbackIngress {
+                representation,
                 registration: id,
                 figure,
                 kind,
@@ -657,11 +770,12 @@ impl RuntimeGraphicsCallbackQueue {
                                 registration.selected.clone(),
                                 registration.callback.clone(),
                                 Arc::clone(&registration.live),
+                                registration.receiver.clone(),
                             )
                         })
                     })
             };
-            let Some((selected, callback, claim)) = selected else {
+            let Some((selected, callback, claim, receiver)) = selected else {
                 // A retired registration cannot be resurrected by a late host
                 // event, even when its numeric figure handle has been reused.
                 if let Some(reply) = &envelope.reply {
@@ -683,6 +797,26 @@ impl RuntimeGraphicsCallbackQueue {
                 .checkpoint(1)
                 .await
                 .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+            let payload_valid = || match &callback {
+                RegisteredCallback::Metadata(_) => envelope.payload.is_none(),
+                RegisteredCallback::Bound(_) => receiver
+                    .as_ref()
+                    .zip(envelope.payload.as_ref())
+                    .is_some_and(|(receiver, payload)| {
+                        crate::plotting_hooks::graphics_callback_payload_valid(
+                            receiver,
+                            envelope.event.kind,
+                            payload,
+                        )
+                    }),
+            };
+            if !payload_valid() {
+                if let Some(reply) = &envelope.reply {
+                    reply.reject_queued(GraphicsCallbackHostFailure::Retired);
+                }
+                *self.0.in_flight.borrow_mut() = None;
+                continue;
+            }
             // The owner may replace or retire this registration while the
             // cooperation turn is pending. Starting an invocation and
             // retiring its claim have one atomic winner.
@@ -702,9 +836,48 @@ impl RuntimeGraphicsCallbackQueue {
             }
             *self.0.in_flight.borrow_mut() = Some(InFlight::Invoking(Arc::clone(&envelope)));
             let event = envelope.event;
-            let result = selected.scope(async move { callback(event).await }).await;
-            invocation.terminal();
+            let result = selected
+                .scope(async {
+                    match &callback {
+                        RegisteredCallback::Metadata(callback) => callback(event).await,
+                        RegisteredCallback::Bound(callback) => {
+                            callback(
+                                event,
+                                envelope
+                                    .payload
+                                    .as_ref()
+                                    .expect("bound payload admitted")
+                                    .clone(),
+                            )
+                            .await
+                        }
+                    }
+                })
+                .await;
             *self.0.in_flight.borrow_mut() = None;
+            if callback.representation() == IngressRepresentation::Bound
+                && !(payload_valid()
+                    && claim.is_live()
+                    && !self.is_closed()
+                    && !selected.is_cancelled())
+            {
+                // Effects may already have occurred. Retire the ticket without
+                // publishing success or replacing the callback's primary error.
+                if let Some(reply) = &envelope.reply {
+                    reply.close_started();
+                }
+                *self.0.in_flight.borrow_mut() =
+                    Some(InFlight::Indeterminate(Arc::clone(&envelope)));
+                return match result {
+                    Err(error) => Err(error),
+                    Ok(_) => Err(build_runtime_error(
+                        "graphics callback authority changed after invocation",
+                    )
+                    .with_identifier("RunMat:graphics:CallbackIndeterminate")
+                    .build()),
+                };
+            }
+            invocation.terminal();
             match result {
                 Ok(value) => {
                     let valid = matches!(

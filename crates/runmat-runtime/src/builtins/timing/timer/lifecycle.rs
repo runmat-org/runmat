@@ -205,34 +205,7 @@ fn background_callback_runtime(
     runtime: &RuntimeContext,
     requires_source_evaluation: bool,
 ) -> BuiltinResult<RuntimeContext> {
-    let policy = crate::context::RuntimeLanguagePolicy {
-        language_mode: runtime.language_mode(),
-        extensions_enabled: runtime.runmat_extensions_enabled(),
-        top_level_await_enabled: runtime.top_level_await_enabled(),
-        dynamic_eval_enabled: runtime.dynamic_eval_enabled(),
-    };
-    let mut services = runtime.service_ports().clone().without_workspace();
-    if let Some(base) = runtime.service_ports().base_workspace() {
-        let base_service = Rc::new(crate::workspace::BaseWorkspaceService::new(base.owner()));
-        services = services.with_workspace(base_service);
-    } else if requires_source_evaluation {
-        runtime
-            .service_ports()
-            .require_base_workspace("timer text callback")
-            .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
-    }
-    if let Some(source_evaluation) = runtime.service_ports().source_evaluation() {
-        services = services.with_source_evaluation(source_evaluation.bind_background_authority()?);
-    } else if requires_source_evaluation {
-        runtime
-            .service_ports()
-            .require_source_evaluation("timer text callback")
-            .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
-    }
-    Ok(runtime
-        .clone()
-        .with_language_policy(policy)
-        .with_service_ports(services))
+    runtime.background_callback_runtime(requires_source_evaluation, "timer text callback")
 }
 
 async fn run_timer_task(

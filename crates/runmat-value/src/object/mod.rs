@@ -18,7 +18,7 @@ pub use containers_map::{
 pub use dynamic_property::DynamicPropertyDef;
 pub use graphics_callback::{
     GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
-    GraphicsCallbackKind, GraphicsCallbackResult,
+    GraphicsCallbackKind, GraphicsCallbackResult, GraphicsCallbackRolePayload,
 };
 pub use graphics_receiver::{GraphicsReceiverKind, GraphicsReceiverRef};
 pub use graphics_scene::GraphicsSceneLease;

@@ -26,17 +26,32 @@ runmat_thread_local! {
 pub(crate) struct PlotCallbackRoot {
     pub(crate) value: Value,
     pub(crate) live: Arc<AtomicBool>,
+    _roots: crate::execution::RootedValueLease,
+    // No role is published merely because its property value was stored.
+    _behavior_authority: Option<crate::context::BackgroundCallbackAuthority>,
 }
+
+#[path = "callbacks/behavior.rs"]
+mod behavior;
+pub(super) use behavior::retain_behavior;
 
 #[derive(Clone, Debug)]
 pub struct PlotCallableToken(Arc<PlotCallableLease>);
 
-#[derive(Debug)]
 struct PlotCallableLease {
     slot: u64,
     owner: PlotCallableOwner,
     origin_thread: std::thread::ThreadId,
     live: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for PlotCallableLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlotCallableLease")
+            .field("slot", &self.slot)
+            .field("owner", &self.owner)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for PlotCallableLease {
@@ -91,11 +106,23 @@ pub(crate) fn take_revoked(values: &mut HashMap<u64, PlotCallbackRoot>) -> Vec<P
 }
 
 pub fn retain(value: Value, builtin: &'static str) -> BuiltinResult<PlotCallableToken> {
+    retain_root(value, None, builtin)
+}
+
+fn retain_root(
+    value: Value,
+    authority: Option<crate::context::BackgroundCallbackAuthority>,
+    builtin: &'static str,
+) -> BuiltinResult<PlotCallableToken> {
     let slot = reserve_slot(&NEXT_SLOT, builtin)?;
     let live = Arc::new(AtomicBool::new(true));
+    let roots = crate::execution::RootedValueLease::for_traced(&value)
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
     let root = PlotCallbackRoot {
         value,
         live: Arc::clone(&live),
+        _roots: roots,
+        _behavior_authority: authority,
     };
     if let Some(runtime) = crate::context::legacy::active() {
         runtime.retain_plot_callback(slot, root);
@@ -245,7 +272,7 @@ mod tests {
         let second = crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let token = {
             let _active = first.enter();
-            retain(Value::Num(17.0), "fsurf").unwrap()
+            retain_behavior(Value::Num(17.0), "pan").unwrap()
         };
         {
             let _active = second.enter();

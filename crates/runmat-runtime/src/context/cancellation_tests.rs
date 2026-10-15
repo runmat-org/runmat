@@ -59,6 +59,77 @@ fn rebinding_invocation_does_not_change_cached_context_generation() {
     );
 }
 
+#[cfg(feature = "plot-core")]
+#[test]
+fn background_selection_keeps_original_policy_cancellation_and_weak_session() {
+    use super::{RuntimeGraphicsCallbackQueue, RuntimeLanguageMode, RuntimeLanguagePolicy};
+    use std::num::NonZeroUsize;
+
+    let cancellation = CancellationSource::new();
+    let original = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
+    .with_language_policy(RuntimeLanguagePolicy {
+        language_mode: RuntimeLanguageMode::Strict,
+        extensions_enabled: false,
+        top_level_await_enabled: false,
+        dynamic_eval_enabled: false,
+    });
+    let state = Rc::downgrade(original.state());
+    let execution = Rc::downgrade(original.execution());
+    let selected = original.capture_background_callback(false).unwrap();
+    let queue = RuntimeGraphicsCallbackQueue::new_for_selected(
+        &original,
+        NonZeroUsize::new(1).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
+    );
+    let fresh = CancellationSource::new();
+    let attachment = original
+        .clone()
+        .with_cancellation_token(fresh.token())
+        .with_language_policy(RuntimeLanguagePolicy {
+            language_mode: RuntimeLanguageMode::RunMat,
+            extensions_enabled: true,
+            top_level_await_enabled: true,
+            dynamic_eval_enabled: true,
+        })
+        .with_service_ports(
+            RuntimeServicePorts::default().with_graphics_callback_queue(queue.downgrade()),
+        );
+    let restored = selected(&attachment).unwrap();
+    assert_eq!(restored.language_mode(), RuntimeLanguageMode::Strict);
+    assert!(!restored.runmat_extensions_enabled());
+    assert!(!restored.top_level_await_enabled());
+    assert!(!restored.dynamic_eval_enabled());
+    assert!(restored
+        .service_ports()
+        .graphics_callback_queue()
+        .unwrap()
+        .points_to(&queue));
+    let different_executor = attachment
+        .clone()
+        .with_execution(Rc::new(RuntimeExecutionService::new()));
+    assert!(selected(&different_executor).is_err());
+    let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    assert!(selected(&foreign).is_err());
+    cancellation.cancel(CancellationReason::User);
+    assert!(
+        selected(&attachment).is_err(),
+        "later cancellation cannot replace the original token"
+    );
+    assert!(!attachment.is_cancelled());
+    drop((restored, different_executor, attachment, original));
+    assert!(
+        state.upgrade().is_none(),
+        "the retained selection must not own session state"
+    );
+    assert!(
+        execution.upgrade().is_none(),
+        "the retained selection must not own the executor"
+    );
+}
+
 #[test]
 fn scoped_interrupt_changes_active_clone_family_and_restores_original() {
     let original = CancellationSource::new();
