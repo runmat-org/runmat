@@ -1,6 +1,8 @@
 use super::*;
 #[path = "tests/projection.rs"]
 mod projection;
+#[path = "tests/raw_constants.rs"]
+mod raw_constants;
 use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
 use crate::fusion_exec::{
     execute_reduction_with_shape_placed, execute_reduction_with_shape_placed_async,

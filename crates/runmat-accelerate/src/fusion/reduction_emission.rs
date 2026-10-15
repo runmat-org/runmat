@@ -1,7 +1,11 @@
 //! Sealed ordinary producer source for legacy reduction geometry. Numerical
 //! expressions and helpers come only from the checked typed fusion owner.
 
-use super::{semantics::ResolvedProgram, typed_producer::TypedProducer, FusionGroupPlan};
+use super::{
+    semantics::ResolvedProgram,
+    typed_producer::{producer_indices, TypedProducer},
+    FusionGroupPlan,
+};
 use crate::graph::ValueId;
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::{GpuTensorLayout, ProviderPrecision};
@@ -11,6 +15,29 @@ use runmat_runtime::value_fact::value_fact;
 use runmat_value::Value;
 use serde::Serialize;
 use std::collections::HashMap;
+
+/// Planner-only source geometry/dependency eligibility. It cannot choose
+/// literal words, source precision, numerical domain or selected bindings.
+pub(crate) fn structural_support(source: &FusionGroupPlan) -> bool {
+    let Some(root) = source.reduction_data else {
+        return false;
+    };
+    if source.inputs.is_empty() || source.legacy_reduction_axis().is_none() {
+        return false;
+    }
+    let leaves = source
+        .inputs
+        .iter()
+        .chain(source.const_values.keys())
+        .map(|&id| (id, String::new()))
+        .collect::<HashMap<_, _>>();
+    let Ok(selected) = producer_indices(source, &leaves, &[root]) else {
+        return false;
+    };
+    selected.into_iter().all(|index| {
+        super::expression::structural_operation_support(source, &source.operations[index])
+    })
+}
 
 pub(crate) struct ReductionProducerEmission {
     root: ValueId,

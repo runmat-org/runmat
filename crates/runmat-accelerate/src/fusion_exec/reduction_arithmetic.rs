@@ -15,25 +15,50 @@ pub(super) fn requires_selected_arithmetic(
     request: &FusionExecutionRequest<'_>,
     bindings: &AdmittedBindings,
 ) -> anyhow::Result<bool> {
-    if !(0..request.plan.operations.len()).any(|index| {
-        bindings.semantic(index).is_some_and(|snapshot| {
-            snapshot
-                .declaration
-                .semantics
-                .is_some_and(|semantics| semantics.required_arithmetic.is_some())
-        })
-    }) {
+    if request.plan.reduction_data.is_none() && !has_required_arithmetic(request, bindings) {
         return Ok(false);
     }
-    let (_, indices) = legacy_producer::project(request.plan)?;
-    Ok(indices.iter().any(|&index| {
+    let (producer, indices) = legacy_producer::project(request.plan)?;
+    Ok(has_captured_operands(&producer)
+        || indices.iter().any(|&index| {
+            bindings.semantic(index).is_some_and(|snapshot| {
+                snapshot
+                    .declaration
+                    .semantics
+                    .is_some_and(|semantics| semantics.required_arithmetic.is_some())
+            })
+        }))
+}
+
+fn has_required_arithmetic(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+) -> bool {
+    (0..request.plan.operations.len()).any(|index| {
         bindings.semantic(index).is_some_and(|snapshot| {
             snapshot
                 .declaration
                 .semantics
                 .is_some_and(|semantics| semantics.required_arithmetic.is_some())
         })
-    }))
+    })
+}
+
+/// Only consumed producer leaves need the typed constant owner. Reduction
+/// controls and unused cached values do not manufacture shader dependencies.
+fn has_captured_operands(producer: &FusionGroupPlan) -> bool {
+    producer
+        .output
+        .is_some_and(|id| producer.const_values.contains_key(&id))
+        || producer.operations.iter().any(|operation| {
+            let inputs = match operation {
+                crate::fusion::FusionOp::Primitive { inputs, .. }
+                | crate::fusion::FusionOp::Builtin { inputs, .. } => inputs,
+            };
+            inputs
+                .iter()
+                .any(|id| producer.const_values.contains_key(id))
+        })
 }
 
 pub(super) enum PreparedReductionArithmetic {
@@ -168,14 +193,10 @@ pub(super) async fn admitted(
     bindings: &AdmittedBindings,
     precision: ProviderPrecision,
 ) -> Result<Option<PreparedReductionArithmetic>, ProviderExecutionError> {
-    if !(0..request.plan.operations.len()).any(|index| {
-        bindings.semantic(index).is_some_and(|snapshot| {
-            snapshot
-                .declaration
-                .semantics
-                .is_some_and(|semantics| semantics.required_arithmetic.is_some())
-        })
-    }) {
+    // Typed reduction mapping can derive its root from the selected terminal
+    // even when no legacy axis/root description exists. Preserve that route;
+    // ordinary typed recipes prepare their own scalar leaves as data.
+    if request.plan.reduction_data.is_none() && !has_required_arithmetic(request, bindings) {
         return Ok(Some(PreparedReductionArithmetic::Unneeded));
     }
     let (producer, indices) = legacy_producer::project(request.plan)?;
@@ -183,12 +204,14 @@ pub(super) async fn admitted(
         .iter()
         .map(|&index| bindings.semantic(index))
         .collect();
-    if !snapshots.iter().flatten().any(|snapshot| {
-        snapshot
-            .declaration
-            .semantics
-            .is_some_and(|semantics| semantics.required_arithmetic.is_some())
-    }) {
+    if !has_captured_operands(&producer)
+        && !snapshots.iter().flatten().any(|snapshot| {
+            snapshot
+                .declaration
+                .semantics
+                .is_some_and(|semantics| semantics.required_arithmetic.is_some())
+        })
+    {
         return Ok(Some(PreparedReductionArithmetic::Unneeded));
     }
     // Async admission owns one observed proof pass, including rejected host

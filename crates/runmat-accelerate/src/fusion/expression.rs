@@ -53,7 +53,16 @@ pub(super) fn admitted_expression(
 }
 
 pub(super) fn structural_support(plan: &super::FusionGroupPlan) -> bool {
-    plan.operations.iter().all(|operation| match operation {
+    plan.operations
+        .iter()
+        .all(|operation| structural_operation_support(plan, operation))
+}
+
+pub(super) fn structural_operation_support(
+    plan: &super::FusionGroupPlan,
+    operation: &super::FusionOp,
+) -> bool {
+    match operation {
         super::FusionOp::Primitive { .. } => true,
         super::FusionOp::Builtin { name, .. } => {
             let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) else {
@@ -66,7 +75,7 @@ pub(super) fn structural_support(plan: &super::FusionGroupPlan) -> bool {
                 .and_then(|declaration| declaration.spec.elementwise.as_ref())
                 .is_some_and(|template| !template.scalar_precisions.is_empty())
         }
-    })
+    }
 }
 
 #[cfg(test)]

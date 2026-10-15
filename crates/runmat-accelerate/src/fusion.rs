@@ -1455,7 +1455,8 @@ impl FusionGroupPlan {
         // Determine kernel support:
         // - Elementwise: retain declared candidates; runtime facts and domain
         //   admission determine the actual typed shader before any upload.
-        // - Reduction: require WGSL generation at plan time as well.
+        // - Reduction: retain structurally eligible typed producers; captured
+        //   constant words and numerical admission are invocation-owned.
         // - Other kinds: executed via provider paths.
         let supported = if plan.has_native_integer_constants() {
             // Fusion WGSL has only floating scalar literals today.  Do not let
@@ -1472,7 +1473,7 @@ impl FusionGroupPlan {
                 expression::structural_support(&plan)
             }
         } else if plan.kernel.kind.is_reduction() {
-            plan.generate_reduction_wgsl("f32").is_some()
+            reduction_emission::structural_support(&plan)
         } else {
             true
         };
@@ -1994,37 +1995,10 @@ impl FusionGroupPlan {
             for (idx, &vid) in self.inputs.iter().enumerate().skip(1) {
                 exprs.insert(vid, format!("v{idx}"));
             }
-            for (vid, val) in &self.const_values {
-                let lit = match val {
-                    Value::Num(n) => {
-                        if scalar_ty == "f64" {
-                            format!("f64({})", n)
-                        } else {
-                            format!("{:?}", *n as f32)
-                        }
-                    }
-                    Value::Int(_) => return None,
-                    Value::Tensor(t) if t.integer_storage().is_none() && t.len() == 1 => {
-                        let scalar = t
-                            .numeric_value_at(0)
-                            .expect("validated floating scalar tensor")
-                            .materialize_f64();
-                        if scalar_ty == "f64" {
-                            format!("f64({})", scalar)
-                        } else {
-                            format!("{:?}", scalar as f32)
-                        }
-                    }
-                    _ => {
-                        if scalar_ty == "f64" {
-                            "f64(0.0)".to_string()
-                        } else {
-                            "0.0".to_string()
-                        }
-                    }
-                };
-                exprs.insert(*vid, lit);
-            }
+            // Captured producer scalars require the sealed typed emitter's
+            // represented-word policy. This compatibility path has no literal
+            // renderer: unused constants add nothing, invocation leaves win
+            // shadowed IDs, and a missing captured dependency cannot execute.
             let mut progressed = true;
             while progressed {
                 progressed = false;
