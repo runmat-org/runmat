@@ -340,7 +340,11 @@ async fn resolve<'a>(
         runmat_runtime::builtins::common::spec::checked_reduction_elements(&contract.input_shape)
             .and_then(|elements| u64::try_from(elements).ok())
             .ok_or_else(|| anyhow::anyhow!("reduction producer cardinality overflow"))?;
-    let producer_work_units = program.scalar_work_units(&mapped.producer, elements)?;
+    let producer_work_units = program.physical_scalar_work_units(
+        &mapped.producer,
+        elements,
+        &producer_implementations,
+    )?;
     // These are the actual invocation's checked producer output facts, in
     // executable operation order. Unknown extents do not qualify a resident
     // host route. The source program's cache identity above already includes

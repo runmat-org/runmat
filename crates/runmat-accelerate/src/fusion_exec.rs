@@ -310,6 +310,8 @@ struct FusionProviderContract<'a> {
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     semantic_identity: Option<runmat_execution::Digest>,
     scalar_work_units: Option<u64>,
+    /// Original-class host work, independent of emitted provider helpers.
+    host_scalar_work_units: Option<u64>,
     matmul: Option<matmul::workload::Selection<'a>>,
     preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
     shader_requirements: Option<ProviderShaderRequirements>,
@@ -335,6 +337,7 @@ fn select_fusion_provider(
                 .collect(),
             semantic_identity: None,
             scalar_work_units: None,
+            host_scalar_work_units: None,
             matmul: None,
             preparation_program: None,
             shader_requirements,
@@ -402,6 +405,7 @@ fn select_fusion_provider_with_implementation(
         outputs,
         semantic_identity,
         scalar_work_units,
+        host_scalar_work_units,
         matmul,
         preparation_program,
         shader_requirements,
@@ -511,10 +515,39 @@ fn select_fusion_provider_with_implementation(
 
     let operation = fusion_operation_token(&request.plan.group.kind);
     let element_count = u64::try_from(elements.unwrap_or(1)).unwrap_or(u64::MAX);
+    let host_available = match host {
+        host_readback::CpuHostPlacement::Readbacks(_) => true,
+        host_readback::CpuHostPlacement::Unavailable => false,
+        host_readback::CpuHostPlacement::Legacy => request
+            .inputs
+            .iter()
+            .chain(unbound_constant_values(request.plan))
+            .all(|value| !runmat_runtime::dispatcher::value_contains_gpu(value)),
+    };
+    let host_units = if let Some(contract) = &matmul {
+        // Original controls are checked at double precision, independently of
+        // a provider's optional narrower implementation.
+        crate::placement::matmul_scalar_work_units(&contract.workload, ProviderPrecision::F64)
+    } else if typed_elementwise {
+        host_scalar_work_units
+    } else {
+        // Non-scalar legacy domains retain their existing element prior.
+        Some(element_count)
+    };
+    if host_available && host_units.is_none() {
+        // Ordinary execution remains valid without a comparative cost proof.
+        // The caller retains any admitted private-readback continuation. Do
+        // not publish a fabricated estimate or timing feedback for this route.
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    }
     let execution_units = scalar_work_units.unwrap_or(element_count);
     let cpu_cost = ExecutionCostEstimate {
         components: ExecutionCostComponents {
-            execution_ns: execution_units.saturating_mul(100).max(100),
+            // With no host admission this descriptor is excluded from the
+            // candidate graph; its carrier is required by the local API.
+            execution_ns: host_units.map_or(0, |units| units.saturating_mul(100).max(100)),
             ..ExecutionCostComponents::default()
         },
         scratch_bytes: Some(0),
@@ -545,6 +578,7 @@ fn select_fusion_provider_with_implementation(
         source: EstimateSource::StaticPrior,
     };
     let cpu_admission = match host {
+        _ if host_units.is_none() => crate::placement::LocalCpuAdmission::Unavailable,
         host_readback::CpuHostPlacement::Legacy => crate::placement::LocalCpuAdmission::Legacy,
         host_readback::CpuHostPlacement::Unavailable => {
             crate::placement::LocalCpuAdmission::Unavailable
@@ -1329,6 +1363,7 @@ pub async fn execute_image_normalize_placed(
             outputs: vec![dense_output_representation(output_precision, output_shape)],
             semantic_identity: None,
             scalar_work_units: None,
+            host_scalar_work_units: None,
             matmul: None,
             preparation_program: None,
             shader_requirements: None,

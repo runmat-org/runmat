@@ -7,6 +7,8 @@ use runmat_types::{rules::RealFloatingRecipe, NumericClass, ScalarOperation};
 
 use super::{semantics::ResolvedProgram, FusionGroupPlan, FusionOp};
 
+mod implementation;
+
 impl ResolvedProgram {
     /// Ordinary bytecode materializes each operation at its own result shape;
     /// no final-shape broadcast or GPU scalar program is needed to price it.
@@ -37,6 +39,22 @@ impl ResolvedProgram {
             .iter()
             .map(|operation| self.operation_work_units(operation));
         total_work(elements, operations)
+    }
+
+    /// Price the physical implementations actually emitted by the selected
+    /// lowerer. Host execution continues to use its original semantic facts.
+    /// Elementwise coverage validation and reduction source mapping supply a
+    /// complete emitted operation plan here, not an unsliced source graph.
+    pub(crate) fn physical_scalar_work_units(
+        &self,
+        plan: &FusionGroupPlan,
+        elements: u64,
+        emitted: &[runmat_accelerate_api::scalar_program::EmittedScalarImplementation],
+    ) -> Result<u64> {
+        if emitted.is_empty() {
+            return self.scalar_work_units(plan, elements);
+        }
+        implementation::work_units(self, plan, elements, emitted)
     }
 
     /// Consume semantic facts, not GPU implementation admission: a valid host

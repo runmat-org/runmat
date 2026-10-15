@@ -62,6 +62,7 @@ pub(super) fn without_shader(
             outputs,
             semantic_identity: Some(identity),
             scalar_work_units: Some(work),
+            host_scalar_work_units: Some(work),
             matmul: None,
             preparation_program: None,
             shader_requirements: None,

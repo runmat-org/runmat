@@ -61,6 +61,7 @@ pub async fn execute_matmul_epilogue_placed(
             )],
             semantic_identity: None,
             scalar_work_units: None,
+            host_scalar_work_units: None,
             matmul: Some(contract),
             preparation_program: None,
             shader_requirements: None,

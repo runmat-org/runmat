@@ -60,6 +60,13 @@ fn scalar_multiply_uses_exact_words_without_changing_double_semantics() {
                 .unwrap();
             assert_eq!(shader.input_indices(), &[0]);
             assert!(shader.uses_exact_product_words());
+            assert_eq!(resolved.host_scalar_work_units(&source).unwrap(), 9);
+            assert_eq!(
+                resolved
+                    .physical_scalar_work_units(&source, 3, shader.implementations())
+                    .unwrap(),
+                3 * crate::kernel_math::product_exact::work_prior().algorithmic_units()
+            );
             assert!(shader.source().contains("struct Tensor { data: array<u32>"));
             assert!(shader
                 .source()
@@ -133,6 +140,29 @@ fn emitted_work_tracks_actual_slice_not_all_semantic_receipts() {
                 .collect::<Vec<_>>(),
             expected
         );
+        if roots.is_none() {
+            let mut emitted = producer.implementations().to_vec();
+            let base = resolved
+                .physical_scalar_work_units(&source, 1, &emitted)
+                .unwrap();
+            let boundary = crate::wgsl::ieee_words::binary32_widening_implementation(3);
+            emitted.push(boundary);
+            assert_eq!(
+                resolved
+                    .physical_scalar_work_units(&source, 1, &emitted)
+                    .unwrap(),
+                base + boundary.algorithmic_units_per_invocation
+            );
+            emitted.push(boundary);
+            assert!(resolved
+                .physical_scalar_work_units(&source, 1, &emitted)
+                .is_err());
+            emitted.pop();
+            emitted.push(emitted[0]);
+            assert!(resolved
+                .physical_scalar_work_units(&source, 1, &emitted)
+                .is_err());
+        }
     }
 }
 

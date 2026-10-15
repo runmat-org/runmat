@@ -213,10 +213,11 @@ async fn execute_elementwise_outputs(
             dense_output_representation(precision, &output_shape)
         })
         .collect();
-    let scalar_work_units = match u64::try_from(len)
-        .ok()
-        .and_then(|elements| program.scalar_work_units(request.plan, elements).ok())
-    {
+    let scalar_work_units = match u64::try_from(len).ok().and_then(|elements| {
+        program
+            .physical_scalar_work_units(request.plan, elements, &emitted_implementations)
+            .ok()
+    }) {
         Some(units) => units,
         None => {
             return Ok(FusionExecutionOutcome::SharedRuntime(
@@ -224,16 +225,6 @@ async fn execute_elementwise_outputs(
             ))
         }
     };
-    let semantic_identity = runmat_execution::Digest::sha256(
-        serde_json::to_vec(&(
-            program.cache_identity()?,
-            &shader,
-            exact_product_words,
-            &emitted_implementations,
-            scalar_work_units,
-        ))
-        .map_err(anyhow::Error::from)?,
-    );
     let has_host_operations = bindings.has_host_operations(request.runtime.as_ref());
     let has_resident = request
         .inputs
@@ -244,6 +235,31 @@ async fn execute_elementwise_outputs(
         .and(input_uses)
         .filter(|_| has_host_operations)
         .and_then(|uses| host_readback::admit(request, &bindings, provider, uses));
+    let original_host_program = admission
+        .is_none()
+        .then(|| bindings.host_facts(request, provider.precision()))
+        .flatten();
+    let original_host_program = admission
+        .as_ref()
+        .map(|admission| &admission.program)
+        .or(original_host_program.as_ref());
+    let host_scalar_work_units =
+        original_host_program.and_then(|program| program.host_scalar_work_units(request.plan).ok());
+    let semantic_identity = runmat_execution::Digest::sha256(
+        serde_json::to_vec(&(
+            "elementwise-independent-host-provider-work-v1",
+            program.cache_identity()?,
+            original_host_program
+                .map(|program| program.cache_identity())
+                .transpose()?,
+            host_scalar_work_units,
+            &shader,
+            exact_product_words,
+            &emitted_implementations,
+            scalar_work_units,
+        ))
+        .map_err(anyhow::Error::from)?,
+    );
     let host = if has_resident && vm_right.is_some() {
         admission.as_ref().map_or(
             super::host_readback::CpuHostPlacement::Unavailable,
@@ -262,6 +278,7 @@ async fn execute_elementwise_outputs(
             outputs: representations,
             semantic_identity: Some(semantic_identity),
             scalar_work_units: Some(scalar_work_units),
+            host_scalar_work_units,
             matmul: None,
             preparation_program: Some(
                 runmat_accelerate_api::ProviderPreparationProgram::Elementwise { shader: &shader },
