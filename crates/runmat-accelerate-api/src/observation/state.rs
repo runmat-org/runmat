@@ -12,8 +12,11 @@ pub use resources::{
     ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
 };
 use wgpu_measurement::WgpuMeasurementAggregate;
+mod real_unary;
+mod compound;
 
 struct State {
+    compound: Option<compound::CompoundObservation>,
     start: Option<Duration>,
     publication: Option<Duration>,
     completion: Option<Duration>,
@@ -212,6 +215,7 @@ impl ProviderOperationReceipt {
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
                     selected_execution: None,
+                    compound: None,
                     conditional_host_fallback: false,
                     conditional_provider_upload: false,
                     conditional_provider_upload_active: false,
@@ -293,7 +297,8 @@ impl ProviderOperationReceipt {
     /// host candidate or a provider-execution witness.
     pub fn allow_conditional_host_fallback(&mut self) {
         self.0.with(|state| {
-            if state.registered != 0
+            if state.compound.is_some()
+                || state.registered != 0
                 || state.publication.is_some()
                 || state.taken
                 || state.conditional_provider_upload
@@ -310,7 +315,11 @@ impl ProviderOperationReceipt {
     /// witness; neither an upload alone nor a direct-shader witness relabels it.
     pub fn allow_provider_host_mediated(&mut self) {
         self.0.with(|state| {
-            if state.registered != 0 || state.publication.is_some() || state.taken {
+            if state.compound.is_some()
+                || state.registered != 0
+                || state.publication.is_some()
+                || state.taken
+            {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.provider_host_mediated_allowed = true;
@@ -323,7 +332,8 @@ impl ProviderOperationReceipt {
     /// hook result, and its physical stage is budgeted with the route.
     pub fn allow_conditional_provider_upload(&mut self) {
         self.0.with(|state| {
-            if state.registered != 0
+            if state.compound.is_some()
+                || state.registered != 0
                 || state.publication.is_some()
                 || state.taken
                 || state.conditional_host_fallback
@@ -667,7 +677,8 @@ impl ProviderOperationRecorder {
         operation: &crate::ProviderOperationIdentity,
     ) {
         self.0.with(|state| {
-            if state.publication.is_some()
+            if state.compound.is_some()
+                || state.publication.is_some()
                 || state.taken
                 || state.provider_host_mediated_allowed
                 || state.expected_execution.as_ref().is_none_or(

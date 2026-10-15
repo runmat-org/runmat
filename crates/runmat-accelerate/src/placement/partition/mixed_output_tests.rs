@@ -241,8 +241,8 @@ fn both_output_roles_remain_retained_until_their_last_graph_consumer() {
     };
     let producer = &request.graph.nodes[0].candidates[1];
     let (host, providers) = next_retained_state(&request, &retention, 0, &empty, producer).unwrap();
-    assert_eq!(host.known_bytes, 8);
-    assert_eq!(providers[&7].known_bytes, 4);
+    assert_eq!(host.known_bytes(), 8);
+    assert_eq!(providers[&7].known_bytes(), 4);
     let after_producer = SearchState {
         selections: vec![1],
         total_ns: 0,
@@ -252,7 +252,7 @@ fn both_output_roles_remain_retained_until_their_last_graph_consumer() {
     let consumer = &request.graph.nodes[1].candidates[0];
     let (host, providers) =
         next_retained_state(&request, &retention, 1, &after_producer, consumer).unwrap();
-    assert_eq!(host.known_bytes, 0);
+    assert_eq!(host.known_bytes(), 0);
     assert!(providers.is_empty());
 }
 
@@ -315,8 +315,8 @@ fn host_output_releases_before_later_provider_output_consumer() {
         &request.graph.nodes[1].candidates[0],
     )
     .unwrap();
-    assert_eq!(host.known_bytes, 0);
-    assert_eq!(providers[&7].known_bytes, 4);
+    assert_eq!(host.known_bytes(), 0);
+    assert_eq!(providers[&7].known_bytes(), 4);
     let after_first_consumer = SearchState {
         selections: vec![1, 0],
         total_ns: 0,
@@ -347,7 +347,7 @@ fn host_output_releases_before_later_provider_output_consumer() {
         &request.graph.nodes[2].candidates[0],
     )
     .unwrap();
-    assert_eq!(host.known_bytes, 6);
+    assert_eq!(host.known_bytes(), 6);
     assert!(providers.is_empty());
 }
 
@@ -379,8 +379,8 @@ fn repeated_consumers_retain_one_output_once_until_its_last_use() {
         &request.graph.nodes[0].candidates[1],
     )
     .unwrap();
-    assert_eq!(host.known_bytes, 0);
-    assert_eq!(providers[&7].known_bytes, 4);
+    assert_eq!(host.known_bytes(), 0);
+    assert_eq!(providers[&7].known_bytes(), 4);
     let after_producer = SearchState {
         selections: vec![1],
         total_ns: 0,
@@ -395,7 +395,7 @@ fn repeated_consumers_retain_one_output_once_until_its_last_use() {
         &request.graph.nodes[1].candidates[0],
     )
     .unwrap();
-    assert_eq!(providers[&7].known_bytes, 4);
+    assert_eq!(providers[&7].known_bytes(), 4);
     let after_first_consumer = SearchState {
         selections: vec![1, 0],
         total_ns: 0,

@@ -1336,6 +1336,7 @@ impl NativeAutoOffload {
             match plan_local_vm_cpu_with_provider(
                 self.provider,
                 LocalPlacementRequest {
+                    compound: planning.compound,
                     operation,
                     semantic_identity: host.map(|(_, identity)| identity),
                     observation_contract: if planning.prepared_authority.is_some() {

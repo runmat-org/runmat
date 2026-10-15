@@ -57,19 +57,7 @@ pub(super) async fn try_real_pair(
         provider.real_power_in_domain(lhs, rhs, domain).await
     };
     match result {
-        Ok(mut output) if valid_output(&output, lhs, rhs, provider, &shape, domain) => {
-            gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
-            let value = if domain == PowerResultDomain::Complex {
-                gpu_helpers::complex_gpu_value(output)
-            } else {
-                gpu_helpers::resident_gpu_value(output)
-            }?;
-            Ok(Some(value))
-        }
-        Ok(output) => Err(gpu_helpers::reject_gpu_output(
-            output,
-            builtin_error("power: provider returned malformed domain-preserving output"),
-        )),
+        Ok(output) => publish_pair(provider, lhs, rhs, &shape, domain, output).map(Some),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             Err(typed_provider_error(
                 "provider execution after classification",
@@ -77,6 +65,30 @@ pub(super) async fn try_real_pair(
             ))
         }
         Err(error) => Err(provider_error("provider execution", error)),
+    }
+}
+
+/// The selected compound and ordinary provider route use the same original
+/// class/shape/alias/provenance publisher, after their own actual execution.
+pub(in super::super) fn publish_pair(
+    provider: &'static dyn AccelProvider,
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    shape: &[usize],
+    domain: PowerResultDomain,
+    mut output: GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    if !valid_output(&output, lhs, rhs, provider, shape, domain) {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error("power: provider returned malformed domain-preserving output"),
+        ));
+    }
+    gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
+    if domain == PowerResultDomain::Complex {
+        gpu_helpers::complex_gpu_value(output)
+    } else {
+        gpu_helpers::resident_gpu_value(output)
     }
 }
 
@@ -127,7 +139,7 @@ pub(super) fn provider_error(stage: &str, source: anyhow::Error) -> crate::Runti
     error
 }
 
-pub(super) fn typed_provider_error(
+pub(in super::super) fn typed_provider_error(
     stage: &str,
     source: runmat_accelerate_api::ProviderExecutionError,
 ) -> crate::RuntimeError {

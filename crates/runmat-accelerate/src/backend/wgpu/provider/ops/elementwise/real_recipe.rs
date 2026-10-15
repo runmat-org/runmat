@@ -1,4 +1,4 @@
-//! Shared physical recipe for ordinary scalar Add and direct real SQRT.
+//! Shared physical recipe for ordinary real scalar and unary operations.
 //! This owns allocation/ABI/launch geometry, not source arithmetic equivalence.
 use super::*;
 use runmat_accelerate_api::{
@@ -108,6 +108,39 @@ fn scalar_uniform_available(limits: &wgpu::Limits) -> bool {
     limits.max_uniform_buffers_per_shader_stage >= 1
 }
 
+fn unary_opcode(operation: Operation) -> Option<crate::backend::wgpu::types::UnaryOpCode> {
+    use crate::backend::wgpu::types::UnaryOpCode as Code;
+    use runmat_types::ScalarUnaryMath as Math;
+    Some(match operation {
+        Operation::Sqrt => Code::Sqrt,
+        Operation::UnaryMath(operation) => match operation {
+            Math::Exp => Code::Exp,
+            Math::Sin => Code::Sin,
+            Math::Cos => Code::Cos,
+            Math::Tan => Code::Tan,
+            Math::Sinh => Code::Sinh,
+            Math::Cosh => Code::Cosh,
+            Math::Tanh => Code::Tanh,
+            Math::Atan => Code::Atan,
+            Math::Asinh => Code::Asinh,
+            Math::Acosh => Code::Acosh,
+            Math::Atanh => Code::Atanh,
+            Math::Log => Code::Log,
+            Math::Log1p => Code::Log1p,
+            Math::Log10 => Code::Log10,
+            Math::Log2 => Code::Log2,
+            Math::Sqrt => Code::Sqrt,
+            Math::Asin => Code::Asin,
+            Math::Acos => Code::Acos,
+        },
+        Operation::ExactSingleBasePower { .. }
+        | Operation::ScalarAdd { .. }
+        | Operation::ScalarMul { .. }
+        | Operation::ScalarMax { .. }
+        | Operation::FloatingCast { .. } => return None,
+    })
+}
+
 fn native_scalar_control(operation: Operation, precision: NumericPrecision) -> bool {
     match operation {
         Operation::ScalarAdd { control, mode } => matches!(
@@ -128,6 +161,7 @@ fn native_scalar_control(operation: Operation, precision: NumericPrecision) -> b
                 | (NumericPrecision::F64, ScalarLiteral::F64Bits(_))
         ),
         Operation::Sqrt
+        | Operation::UnaryMath(_)
         | Operation::FloatingCast { .. }
         | Operation::ExactSingleBasePower { .. } => false,
     }
@@ -223,6 +257,7 @@ impl WgpuProvider {
                             crate::backend::wgpu::types::ScalarOpCode::Max
                         }
                         Operation::Sqrt
+                        | Operation::UnaryMath(_)
                         | Operation::FloatingCast { .. }
                         | Operation::ExactSingleBasePower { .. } => {
                             unreachable!("matched scalar operation")
@@ -246,36 +281,41 @@ impl WgpuProvider {
                         0,
                     )
                 }
-                Operation::Sqrt | Operation::ExactSingleBasePower { .. } => {
+                Operation::Sqrt
+                | Operation::UnaryMath(_)
+                | Operation::ExactSingleBasePower { .. } => {
                     if !scalar_uniform_available(&self.adapter_limits) {
                         return Ok(None);
                     }
                     if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
                         return Ok(None);
                     }
-                    let shader = if let Operation::ExactSingleBasePower { control } =
-                        request.operation
-                    {
-                        if precision != NumericPrecision::F32 {
-                            return Ok(None);
-                        }
-                        let Some(operation) =
-                            runmat_accelerate_api::ExactSingleBasePower::for_control(control)
-                        else {
-                            return Ok(None);
+                    let shader =
+                        if let Operation::ExactSingleBasePower { control } = request.operation {
+                            if precision != NumericPrecision::F32 {
+                                return Ok(None);
+                            }
+                            let Some(operation) =
+                                runmat_accelerate_api::ExactSingleBasePower::for_control(control)
+                            else {
+                                return Ok(None);
+                            };
+                            if request.source.layout == ProviderLayout::Strided
+                                && request.source.shape.len() != 2
+                            {
+                                return Ok(None);
+                            }
+                            crate::backend::wgpu::shaders::exact_power::shader_for_layout(
+                                operation,
+                                request.source.layout == ProviderLayout::Strided,
+                            )
+                        } else {
+                            real_unary_shader(
+                                unary_opcode(request.operation)
+                                    .expect("matched ordinary unary operation"),
+                                precision,
+                            )
                         };
-                        if request.source.layout == ProviderLayout::Strided
-                            && request.source.shape.len() != 2
-                        {
-                            return Ok(None);
-                        }
-                        crate::backend::wgpu::shaders::exact_power::shader_for_layout(
-                            operation,
-                            request.source.layout == ProviderLayout::Strided,
-                        )
-                    } else {
-                        real_unary_shader(crate::backend::wgpu::types::UnaryOpCode::Sqrt, precision)
-                    };
                     let recipe = super::super::pipeline_recipe::PipelineRecipe::fusion(
                         &shader,
                         1,
@@ -320,7 +360,7 @@ impl WgpuProvider {
         };
         let uniform_allocations = if matches!(
             request.operation,
-            Operation::Sqrt | Operation::ExactSingleBasePower { .. }
+            Operation::Sqrt | Operation::UnaryMath(_) | Operation::ExactSingleBasePower { .. }
         ) {
             1
         } else {
@@ -404,6 +444,7 @@ impl WgpuProvider {
                     Operation::ScalarMul { .. } => crate::backend::wgpu::types::ScalarOpCode::Mul,
                     Operation::ScalarMax { .. } => crate::backend::wgpu::types::ScalarOpCode::Max,
                     Operation::Sqrt
+                    | Operation::UnaryMath(_)
                     | Operation::FloatingCast { .. }
                     | Operation::ExactSingleBasePower { .. } => {
                         unreachable!("matched scalar operation")
@@ -488,9 +529,10 @@ impl WgpuProvider {
                     })
                 }
             }
-            Operation::Sqrt => self
+            Operation::Sqrt | Operation::UnaryMath(_) => self
                 .unary_op_exec_recorded(
-                    crate::backend::wgpu::types::UnaryOpCode::Sqrt,
+                    unary_opcode(recipe.request().operation)
+                        .expect("matched ordinary unary operation"),
                     input,
                     Some(&observed),
                 )

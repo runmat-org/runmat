@@ -183,19 +183,17 @@ impl PreparedResidentScalarPower {
                 "prepared POWER provider capability changed",
             ));
         }
+        if self
+            .symbolic
+            .resident_input
+            .as_ref()
+            .is_some_and(|input| !input.matches(resident))
+        {
+            return Err(PowerServiceError::pre(
+                "planned POWER input description changed",
+            ));
+        }
         if self.route == PowerPhysicalRoute::ExactSingleBase {
-            if self
-                .query
-                .workload
-                .real_power_scalar
-                .as_ref()
-                .and_then(|work| work.input.as_ref())
-                .is_some_and(|input| !input.matches(resident))
-            {
-                return Err(PowerServiceError::pre(
-                    "certified POWER input description changed",
-                ));
-            }
             let current = self.symbolic.replan(self.provider)?;
             if current.as_ref() != Some(&self.symbolic) {
                 return Err(PowerServiceError::pre("certified POWER capability changed"));
@@ -291,11 +289,8 @@ pub fn prepare_resident_scalar_power_against_plan(
         ));
     }
     if planned
-        .query
-        .workload
-        .real_power_scalar
+        .resident_input
         .as_ref()
-        .and_then(|work| work.input.as_ref())
         .is_some_and(|input| !input.matches(resident))
     {
         return Err(PowerServiceError::pre(
@@ -340,6 +335,10 @@ pub fn prepare_resident_scalar_power_against_plan(
                     .and_then(|work| work.input.clone()),
             )
         });
+    let live_resident_input = std::mem::replace(
+        &mut replanned.resident_input,
+        planned.resident_input.clone(),
+    );
     if &replanned != planned {
         return Err(PowerServiceError::pre(
             "planned POWER physical route changed",
@@ -348,6 +347,7 @@ pub fn prepare_resident_scalar_power_against_plan(
     if let Some(work) = &mut replanned.query.workload.real_power_scalar {
         work.input = live_input;
     }
+    replanned.resident_input = live_resident_input;
     Ok(prepared_from_plan(provider, resident, replanned))
 }
 

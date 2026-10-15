@@ -10,6 +10,9 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
     let root = runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
         .map_err(|error| Box::new(error.into_runtime_error()))?;
     let form = request.form();
+    let compound = request
+        .plan_compound(Some(context), auto.provider)
+        .map_err(Box::new)?;
     let complete_host = request.has_prepared_completion_right()
         && runmat_runtime::context::preparation::PreparedHostExecution::supports_form(form);
     let admission = request
@@ -21,6 +24,7 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
     // not applicable: leave the original domain-owned implementation intact.
     // This is before planning/resource admission; no rejection is caught here.
     if admission.is_none()
+        && compound.is_none()
         && request.numerical_domain() == runmat_accelerate_api::NumericalDomainEvidence::Unknown
         && matches!(
             form.operation,
@@ -43,8 +47,16 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         admission
             .as_ref()
             .map(|admission| (&admission.resources, admission.identity)),
+        compound.as_ref(),
     )?
     .with_request_input_root(root);
+    if prepared
+        .observation
+        .as_ref()
+        .is_some_and(|observation| !observation.host_selected())
+    {
+        prepared.compound = compound;
+    }
     let Some(observation) = prepared
         .observation
         .as_mut()

@@ -4,7 +4,7 @@ mod autotune;
 mod typed_recipe;
 mod typed_selection;
 mod core;
-pub(crate) use core::{AnyStageObserved, FrozenAnySnapshot};
+pub(crate) use core::{AnyStageObserved, FrozenAnyPipeline, FrozenAnySnapshot};
 mod extrema_geometry;
 #[cfg(test)]
 mod extrema_tests;

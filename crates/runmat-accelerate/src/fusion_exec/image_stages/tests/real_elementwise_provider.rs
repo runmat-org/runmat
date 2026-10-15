@@ -28,6 +28,7 @@ impl StagedProvider {
         request: &ProviderRealElementwiseRequest,
     ) -> ProviderExecutionResult<Option<ProviderRealElementwisePhysicalProposal>> {
         let sqrt = match request.operation {
+            Operation::UnaryMath(_) => return Ok(None),
             Operation::ExactSingleBasePower { .. } => return Ok(None),
             Operation::ScalarAdd { .. }
             | Operation::ScalarMul { .. }
@@ -94,6 +95,13 @@ impl StagedProvider {
         Box::pin(async move {
             let operation = recipe.request().operation;
             let sqrt = match operation {
+                Operation::UnaryMath(_) => {
+                    return Err(ProviderExecutionError::from(
+                        runmat_accelerate_api::unsupported_provider_operation(
+                            "fixture has no ordinary unary kernel",
+                        ),
+                    ));
+                }
                 Operation::ExactSingleBasePower { .. } => {
                     return Err(ProviderExecutionError::from(anyhow!(
                         "fixture has no exact POWER kernel"
@@ -154,6 +162,9 @@ impl StagedProvider {
                         Operation::ScalarMul { .. } => StageHook::Mul,
                         Operation::ScalarMax { .. } => StageHook::Max,
                         Operation::FloatingCast { .. } => unreachable!("handled cast"),
+                        Operation::UnaryMath(_) => {
+                            unreachable!("unary recipe rejected before execution")
+                        }
                     },
                     input.physical().element_type(),
                 )

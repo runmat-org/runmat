@@ -6,6 +6,8 @@
 //! each provider implementation.
 
 mod capability;
+pub(crate) mod compound_execution;
+pub use compound_execution::ProviderCompoundCancelled;
 mod convolution;
 pub use convolution::{
     ProviderConvolutionForm, ProviderConvolutionGeometry, ProviderConvolutionInputBackings,
@@ -16,8 +18,11 @@ mod execution_inventory;
 mod extrema;
 mod feasibility;
 pub use extrema::{
-    ProviderExtremaDemand, ProviderExtremaGeometry, ProviderExtremaInputBacking,
-    ProviderExtremaKind, ProviderExtremaWorkload,
+    ProviderCheckedGlobalExtrema, ProviderExecutedGlobalExtrema, ProviderExtremaDemand,
+    ProviderExtremaGeometry, ProviderExtremaInputBacking, ProviderExtremaKind,
+    ProviderExtremaWorkload, ProviderGlobalExtremaObserved, ProviderGlobalExtremaOutputRoute,
+    ProviderGlobalExtremaPhysicalProposal, ProviderGlobalExtremaRecipe,
+    ProviderGlobalExtremaRequest, ProviderGlobalExtremaScalar,
 };
 mod image_stages;
 mod reduction_nd;
@@ -50,6 +55,7 @@ mod matmul;
 pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;
 mod real_elementwise;
+mod real_unary;
 pub use real_elementwise::{
     ProviderExecutedMixedRealAdd, ProviderExecutedRealElementwise, ProviderMixedRealAddObserved,
     ProviderMixedRealAddRecipe, ProviderMixedRealAddResources,
@@ -57,6 +63,11 @@ pub use real_elementwise::{
     ProviderRealElementwiseOperation, ProviderRealElementwiseOutputRoute,
     ProviderRealElementwisePhysicalProposal, ProviderRealElementwiseRecipe,
     ProviderRealElementwiseRequest,
+};
+pub use real_unary::{
+    ProviderRealUnaryCompound, ProviderRealUnaryContinuation, ProviderRealUnaryContinuationKind,
+    ProviderRealUnaryContinuations, ProviderRealUnaryDomain, ProviderRealUnaryExecuted,
+    ProviderRealUnaryExecution, ProviderRealUnaryExecutionEvidence, ProviderRealUnaryPublication,
 };
 mod real_binary;
 pub use real_binary::{

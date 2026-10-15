@@ -52,6 +52,21 @@ pub(super) fn validate_set(
             "physical candidates must share exact ordered data leaves and explicit typed transfer facts",
         ).with_identifier("RunMat:Placement:InvalidRequest").build()));
     }
+    if physical.iter().any(|candidate| {
+        candidate.compound.is_some_and(|plan| {
+            candidate.physical_identity != Some(plan.identity())
+                || !plan.matches(provider, candidate.data_inputs)
+        })
+    }) {
+        return Err(Box::new(
+            runmat_runtime::build_runtime_error(
+                "compound candidate lost its admitted source/recipe",
+            )
+            .with_identifier("RunMat:Placement:InvalidRequest")
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .build(),
+        ));
+    }
     let mut names = std::collections::BTreeSet::new();
     if physical.iter().any(|candidate| {
         !names.insert(candidate_name(

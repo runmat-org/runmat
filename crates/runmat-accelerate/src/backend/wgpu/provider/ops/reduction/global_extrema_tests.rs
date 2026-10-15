@@ -100,10 +100,44 @@ async fn check_count(provider: &WgpuProvider, values: &[f64], expected: f64) {
     }
 }
 
-async fn qualify(provider: &WgpuProvider) {
+async fn qualify(provider: &'static WgpuProvider) {
     let workgroup = provider.global_reduce_launch.workgroup() as usize;
     let len = workgroup * 5 + 13;
     assert!(len > workgroup * 4, "exercise more than two workgroups");
+
+    // The admitted tree must use the same actual native allocator and launch
+    // as execution. Singleton results are lawful borrowed scalar views.
+    for size in [1, len] {
+        let input = upload(provider, &vec![7.0; size]);
+        for kind in [
+            runmat_accelerate_api::ProviderExtremaKind::Minimum,
+            runmat_accelerate_api::ProviderExtremaKind::Maximum,
+        ] {
+            let recipe =
+                runmat_accelerate_api::ProviderGlobalExtremaRecipe::plan(provider, &input, kind)
+                    .unwrap()
+                    .expect("actual selected global recipe");
+            let expected = recipe.physical().expected_observations().unwrap();
+            let result = recipe
+                .execute()
+                .await
+                .expect("actual selected global execution");
+            assert_eq!(result.observed, expected);
+            assert_eq!(result.output.shares_allocation_with(&input), size == 1);
+            assert_eq!(
+                result.output.physical().element_type(),
+                input.physical().element_type()
+            );
+            let host = provider.download_numeric(&result.output).await.unwrap();
+            match host.data {
+                HostNumericDataOwned::F32(values) => assert_eq!(values, vec![7.0_f32]),
+                HostNumericDataOwned::F64(values) => assert_eq!(values, vec![7.0_f64]),
+                _ => panic!("selected global tree changed native class"),
+            }
+            drop(result);
+            input.allocation_lease().validate_live().unwrap();
+        }
+    }
 
     let mut values = vec![7.0; len];
     values[workgroup + 3] = f64::NAN;

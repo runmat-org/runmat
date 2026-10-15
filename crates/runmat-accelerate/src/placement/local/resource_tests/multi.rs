@@ -185,6 +185,7 @@ fn physical(
     preparation: CandidatePreparationState,
 ) -> LocalPhysicalCandidate<'static> {
     LocalPhysicalCandidate {
+        compound: None,
         physical_identity: Some(Digest::sha256([marker as u8])),
         provider_kind: ExecutionCandidateKind::ProviderFusion,
         data_inputs: &[],
@@ -713,6 +714,7 @@ fn typed_reduction_refuses_floating_cast_as_input_adapter_before_query() {
         let selection_identity = base.physical_identity.unwrap();
         let output = base.outputs[0].clone();
         let candidate = LocalPhysicalCandidate {
+            compound: None,
             data_inputs: &leaves,
             source_inputs: Some(vec![source.clone()]),
             prepared_inputs: Some(vec![prepared.clone()]),
@@ -741,6 +743,7 @@ fn typed_reduction_refuses_floating_cast_as_input_adapter_before_query() {
             ..base
         };
         let valid_first = LocalPhysicalCandidate {
+            compound: None,
             data_inputs: &leaves,
             source_inputs: Some(vec![source.clone()]),
             prepared_inputs: Some(vec![source.clone()]),

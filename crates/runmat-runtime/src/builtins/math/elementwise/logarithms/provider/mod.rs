@@ -1,5 +1,6 @@
 pub(super) mod contract;
 mod restore;
+pub(super) use restore::publish_host_result;
 #[cfg(test)]
 mod owning_tests;
 

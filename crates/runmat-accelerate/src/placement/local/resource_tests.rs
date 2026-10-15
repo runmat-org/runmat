@@ -225,6 +225,7 @@ fn try_plan_with_outputs(
     plan_local(
         provider,
         LocalPlacementRequest {
+            compound: None,
             operation: "resource.fixture",
             semantic_identity: None,
             observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,
@@ -342,6 +343,7 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
     let outcome = plan_local(
         &provider,
         LocalPlacementRequest {
+            compound: None,
             operation: "sum",
             semantic_identity: None,
             observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,

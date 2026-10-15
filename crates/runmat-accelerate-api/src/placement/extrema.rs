@@ -2,6 +2,12 @@
 //! These facts distinguish the physical two-output hook from its public
 //! requested-output contract; they do not select a device or imply timing.
 use serde::{Deserialize, Serialize};
+mod global;
+pub use global::{
+    ProviderCheckedGlobalExtrema, ProviderExecutedGlobalExtrema, ProviderGlobalExtremaObserved,
+    ProviderGlobalExtremaOutputRoute, ProviderGlobalExtremaPhysicalProposal,
+    ProviderGlobalExtremaRecipe, ProviderGlobalExtremaRequest, ProviderGlobalExtremaScalar,
+};
 
 use crate::{
     allocation::{AllocationAcquisitionError, GpuTensorLayout, TensorViewIdentity},

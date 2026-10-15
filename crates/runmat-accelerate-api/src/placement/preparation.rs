@@ -11,6 +11,15 @@ pub struct ProviderElementwiseGeometry {
 
 #[derive(Clone, Copy, Debug)]
 pub enum ProviderPreparationProgram<'a> {
+    PowerPair {
+        recipe: &'a crate::power_service::PowerPairCompound,
+    },
+    PowerScalar {
+        projection: &'a crate::power_service::PowerTypedScalarProjection,
+    },
+    RealUnary {
+        recipe: &'a crate::ProviderRealUnaryCompound,
+    },
     Elementwise {
         shader: &'a str,
     },
@@ -40,6 +49,7 @@ pub enum ProviderPreparationRoute {
 impl ProviderPreparationProgram<'_> {
     pub fn route(self) -> Option<ProviderPreparationRoute> {
         match self {
+            Self::RealUnary { .. } | Self::PowerPair { .. } | Self::PowerScalar { .. } => None,
             Self::FloatingCast { target } => {
                 Some(ProviderPreparationRoute::FloatingCast { target })
             }

@@ -127,6 +127,7 @@ pub(super) fn choose(
                 .with_input_preparation(input_plan.inventory.clone())
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
             Ok(LocalPhysicalCandidate {
+                compound: None,
                 physical_identity: Some(selection.identity()),
                 provider_kind: ExecutionCandidateKind::ProviderFusion,
                 data_inputs: &data_inputs,

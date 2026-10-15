@@ -138,6 +138,10 @@ pub enum ProviderRouteOutcome {
     /// H preparation returned Unsupported before the selected hook began.
     PreparationHostFallback,
     PreparationProviderUpload,
+    /// A consumed domain probe selected the original host continuation;
+    /// this is not an Unsupported hook result or provider-kernel execution.
+    DomainHostContinuation,
+    DomainProviderUpload,
 }
 
 /// Stage measurements are separate from the end-to-end total: intervals may

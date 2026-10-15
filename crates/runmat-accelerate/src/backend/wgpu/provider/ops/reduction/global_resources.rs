@@ -1,5 +1,125 @@
 //! Pure physical-resource admission for the selected global extrema tree.
+use super::super::backend_types::WgpuProvider;
+use super::super::validated_fusion::ReductionExtremaPipelineKind;
+use crate::backend::wgpu::residency::BufferResidency;
 use runmat_accelerate_api::unsupported_provider_operation;
+use runmat_accelerate_api::{
+    AccelProvider, ProviderElementType, ProviderExecutionError, ProviderExecutionResult,
+    ProviderGlobalExtremaOutputRoute, ProviderGlobalExtremaPhysicalProposal,
+    ProviderGlobalExtremaRequest, ProviderLayout, ProviderResidency, ProviderStorage,
+};
+
+impl WgpuProvider {
+    pub(crate) fn propose_global_extrema_exec(
+        &self,
+        request: &ProviderGlobalExtremaRequest,
+    ) -> ProviderExecutionResult<Option<ProviderGlobalExtremaPhysicalProposal>> {
+        if request.source.storage != ProviderStorage::DenseReal
+            || request.source.residency != ProviderResidency::Device
+            || !matches!(
+                request.source.layout,
+                ProviderLayout::ColumnMajorContiguous | ProviderLayout::Strided
+            )
+            || request.source.element_type != ProviderElementType::from(self.precision())
+            || [
+                "RUNMAT_DISABLE_REDUCE_GLOBAL",
+                "RUNMAT_PROVIDER_REDUCTION_SNAPSHOT",
+                "RUNMAT_FORCE_REDUCE_SNAPSHOT",
+            ]
+            .iter()
+            .any(|flag| std::env::var(flag).is_ok())
+        {
+            return Ok(None);
+        }
+        let Some(len) = request
+            .source
+            .checked_element_count()
+            .and_then(|n| usize::try_from(n).ok())
+        else {
+            return Ok(None);
+        };
+        if len == 0 {
+            return Ok(None);
+        }
+        self.require_ieee_words(self.precision)
+            .map_err(ProviderExecutionError::from)?;
+        self.pipelines
+            .reduce_global
+            .preflight()
+            .map_err(ProviderExecutionError::from)?;
+        admit(
+            len,
+            request.source_buffer_bytes,
+            self.element_size,
+            self.global_reduce_launch.elements_per_group(),
+            self.global_reduce_launch.max_input_per_pass(),
+            u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            self.adapter_limits.max_buffer_size,
+        )
+        .map_err(ProviderExecutionError::from)?;
+        let uniform_bytes =
+            std::mem::size_of::<crate::backend::wgpu::params::ReduceGlobalParams>() as u64;
+        if self.adapter_limits.max_storage_buffers_per_shader_stage < 2
+            || self.adapter_limits.max_uniform_buffers_per_shader_stage < 1
+            || u64::from(self.adapter_limits.max_uniform_buffer_binding_size) < uniform_bytes
+        {
+            return Ok(None);
+        }
+        let mut current = len;
+        let mut allocated = 0_u64;
+        let mut output_bytes = request.source_buffer_bytes;
+        let mut dispatches = 0_u32;
+        let Some(chunk) = self.global_reduce_launch.max_input_per_pass() else {
+            return Ok(None);
+        };
+        while current > 1 {
+            let output = self.global_reduce_launch.output_len(current).max(1);
+            let Some(bytes) = BufferResidency::requested_bytes(output, self.element_size) else {
+                return Ok(None);
+            };
+            let Some(total) = allocated.checked_add(bytes) else {
+                return Ok(None);
+            };
+            allocated = total;
+            output_bytes = bytes;
+            let Some(count) = u32::try_from(current.div_ceil(chunk))
+                .ok()
+                .and_then(|count| dispatches.checked_add(count))
+            else {
+                return Ok(None);
+            };
+            dispatches = count;
+            current = output;
+        }
+        let Some(uniform_buffer_bytes) = uniform_bytes.checked_mul(u64::from(dispatches)) else {
+            return Ok(None);
+        };
+        let intermediate_buffer_bytes = if len == 1 {
+            0
+        } else {
+            let Some(bytes) = allocated.checked_sub(output_bytes) else {
+                return Ok(None);
+            };
+            bytes
+        };
+        Ok(Some(ProviderGlobalExtremaPhysicalProposal {
+            output_route: if len == 1 {
+                ProviderGlobalExtremaOutputRoute::SourceScalarAlias
+            } else {
+                ProviderGlobalExtremaOutputRoute::FreshAllocation
+            },
+            output_buffer_bytes: output_bytes,
+            intermediate_buffer_bytes,
+            uniform_allocations: dispatches,
+            uniform_buffer_bytes,
+            dispatches,
+            queue_submissions: dispatches,
+            workgroup_size: self.global_reduce_launch.workgroup(),
+            chunk_capacity: chunk as u64,
+            pipeline_key: ReductionExtremaPipelineKind::Global.recipe(self).key(),
+        }))
+    }
+}
 
 pub(super) fn admit(
     len: usize,

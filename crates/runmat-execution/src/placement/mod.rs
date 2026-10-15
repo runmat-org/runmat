@@ -27,7 +27,11 @@ pub use graph::{
     PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementGraphOutputFact,
     PlacementPlanRequest, ResourceBoundUnavailable, ResourceByteBound, SourceOutputOrdinal,
 };
-pub use resource::{PlacementResourceSnapshot, ProviderResourceSnapshot};
+pub use resource::{
+    admit_candidate_resources, single_candidate_resources_admitted, AdmittedResourceDemand,
+    CandidateResourceFacts, PlacementResourceSnapshot, ProviderResourceSnapshot, ResourceAccount,
+    ResourceAdmissionContext, ResourceAdmissionError, ResourceBudgetKind, ResourceSnapshotError,
+};
 pub use whole_work::{
     WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind,
     WholeWorkObservation, WholeWorkObservationOutcome, WholeWorkPlacementRequest,

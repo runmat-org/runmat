@@ -8,10 +8,13 @@ use crate::{
 use super::prepare::{PowerPhysicalRoute, PreparedResidentScalarPower};
 use super::validate::{publish_provenance, reject, storage, valid_output, PowerServiceError};
 mod exact;
+mod projected;
+pub use projected::execute_resident_scalar_power_projected;
 
 pub struct ExecutedResidentScalarPower {
     pub handle: GpuTensorHandle,
     pub domain: PowerResultDomain,
+    pub scalar_evidence: Option<super::scalar_projection::PowerScalarExecutionEvidence>,
 }
 
 /// Execute the prepared physical route. No returned failure authorizes a host
@@ -168,7 +171,11 @@ pub async fn execute_resident_scalar_power(
         return Err(reject_with_cause(published, error));
     }
     let handle = publish_provenance(published, resident)?;
-    Ok(ExecutedResidentScalarPower { handle, domain })
+    Ok(ExecutedResidentScalarPower {
+        handle,
+        domain,
+        scalar_evidence: None,
+    })
 }
 
 async fn execute_legacy_real(
@@ -226,6 +233,7 @@ async fn execute_legacy_real(
     Ok(ExecutedResidentScalarPower {
         handle,
         domain: PowerResultDomain::Real,
+        scalar_evidence: None,
     })
 }
 

@@ -6,6 +6,7 @@ use runmat_accelerate_api::{
     unsupported_provider_operation, ProviderExecutionError, ProviderExecutionResult,
 };
 use std::cell::Cell;
+mod recipe;
 
 struct ExtremaInputFrame {
     entry: BufferEntry,

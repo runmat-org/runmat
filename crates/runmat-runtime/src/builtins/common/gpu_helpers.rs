@@ -12,6 +12,8 @@ use runmat_value::{IntegerComplexStorage, NumericScalar, NumericStorage};
 use crate::build_runtime_error;
 
 mod residency_cleanup;
+mod complex_transfer;
+pub use complex_transfer::native_complex_upload_workspace;
 pub(crate) use residency_cleanup::clear_input_residency;
 mod real_range;
 pub use real_range::{
@@ -679,12 +681,12 @@ fn interleaved_complex_data(tensor: &ComplexTensor) -> Result<HostNumericDataOwn
         };
     }
     match tensor.complex_storage() {
-        ComplexStorage::F64(values) => Ok(HostNumericDataOwned::F64(
-            values.iter().flat_map(|value| [value.0, value.1]).collect(),
-        )),
-        ComplexStorage::F32(values) => Ok(HostNumericDataOwned::F32(
-            values.iter().flat_map(|value| [value.0, value.1]).collect(),
-        )),
+        ComplexStorage::F64(values) => {
+            complex_transfer::interleave(values).map(HostNumericDataOwned::F64)
+        }
+        ComplexStorage::F32(values) => {
+            complex_transfer::interleave(values).map(HostNumericDataOwned::F32)
+        }
         ComplexStorage::Integer(storage) => match (&storage.real, &storage.imag) {
             (IntegerStorage::I8(real), IntegerStorage::I8(imag)) => {
                 Ok(integer_interleaved!(real, imag, I8))

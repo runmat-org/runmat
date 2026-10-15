@@ -1,6 +1,6 @@
 //! Preparation of an admitted real floating operand with request-local domain evidence.
 use crate::context::preparation::{
-    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+    execute_request_compound, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease};
@@ -10,18 +10,43 @@ use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinPrepar
 use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
 use runmat_value::{NumericDType, Tensor, Value};
 use std::future::Future;
+mod continuation;
+pub use continuation::RealUnaryPublication;
+mod runner;
+pub(crate) use runner::RealUnaryAdapter;
 
-pub(crate) async fn execute<F, Fut>(
+pub(crate) async fn execute<F, Fut, B, H, R>(
     runtime: Option<&RuntimeContext>,
     entry: &'static BuiltinCatalogEntry,
-    predicate: RealUnaryPredicate,
+    operation: runmat_types::ScalarUnaryMath,
+    publication: RealUnaryPublication,
+    adapter: RealUnaryAdapter<B, H, R>,
     value: Value,
     body: F,
 ) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
+    B: FnOnce(
+        &runmat_accelerate_api::GpuTensorHandle,
+        RealUnaryClassification,
+    ) -> BuiltinResult<()>,
+    H: FnOnce(
+        &'static dyn runmat_accelerate_api::AccelProvider,
+        &runmat_accelerate_api::GpuTensorHandle,
+        Value,
+    ) -> BuiltinResult<Value>,
+    R: FnOnce(
+        &'static dyn runmat_accelerate_api::AccelProvider,
+        &runmat_accelerate_api::GpuTensorHandle,
+        runmat_accelerate_api::GpuTensorHandle,
+    ) -> BuiltinResult<Value>,
 {
+    let predicate = operation.real_predicate().ok_or_else(|| {
+        crate::build_runtime_error("real unary preparation requires a promoting-domain instruction")
+            .with_identifier("RunMat:Placement:InvalidRequest")
+            .build()
+    })?;
     let _input = RootedValueLease::for_values(std::iter::once(&value))
         .map_err(|cause| cause.into_runtime_error())?;
     if let Some(route) = crate::builtins::math::host_route::canonical(
@@ -42,11 +67,19 @@ where
         return Ok(output);
     }
     let resident = matches!(&value, Value::GpuTensor(handle)
-        if runmat_accelerate_api::handle_provenance(handle) == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
-        && crate::builtins::math::host_route::real_floating_shape(&value).is_some());
+        if crate::builtins::math::host_route::real_floating_shape(&value).is_some());
     if !resident
         && !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
+        if let Value::GpuTensor(source) = &value {
+            if let Some(owner) =
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+            {
+                crate::context::provider_operation::unavailable_provider_route::<()>(
+                    runtime, owner,
+                )?;
+            }
+        }
         return body(value).await;
     }
     let request = AdmittedBuiltinPreparation::new(
@@ -62,6 +95,7 @@ where
         },
         vec![value],
     )?
+    .with_real_unary(operation, publication)?
     .with_numerical_domain(|operands| match operands {
         [Value::Tensor(tensor)] => Ok(NumericalDomainEvidence::RealUnary {
             predicate,
@@ -84,8 +118,56 @@ where
             .with_owned_values_async(|mut values| body(values.remove(0)))
             .await;
     }
-    execute_request(runtime, request, |mut values| async move {
+    let direct = if runtime.is_none_or(|runtime| runtime.service_ports().acceleration().is_none()) {
+        match request.operands() {
+            [Value::GpuTensor(source)] => {
+                match crate::builtins::common::gpu_helpers::exact_provider_for_handle(source) {
+                    Some(owner) => request.plan_compound(runtime, owner)?,
+                    None => None,
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    execute_request_compound(runtime, request, |mut values, compound| async move {
         let value = values.remove(0);
+        if let Some(compound) = compound.or(direct) {
+            let crate::context::preparation::AdmittedBuiltinCompound::RealUnary(compound) =
+                compound
+            else {
+                return Err(crate::build_runtime_error(
+                    "unary body received another compound authority",
+                )
+                .with_identifier("RunMat:Placement:InvalidDecision")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build());
+            };
+            if compound.admission().binding.builtin != entry.identity
+                || compound.unary().operation() != operation
+                || compound.unary().publication() != publication
+            {
+                return Err(crate::build_runtime_error(
+                    "compound unary delivery differs from its admitted body",
+                )
+                .with_identifier("RunMat:Placement:InvalidDecision")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build());
+            }
+            return runner::execute(runtime, compound, value, body, adapter).await;
+        }
+        if let Value::GpuTensor(source) = &value {
+            if let Some(owner) =
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+            {
+                // No complete physical body was delivered. None is not a
+                // permission to bypass a finite budget with legacy probe hooks.
+                crate::context::provider_operation::unavailable_provider_route::<()>(
+                    runtime, owner,
+                )?;
+            }
+        }
         let route = crate::builtins::math::host_route::canonical(
             runtime,
             crate::context::VmFusionHostInstruction::ElementwiseCall,
@@ -133,23 +215,7 @@ fn classify_values(
     values: impl Iterator<Item = f64>,
     predicate: RealUnaryPredicate,
 ) -> RealUnaryClassification {
-    let mut result = RealUnaryClassification::Inside;
-    for value in values {
-        if value.is_nan() {
-            result = RealUnaryClassification::Indeterminate;
-            continue;
-        }
-        let inside = match predicate {
-            RealUnaryPredicate::Nonnegative => value >= 0.0,
-            RealUnaryPredicate::AtLeastMinusOne => value >= -1.0,
-            RealUnaryPredicate::AtLeastOne => value >= 1.0,
-            RealUnaryPredicate::ClosedUnitInterval => (-1.0..=1.0).contains(&value),
-        };
-        if !inside {
-            return RealUnaryClassification::Outside;
-        }
-    }
-    result
+    predicate.classify(values)
 }
 
 #[cfg(test)]

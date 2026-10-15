@@ -94,7 +94,13 @@ async fn asin_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
     crate::builtins::common::real_unary_preparation::execute(
         runtime.as_ref(),
         &runmat_builtins::ASIN_CATALOG_ENTRY,
-        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        runmat_types::ScalarUnaryMath::Asin,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ASIN_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ASIN_ERROR_INTERNAL,
+        ),
         value,
         |value| async move {
             let output = asin_execute(value).await?;

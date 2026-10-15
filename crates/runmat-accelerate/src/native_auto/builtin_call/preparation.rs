@@ -200,7 +200,7 @@ impl NativeAutoOffload {
         operation: ArgumentOperation,
         completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
-        self.prepare_operation_with_host(name, args, runtime, operation, completion, None)
+        self.prepare_operation_with_host(name, args, runtime, operation, completion, None, None)
     }
 
     pub(super) fn prepare_operation_with_host(
@@ -214,6 +214,7 @@ impl NativeAutoOffload {
             &crate::fusion_exec::host_readback::CpuHostResources,
             runmat_execution::Digest,
         )>,
+        compound: Option<&runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
@@ -229,8 +230,11 @@ impl NativeAutoOffload {
             &inputs,
             workload.clone(),
             super::observation::BuiltinPlanningContext {
+                compound,
                 runtime,
-                preparation_program: operation.preparation_program(),
+                preparation_program: compound
+                    .map(|plan| plan.preparation_program())
+                    .or_else(|| operation.preparation_program()),
                 prepared_authority: completion.as_ref().map(|right| right.session_authority()),
                 host,
             },
@@ -245,20 +249,27 @@ impl NativeAutoOffload {
         let mut observation =
             BuiltinCallObservation::new(plan.feedback, trace, evaluation.recommend_gpu, args)
                 .with_completion(completion);
-        observation.prepare_provider(
-            self.provider,
-            plan.provider_query
-                .as_deref()
-                .filter(|_| plan.provider_observation),
-        );
+        let query = plan
+            .provider_query
+            .as_deref()
+            .filter(|_| plan.provider_observation);
+        if let Some(compound) = compound {
+            observation.prepare_compound(self.provider, query, compound);
+        } else {
+            observation.prepare_provider(self.provider, query);
+        }
         let recorder = observation.recorder();
         runmat_accelerate_api::observation::with_provider_observation(recorder, || {
             let prepared: ProviderExecutionResult<_> = (|| {
                 let mut processed = args.to_vec();
                 let mut uploads = None;
                 if evaluation.recommend_gpu {
-                    for value in processed.iter_mut().take(operation.count()) {
-                        if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
+                    for (offset, value) in processed.iter_mut().take(operation.count()).enumerate()
+                    {
+                        if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty())
+                            || compound
+                                .is_some_and(|plan| plan.preserves_host_scalar_operand(offset))
+                        {
                             continue;
                         }
                         if uploads.is_none() {
@@ -290,6 +301,7 @@ impl NativeAutoOffload {
             })();
             match prepared {
                 Ok((processed, uploads)) => Ok(PreparedBuiltinCall {
+                    compound: None,
                     args: processed,
                     observation: Some(observation),
                     uploads,

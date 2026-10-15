@@ -17,6 +17,36 @@ pub enum ScalarUnaryMath {
     Asinh,
     Acosh,
     Atanh,
+    Log,
+    Log1p,
+    Log10,
+    Log2,
+    Sqrt,
+    Asin,
+    Acos,
+}
+
+impl ScalarUnaryMath {
+    /// Real-input domain of the numerical instruction, independently of any
+    /// builtin's complex-result, error, or residency/publication convention.
+    pub const fn real_predicate(self) -> Option<crate::RealUnaryPredicate> {
+        use crate::RealUnaryPredicate as Predicate;
+        match self {
+            Self::Log | Self::Log10 | Self::Log2 | Self::Sqrt => Some(Predicate::Nonnegative),
+            Self::Log1p => Some(Predicate::AtLeastMinusOne),
+            Self::Asin | Self::Acos | Self::Atanh => Some(Predicate::ClosedUnitInterval),
+            Self::Acosh => Some(Predicate::AtLeastOne),
+            Self::Exp
+            | Self::Sin
+            | Self::Cos
+            | Self::Tan
+            | Self::Sinh
+            | Self::Cosh
+            | Self::Tanh
+            | Self::Atan
+            | Self::Asinh => None,
+        }
+    }
 }
 
 /// Closed scalar operation identity for a proved pure fusion slice.

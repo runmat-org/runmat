@@ -28,6 +28,7 @@ pub(crate) use provider_contract::convolution::observation_capability as convolu
 pub(crate) use provider_contract::extrema::observation_capability as extrema_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::floating_conversion::{
+    build_for_input as floating_cast_build_for_input,
     observation_capability as floating_cast_observation_capability,
     physical_work as floating_cast_physical_work,
     unresolved_adaptation as floating_cast_unresolved_adaptation,

@@ -1682,6 +1682,88 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Ok(None)
     }
 
+    fn propose_power_evaluation(
+        &self,
+        _base: &GpuTensorHandle,
+        _exponent: &GpuTensorHandle,
+        _domain: PowerResultDomain,
+    ) -> ProviderExecutionResult<Option<power_service::PowerEvaluationPhysicalProposal>> {
+        Ok(None)
+    }
+
+    fn execute_power_evaluation_recipe<'a>(
+        &'a self,
+        _recipe: &'a power_service::PowerEvaluationRecipe,
+    ) -> ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation(
+                    "paired POWER evaluation recipe execution is unsupported",
+                ),
+            ))
+        })
+    }
+
+    /// Handle-free physical projection for sources described by original
+    /// live metadata or the provider's own dense allocator contract. No
+    /// handle, numerical evidence or execution permission is minted here.
+    fn propose_power_pair_geometry(
+        &self,
+        _inputs: &[ProviderRepresentation; 2],
+        _descriptions: &[PowerInputDescription; 2],
+        _frozen: Option<&power_service::PowerProbePhysicalProposal>,
+    ) -> ProviderExecutionResult<Option<power_service::PowerPairPhysicalProjection>> {
+        Ok(None)
+    }
+
+    /// Exact ordinary paired POWER probe. A frozen proposal carries physical
+    /// snapshot/geometry, not numerical evidence or placement permission.
+    fn propose_power_probe(
+        &self,
+        _base: &GpuTensorHandle,
+        _exponent: &GpuTensorHandle,
+        _frozen: Option<&power_service::PowerProbePhysicalProposal>,
+    ) -> ProviderExecutionResult<Option<power_service::PowerProbePhysicalProposal>> {
+        Ok(None)
+    }
+
+    fn execute_power_probe_recipe<'a>(
+        &'a self,
+        _recipe: &'a power_service::PowerProbeRecipe,
+    ) -> ProviderExecutionFuture<'a, power_service::PowerProbeObserved> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation(
+                    "paired POWER probe recipe execution is unsupported",
+                ),
+            ))
+        })
+    }
+
+    /// Exact native global extrema tree, before allocation/submission. This
+    /// supplies physical work only, never a numerical-domain classification.
+    /// Complete global min/max tree for a native real source. This distinct
+    /// physical contract propagates represented NaNs, including mixed inputs;
+    /// an omit-NaN legacy reduction must decline rather than certify a probe.
+    fn propose_global_extrema(
+        &self,
+        _request: &ProviderGlobalExtremaRequest,
+    ) -> ProviderExecutionResult<Option<ProviderGlobalExtremaPhysicalProposal>> {
+        Ok(None)
+    }
+
+    fn execute_global_extrema_recipe<'a>(
+        &'a self,
+        _source: &'a GpuTensorHandle,
+        _recipe: &'a ProviderGlobalExtremaRecipe,
+    ) -> ProviderExecutionFuture<'a, ProviderExecutedGlobalExtrema> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation("global extrema recipe execution is unsupported"),
+            ))
+        })
+    }
+
     /// Consume the same privately minted recipe used for physical planning.
     /// Providers must authenticate the actual source and rederive the recipe
     /// before effects, then report observed allocation/submission resources.
@@ -2145,6 +2227,53 @@ pub trait AccelProvider: AcceleratorThreadBound {
         observation::ProviderObservationSupport::Unsupported
     }
 
+    fn real_unary_observation_capability(
+        &self,
+        _recipe: &ProviderRealUnaryCompound,
+        _continuations: ProviderRealUnaryContinuations,
+    ) -> observation::ProviderObservationCapability {
+        observation::ProviderObservationCapability::Unsupported
+    }
+
+    fn power_pair_observation_capability(
+        &self,
+        _recipe: &power_service::PowerPairCompound,
+    ) -> observation::ProviderObservationCapability {
+        observation::ProviderObservationCapability::Unsupported
+    }
+
+    fn power_scalar_observation_capability(
+        &self,
+        _projection: &power_service::PowerTypedScalarProjection,
+    ) -> observation::ProviderObservationCapability {
+        observation::ProviderObservationCapability::Unsupported
+    }
+
+    fn begin_power_scalar_observation(
+        &self,
+        _projection: &power_service::PowerTypedScalarProjection,
+    ) -> observation::ProviderObservationSupport {
+        observation::ProviderObservationSupport::Unsupported
+    }
+
+    fn begin_power_pair_observation(
+        &self,
+        _recipe: &power_service::PowerPairCompound,
+    ) -> observation::ProviderObservationSupport {
+        observation::ProviderObservationSupport::Unsupported
+    }
+
+    /// Same provider-owned progress/budget/fence authority as ordinary
+    /// operations, but scoped to the complete sealed compound rather than a
+    /// real-only operation query whose original domain remains Unknown.
+    fn begin_real_unary_observation(
+        &self,
+        _recipe: &ProviderRealUnaryCompound,
+        _continuations: ProviderRealUnaryContinuations,
+    ) -> observation::ProviderObservationSupport {
+        observation::ProviderObservationSupport::Unsupported
+    }
+
     /// Determines whether a representation-specific operation can execute
     /// without attempting allocation, compilation, transfer, or dispatch.
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
@@ -2158,6 +2287,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _query: &ProviderFeasibilityQuery,
     ) -> Option<ProviderNumericUploadPhysicalEvidence> {
+        None
+    }
+
+    /// Pure physical stage of the same typed floating-cast owner used by
+    /// unary_double/unary_single. No handle or execution permission is minted.
+    fn floating_cast_physical_evidence(
+        &self,
+        _input: &ProviderRepresentation,
+        _target: ProviderPrecision,
+    ) -> Option<ProviderFloatingCastPhysicalEvidence> {
         None
     }
 

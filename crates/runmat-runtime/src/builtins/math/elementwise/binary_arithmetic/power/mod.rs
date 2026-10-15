@@ -141,7 +141,9 @@ async fn power_builtin(
                 (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
                 (lhs, rhs) => Ok(power_host(lhs, rhs)?),
             }?;
-            let base = RootedValue::new(base_result).map_err(|cause| cause.into_runtime_error())?;
+            RootedValue::new(base_result).map_err(|cause| cause.into_runtime_error())
+        },
+        |base| async move {
             let value =
                 apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)
                     .await?;
@@ -173,6 +175,8 @@ mod math;
 use math::{complex_pow_scalar, complex_pow_scalar_f32};
 
 mod provider;
+mod compound;
+mod scalar_compound;
 use provider::{power_gpu_host_left, power_gpu_host_right, power_gpu_pair};
 
 #[cfg(test)]

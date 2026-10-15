@@ -28,12 +28,13 @@ impl LogarithmOperation {
             Self::Common => &runmat_builtins::LOG10_CATALOG_ENTRY,
         }
     }
-    pub(super) const fn real_predicate(self) -> runmat_types::RealUnaryPredicate {
+    pub(super) const fn instruction(self) -> runmat_types::ScalarUnaryMath {
+        use runmat_types::ScalarUnaryMath as Math;
         match self {
-            Self::OnePlus => runmat_types::RealUnaryPredicate::AtLeastMinusOne,
-            Self::Natural | Self::Binary | Self::Common => {
-                runmat_types::RealUnaryPredicate::Nonnegative
-            }
+            Self::Natural => Math::Log,
+            Self::OnePlus => Math::Log1p,
+            Self::Binary => Math::Log2,
+            Self::Common => Math::Log10,
         }
     }
     pub(super) const fn name(self) -> &'static str {
@@ -81,8 +82,14 @@ impl LogarithmOperation {
             Self::Common => value.log10(),
         }
     }
-    pub(super) const fn restores_automatic_fallback(self) -> bool {
-        !matches!(self, Self::Binary)
+    pub(super) const fn fallback_publication(
+        self,
+    ) -> crate::builtins::common::real_unary_preparation::RealUnaryPublication {
+        use crate::builtins::common::real_unary_preparation::RealUnaryPublication;
+        match self {
+            Self::Binary => RealUnaryPublication::NonExplicitHost,
+            Self::Natural | Self::OnePlus | Self::Common => RealUnaryPublication::Restore,
+        }
     }
     pub(super) const fn invalid_input(self) -> &'static BuiltinErrorDescriptor {
         match self {

@@ -10,7 +10,7 @@ use runmat_accelerate_api::{
     ProviderRealElementwiseObserved,
 };
 
-struct PowerFlagFusionRecipe {
+pub(super) struct PowerFlagFusionRecipe {
     input_precision: NumericPrecision,
     flag_precision: NumericPrecision,
     shape: Vec<usize>,
@@ -25,13 +25,49 @@ pub(super) struct PreparedPowerFlagFusion {
 }
 
 impl PreparedPowerFlagFusion {
+    pub(super) fn pipeline_key(&self) -> u64 {
+        self.recipe.pipeline_key()
+    }
+    pub(super) fn physical_identity(&self) -> Result<runmat_execution::Digest> {
+        self.recipe.physical_identity()
+    }
     pub(super) fn resource_work(&self) -> ProviderRealElementwiseObserved {
-        self.recipe.fusion.expected()
+        self.recipe.resource_work()
     }
 }
 
 impl PowerFlagFusionRecipe {
-    fn plan(
+    pub(super) fn pipeline_key(&self) -> u64 {
+        self.fusion.pipeline().key()
+    }
+    pub(super) fn physical_identity(&self) -> Result<runmat_execution::Digest> {
+        let pipeline = self.fusion.pipeline();
+        let launch = self.fusion.launch();
+        let work = self.resource_work();
+        Ok(runmat_execution::Digest::sha256_serialized(&(
+            "wgpu-power-flag-physical-v1",
+            &pipeline.shader,
+            &pipeline.layout,
+            pipeline.workgroup,
+            launch.workgroup(),
+            launch.chunk_capacity(),
+            &self.shape,
+            self.len,
+            work.output_buffer_bytes,
+            work.uniform_allocations,
+            work.uniform_buffer_bytes,
+            work.dispatches,
+            work.queue_submissions,
+        ))?)
+    }
+
+    pub(super) fn resource_work(&self) -> ProviderRealElementwiseObserved {
+        self.fusion.expected()
+    }
+}
+
+impl PowerFlagFusionRecipe {
+    pub(super) fn plan(
         input_precision: NumericPrecision,
         flag_precision: NumericPrecision,
         shape: &[usize],

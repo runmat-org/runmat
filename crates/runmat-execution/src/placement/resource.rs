@@ -19,6 +19,27 @@ pub struct ProviderResourceSnapshot {
 }
 
 impl ProviderResourceSnapshot {
+    pub fn validate_typed(&self) -> Result<(), ResourceSnapshotError> {
+        if self
+            .capacity_bytes
+            .is_some_and(|capacity| self.live_bytes > capacity)
+            || self
+                .scratch_available_bytes
+                .zip(self.capacity_bytes)
+                .is_some_and(|(scratch, capacity)| scratch > capacity)
+            || self.reclaimable_bytes > self.live_bytes
+            || self.queue_depth.is_some() != self.queue_limit.is_some()
+            || self
+                .queue_depth
+                .zip(self.queue_limit)
+                .is_some_and(|(depth, limit)| depth > limit)
+        {
+            return Err(ResourceSnapshotError::InconsistentProvider {
+                device_id: self.device_id,
+            });
+        }
+        Ok(())
+    }
     pub fn immediately_available_bytes(&self) -> Option<u64> {
         self.capacity_bytes
             .map(|capacity| capacity.saturating_sub(self.live_bytes))
@@ -42,27 +63,19 @@ pub struct PlacementResourceSnapshot {
 
 impl PlacementResourceSnapshot {
     pub fn validate(&self) -> Result<(), &'static str> {
+        self.validate_typed()
+            .map_err(ResourceSnapshotError::message)
+    }
+
+    pub fn validate_typed(&self) -> Result<(), ResourceSnapshotError> {
         let mut provider_ids = BTreeSet::new();
         for provider in &self.providers {
             if !provider_ids.insert(provider.device_id) {
-                return Err("provider resource device identities must be unique");
+                return Err(ResourceSnapshotError::DuplicateProvider {
+                    device_id: provider.device_id,
+                });
             }
-            if provider
-                .capacity_bytes
-                .is_some_and(|capacity| provider.live_bytes > capacity)
-                || provider
-                    .scratch_available_bytes
-                    .zip(provider.capacity_bytes)
-                    .is_some_and(|(scratch, capacity)| scratch > capacity)
-                || provider.reclaimable_bytes > provider.live_bytes
-                || provider.queue_depth.is_some() != provider.queue_limit.is_some()
-                || provider
-                    .queue_depth
-                    .zip(provider.queue_limit)
-                    .is_some_and(|(depth, limit)| depth > limit)
-            {
-                return Err("provider resource snapshot is inconsistent");
-            }
+            provider.validate_typed()?;
         }
         Ok(())
     }
@@ -73,3 +86,31 @@ impl PlacementResourceSnapshot {
             .find(|provider| provider.device_id == device_id)
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResourceSnapshotError {
+    DuplicateProvider { device_id: u32 },
+    InconsistentProvider { device_id: u32 },
+}
+
+impl ResourceSnapshotError {
+    fn message(self) -> &'static str {
+        match self {
+            Self::DuplicateProvider { .. } => "provider resource device identities must be unique",
+            Self::InconsistentProvider { .. } => "provider resource snapshot is inconsistent",
+        }
+    }
+}
+impl std::fmt::Display for ResourceSnapshotError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.message())
+    }
+}
+impl std::error::Error for ResourceSnapshotError {}
+
+mod account;
+mod admission;
+pub use account::{ResourceAccount, ResourceAdmissionError, ResourceBudgetKind};
+pub use admission::{
+    admit_candidate_resources, single_candidate_resources_admitted, AdmittedResourceDemand,
+    CandidateResourceFacts, ResourceAdmissionContext,
+};

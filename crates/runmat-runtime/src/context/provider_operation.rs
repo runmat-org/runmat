@@ -7,13 +7,58 @@ use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
 };
-use runmat_accelerate_api::ProviderFeasibility;
 use runmat_execution::{Digest, WholeWorkConstraint, WholeWorkPlacementRequest};
 
+pub(crate) fn provider_resource_estimate(
+    runtime: Option<&RuntimeContext>,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+) -> BuiltinResult<Option<runmat_accelerate_api::ProviderResourceEstimate>> {
+    provider_resource_query(runtime, provider, || provider.query_feasibility(query))
+}
+
+pub(crate) fn provider_resource_query(
+    runtime: Option<&RuntimeContext>,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    query: impl FnOnce() -> runmat_accelerate_api::ProviderFeasibility,
+) -> BuiltinResult<Option<runmat_accelerate_api::ProviderResourceEstimate>> {
+    check_cancelled(runtime)?;
+    let budget = runtime
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .and_then(|port| port.placement_resources().memory_available_bytes);
+    let result = admission::estimate(query(), &provider.placement_resources(), budget)?;
+    check_cancelled(runtime)?;
+    Ok(result)
+}
+
+pub(crate) fn unavailable_provider_route<T>(
+    runtime: Option<&RuntimeContext>,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<Option<T>> {
+    check_cancelled(runtime)?;
+    let snapshot = provider.placement_resources();
+    check_cancelled(runtime)?;
+    admission::validate_live(&snapshot)?;
+    let budget = runtime
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .and_then(|port| port.placement_resources().memory_available_bytes);
+    if admission::finite_budget(&snapshot, budget) {
+        return Err(build_runtime_error(
+            "provider route has no proven physical continuation under a finite budget",
+        )
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    check_cancelled(runtime)?;
+    Ok(None)
+}
+
 mod candidate;
+mod admission;
 mod readbacks;
 mod types;
-use candidate::admitted_candidate;
+use candidate::{operation_signature, resource_candidate};
 use readbacks::prepare_readbacks;
 use types::{ConditionalUploadPublication, DirectProviderPublication};
 pub(crate) use types::{
@@ -25,12 +70,7 @@ pub(crate) fn select_exact_provider_operation(
     runtime: Option<&RuntimeContext>,
     request: ExactProviderOperation<'_>,
 ) -> BuiltinResult<Option<SelectedProviderOperation>> {
-    let Some(runtime) = runtime else {
-        return Ok(None);
-    };
-    let Some(service) = runtime.service_ports().placement() else {
-        return Ok(None);
-    };
+    check_cancelled(runtime)?;
     let provider = request.provider;
     let query = request.query;
     if request.conditional_host_fallback.is_some() && request.conditional_provider_upload.is_some()
@@ -41,31 +81,11 @@ pub(crate) fn select_exact_provider_operation(
         .with_identifier("RunMat:Placement:InvalidConditionalPresentation")
         .build());
     }
-    let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(query) else {
-        return Ok(None);
-    };
-    let Some(direct_output) =
-        DirectProviderPublication::new(query.outputs.len(), estimate.output_bytes)
-    else {
-        // No selected route may claim a physical retained result from its
-        // logical output geometry. The provider call remains available to the
-        // caller without a qualified placement receipt only when no finite
-        // memory resource contract would thereby be bypassed.
-        let resources = provider.placement_resources();
-        let finite_host = runtime
-            .service_ports()
-            .parallel()
-            .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some());
-        if finite_host
-            || resources.capacity_bytes.is_some()
-            || resources.scratch_available_bytes.is_some()
-        {
-            return Err(build_runtime_error(
-                "provider result has no physical publication bound under a finite resource budget",
-            )
-            .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
-            .build());
-        }
+    let parallel = runtime
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .map(|port| port.placement_resources())
+        .unwrap_or_default();
+    let Some(estimate) = provider_resource_estimate(runtime, provider, query)? else {
         return Ok(None);
     };
     if request
@@ -79,24 +99,17 @@ pub(crate) fn select_exact_provider_operation(
         .with_identifier("RunMat:Placement:InvalidConditionalPresentation")
         .build());
     }
-    let ProviderObservationCapability::Supported(observation) =
-        provider.operation_observation_capability(query)
-    else {
-        return Ok(None);
-    };
-    let parallel = runtime
-        .service_ports()
-        .parallel()
-        .map(|port| port.placement_resources())
-        .unwrap_or_default();
-    let Some(mut prepared) = prepare_readbacks(
+    check_cancelled(runtime)?;
+    let prepared = prepare_readbacks(
         &request,
         estimate.output_bytes,
         parallel.memory_available_bytes,
-    )?
-    else {
+    )?;
+    check_cancelled(runtime)?;
+    let Some(mut prepared) = prepared else {
         return Ok(None);
     };
+    // Observation metadata does not grant physical resource admission.
     let provider_digest = Digest::sha256(
         serde_json::to_vec(&(
             provider.capability_snapshot(),
@@ -104,20 +117,73 @@ pub(crate) fn select_exact_provider_operation(
         ))
         .expect("capability snapshot serializes"),
     );
-    let Some(revision) =
-        service.whole_work_revision(runtime.program_revision().cloned(), provider_digest)
-    else {
-        return Ok(None);
-    };
-    let (signature, candidate, resources) = admitted_candidate(
+    let observation = runtime.and_then(|runtime| {
+        let service = runtime.service_ports().placement()?;
+        let revision =
+            service.whole_work_revision(runtime.program_revision().cloned(), provider_digest)?;
+        let ProviderObservationCapability::Supported(overhead) =
+            provider.operation_observation_capability(query)
+        else {
+            return None;
+        };
+        Some((runtime, service, revision, overhead))
+    });
+    let (candidate, resources) = resource_candidate(
         runtime,
         &request,
         &estimate,
-        observation,
+        observation.as_ref().map(|(_, _, _, overhead)| *overhead),
         &mut prepared,
-        revision,
         parallel,
     );
+    if let Some(snapshot) = resources.provider(provider.device_id()) {
+        admission::require_queue_bound(
+            snapshot,
+            request.output_queue_slots.or(estimate.dispatches),
+        )?;
+    }
+    if resources.cancellation_requested {
+        return Err(
+            build_runtime_error("provider operation cancelled before admission")
+                .with_identifier("RunMat:Cancelled")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build(),
+        );
+    }
+    runmat_execution::single_candidate_resources_admitted(
+        runmat_execution::CandidateResourceFacts {
+            location: candidate.execution_location,
+            output_residency: candidate.output_residency,
+            presentation: &candidate.presentation,
+            kind: candidate.kind,
+            demand: candidate.resources,
+            transactional_results: candidate.transactional_results,
+        },
+        &resources,
+        false,
+    )
+    .map_err(resource_error)?;
+    let Some(direct_output) =
+        DirectProviderPublication::new(query.outputs.len(), estimate.output_bytes)
+    else {
+        // A resource-only route is not a validated output-publication receipt.
+        let provider_resources = provider.placement_resources();
+        if parallel.memory_available_bytes.is_some()
+            || provider_resources.capacity_bytes.is_some()
+            || provider_resources.scratch_available_bytes.is_some()
+        {
+            return Err(build_runtime_error(
+                "provider result has no physical publication bound under a finite resource budget",
+            )
+            .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+            .build());
+        }
+        return Ok(None);
+    };
+    let Some((runtime, service, revision, _)) = observation else {
+        return Ok(None);
+    };
+    let signature = operation_signature(&request, &prepared, revision);
     let selected = service.select_whole_work(WholeWorkPlacementRequest {
         signature: signature.clone(),
         constraint: WholeWorkConstraint::ProviderRequired {
@@ -163,4 +229,37 @@ pub(crate) fn select_exact_provider_operation(
         ),
         produced_readback: prepared.produced_readback,
     }))
+}
+
+fn check_cancelled(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
+    if runtime.is_some_and(RuntimeContext::is_cancelled) {
+        return Err(
+            build_runtime_error("provider operation cancelled before admission")
+                .with_identifier("RunMat:Cancelled")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build(),
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn resource_error(
+    cause: runmat_execution::ResourceAdmissionError,
+) -> crate::RuntimeError {
+    let identifier = match cause {
+        runmat_execution::ResourceAdmissionError::InsufficientEvidence { .. } => {
+            "RunMat:Placement:InsufficientResourceEvidence"
+        }
+        runmat_execution::ResourceAdmissionError::InvalidSnapshot(_) => {
+            "RunMat:Placement:InvalidRequest"
+        }
+        _ => "RunMat:Placement:NoLegalCandidate",
+    };
+    build_runtime_error(format!(
+        "provider operation resource admission failed: {cause:?}"
+    ))
+    .with_identifier(identifier)
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .with_source(cause)
+    .build()
 }

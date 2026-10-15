@@ -141,7 +141,13 @@ async fn acosh_builtin(
     crate::builtins::common::real_unary_preparation::execute(
         runtime.as_ref(),
         &runmat_builtins::ACOSH_CATALOG_ENTRY,
-        runmat_types::RealUnaryPredicate::AtLeastOne,
+        runmat_types::ScalarUnaryMath::Acosh,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ACOSH_ERROR_INTERNAL,
+        ),
         value,
         |value| async move {
             let output = acosh_execute(value).await?;

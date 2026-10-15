@@ -152,7 +152,9 @@ impl SelectedRealPlans {
                 ScalarLiteral::F64Bits(bits) => ProviderImageOutputOperand::ScalarF64Bits(bits),
             }),
             Operation::FloatingCast { .. } => None,
-            Operation::Sqrt | Operation::ExactSingleBasePower { .. } => return false,
+            Operation::Sqrt | Operation::UnaryMath(_) | Operation::ExactSingleBasePower { .. } => {
+                return false
+            }
         };
         wire.hook == source.hook()
             && wire.source_output == source.output()

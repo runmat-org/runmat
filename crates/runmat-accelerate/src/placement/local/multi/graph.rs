@@ -6,6 +6,8 @@ use super::{
 use runmat_execution::CandidatePeakLiveDemand;
 
 pub(super) struct Admitted {
+    pub(super) exact_resources: Option<CandidateResourceDemand>,
+    pub(super) exact_residency: Option<runmat_execution::CandidateOutputResidency>,
     pub(super) original_index: usize,
     pub(super) descriptor: Option<ExecutionCandidateDescriptor>,
     pub(super) identity: String,
@@ -49,6 +51,9 @@ pub(super) fn candidate_name(
 }
 
 pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand {
+    if let Some(resources) = admitted.exact_resources {
+        return resources;
+    }
     let final_created = admitted
         .input_resources
         .map_or(ResourceByteBound::Known(0), |resources| {
@@ -173,6 +178,8 @@ mod tests {
             source: EstimateSource::StaticPrior,
         };
         Admitted {
+            exact_resources: None,
+            exact_residency: None,
             original_index: 0,
             identity: "provider.1.fusion.reduction.fixture".into(),
             kind: ExecutionCandidateKind::ProviderFusion,

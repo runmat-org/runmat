@@ -32,6 +32,82 @@ pub(super) struct PreparedReadbacks {
     pub(super) produced_readback: Option<PreparedProducedReadback>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::physical_test_support::OwnedPhysicalProvider;
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
+        ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
+    };
+
+    #[test]
+    fn missing_produced_index_evidence_cannot_skip_finite_readback_admission() {
+        let provider = Box::leak(Box::new(OwnedPhysicalProvider::new()));
+        let output = ProviderRepresentation {
+            element_type: ProviderElementType::F32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 1],
+            residency: ProviderResidency::Device,
+        };
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("min"),
+            family: ProviderOperationFamily::Reduction,
+            inputs: vec![],
+            outputs: vec![output.clone(), output],
+            workload: ProviderWorkload::default(),
+        };
+        let request = ExactProviderOperation {
+            provider,
+            query: &query,
+            semantic_operation: "min",
+            variant: "missing_readback_fixture",
+            domain_facts: runmat_execution::Digest::sha256(b"readback_fixture"),
+            host_scratch: ResourceByteBound::Known(0),
+            provider_host_scratch: ResourceByteBound::Known(0),
+            host_cpu_millicores: 1000,
+            already_live_bytes: 0,
+            readbacks: &[],
+            produced_readback: Some(super::super::types::ExactProducedProviderReadback {
+                output_index: 1,
+                public_host_bytes: ResourceByteBound::Known(8),
+                conversion_host_workspace: ResourceByteBound::Known(0),
+            }),
+            internal_input_stages: None,
+            output_queue_slots: None,
+            conditional_host_fallback: None,
+            conditional_host_scratch: ResourceByteBound::Known(0),
+            conditional_provider_upload: None,
+            provider_host_mediated: false,
+        };
+        assert!(prepare_readbacks(&request, Some(8), None)
+            .unwrap()
+            .is_none());
+        let error = match prepare_readbacks(&request, Some(8), Some(1024)) {
+            Err(error) => error,
+            Ok(_) => panic!("finite readback requires real physical evidence"),
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        source.cancel(runmat_execution::CancellationReason::User);
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let error = match super::super::select_exact_provider_operation(Some(&runtime), request) {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled route cannot become no-plan"),
+        };
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    }
+}
+
 pub(super) fn prepare_readbacks(
     request: &ExactProviderOperation<'_>,
     provider_output_bytes: Option<u64>,
@@ -69,11 +145,9 @@ pub(super) fn prepare_readbacks(
             );
         }
         let source_resource = source_provider.placement_resources();
+        super::admission::validate_live(&source_resource)?;
         let Some(download) = ProviderFeasibilityQuery::exact_numeric_download(source) else {
-            if parallel_memory_available_bytes.is_some()
-                || source_resource.capacity_bytes.is_some()
-                || source_resource.scratch_available_bytes.is_some()
-            {
+            if super::admission::finite_budget(&source_resource, parallel_memory_available_bytes) {
                 return Err(build_runtime_error(
                     "provider input has no exact native readback under a finite resource budget",
                 )
@@ -82,14 +156,14 @@ pub(super) fn prepare_readbacks(
             }
             return Ok(None);
         };
-        if !source_provider
-            .query_numeric_download_feasibility(source, &download)
-            .is_supported()
+        if super::admission::estimate(
+            source_provider.query_numeric_download_feasibility(source, &download),
+            &source_resource,
+            parallel_memory_available_bytes,
+        )?
+        .is_none()
         {
-            if parallel_memory_available_bytes.is_some()
-                || source_resource.capacity_bytes.is_some()
-                || source_resource.scratch_available_bytes.is_some()
-            {
+            if super::admission::finite_budget(&source_resource, parallel_memory_available_bytes) {
                 return Err(build_runtime_error(
                     "provider input readback has no proven route under a finite resource budget",
                 )
@@ -175,6 +249,13 @@ pub(super) fn prepare_readbacks(
             );
         };
         let Some(evidence) = provider.produced_numeric_readback_evidence(output) else {
+            if provider_resources.iter().any(|snapshot| {
+                super::admission::finite_budget(snapshot, parallel_memory_available_bytes)
+            }) {
+                return Err(build_runtime_error("provider-produced readback has no physical bound under a finite resource budget")
+                    .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never).build());
+            }
             return Ok(None);
         };
         if output.checked_byte_len() != Some(evidence.source_requested_bytes)

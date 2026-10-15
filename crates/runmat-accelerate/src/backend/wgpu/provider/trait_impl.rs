@@ -38,6 +38,8 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
         runmat_accelerate_api::observation::current_provider_observation().filter(|recorder| {
             recorder.expects_operation(&operation)
                 || recorder.observes_conditional_provider_upload(provider.device_id())
+                || recorder.observes_real_unary_upload(provider.device_id())
+                || recorder.observes_power_scalar_upload(provider.device_id())
         })
     else {
         return Ok(());
@@ -213,6 +215,168 @@ impl AccelProvider for WgpuProvider {
         output: &runmat_accelerate_api::ProviderRepresentation,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
         self.plan_dense_real_output_buffer_bytes_exec(output)
+    }
+
+    fn power_pair_observation_capability(
+        &self,
+        recipe: &runmat_accelerate_api::power_service::PowerPairCompound,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        self.power_pair_observation_capability_exec(recipe)
+    }
+
+    fn power_scalar_observation_capability(
+        &self,
+        projection: &runmat_accelerate_api::power_service::PowerTypedScalarProjection,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability as Capability, ProviderObservationOverhead,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self
+            .observation_progress
+            .as_ref()
+            .is_some_and(|port| port.is_available())
+        {
+            return Capability::Unsupported;
+        }
+        if !projection.is_current_for(self) {
+            return Capability::Unsupported;
+        }
+        let Some(resources) = projection.resource_bounds() else {
+            return Capability::Unsupported;
+        };
+        let submissions = resources.queue_slots;
+        // The exact native upload quote already carries its one mapped-upload
+        // completion fence. Keep that physical stage in the base demand and
+        // add only the other compound fences as observation overhead.
+        let fence_bytes = crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES;
+        if projection.scalar_upload.provider_scratch_bytes
+            != runmat_execution::ResourceByteBound::Known(fence_bytes)
+            || projection.scalar_upload.completion_queue_slots != 1
+        {
+            return Capability::Unsupported;
+        }
+        let Some(requested_peak_buffer_bytes) = u64::from(submissions)
+            .checked_mul(fence_bytes)
+            .and_then(|bytes| bytes.checked_sub(fence_bytes))
+        else {
+            return Capability::Unsupported;
+        };
+        crate::backend::wgpu::dispatch::observation::gate_prospective_encoder_query(
+            Capability::Supported(ProviderObservationOverhead {
+                submissions,
+                requested_peak_buffer_bytes,
+                clear_commands: submissions,
+                map_callbacks: submissions,
+                wgpu_compute_query: None,
+            }),
+            self.timestamp_capability,
+            &self.observation_budget,
+        )
+    }
+
+    fn begin_power_scalar_observation(
+        &self,
+        projection: &runmat_accelerate_api::power_service::PowerTypedScalarProjection,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        match self.power_scalar_observation_capability(projection) {
+            runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_) => {
+                self.owned_operation_observation()
+            }
+            runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => {
+                runmat_accelerate_api::observation::ProviderObservationSupport::Unsupported
+            }
+        }
+    }
+
+    fn begin_power_pair_observation(
+        &self,
+        recipe: &runmat_accelerate_api::power_service::PowerPairCompound,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        match self.power_pair_observation_capability_exec(recipe) {
+            runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_) => {
+                self.owned_operation_observation()
+            }
+            runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => {
+                runmat_accelerate_api::observation::ProviderObservationSupport::Unsupported
+            }
+        }
+    }
+
+    fn propose_power_evaluation(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerEvaluationPhysicalProposal>,
+    > {
+        self.propose_power_evaluation_exec(base, exponent, domain)
+    }
+
+    fn execute_power_evaluation_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerEvaluationRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move { self.execute_power_evaluation_recipe_exec(recipe) })
+    }
+
+    fn propose_power_pair_geometry(
+        &self,
+        inputs: &[runmat_accelerate_api::ProviderRepresentation; 2],
+        descriptions: &[runmat_accelerate_api::PowerInputDescription; 2],
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerPairPhysicalProjection>,
+    > {
+        self.propose_power_pair_geometry_exec(inputs, descriptions, frozen)
+    }
+
+    fn propose_power_probe(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    > {
+        self.propose_power_probe_exec(base, exponent, frozen)
+    }
+
+    fn execute_power_probe_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerProbeRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::power_service::PowerProbeObserved,
+    > {
+        Box::pin(self.execute_power_probe_recipe_exec(recipe))
+    }
+
+    fn propose_global_extrema(
+        &self,
+        request: &runmat_accelerate_api::ProviderGlobalExtremaRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderGlobalExtremaPhysicalProposal>,
+    > {
+        self.propose_global_extrema_exec(request)
+    }
+
+    fn execute_global_extrema_recipe<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderGlobalExtremaRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedGlobalExtrema,
+    > {
+        Box::pin(async move {
+            self.execute_global_extrema_recipe_exec(source, recipe)
+                .await
+        })
     }
 
     fn plan_power_output_buffer_bytes(
@@ -400,23 +564,31 @@ impl AccelProvider for WgpuProvider {
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
         use runmat_accelerate_api::observation::{
-            ProviderObservationCapability, ProviderObservationSupport, ProviderOperationReceipt,
+            ProviderObservationCapability, ProviderObservationSupport,
         };
         match self.operation_observation_capability(query) {
             ProviderObservationCapability::Unsupported => ProviderObservationSupport::Unsupported,
-            ProviderObservationCapability::Supported(_) => {
-                #[cfg(not(target_arch = "wasm32"))]
-                let receipt = match &self.observation_progress {
-                    Some(progress) => ProviderOperationReceipt::with_wgpu_progress(
-                        self.observation_budget.clone(),
-                        progress.clone(),
-                    ),
-                    None => return ProviderObservationSupport::Unsupported,
-                };
-                #[cfg(target_arch = "wasm32")]
-                let receipt =
-                    ProviderOperationReceipt::with_budget(self.observation_budget.clone());
-                ProviderObservationSupport::Observed(receipt)
+            ProviderObservationCapability::Supported(_) => self.owned_operation_observation(),
+        }
+    }
+    fn real_unary_observation_capability(
+        &self,
+        recipe: &runmat_accelerate_api::ProviderRealUnaryCompound,
+        continuations: runmat_accelerate_api::ProviderRealUnaryContinuations,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        self.real_unary_observation_capability_exec(recipe, continuations)
+    }
+    fn begin_real_unary_observation(
+        &self,
+        recipe: &runmat_accelerate_api::ProviderRealUnaryCompound,
+        continuations: runmat_accelerate_api::ProviderRealUnaryContinuations,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        match self.real_unary_observation_capability_exec(recipe, continuations) {
+            runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => {
+                runmat_accelerate_api::observation::ProviderObservationSupport::Unsupported
+            }
+            runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_) => {
+                self.owned_operation_observation()
             }
         }
     }
@@ -509,8 +681,8 @@ impl AccelProvider for WgpuProvider {
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
         use runmat_accelerate_api::{
-            ProviderElementType, ProviderFeasibility, ProviderLayout, ProviderOperationFamily,
-            ProviderResidency, ProviderStorage,
+            ProviderElementType, ProviderLayout, ProviderOperationFamily, ProviderResidency,
+            ProviderStorage,
         };
         if query.operation.0 != "transfer.upload"
             || query.family != ProviderOperationFamily::Upload
@@ -530,19 +702,54 @@ impl AccelProvider for WgpuProvider {
         {
             return None;
         }
-        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
-            return None;
-        };
+        let physical = self.upload_physical_evidence(query)?;
         Some(
             runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence {
-                output_requested_bytes: estimate.output_bytes?,
+                output_requested_bytes: physical.output_requested_bytes,
                 // create_buffer_init owns the output directly. The only extra
                 // requested buffer is the observed completion fence submitted
                 // after publication, including empty logical payloads.
-                provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(
-                    crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
-                ),
-                completion_queue_slots: 1,
+                provider_scratch_bytes: physical.provider_scratch_bytes,
+                completion_queue_slots: physical.completion_queue_slots,
+            },
+        )
+    }
+
+    fn floating_cast_physical_evidence(
+        &self,
+        input: &runmat_accelerate_api::ProviderRepresentation,
+        target: ProviderPrecision,
+    ) -> Option<runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderLayout, ProviderResidency, ProviderStorage,
+        };
+        if input.residency != ProviderResidency::Device
+            || input.layout != ProviderLayout::ColumnMajorContiguous
+            || !matches!(
+                (input.storage, input.element_type),
+                (
+                    ProviderStorage::DenseReal,
+                    ProviderElementType::F32 | ProviderElementType::F64
+                ) | (
+                    ProviderStorage::DenseComplexInterleaved,
+                    ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64
+                )
+            )
+            || self.precision() != ProviderPrecision::F64
+        {
+            return None;
+        }
+        let target_type = ProviderElementType::from(target);
+        let work = crate::placement::floating_cast_build_for_input(self, input, target_type)?;
+        if work.source == target || work.estimate.dispatches == Some(0) {
+            return None;
+        }
+        Some(
+            runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence {
+                output_requested_bytes: work.estimate.output_bytes?,
+                uniform_buffer_bytes: work.uniform_bytes,
+                dispatches: work.estimate.dispatches?,
+                queue_slots: work.estimate.dispatches?,
             },
         )
     }
@@ -583,7 +790,15 @@ impl AccelProvider for WgpuProvider {
                 | ProviderElementType::U64
                 | ProviderElementType::F32
                 | ProviderElementType::F64
-        ) || output.storage != ProviderStorage::DenseReal
+                | ProviderElementType::ComplexF32
+                | ProviderElementType::ComplexF64
+        ) || output.storage
+            != match output.element_type {
+                ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+                    ProviderStorage::DenseComplexInterleaved
+                }
+                _ => ProviderStorage::DenseReal,
+            }
             || output.layout != ProviderLayout::ColumnMajorContiguous
             || output.residency != ProviderResidency::Device
         {
@@ -610,8 +825,10 @@ impl AccelProvider for WgpuProvider {
             | ProviderElementType::U16
             | ProviderElementType::U32 => 4,
             ProviderElementType::I64 | ProviderElementType::U64 => 8,
-            ProviderElementType::F32 | ProviderElementType::F64 => 0,
-            ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => return None,
+            ProviderElementType::F32
+            | ProviderElementType::F64
+            | ProviderElementType::ComplexF32
+            | ProviderElementType::ComplexF64 => 0,
         };
         let host_workspace_bytes = output
             .checked_element_count()?

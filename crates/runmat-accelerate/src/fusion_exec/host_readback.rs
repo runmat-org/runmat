@@ -69,29 +69,6 @@ fn unavailable(message: &'static str) -> RuntimeError {
 }
 
 impl Source {
-    /// Facts of this owner's exact native real download. Public opaque GPU
-    /// facts alone cannot supply dense storage or a host allocation bound.
-    pub(crate) fn host_fact(&self, actual: &Value) -> Option<runmat_types::ValueFact> {
-        if !self.current()
-            || !matches!(actual, Value::GpuTensor(handle) if self.matches_handle(handle))
-        {
-            return None;
-        }
-        let mut fact = runmat_runtime::value_fact::value_fact(actual);
-        let class = runmat_types::NumericClass::from_class_identity(
-            &self.handle.physical().element_type().class_identity(),
-        )?;
-        if !matches!(&fact.kind, runmat_types::ValueKindFact::Numeric(numeric)
-            if numeric.class == class && numeric.domain == runmat_types::NumericDomain::Real)
-        {
-            return None;
-        }
-        fact.storage = runmat_types::StorageFact::Dense;
-        fact = runmat_builtins::gathered_value_fact(&fact);
-        // The retained mirror and the prepared operand share a COW payload.
-        fact.alias = runmat_types::AliasFact::Shared;
-        Some(fact)
-    }
     pub(crate) fn admit(
         handle: &GpuTensorHandle,
         provider: &dyn AccelProvider,

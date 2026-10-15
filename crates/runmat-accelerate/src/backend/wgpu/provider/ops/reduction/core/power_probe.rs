@@ -32,6 +32,18 @@ pub(crate) struct FrozenAnyPipeline {
 }
 
 impl FrozenAnyPipeline {
+    pub(crate) fn physical_identity(&self) -> Result<runmat_execution::Digest> {
+        Ok(runmat_execution::Digest::sha256_serialized(&(
+            "wgpu-power-any-physical-v1",
+            &self.shader_source,
+            self.shader_workgroup,
+            match self.precision {
+                NumericPrecision::F32 => 32_u8,
+                NumericPrecision::F64 => 64_u8,
+            },
+        ))?)
+    }
+
     pub(crate) fn prepare(
         owner_device_id: u32,
         precision: NumericPrecision,

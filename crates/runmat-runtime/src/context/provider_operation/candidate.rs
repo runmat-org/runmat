@@ -12,71 +12,26 @@ use runmat_execution::{
     ResourceByteBound, WholeWorkCandidate,
 };
 
-pub(super) fn admitted_candidate(
-    runtime: &RuntimeContext,
+pub(super) fn resource_candidate(
+    runtime: Option<&RuntimeContext>,
     request: &ExactProviderOperation<'_>,
     estimate: &ProviderResourceEstimate,
-    observation: ProviderObservationOverhead,
+    observation: Option<ProviderObservationOverhead>,
     prepared: &mut PreparedReadbacks,
-    revision: PlacementRevision,
     parallel: RuntimeParallelResources,
-) -> (
-    PlacementSignature,
-    WholeWorkCandidate,
-    PlacementResourceSnapshot,
-) {
+) -> (WholeWorkCandidate, PlacementResourceSnapshot) {
     let provider = request.provider;
     let query = request.query;
     let conditional_provider_upload = prepared.conditional_provider_upload;
     let input_stages = prepared.input_stages;
-    let signature = PlacementSignature {
-        region: None,
-        operation: request.semantic_operation.into(),
-        runtime_facts: Digest::sha256(
-            serde_json::to_vec(&(
-                request.variant,
-                request.semantic_operation,
-                request.domain_facts,
-                query,
-                &prepared.readback_facts,
-                input_stages,
-                prepared.host_scratch,
-                prepared.preparation_host_workspace,
-                prepared.conditional_readback_host_workspace,
-                request.output_queue_slots,
-                prepared.produced_readback.as_ref().map(|readback| {
-                    (
-                        &readback.output,
-                        readback.evidence,
-                        readback.public_host_bytes,
-                    )
-                }),
-                request.conditional_host_fallback,
-                request.conditional_host_scratch,
-                request.provider_host_mediated,
-                conditional_provider_upload.as_ref().map(|upload| {
-                    (
-                        upload.transfer_bytes,
-                        upload.provider_output_requested_bytes,
-                        upload.host_result_bytes,
-                        upload.host_scratch_bytes,
-                        upload.provider_scratch_bytes,
-                        upload.queue_slots,
-                    )
-                }),
-                provider.device_id(),
-            ))
-            .expect("typed provider operation serializes"),
-        ),
-        provider_provenance: None,
-        graph_output_authority: None,
-        revision,
-    };
     // Completion fences coexist with the operation's output/temporary peak.
     // An overflow is unknown physical demand, never a wrapped small bound.
     let peak_live = estimate
         .transient_bytes
-        .and_then(|bytes| bytes.checked_add(observation.requested_peak_buffer_bytes))
+        .and_then(|bytes| match observation {
+            Some(observation) => bytes.checked_add(observation.requested_peak_buffer_bytes),
+            None => Some(bytes),
+        })
         .and_then(|bytes| match prepared.produced_readback.as_ref() {
             Some(readback) => match readback.evidence.provider_scratch_bytes {
                 ResourceByteBound::Known(scratch) => bytes.checked_add(scratch),
@@ -169,6 +124,9 @@ pub(super) fn admitted_candidate(
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
             provider_host_workspace: Some(prepared.host_scratch),
             provider_input_stages: input_stages,
+            // The legacy fallback is not physical evidence. The owning
+            // preflight rejects absent queue bounds under a finite queue;
+            // signature/query facts retain the original absence.
             queue_slots: request
                 .output_queue_slots
                 .unwrap_or_else(|| estimate.dispatches.unwrap_or(1))
@@ -195,9 +153,64 @@ pub(super) fn admitted_candidate(
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: parallel.cpu_millicores_available,
         memory_available_bytes: parallel.memory_available_bytes,
-        cancellation_requested: runtime.is_cancelled(),
+        cancellation_requested: runtime.is_some_and(RuntimeContext::is_cancelled),
         providers: std::mem::take(&mut prepared.provider_resources),
         epoch: u64::from_le_bytes(digest.bytes()[..8].try_into().expect("digest length")),
     };
-    (signature, candidate, resources)
+    (candidate, resources)
+}
+
+/// Identity is optional observation metadata, never a prerequisite to resources.
+pub(super) fn operation_signature(
+    request: &ExactProviderOperation<'_>,
+    prepared: &PreparedReadbacks,
+    revision: PlacementRevision,
+) -> PlacementSignature {
+    let provider = request.provider;
+    let query = request.query;
+    let conditional_provider_upload = prepared.conditional_provider_upload;
+    let input_stages = prepared.input_stages;
+    PlacementSignature {
+        region: None,
+        operation: request.semantic_operation.into(),
+        runtime_facts: Digest::sha256(
+            serde_json::to_vec(&(
+                request.variant,
+                request.semantic_operation,
+                request.domain_facts,
+                query,
+                &prepared.readback_facts,
+                input_stages,
+                prepared.host_scratch,
+                prepared.preparation_host_workspace,
+                prepared.conditional_readback_host_workspace,
+                request.output_queue_slots,
+                prepared.produced_readback.as_ref().map(|readback| {
+                    (
+                        &readback.output,
+                        readback.evidence,
+                        readback.public_host_bytes,
+                    )
+                }),
+                request.conditional_host_fallback,
+                request.conditional_host_scratch,
+                request.provider_host_mediated,
+                conditional_provider_upload.as_ref().map(|upload| {
+                    (
+                        upload.transfer_bytes,
+                        upload.provider_output_requested_bytes,
+                        upload.host_result_bytes,
+                        upload.host_scratch_bytes,
+                        upload.provider_scratch_bytes,
+                        upload.queue_slots,
+                    )
+                }),
+                provider.device_id(),
+            ))
+            .expect("typed provider operation serializes"),
+        ),
+        provider_provenance: None,
+        graph_output_authority: None,
+        revision,
+    }
 }

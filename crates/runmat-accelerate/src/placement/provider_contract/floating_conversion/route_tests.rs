@@ -133,6 +133,7 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
         let result = plan_local(
             &provider,
             LocalPlacementRequest {
+                compound: None,
                 operation: SINGLE_CATALOG_ENTRY.identity.name,
                 semantic_identity: None,
                 observation_contract:

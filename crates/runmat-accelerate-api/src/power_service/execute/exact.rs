@@ -73,6 +73,7 @@ pub(super) async fn execute(
     Ok(ExecutedResidentScalarPower {
         handle: publish_provenance(output, resident)?,
         domain: PowerResultDomain::Real,
+        scalar_evidence: None,
     })
 }
 

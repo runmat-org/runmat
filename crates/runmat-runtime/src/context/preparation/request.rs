@@ -29,7 +29,35 @@ pub struct AdmittedBuiltinPreparation {
     operands: RootedValues,
     numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
     sum_reduction: Option<AdmittedSumReduction>,
+    compound_body: Option<AdmittedCompoundBody>,
     prepared_completion: Option<super::PreparedCompletionRight>,
+}
+
+/// An instruction/publication pair supplied by the actual unary operation
+/// owner after normal argument, extension and requested-output admission.
+/// Construction remains private to runtime domains; services cannot derive
+/// this admission from a name, predicate, provider quote, or output class.
+#[derive(Clone, Copy)]
+pub struct AdmittedRealUnary {
+    operation: runmat_types::ScalarUnaryMath,
+    publication: crate::builtins::common::real_unary_preparation::RealUnaryPublication,
+}
+
+#[derive(Clone, Copy)]
+enum AdmittedCompoundBody {
+    RealUnary(AdmittedRealUnary),
+    RealPower,
+}
+
+impl AdmittedRealUnary {
+    pub fn operation(self) -> runmat_types::ScalarUnaryMath {
+        self.operation
+    }
+    pub fn publication(
+        self,
+    ) -> crate::builtins::common::real_unary_preparation::RealUnaryPublication {
+        self.publication
+    }
 }
 
 /// Already-resolved numerical controls, not a second public option grammar.
@@ -47,6 +75,74 @@ pub struct AdmittedSumReduction {
 }
 
 impl AdmittedBuiltinPreparation {
+    pub fn plan_compound(
+        &self,
+        context: Option<&super::RuntimeContext>,
+        provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    ) -> crate::BuiltinResult<Option<super::AdmittedBuiltinCompound>> {
+        match self.compound_body {
+            Some(AdmittedCompoundBody::RealUnary(_)) => {
+                super::real_unary::plan(self, context, provider)
+                    .map(|plan| plan.map(super::AdmittedBuiltinCompound::RealUnary))
+            }
+            Some(AdmittedCompoundBody::RealPower) => {
+                if let Some(plan) = super::real_power::plan(self, context, provider)? {
+                    Ok(Some(super::AdmittedBuiltinCompound::RealPower(plan)))
+                } else {
+                    super::real_power_scalar::plan(self, context, provider)
+                        .map(|plan| plan.map(super::AdmittedBuiltinCompound::RealPowerScalar))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+    pub fn host_resource_bound(
+        &self,
+        context: &super::RuntimeContext,
+    ) -> Option<super::AdmittedHostResources> {
+        super::host_resources::bound(self, Some(context))
+    }
+    pub(crate) fn with_real_unary(
+        mut self,
+        operation: runmat_types::ScalarUnaryMath,
+        publication: crate::builtins::common::real_unary_preparation::RealUnaryPublication,
+    ) -> Result<Self, RuntimeError> {
+        if operation
+            .real_predicate()
+            .map(BuiltinPreparationOperation::RealUnary)
+            != Some(self.form.operation)
+        {
+            return Err(invalid(
+                "unary instruction and admitted preparation form disagree",
+            ));
+        }
+        self.compound_body = Some(AdmittedCompoundBody::RealUnary(AdmittedRealUnary {
+            operation,
+            publication,
+        }));
+        Ok(self)
+    }
+
+    pub fn real_unary(&self) -> Option<AdmittedRealUnary> {
+        match self.compound_body {
+            Some(AdmittedCompoundBody::RealUnary(unary)) => Some(unary),
+            Some(AdmittedCompoundBody::RealPower) | None => None,
+        }
+    }
+
+    pub(crate) fn with_real_power(mut self) -> Result<Self, RuntimeError> {
+        if self.form.operation != BuiltinPreparationOperation::RealPower {
+            return Err(invalid(
+                "paired POWER body and admitted preparation form disagree",
+            ));
+        }
+        self.compound_body = Some(AdmittedCompoundBody::RealPower);
+        Ok(self)
+    }
+
+    pub(super) fn is_real_power(&self) -> bool {
+        matches!(self.compound_body, Some(AdmittedCompoundBody::RealPower))
+    }
     pub(super) fn with_selected_call(mut self, context: &super::RuntimeContext) -> Self {
         if matches!(
             self.form.operation,
@@ -265,6 +361,7 @@ impl AdmittedBuiltinPreparation {
             operands,
             numerical_domain: Default::default(),
             sum_reduction: None,
+            compound_body: None,
             prepared_completion: None,
         })
     }

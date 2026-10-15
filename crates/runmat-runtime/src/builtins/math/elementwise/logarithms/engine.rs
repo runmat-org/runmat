@@ -38,7 +38,23 @@ pub(super) async fn execute_non_table(
     crate::builtins::common::real_unary_preparation::execute(
         runtime,
         operation.catalog_entry(),
-        operation.real_predicate(),
+        operation.instruction(),
+        operation.fallback_publication(),
+        crate::builtins::common::real_unary_preparation::RealUnaryAdapter {
+            internal_error: operation.internal_error(),
+            before_host: |input, classification| {
+                if classification == runmat_types::RealUnaryClassification::Outside {
+                    super::provider::ensure_explicit_complex_extension(operation, input)?;
+                }
+                Ok(())
+            },
+            publish_host: |provider, input, result| {
+                super::provider::publish_host_result(operation, provider, input, result)
+            },
+            publish_real: |provider, input, output| {
+                super::provider::contract::validate(operation, provider, input, output)
+            },
+        },
         value,
         |value| async move {
             let output = match value {

@@ -4,7 +4,7 @@ use crate::BuiltinResult;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 
-pub(super) fn validate(
+pub(in crate::builtins::math::elementwise::logarithms) fn validate(
     operation: LogarithmOperation,
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,

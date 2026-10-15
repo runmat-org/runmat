@@ -9,6 +9,8 @@ use runmat_accelerate_api::{
     ProviderPreparationSnapshot, ProviderResidency,
 };
 use runmat_execution::{CandidatePreparationState, Digest};
+mod real_unary;
+mod power_pair;
 
 fn preparation_key_is_warm(
     key: u64,
@@ -30,6 +32,15 @@ impl WgpuProvider {
         program: ProviderPreparationProgram<'_>,
     ) -> Option<ProviderPreparationSnapshot> {
         let shader = match program {
+            ProviderPreparationProgram::PowerPair { recipe } => {
+                return self.power_pair_preparation_snapshot(recipe)
+            }
+            ProviderPreparationProgram::PowerScalar { projection } => {
+                return self.power_scalar_preparation_snapshot(projection)
+            }
+            ProviderPreparationProgram::RealUnary { recipe } => {
+                return self.real_unary_preparation_snapshot(recipe)
+            }
             ProviderPreparationProgram::TypedReduction { selection } => {
                 let work = query.workload.typed_reduction.as_ref()?;
                 if !work.matches_selection(selection)

@@ -61,7 +61,8 @@ impl AccelProvider for Fixture {
             | ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
             | ProviderRealElementwiseOperation::ScalarMul { .. }
             | ProviderRealElementwiseOperation::ScalarMax { .. }
-            | ProviderRealElementwiseOperation::Sqrt => return Ok(None),
+            | ProviderRealElementwiseOperation::Sqrt
+            | ProviderRealElementwiseOperation::UnaryMath(_) => return Ok(None),
         };
         if self.decline_at.load(Ordering::SeqCst) == step {
             return Ok(None);

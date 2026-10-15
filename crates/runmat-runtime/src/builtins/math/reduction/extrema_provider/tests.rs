@@ -128,6 +128,7 @@ enum Fault {
 struct Provider {
     owner: TestAllocationOwner,
     fault: Fault,
+    resources: runmat_execution::ProviderResourceSnapshot,
     reductions: AtomicUsize,
     downloads: AtomicUsize,
 }
@@ -172,6 +173,13 @@ impl Provider {
 }
 
 impl AccelProvider for Provider {
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        runmat_execution::ProviderResourceSnapshot {
+            device_id: self.device_id(),
+            ..self.resources.clone()
+        }
+    }
+
     fn query_feasibility(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
@@ -314,6 +322,7 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
             let provider = Box::leak(Box::new(Provider {
                 owner: TestAllocationOwner::new(),
                 fault,
+                resources: Default::default(),
                 reductions: AtomicUsize::new(0),
                 downloads: AtomicUsize::new(0),
             }));
@@ -360,6 +369,91 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
             drop(input.handle);
             assert_eq!(input.probe.retirements(), 1);
         }
+
+        // An unsupported feasibility quote is not an unsupported hook result:
+        // the ordinary caller would still execute that hook after no receipt.
+        // Missing bounds cannot authorize it under a finite or invalid snapshot.
+        for resources in [
+            runmat_execution::ProviderResourceSnapshot {
+                capacity_bytes: Some(1024),
+                ..Default::default()
+            },
+            runmat_execution::ProviderResourceSnapshot {
+                queue_depth: Some(0),
+                queue_limit: Some(2),
+                ..Default::default()
+            },
+            runmat_execution::ProviderResourceSnapshot {
+                lost: true,
+                ..Default::default()
+            },
+            runmat_execution::ProviderResourceSnapshot {
+                queue_depth: Some(0),
+                ..Default::default()
+            },
+        ] {
+            let expected = if resources.lost {
+                "RunMat:Placement:NoLegalCandidate"
+            } else if resources.queue_depth.is_some() && resources.queue_limit.is_none() {
+                "RunMat:Placement:InvalidRequest"
+            } else {
+                "RunMat:Placement:InsufficientResourceEvidence"
+            };
+            let provider = Box::leak(Box::new(Provider {
+                owner: TestAllocationOwner::new(),
+                fault: Fault::Unsupported,
+                resources,
+                reductions: AtomicUsize::new(0),
+                downloads: AtomicUsize::new(0),
+            }));
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let input = provider
+                .owner
+                .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let result = futures::executor::block_on(if name == "min" {
+                ExtremaKind::Min.reduce_dim(None, &input.handle, 0, ExtremaDemand::ValuesOnly)
+            } else {
+                ExtremaKind::Max.reduce_dim(None, &input.handle, 0, ExtremaDemand::ValuesOnly)
+            });
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("unbounded hook cannot bypass physical admission"),
+            };
+            assert_eq!(error.identifier(), Some(expected));
+            assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+            assert_eq!(provider.reductions.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+            // A normal ND source has no direct two-dimensional backing plan.
+            // Its known owner must not receive an unadmitted hook either.
+            let nd = provider
+                .owner
+                .allocate_zeroed(
+                    vec![2, 1, 1],
+                    NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                )
+                .unwrap();
+            let error = match futures::executor::block_on(ExtremaKind::Min.reduce_dim(
+                None,
+                &nd.handle,
+                0,
+                ExtremaDemand::ValuesOnly,
+            )) {
+                Err(error) => error,
+                Ok(_) => panic!("missing backing is not resource admission"),
+            };
+            assert_eq!(error.identifier(), Some(expected));
+            assert_eq!(provider.reductions.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+            nd.handle.allocation_lease().validate_live().unwrap();
+            drop(nd.handle);
+            assert_eq!(nd.probe.retirements(), 1);
+            input.handle.allocation_lease().validate_live().unwrap();
+            assert_eq!(input.probe.retirements(), 0);
+            drop(input.handle);
+            assert_eq!(input.probe.retirements(), 1);
+        }
     }
 }
 
@@ -371,6 +465,7 @@ fn selected_extrema_unsupported_after_submission_retains_cause_without_retry() {
     let provider = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
         fault: Fault::UnsupportedAfterSubmission,
+        resources: Default::default(),
         reductions: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
     }));
@@ -433,6 +528,7 @@ fn dimensional_extrema_never_dispatch_unregistered_input_to_selected_provider() 
     let selected = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
         fault: Fault::Execution,
+        resources: Default::default(),
         reductions: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
     }));
@@ -465,6 +561,7 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                 let provider = Box::leak(Box::new(Provider {
                     owner: TestAllocationOwner::new(),
                     fault,
+                    resources: Default::default(),
                     reductions: AtomicUsize::new(0),
                     downloads: AtomicUsize::new(0),
                 }));

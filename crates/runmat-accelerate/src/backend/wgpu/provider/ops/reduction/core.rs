@@ -163,6 +163,16 @@ impl WgpuProvider {
         op: crate::backend::wgpu::types::GlobalReduceOp,
         emission: SelectedEmission<'_>,
     ) -> Result<GpuTensorHandle> {
+        self.reduce_global_recorded_exec(a, op, emission, None)
+    }
+
+    pub(super) fn reduce_global_recorded_exec(
+        &self,
+        a: &GpuTensorHandle,
+        op: crate::backend::wgpu::types::GlobalReduceOp,
+        emission: SelectedEmission<'_>,
+        observed: Option<&std::cell::RefCell<runmat_accelerate_api::ProviderGlobalExtremaObserved>>,
+    ) -> Result<GpuTensorHandle> {
         let SelectedEmission {
             selected: validated,
             effect: allocated,
@@ -183,6 +193,10 @@ impl WgpuProvider {
             ));
         }
         if entry.len == 0 {
+            ensure!(
+                observed.is_none(),
+                "selected global probe requires a nonempty source"
+            );
             let default = match op {
                 crate::backend::wgpu::types::GlobalReduceOp::Sum => 0.0,
                 crate::backend::wgpu::types::GlobalReduceOp::Prod => 1.0,
@@ -205,7 +219,9 @@ impl WgpuProvider {
             .max_input_per_pass()
             .ok_or_else(|| anyhow!("reduce_global: frozen launch capacity overflows"))?;
         let current = self.with_emission(|emission, pending| -> Result<_> {
-        let mut current = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
+        // A selected recipe pins the no-snapshot physical route. Legacy hooks
+        // retain their environment-selected diagnostic copy behavior.
+        let mut current = if observed.is_none() && std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
             let size_bytes = (entry.len * self.element_size) as u64;
             let snap = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-global-input-snapshot"),
@@ -234,7 +250,7 @@ impl WgpuProvider {
             // Metal-safe (opt-in): snapshot input buffer for this pass to avoid any SR/SRW conflicts
             // Enabled only if RUNMAT_FORCE_REDUCE_SNAPSHOT is set to avoid perf impact by default.
             let mut input_for_pass = current.clone();
-            if self.adapter_info.backend == wgpu::Backend::Metal
+            if observed.is_none() && self.adapter_info.backend == wgpu::Backend::Metal
                 && std::env::var("RUNMAT_FORCE_REDUCE_SNAPSHOT").is_ok()
             {
                 let size_bytes = (current_len * self.element_size) as u64;
@@ -261,11 +277,17 @@ impl WgpuProvider {
             if let Some(allocated) = allocated {
                 allocated.set(true);
             }
+            if let Some(observed) = observed {
+                let mut value = observed.borrow_mut();
+                value.allocated_buffer_bytes = value.allocated_buffer_bytes.checked_add(out_buffer.size())
+                    .ok_or_else(|| anyhow!("global extrema allocation accounting overflow"))?;
+            }
             if let Some(after_allocation) = after_allocation {
                 after_allocation(&out_buffer)?;
             }
             // Prevent aliasing: output buffer must not be the same as input buffer
             if std::ptr::eq(out_buffer.as_ref(), input_for_pass.as_ref()) {
+                ensure!(observed.is_none(), "selected global allocator aliased a borrowed source; an unadmitted replacement is forbidden");
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
                     log::debug!(
                         "reduce_global_exec: alias detected; current_ptr={:p} out_ptr={:p} len={} out_total={}",
@@ -298,6 +320,11 @@ impl WgpuProvider {
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 }));
+                if let Some(observed) = observed {
+                    let mut value = observed.borrow_mut();
+                    value.allocated_buffer_bytes = value.allocated_buffer_bytes.checked_add(out_buffer.size())
+                        .ok_or_else(|| anyhow!("global extrema allocation accounting overflow"))?;
+                }
             }
 
             let mut in_offset_elems = 0usize;
@@ -314,6 +341,13 @@ impl WgpuProvider {
                     total: current_len as u32,
                 };
                 let params_buffer = self.uniform_buffer(emission, &params, "runmat-reduce-global-params")?;
+                if let Some(observed) = observed {
+                    let mut value = observed.borrow_mut();
+                    value.uniform_allocations = value.uniform_allocations.checked_add(1)
+                        .ok_or_else(|| anyhow!("global extrema uniform count overflow"))?;
+                    value.uniform_buffer_bytes = value.uniform_buffer_bytes.checked_add(params_buffer.size())
+                        .ok_or_else(|| anyhow!("global extrema uniform accounting overflow"))?;
+                }
 
                 let bind_group = emission.device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -364,6 +398,13 @@ impl WgpuProvider {
                     &bind_group,
                     groups,
                 )?;
+                if let Some(observed) = observed {
+                    let mut value = observed.borrow_mut();
+                    value.dispatches = value.dispatches.checked_add(1)
+                        .ok_or_else(|| anyhow!("global extrema dispatch accounting overflow"))?;
+                    value.queue_submissions = value.queue_submissions.checked_add(1)
+                        .ok_or_else(|| anyhow!("global extrema queue accounting overflow"))?;
+                }
                 in_offset_elems += chunk_in;
                 _out_offset_elems += chunk_out;
             }

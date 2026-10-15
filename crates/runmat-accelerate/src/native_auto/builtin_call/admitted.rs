@@ -112,7 +112,7 @@ pub(super) fn prepare_with(
     let input_root =
         runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
             .map_err(|error| Box::new(error.into_runtime_error()))?;
-    let prepared = prepare_with_inner(auto, context, request, None)?;
+    let prepared = prepare_with_inner(auto, context, request, None, None)?;
     Ok(prepared.with_request_input_root(input_root))
 }
 
@@ -124,6 +124,7 @@ fn prepare_with_inner(
         &crate::fusion_exec::host_readback::CpuHostResources,
         runmat_execution::Digest,
     )>,
+    compound: Option<&runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
 ) -> PreparationResult<PreparedBuiltinCall> {
     if request.form().operation == Operation::RuntimeOwned {
         return Ok(request
@@ -263,6 +264,7 @@ fn prepare_with_inner(
             operation,
             completion,
             host,
+            compound,
         )
         .map_err(preparation_error)?;
     Ok(prepared)
@@ -276,6 +278,11 @@ fn preparation_error(error: ProviderExecutionError) -> RuntimeError {
 }
 
 impl BuiltinPreparationObservation for BuiltinCallGuard {
+    fn take_compound(
+        &mut self,
+    ) -> Option<runmat_runtime::context::preparation::AdmittedBuiltinCompound> {
+        self.compound.take()
+    }
     fn gpu_gather_retry_policy(&self) -> runmat_runtime::GpuGatherRetry {
         if self.readbacks.is_some()
             || self

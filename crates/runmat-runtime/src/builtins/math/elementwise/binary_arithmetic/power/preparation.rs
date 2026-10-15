@@ -4,7 +4,8 @@ use super::domain::PowerResultDomain;
 use super::power_error_with_detail;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::context::preparation::{
-    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+    execute_request_compound, AdmittedBuiltinCompound, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
 };
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease};
@@ -17,16 +18,19 @@ use runmat_builtins::{
 use runmat_value::{NumericDType, Value};
 use std::future::Future;
 
-pub(super) async fn execute<F, Fut>(
+pub(super) async fn execute<F, Fut, P, Published>(
     runtime: Option<&RuntimeContext>,
     input_count: usize,
     left: Value,
     right: Value,
     body: F,
+    publish: P,
 ) -> BuiltinResult<RootedValue>
 where
     F: FnOnce(Value, Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
+    P: FnOnce(RootedValue) -> Published,
+    Published: Future<Output = BuiltinResult<RootedValue>>,
 {
     let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
         .map_err(|cause| cause.into_runtime_error())?;
@@ -39,7 +43,7 @@ where
             // The canonical power body still owns domain/class arithmetic;
             // only operand promotion is bypassed for the selected host route.
             let evidence = classify_operands(&left, &right)?;
-            let output = body(left, right).await?;
+            let output = publish(body(left, right).await?).await?;
             route.confirm_numerical_host_branch(
                 runtime.unwrap(),
                 crate::context::VmFusionHostInstruction::ElementwiseBinary,
@@ -53,17 +57,15 @@ where
         .any(|value| matches!(value, Value::GpuTensor(_)));
     let admitted = input_count == 2
         && [&left, &right].into_iter().all(|value| match value {
-            Value::GpuTensor(handle) => {
-                runmat_accelerate_api::handle_provenance(handle)
-                    == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
-                    && crate::builtins::math::host_route::real_floating_shape(value).is_some()
+            Value::GpuTensor(_) => {
+                crate::builtins::math::host_route::real_floating_shape(value).is_some()
             }
             Value::Tensor(t) => matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64),
             Value::Num(_) => resident,
             _ => false,
         });
     if !admitted {
-        return body(left, right).await;
+        return publish(body(left, right).await?).await;
     }
     let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
@@ -78,16 +80,78 @@ where
         },
         vec![left, right],
     )?
+    .with_real_power()?
     .with_numerical_domain(classify)?;
-    execute_request(runtime, request, |mut values| async move {
+    let direct = if runtime.is_none_or(|runtime| runtime.service_ports().acceleration().is_none()) {
+        request
+            .operands()
+            .iter()
+            .find_map(|value| match value {
+                Value::GpuTensor(source) => {
+                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+                }
+                _ => None,
+            })
+            .map(|owner| request.plan_compound(runtime, owner))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    execute_request_compound(runtime, request, |mut values, compound| async move {
+        if let Some(compound) = compound.or(direct) {
+            let right = values.remove(1);
+            let left = values.remove(0);
+            let output = match compound {
+                AdmittedBuiltinCompound::RealPower(compound) => {
+                    super::compound::execute(runtime, compound, left, right).await?
+                }
+                AdmittedBuiltinCompound::RealPowerScalar(compound) => {
+                    super::scalar_compound::execute(runtime, compound, left, right).await?
+                }
+                AdmittedBuiltinCompound::RealUnary(_) => {
+                    let mut error =
+                        super::builtin_error("power: received another admitted compound authority");
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(error);
+                }
+            };
+            return publish(output).await;
+        }
         let route = crate::builtins::math::host_route::canonical(
             runtime,
             crate::context::VmFusionHostInstruction::ElementwiseBinary,
             values.iter(),
         );
+        if route.is_none() {
+            // Missing complete physical recipe is not a certified no-attempt
+            // hook result. Validate each actual owner before legacy probe or
+            // scalar-staging effects; never invent an owner for unknown views.
+            let mut owners: Vec<&'static dyn runmat_accelerate_api::AccelProvider> = Vec::new();
+            for value in &values {
+                let Value::GpuTensor(source) = value else {
+                    continue;
+                };
+                let Some(owner) =
+                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+                else {
+                    continue;
+                };
+                if owners
+                    .iter()
+                    .any(|previous| runmat_accelerate_api::same_provider_instance(*previous, owner))
+                {
+                    continue;
+                }
+                owners.push(owner);
+                crate::context::provider_operation::unavailable_provider_route::<()>(
+                    runtime, owner,
+                )?;
+            }
+        }
         let evidence = route.as_ref().map(|_| classify(&values)).transpose()?;
         let right = values.remove(1);
-        let output = body(values.remove(0), right).await?;
+        let output = publish(body(values.remove(0), right).await?).await?;
         if let (Some(route), Some(evidence)) = (route, evidence) {
             route.confirm_numerical_host_branch(
                 runtime.unwrap(),

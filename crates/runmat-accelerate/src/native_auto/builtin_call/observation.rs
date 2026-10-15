@@ -8,6 +8,8 @@ use runmat_execution::profiling::{CommandProviderContribution, ProviderObservati
 
 #[derive(Default)]
 pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
+    pub(in crate::native_auto) compound:
+        Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     pub(in crate::native_auto) runtime: Option<&'a RuntimeContext>,
     pub(in crate::native_auto) preparation_program:
         Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
@@ -193,6 +195,34 @@ impl BuiltinCallObservation {
         self.receipt
             .as_ref()
             .map(ProviderOperationReceipt::recorder)
+    }
+    pub(super) fn prepare_compound(
+        &mut self,
+        provider: &dyn AccelProvider,
+        query: Option<&runmat_accelerate_api::ProviderFeasibilityQuery>,
+        plan: &runmat_runtime::context::preparation::AdmittedBuiltinCompound,
+    ) {
+        if !self.provider_selected
+            || !self
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.is_current())
+        {
+            return;
+        }
+        let Some(query) = query else {
+            return;
+        };
+        if let ProviderObservationSupport::Observed(mut receipt) = plan.begin_observation(provider)
+        {
+            plan.require_execution(&mut receipt, query.operation.clone());
+            self.command_contribution = self
+                .feedback
+                .as_ref()
+                .and_then(|feedback| feedback.runtime.command_profiling())
+                .and_then(|command| command.begin_provider_operation());
+            self.receipt = Some(receipt);
+        }
     }
 
     pub(super) fn preparation_fallback(&mut self) {

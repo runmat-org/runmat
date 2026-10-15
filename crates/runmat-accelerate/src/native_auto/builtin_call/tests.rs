@@ -280,6 +280,7 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
         &args,
     );
     PreparedBuiltinCall {
+        compound: None,
         args,
         observation: Some(observation),
         uploads: None,

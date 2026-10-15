@@ -1,9 +1,9 @@
-use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
+use crate::placement::{ResourceBoundUnavailable, ResourceByteBound};
 
 /// Retained allocations can outlive one graph node. Counts preserve which
 /// unavailable bounds remain live when a predecessor's last consumer exits.
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct ResourceAccount {
+pub struct ResourceAccount {
     pub(super) known_bytes: u64,
     pub(super) unavailable_bounds: UnavailableCounts,
 }
@@ -24,7 +24,7 @@ impl UnavailableCounts {
         }
     }
 
-    pub(super) fn is_empty(self) -> bool {
+    pub fn is_empty(self) -> bool {
         self == Self::default()
     }
 
@@ -50,10 +50,26 @@ impl UnavailableCounts {
 }
 
 impl ResourceAccount {
+    /// Project a complete arithmetic account without discarding unresolved
+    /// evidence. `known_bytes` alone is not a certified resource bound.
+    pub fn bound(self) -> ResourceByteBound {
+        match self.unavailable_bounds.first() {
+            Some(reason) => ResourceByteBound::Unavailable(reason),
+            None => ResourceByteBound::Known(self.known_bytes),
+        }
+    }
+
+    pub fn known_bytes(self) -> u64 {
+        self.known_bytes
+    }
+    pub fn is_empty(self) -> bool {
+        self.known_bytes == 0 && self.unavailable_bounds.is_empty()
+    }
+
     /// Alternative stages do not overlap: readback completes before output
     /// upload. Keep the larger proven peak, or an unavailable bound when
     /// either stage cannot prove its peak under a finite provider quota.
-    pub(super) fn peak(self, other: Self) -> Self {
+    pub fn peak(self, other: Self) -> Self {
         if !self.unavailable_bounds.is_empty() {
             self
         } else if !other.unavailable_bounds.is_empty() {
@@ -65,14 +81,14 @@ impl ResourceAccount {
         }
     }
 
-    pub(super) fn combine(self, other: Self) -> Option<Self> {
+    pub fn combine(self, other: Self) -> Option<Self> {
         Some(Self {
             known_bytes: self.known_bytes.checked_add(other.known_bytes)?,
             unavailable_bounds: self.unavailable_bounds.combine(other.unavailable_bounds)?,
         })
     }
 
-    pub(super) fn add(self, bound: ResourceByteBound) -> Option<Self> {
+    pub fn add(self, bound: ResourceByteBound) -> Option<Self> {
         Some(match bound {
             ResourceByteBound::Known(bytes) => Self {
                 known_bytes: self.known_bytes.checked_add(bytes)?,
@@ -87,7 +103,7 @@ impl ResourceAccount {
         })
     }
 
-    pub(super) fn subtract(self, bound: ResourceByteBound) -> Option<Self> {
+    pub fn subtract(self, bound: ResourceByteBound) -> Option<Self> {
         Some(match bound {
             ResourceByteBound::Known(bytes) => Self {
                 known_bytes: self.known_bytes.checked_sub(bytes)?,
@@ -102,7 +118,7 @@ impl ResourceAccount {
         })
     }
 
-    pub(super) fn within(
+    pub fn within(
         self,
         budget: Option<u64>,
         budget_kind: ResourceBudgetKind,
@@ -124,14 +140,15 @@ impl ResourceAccount {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::placement) enum ResourceBudgetKind {
+pub enum ResourceBudgetKind {
     HostMemory,
     ProviderScratch(u32),
     ProviderMemory(u32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::placement) enum ResourceAdmissionError {
+pub enum ResourceAdmissionError {
+    InvalidSnapshot(super::ResourceSnapshotError),
     InsufficientEvidence {
         reason: ResourceBoundUnavailable,
         budget: ResourceBudgetKind,
@@ -140,6 +157,20 @@ pub(in crate::placement) enum ResourceAdmissionError {
     Overflow,
     UnavailableProvider,
     TransactionalResultsRequired,
+}
+
+impl std::fmt::Display for ResourceAdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+impl std::error::Error for ResourceAdmissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidSnapshot(cause) => Some(cause),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

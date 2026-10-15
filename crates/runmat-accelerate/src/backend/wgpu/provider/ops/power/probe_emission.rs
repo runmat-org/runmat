@@ -163,7 +163,7 @@ impl StageDemand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ProbeGeometry {
+pub(super) struct ProbeGeometry {
     flag_bytes: u64,
     scalar_bytes: u64,
     stages: [StageDemand; 2],
@@ -171,7 +171,7 @@ struct ProbeGeometry {
 }
 
 impl ProbeGeometry {
-    fn plan(
+    pub(super) fn plan(
         len: usize,
         precision: NumericPrecision,
         snapshot: FrozenAnySnapshot,
@@ -282,41 +282,37 @@ impl ProbePreflight {
         &self,
         flag: &ProviderRealElementwiseObserved,
     ) -> Result<ProviderResourcePhasePlan> {
-        ensure!(
-            flag.output_buffer_bytes == Some(self.geometry.flag_bytes)
-                && flag.uniform_allocations == 1
-                && flag.queue_submissions > 0,
-            "POWER flag resource recipe cannot bound probe scope"
-        );
-        let add = |left: u64, right: u64| {
-            left.checked_add(right)
-                .ok_or_else(|| anyhow!("POWER probe phase resource ceiling overflow"))
-        };
-        let flag_fences = u64::from(flag.queue_submissions)
-            .checked_mul(8)
-            .ok_or_else(|| anyhow!("POWER flag fence ceiling overflow"))?;
-        let flag_peak = add(
-            add(self.geometry.flag_bytes, flag.uniform_buffer_bytes)?,
-            flag_fences,
-        )?;
-        let stage_ceiling = |previous: u64, stage: StageDemand| -> Result<u64> {
-            let with_output = add(previous, stage.output_bytes)?;
-            let with_snapshot = add(with_output, stage.snapshot_copy_bytes.unwrap_or(0))?;
-            let with_uniform = add(with_snapshot, stage.uniform_bytes)?;
-            add(
-                with_uniform,
-                if stage.snapshot_copy_bytes.is_some() {
-                    16
-                } else {
-                    8
-                },
-            )
-        };
-        let rows_peak = stage_ceiling(flag_peak, self.geometry.stages[0])?;
-        let columns_peak = stage_ceiling(rows_peak, self.geometry.stages[1])?;
-        let readback_peak = add(add(columns_peak, self.geometry.readback_staging_bytes)?, 8)?;
-        ProviderResourcePhasePlan::new([flag_peak, rows_peak, columns_peak, readback_peak])
-            .map_err(Into::into)
+        ProviderResourcePhasePlan::new(self.resource_limits(flag)?).map_err(Into::into)
+    }
+
+    /// The resource admission projection and the active-owner ledger consume
+    /// the same checked physical ceiling, including native scalar staging and
+    /// mandatory submission-fence backing. This does not price the probe or
+    /// certify an unknown numerical domain.
+    pub(super) fn resource_limits(
+        &self,
+        flag: &ProviderRealElementwiseObserved,
+    ) -> Result<[u64; 4]> {
+        self.resource_limits_with_fences(flag, true)
+    }
+
+    /// Admission adds optional observation fences/query storage at the
+    /// canonical observation owner, exactly once. The active ledger retains
+    /// its fence-inclusive ceilings above.
+    pub(super) fn data_resource_limits(
+        &self,
+        flag: &ProviderRealElementwiseObserved,
+    ) -> Result<[u64; 4]> {
+        self.resource_limits_with_fences(flag, false)
+    }
+
+    fn resource_limits_with_fences(
+        &self,
+        flag: &ProviderRealElementwiseObserved,
+        include_fences: bool,
+    ) -> Result<[u64; 4]> {
+        self.geometry
+            .resource_limits_with_fences(flag, include_fences)
     }
 
     pub(super) fn require_sources(
@@ -334,7 +330,57 @@ impl ProbePreflight {
         );
         Ok(())
     }
+}
 
+impl ProbeGeometry {
+    pub(super) fn resource_limits_with_fences(
+        &self,
+        flag: &ProviderRealElementwiseObserved,
+        include_fences: bool,
+    ) -> Result<[u64; 4]> {
+        ensure!(
+            flag.output_buffer_bytes == Some(self.flag_bytes)
+                && flag.uniform_allocations == 1
+                && flag.queue_submissions > 0,
+            "POWER flag resource recipe cannot bound probe scope"
+        );
+        let add = |left: u64, right: u64| {
+            left.checked_add(right)
+                .ok_or_else(|| anyhow!("POWER probe phase resource ceiling overflow"))
+        };
+        let flag_fences = u64::from(flag.queue_submissions)
+            .checked_mul(if include_fences { 8 } else { 0 })
+            .ok_or_else(|| anyhow!("POWER flag fence ceiling overflow"))?;
+        let flag_peak = add(
+            add(self.flag_bytes, flag.uniform_buffer_bytes)?,
+            flag_fences,
+        )?;
+        let stage_ceiling = |previous: u64, stage: StageDemand| -> Result<u64> {
+            let with_output = add(previous, stage.output_bytes)?;
+            let with_snapshot = add(with_output, stage.snapshot_copy_bytes.unwrap_or(0))?;
+            let with_uniform = add(with_snapshot, stage.uniform_bytes)?;
+            add(
+                with_uniform,
+                if !include_fences {
+                    0
+                } else if stage.snapshot_copy_bytes.is_some() {
+                    16
+                } else {
+                    8
+                },
+            )
+        };
+        let rows_peak = stage_ceiling(flag_peak, self.stages[0])?;
+        let columns_peak = stage_ceiling(rows_peak, self.stages[1])?;
+        let readback_peak = add(
+            add(columns_peak, self.readback_staging_bytes)?,
+            if include_fences { 8 } else { 0 },
+        )?;
+        Ok([flag_peak, rows_peak, columns_peak, readback_peak])
+    }
+}
+
+impl ProbePreflight {
     pub(super) fn require_flag(&self, flag: &GpuTensorHandle) -> Result<()> {
         flag.view().validate(flag.physical())?;
         flag.allocation_lease().validate_live()?;

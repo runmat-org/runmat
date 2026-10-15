@@ -1,8 +1,8 @@
 use super::*;
 #[path = "io/power_probe.rs"]
 mod power_probe;
-pub(crate) use power_probe::PowerProbeReadbackObserved;
 use power_probe::ProbeStaging;
+pub(crate) use power_probe::{power_probe_host_workspace_bytes, PowerProbeReadbackObserved};
 use runmat_accelerate_api::{
     HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned, HostIntegerTensorView,
     HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView,

@@ -56,7 +56,7 @@ where
     restore_output(provider, input, output, builtin)
 }
 
-fn restore_output(
+pub(super) fn restore_output(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     output: Value,

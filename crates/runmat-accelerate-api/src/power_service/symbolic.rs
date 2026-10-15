@@ -56,6 +56,7 @@ pub struct PowerSymbolicPhysicalWork {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSymbolicPlan {
     pub(crate) exact_proposal: Option<crate::ProviderRealElementwisePhysicalProposal>,
+    pub(crate) resident_input: Option<crate::PowerInputDescription>,
     pub(crate) resident: ProviderRepresentation,
     pub(crate) control: PowerScalarControl,
     pub(crate) resident_operand: RealPowerOperand,
@@ -84,6 +85,9 @@ impl PowerSymbolicPlan {
     pub fn resident_representation(&self) -> &ProviderRepresentation {
         &self.resident
     }
+    pub fn resident_input_description(&self) -> Option<&crate::PowerInputDescription> {
+        self.resident_input.as_ref()
+    }
     pub fn scalar_shape(&self) -> &[usize] {
         &self.host_shape
     }
@@ -107,6 +111,15 @@ impl PowerSymbolicPlan {
                 single_publication: false,
             };
         }
+        if self.route == PowerPhysicalRoute::LegacyProvenReal {
+            return PowerPhysicalRecipe {
+                route: self.route,
+                mode: self.mode,
+                widen_resident: false,
+                scalar: PowerScalarConstruction::ProviderFill,
+                single_publication: false,
+            };
+        }
         let mixed = matches!(
             self.mode,
             RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
@@ -115,25 +128,13 @@ impl PowerSymbolicPlan {
             route: self.route,
             mode: self.mode,
             widen_resident: mixed && self.resident.element_type == ProviderElementType::F32,
-            scalar: if self.exact_scalar_upload() {
-                PowerScalarConstruction::ExactTypedUpload
-            } else {
-                PowerScalarConstruction::ProviderFill
-            },
+            scalar: PowerScalarConstruction::ExactTypedUpload,
             single_publication: mixed,
         }
     }
 
     pub(crate) fn exact_scalar_upload(&self) -> bool {
-        let mixed = matches!(
-            self.mode,
-            RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
-        );
-        (!mixed
-            && self.control.precision() == ProviderPrecision::F32
-            && self.provider_precision == ProviderPrecision::F64)
-            || (self.control.value() == 0.0 && self.control.value().is_sign_negative())
-            || self.control.value().is_nan()
+        self.route == PowerPhysicalRoute::TypedDomain
     }
 
     pub fn feasibility_query(&self, domain: PowerResultDomain) -> Option<ProviderFeasibilityQuery> {
@@ -204,7 +205,10 @@ impl PowerSymbolicPlan {
                     self.control.precision().into()
                 },
                 ProviderStorage::DenseReal,
-                vec![1, 1],
+                self.host_shape
+                    .iter()
+                    .map(|&extent| u64::try_from(extent).ok())
+                    .collect::<Option<Vec<_>>>()?,
             ),
             PowerScalarConstruction::ProviderFill => device_rep(
                 native_type,
@@ -435,6 +439,7 @@ fn derive(
     };
     Ok(Some(PowerSymbolicPlan {
         exact_proposal,
+        resident_input: None,
         resident,
         control,
         resident_operand,
@@ -521,18 +526,22 @@ pub(super) fn plan_with_input(
         .transpose()
         .map_err(PowerServiceError)?
         .flatten();
-    let Some(plan) = derive(
+    let Some(mut plan) = derive(
         provider,
         resident,
         control,
         resident_operand,
         host_shape,
         operation,
-        exact_proposal.map(|proposal| ExactDescription { proposal, input }),
+        exact_proposal.map(|proposal| ExactDescription {
+            proposal,
+            input: input.clone(),
+        }),
     )?
     else {
         return Ok(None);
     };
+    plan.resident_input = input;
     if plan.route == PowerPhysicalRoute::ExactSingleBase {
         if plan
             .query
@@ -608,11 +617,7 @@ impl PowerSymbolicPlan {
             self.resident_operand,
             &self.host_shape,
             self.query.operation.clone(),
-            self.query
-                .workload
-                .real_power_scalar
-                .as_ref()
-                .and_then(|work| work.input.clone()),
+            self.resident_input.clone(),
         )
     }
 }

@@ -22,6 +22,11 @@ pub trait PreparedCallCompletion {
 /// borrowed input protection and adopt returned aliases before releasing temps.
 /// No timing assumptions are imposed by the runtime.
 pub trait BuiltinPreparationObservation {
+    /// Actual selected physical body, not a metadata snapshot. Only domains
+    /// which supplied its admitted instruction may consume this delivery.
+    fn take_compound(&mut self) -> Option<super::AdmittedBuiltinCompound> {
+        None
+    }
     /// A completed private preparation effect may forbid retry of the body.
     /// This can only strengthen to Never; it never requests a new replay.
     fn gpu_gather_retry_policy(&self) -> crate::GpuGatherRetry {
@@ -50,6 +55,11 @@ pub struct PreparedBuiltinOperands {
 }
 
 impl PreparedBuiltinOperands {
+    pub(super) fn take_compound(&mut self) -> Option<super::AdmittedBuiltinCompound> {
+        self.observation
+            .as_mut()
+            .and_then(|observation| observation.take_compound())
+    }
     pub(super) fn forbids_gpu_gather_retry(&self) -> bool {
         self.observation.as_ref().is_some_and(|observation| {
             observation.gpu_gather_retry_policy() == crate::GpuGatherRetry::Never

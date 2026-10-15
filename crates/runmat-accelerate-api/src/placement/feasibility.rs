@@ -161,6 +161,18 @@ pub struct ProviderNumericUploadPhysicalEvidence {
     pub completion_queue_slots: u32,
 }
 
+/// Exact native floating-cast stage for an already resident contiguous source.
+/// A same-class alias has no fresh output; scalar POWER only requests genuine
+/// F32/F64 changes. The eventual live source must still be authenticated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderFloatingCastPhysicalEvidence {
+    pub output_requested_bytes: u64,
+    pub uniform_buffer_bytes: u64,
+    pub dispatches: u32,
+    pub queue_slots: u32,
+}
+
 /// A native numeric result produced by a selected provider operation may be
 /// read back only after it exists. This is side-effect-free physical evidence
 /// for the *future* contiguous output representation, not proof that a later
@@ -213,6 +225,13 @@ pub struct ProviderRejection {
     /// Stable provider-owned diagnostic token, never arbitrary error text.
     pub detail: Option<String>,
 }
+
+impl std::fmt::Display for ProviderRejection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:?}: {:?}", self.code, self.detail)
+    }
+}
+impl std::error::Error for ProviderRejection {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "status")]

@@ -35,6 +35,9 @@ pub enum ProviderRealElementwiseOperation {
         control: ScalarLiteral,
     },
     Sqrt,
+    /// Ordinary real unary execution only. The recipe supplies physical work,
+    /// not the operation owner's separate numerical-domain admission.
+    UnaryMath(runmat_types::ScalarUnaryMath),
     FloatingCast {
         target: ProviderPrecision,
     },
@@ -176,15 +179,21 @@ impl ProviderRealElementwiseRecipe {
             ProviderRealElementwiseOperation::ScalarMax { control } => {
                 (4, Some(control), None, None)
             }
+            ProviderRealElementwiseOperation::UnaryMath(_) => (5, None, None, None),
+        };
+        let unary = match self.request.operation {
+            ProviderRealElementwiseOperation::UnaryMath(operation) => Some(operation),
+            _ => None,
         };
         Ok(runmat_execution::Digest::sha256(serde_json::to_vec(&(
-            "ordinary-real-elementwise-v3",
+            "ordinary-real-elementwise-v4",
             &self.request.source,
             self.request.source_buffer_bytes,
             control,
             operation,
             add_mode,
             target,
+            unary,
             &self.output,
             &self.physical,
         ))?))
@@ -347,7 +356,9 @@ fn native_request(request: &ProviderRealElementwiseRequest) -> bool {
                 && crate::ExactSingleBasePower::for_control(control).is_some()
         }
         ProviderRealElementwiseOperation::FloatingCast { .. } => true,
-        ProviderRealElementwiseOperation::Sqrt => true,
+        ProviderRealElementwiseOperation::Sqrt | ProviderRealElementwiseOperation::UnaryMath(_) => {
+            true
+        }
         ProviderRealElementwiseOperation::ScalarMul { control }
         | ProviderRealElementwiseOperation::ScalarMax { control } => matches!(
             (source.element_type, control),
@@ -389,7 +400,8 @@ fn output_projection(
         | ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
         | ProviderRealElementwiseOperation::ScalarMul { .. }
         | ProviderRealElementwiseOperation::ScalarMax { .. }
-        | ProviderRealElementwiseOperation::Sqrt => {
+        | ProviderRealElementwiseOperation::Sqrt
+        | ProviderRealElementwiseOperation::UnaryMath(_) => {
             output.layout = ProviderLayout::ColumnMajorContiguous;
             ProviderRealElementwiseOutputRoute::FreshAllocation
         }

@@ -68,9 +68,11 @@ pub(super) fn select(
     axis: usize,
     demand: ExtremaDemand,
 ) -> BuiltinResult<Option<SelectedExtrema>> {
-    let Some(runtime) = runtime else {
+    // Public min/max validate the selected dimension before reaching this
+    // physical owner. Preserve that applicability exit before resource probes.
+    if input.shape().get(axis).is_none() {
         return Ok(None);
-    };
+    }
     let Some(backing) =
         ProviderExtremaInputBacking::from_full_live_handle(input).map_err(|source| {
             crate::build_runtime_error("dimensional extrema input allocation is unavailable")
@@ -79,7 +81,7 @@ pub(super) fn select(
                 .build()
         })?
     else {
-        return Ok(None);
+        return crate::context::provider_operation::unavailable_provider_route(runtime, provider);
     };
     let Some(shape) = input
         .shape()
@@ -89,7 +91,7 @@ pub(super) fn select(
         .collect::<Result<Vec<_>, _>>()
         .ok()
     else {
-        return Ok(None);
+        return crate::context::provider_operation::unavailable_provider_route(runtime, provider);
     };
     let Some(&axis_extent) = shape.get(axis) else {
         return Ok(None);
@@ -156,7 +158,12 @@ pub(super) fn select(
         && index_class == ProviderElementType::F32
         && produced_readback.is_none()
     {
-        return Ok(None);
+        return Err(crate::build_runtime_error(
+            "dimensional extrema index conversion geometry overflows",
+        )
+        .with_identifier("RunMat:Placement:ResourceOverflow")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
     }
     let identity = input.view_identity();
     let domain_facts = Digest::sha256(
@@ -170,7 +177,7 @@ pub(super) fn select(
         .expect("typed extrema facts serialize"),
     );
     let selected = select_exact_provider_operation(
-        Some(runtime),
+        runtime,
         ExactProviderOperation {
             provider,
             query: &query,

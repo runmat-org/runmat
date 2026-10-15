@@ -7,8 +7,14 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, PowerResultDomain
 
 #[path = "power/flag_fusion.rs"]
 mod flag_fusion;
+#[path = "power/evaluation.rs"]
+mod evaluation;
+#[path = "power/projection.rs"]
+mod projection;
 #[path = "power/probe_emission.rs"]
 mod probe_emission;
+#[path = "power/probe.rs"]
+mod probe;
 pub(crate) use probe_emission::PowerProbeResourcePhase;
 #[cfg(test)]
 pub(crate) use probe_emission::ProbeSubmissionRecord;
@@ -215,109 +221,12 @@ impl WgpuProvider {
         base: &GpuTensorHandle,
         exponent: &GpuTensorHandle,
     ) -> Result<(PowerResultDomain, ProbeRecordResult)> {
-        let input_precision = self.get_entry_raw(base)?.precision;
-        if input_precision != self.precision
-            && !(input_precision == NumericPrecision::F32
-                && self.precision == NumericPrecision::F64)
-        {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "power classification requires exact floating input conversion",
-            ));
-        }
-        let (shape, len) = self.admitted_power_shape(base, exponent, input_precision)?;
-        if len == 0 {
+        let Some(prepared) = self.prepare_power_domain_probe_exec(base, exponent)? else {
             return Ok((PowerResultDomain::Real, empty_probe_record()));
-        }
-        self.require_ieee_words(self.precision)?;
-        let snapshot = super::reduction::FrozenAnySnapshot::capture();
-        let any_pipeline = self.prepare_power_any_pipeline_exec()?;
-        let probe = probe_emission::ProbePreflight::plan(probe_emission::ProbePlanRequest {
-            base,
-            exponent,
-            owner_device_id: self.device_id(),
-            len,
-            precision: self.precision,
-            snapshot,
-            limits: &self.adapter_limits,
-            shader_workgroup: any_pipeline.shader_workgroup(),
-        })?;
-        let prepared_flag =
-            self.prepare_power_flag_fusion_exec(base, exponent, &shape, len, input_precision)?;
-        probe.require_sources(base, exponent)?;
-        let phase_limits = probe.resource_phase_limits(&prepared_flag.resource_work())?;
-        let resource_scope = runmat_accelerate_api::observation::current_provider_observation()
-            .map(|recorder| recorder.begin_resource_scope(phase_limits))
-            .transpose()?;
-        let classified = runmat_accelerate_api::observation::observe_provider_resource_future(
-            resource_scope.clone(),
-            async {
-                if let Some(scope) =
-                    runmat_accelerate_api::observation::current_provider_resource_scope()
-                {
-                    PowerProbeResourcePhase::Flag.begin(&scope)?;
-                }
-                // Input buffers remain borrowed, including F32 on an F64 provider.
-                // Exact widening occurs in registers. Flags and the existing scalar
-                // reductions retain native precision, so probe allocations/readback
-                // geometry is unchanged: no input staging or hidden layout dispatch.
-                let (flags, flag_receipt) =
-                    self.execute_power_flag_fusion_prepared_exec(base, exponent, prepared_flag)?;
-                flag_receipt.require_output(&flags)?;
-                probe.require_flag(&flags)?;
-                // The flag receipt covers emission only. The outer canonical
-                // operation receipt, if issued, owns fence completion and the
-                // explicit resource scope across the remaining stages.
-                // This buffer is owned here, so reshaping it cannot change an input's
-                // metadata. Existing two-dimensional full reduction handles all ranks.
-                let flat = self.reshape_exec(&flags, &[len, 1])?;
-                probe.require_flat(&flags, &flat)?;
-                if let Some(scope) =
-                    runmat_accelerate_api::observation::current_provider_resource_scope()
-                {
-                    PowerProbeResourcePhase::AnyRows.begin(&scope)?;
-                }
-                let (reduced, stages) =
-                    self.reduce_power_any_omit_observed_exec(&flat, snapshot, &any_pipeline)?;
-                probe.require_stages(&flat, &reduced, &stages)?;
-                if let Some(scope) =
-                    runmat_accelerate_api::observation::current_provider_resource_scope()
-                {
-                    PowerProbeResourcePhase::Readback.begin(&scope)?;
-                }
-                let (result, readback) = self.download_power_probe_observed_exec(&reduced).await?;
-                probe.require_readback(&reduced, &readback)?;
-                #[cfg(test)]
-                let submissions =
-                    probe.collect_submissions(flag_receipt.tickets(), &stages, &readback)?;
-                ensure!(
-                    result.data.len() == 1 && (result.data[0] == 0.0 || result.data[0] == 1.0),
-                    "power domain reduction returned an invalid flag"
-                );
-                let domain = if result.data[0] == 0.0 {
-                    PowerResultDomain::Real
-                } else {
-                    PowerResultDomain::Complex
-                };
-                #[cfg(test)]
-                let record = Some(submissions);
-                #[cfg(not(test))]
-                let record = ();
-                Ok((domain, record))
-            },
-        )
-        .await;
-        if let Some(scope) = resource_scope {
-            if classified.is_ok() {
-                scope.finish()?;
-            } else {
-                scope.fail(
-                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
-                );
-            }
-        }
-        classified
+        };
+        self.execute_power_domain_probe_prepared_exec(base, exponent, prepared)
+            .await
     }
-
     pub(crate) fn real_power_in_domain_exec(
         &self,
         base: &GpuTensorHandle,
@@ -591,6 +500,89 @@ mod tests {
                 );
                 assert!((actual.data[3] - 2.0).abs() < tolerance);
             }
+            let before = provider.telemetry_snapshot();
+            let compound = runmat_accelerate_api::power_service::PowerPairCompound::plan(
+                provider, &base, &exponent,
+            )
+            .unwrap()
+            .expect("actual native paired POWER compound");
+            let representations = [&base, &exponent].map(|source| {
+                runmat_accelerate_api::ProviderFeasibilityQuery::exact_numeric_download(source)
+                    .unwrap()
+                    .inputs
+                    .into_iter()
+                    .next()
+                    .unwrap()
+            });
+            let descriptions = [
+                runmat_accelerate_api::PowerInputDescription::Live {
+                    physical: *base.physical(),
+                    view: base.view().clone(),
+                },
+                runmat_accelerate_api::PowerInputDescription::PlannedDense {
+                    requested_bytes: provider
+                        .plan_dense_real_output_buffer_bytes(&representations[1])
+                        .unwrap()
+                        .expect("future dense output extent"),
+                },
+            ];
+            let future = runmat_accelerate_api::power_service::PowerPairProjection::plan(
+                provider,
+                representations,
+                descriptions,
+            )
+            .unwrap()
+            .expect("future dense operand has both native POWER alternatives");
+            assert_eq!(future.physical().probe, *compound.probe().physical());
+            assert_eq!(future.physical().real, *compound.real().physical());
+            assert_eq!(future.physical().complex, *compound.complex().physical());
+            let bound = future
+                .bind(&base, &exponent)
+                .expect("actual produced lease binds the projected alternatives");
+            assert_eq!(bound.identity().unwrap(), compound.identity().unwrap());
+            let foreign = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    exponent.shape().to_vec(),
+                    exponent.physical().element_type(),
+                    GpuTensorStorage::Real,
+                )
+                .unwrap();
+            assert!(future.bind(&base, &foreign.handle).is_err());
+            foreign.handle.release().unwrap();
+            assert_eq!(
+                before,
+                provider.telemetry_snapshot(),
+                "physical planning cannot execute a probe"
+            );
+            let executed = bound.execute(None).await.unwrap();
+            let (selected_output, evidence) = executed.into_parts();
+            assert_eq!(evidence.domain(), domain);
+            assert!(!selected_output.shares_allocation_with(&base));
+            assert!(!selected_output.shares_allocation_with(&exponent));
+            assert_eq!(
+                selected_output.physical().element_type(),
+                base.physical().element_type()
+            );
+            let selected = provider.download(&selected_output).await.unwrap();
+            assert_eq!(selected.shape, actual.shape);
+            assert_eq!(selected.storage, actual.storage);
+            assert_eq!(selected.data.len(), actual.data.len());
+            for (selected, ordinary) in selected.data.iter().zip(&actual.data) {
+                assert!((selected - ordinary).abs() < tolerance);
+            }
+            selected_output.release().unwrap();
+            let cancelled = runmat_execution::cancellation::CancellationSource::new();
+            cancelled.cancel(runmat_execution::CancellationReason::User);
+            let token = cancelled.token();
+            let before = provider.telemetry_snapshot();
+            assert!(compound.execute(Some(&token)).await.is_err());
+            assert_eq!(
+                before,
+                provider.telemetry_snapshot(),
+                "pre-effect cancellation must not execute any child"
+            );
+            base.allocation_lease().validate_live().unwrap();
+            exponent.allocation_lease().validate_live().unwrap();
             for handle in [base, exponent, output] {
                 handle.release().unwrap();
             }
@@ -625,5 +617,71 @@ mod tests {
         for handle in [base, exponent, output] {
             handle.release().unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn actual_scalar_power_projection_binds_upload_and_consumes_paired_probe() {
+        use runmat_accelerate_api::power_service::{
+            execute_resident_scalar_power_projected, prepare_resident_scalar_power,
+            PowerTypedScalarProjection,
+        };
+        use runmat_accelerate_api::{
+            PowerScalarControl, ProviderOperationIdentity, RealPowerOperand,
+        };
+        let provider = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("scalar POWER qualification requires a compatible WGPU adapter");
+        let base = provider
+            .upload(&HostTensorView {
+                data: &[-4.0, 4.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let control = match provider.precision() {
+            ProviderPrecision::F32 => PowerScalarControl::SingleBits(0.5_f32.to_bits()),
+            ProviderPrecision::F64 => PowerScalarControl::DoubleBits(0.5_f64.to_bits()),
+        };
+        let prepared = prepare_resident_scalar_power(
+            provider,
+            &base,
+            control,
+            RealPowerOperand::Base,
+            &[1, 1],
+            ProviderOperationIdentity::new(runmat_builtins::POWER_CATALOG_ENTRY.identity.name),
+        )
+        .unwrap()
+        .expect("real scalar typed POWER route");
+        let before = provider.telemetry_snapshot();
+        let projection = PowerTypedScalarProjection::plan(provider, prepared.symbolic_plan())
+            .unwrap()
+            .expect("native upload and paired alternatives have exact physical stages");
+        let resources = projection
+            .resource_bounds()
+            .expect("all native stages are bounded");
+        assert!(resources.retained_bytes > 0 && resources.queue_slots > 0);
+        assert!(matches!(
+            resources.peak_bytes,
+            runmat_execution::ResourceByteBound::Known(bytes)
+                if bytes >= resources.retained_bytes
+        ));
+        assert_eq!(before, provider.telemetry_snapshot());
+        let executed = execute_resident_scalar_power_projected(prepared, &projection, None)
+            .await
+            .unwrap();
+        assert_eq!(executed.domain, PowerResultDomain::Complex);
+        assert!(executed.scalar_evidence.is_some());
+        assert!(!executed.handle.shares_allocation_with(&base));
+        let actual = provider.download(&executed.handle).await.unwrap();
+        let tolerance = if provider.precision() == ProviderPrecision::F32 {
+            2e-4
+        } else {
+            1e-10
+        };
+        assert!((actual.data[1] - 2.0).abs() < tolerance);
+        assert!((actual.data[2] - 2.0).abs() < tolerance);
+        base.allocation_lease().validate_live().unwrap();
+        executed.handle.release().unwrap();
+        base.release().unwrap();
     }
 }

@@ -94,7 +94,13 @@ async fn acos_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
     crate::builtins::common::real_unary_preparation::execute(
         runtime.as_ref(),
         &runmat_builtins::ACOS_CATALOG_ENTRY,
-        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        runmat_types::ScalarUnaryMath::Acos,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ACOS_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ACOS_ERROR_INTERNAL,
+        ),
         value,
         |value| async move {
             let output = acos_execute(value).await?;

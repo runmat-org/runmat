@@ -138,6 +138,7 @@ fn altered_checked_selection_workload_refuses_before_provider_query() {
             &Rc::new(Capture::default()),
             1_000_000,
             vec![LocalPhysicalCandidate {
+                compound: None,
                 physical_identity: Some(selection.identity()),
                 provider_kind: ExecutionCandidateKind::ProviderFusion,
                 data_inputs: &leaves,
@@ -198,6 +199,7 @@ fn unchanged_checked_typed_selection_reaches_same_physical_query() {
         &Rc::new(Capture::default()),
         1_000_000,
         vec![LocalPhysicalCandidate {
+            compound: None,
             physical_identity: Some(selection.identity()),
             provider_kind: ExecutionCandidateKind::ProviderFusion,
             data_inputs: &leaves,
@@ -246,6 +248,7 @@ fn try_plan_resident(
         &Rc::new(Capture::default()),
         1_000_000,
         vec![LocalPhysicalCandidate {
+            compound: None,
             physical_identity: Some(selection.identity()),
             provider_kind: ExecutionCandidateKind::ProviderFusion,
             data_inputs: &leaves,

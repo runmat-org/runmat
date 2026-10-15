@@ -141,7 +141,13 @@ async fn atanh_builtin(
     crate::builtins::common::real_unary_preparation::execute(
         runtime.as_ref(),
         &runmat_builtins::ATANH_CATALOG_ENTRY,
-        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        runmat_types::ScalarUnaryMath::Atanh,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ATANH_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ATANH_ERROR_INTERNAL,
+        ),
         value,
         |value| async move {
             let output = atanh_execute(value).await?;

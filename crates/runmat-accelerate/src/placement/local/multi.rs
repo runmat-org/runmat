@@ -22,6 +22,7 @@ use runmat_execution::{
 use runmat_value::Value;
 
 pub(crate) struct LocalPhysicalCandidate<'a> {
+    pub(crate) compound: Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     /// Selection.identity() for a typed strategy. None preserves legacy
     /// single-candidate naming and feedback identity.
     pub(crate) physical_identity: Option<Digest>,
@@ -245,6 +246,21 @@ pub(super) fn plan_local_multi_with_provider(
                     "selected_shader_requirements_unavailable",
                 )
             }
+            _ if candidate.compound.is_some() => {
+                let resources = candidate.compound.unwrap().resources();
+                ProviderFeasibility::Supported {
+                    estimate: runmat_accelerate_api::ProviderResourceEstimate {
+                        transient_bytes: resources.peak_live.map(|peak| peak.peak_bytes),
+                        output_bytes: match resources.retained_bytes {
+                            ResourceByteBound::Known(bytes) => Some(bytes),
+                            ResourceByteBound::Unavailable(_) => None,
+                        },
+                        // Conditional physical stages are not an exact execution
+                        // count until the actual domain probe chooses its branch.
+                        dispatches: None,
+                    },
+                }
+            }
             _ => provider.query_feasibility(&query),
         };
         let estimate = match feasibility {
@@ -271,7 +287,9 @@ pub(super) fn plan_local_multi_with_provider(
             observation: candidate.preparation_program.filter(|_| compare_profitability)
                 .and(runtime)
                 .and_then(|runtime| runtime.service_ports().placement())
-                .and_then(|_| match provider.operation_observation_capability(&query) {
+                .and_then(|_| match candidate.compound.map_or_else(
+                    || provider.operation_observation_capability(&query),
+                    |plan| plan.observation_capability(provider)) {
                     runmat_accelerate_api::observation::ProviderObservationCapability::Supported(overhead) =>
                         Some(overhead),
                     runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => None,
@@ -297,8 +315,15 @@ pub(super) fn plan_local_multi_with_provider(
             required_download_bytes: candidate.required_download_bytes,
             downstream_materialization: candidate.downstream_materialization,
         };
-        let cost = provider
-            .estimate_cost(&cost_query)
+        // A quote for the original single real operation does not price this
+        // wider probe/conditional-host/restore scope. Until a provider supplies
+        // that complete scoped quote, whole-work policy receives true absence
+        // and may use only its existing exact-route observations/learning.
+        let cost = candidate
+            .compound
+            .is_none()
+            .then(|| provider.estimate_cost(&cost_query))
+            .flatten()
             .map(|estimate| runmat_execution::CandidateCostEvidence::Estimated(estimate.cost))
             .unwrap_or_else(|| {
                 let Some(mut cost) = candidate.fallback.estimate() else {
@@ -323,9 +348,12 @@ pub(super) fn plan_local_multi_with_provider(
             },
             preparation,
             cost,
-            output_residency: CandidateOutputResidency::Provider {
-                device_id: provider.device_id(),
-            },
+            output_residency: candidate
+                .compound
+                .map(|plan| plan.output_residency())
+                .unwrap_or(CandidateOutputResidency::Provider {
+                    device_id: provider.device_id(),
+                }),
             presentation: runmat_execution::CandidateOutputPresentation::Direct,
             guards: cpu.guards.clone(),
         });
@@ -388,6 +416,12 @@ pub(super) fn plan_local_multi_with_provider(
             })
             .transpose()?;
         admitted.push(Admitted {
+            exact_resources: candidate
+                .compound
+                .map(|plan| plan.resources_with_observation(cost_query.context.observation))
+                .transpose()
+                .map_err(Box::new)?,
+            exact_residency: candidate.compound.map(|plan| plan.output_residency()),
             original_index,
             descriptor,
             identity,

@@ -17,6 +17,7 @@ use runmat_runtime::{context::RuntimeContext, RuntimeError};
 type PreparationResult<T> = std::result::Result<T, Box<RuntimeError>>;
 
 pub(super) struct PreparedBuiltinCall {
+    compound: Option<runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     args: Vec<Value>,
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
@@ -26,6 +27,7 @@ pub(super) struct PreparedBuiltinCall {
 
 /// One call owns both its measurement and its fresh operand allocations.
 struct BuiltinCallGuard {
+    compound: Option<runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
     _request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
@@ -74,6 +76,7 @@ impl BuiltinCallGuard {
 impl PreparedBuiltinCall {
     fn unobserved(args: Vec<Value>) -> Self {
         Self {
+            compound: None,
             args,
             observation: None,
             uploads: None,
@@ -100,6 +103,7 @@ impl PreparedBuiltinCall {
         (
             self.args,
             BuiltinCallGuard {
+                compound: self.compound,
                 observation: self.observation,
                 uploads: self.uploads,
                 _request_input_root: self.request_input_root,

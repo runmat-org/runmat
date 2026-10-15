@@ -34,6 +34,7 @@ fn plan_error(error: crate::placement::PlacementPlanError) -> Box<runmat_runtime
 mod resource_tests;
 
 pub(crate) struct LocalPlacementRequest<'a> {
+    pub(crate) compound: Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     pub(crate) operation: &'a str,
     /// Optional deterministic identity of the selected typed program. This
     /// augments, rather than replaces, argument/resource/preparation facts.
@@ -322,6 +323,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
     implementation: LocalProviderAdmission,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let LocalPlacementRequest {
+        compound,
         operation,
         semantic_identity,
         observation_contract,
@@ -354,13 +356,14 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             cpu,
             cpu_admission,
             physical: vec![multi::LocalPhysicalCandidate {
-                physical_identity: None,
+                compound,
+                physical_identity: compound.map(|plan| plan.identity()),
                 provider_kind,
                 data_inputs: inputs,
-                source_inputs: None,
-                prepared_inputs: None,
+                source_inputs: compound.map(|plan| plan.source_inputs()),
+                prepared_inputs: compound.map(|plan| plan.source_inputs()),
                 input_adaptation: None,
-                outputs,
+                outputs: compound.map_or(outputs, |plan| vec![plan.query_output()]),
                 workload,
                 preparation,
                 preparation_program,

@@ -57,9 +57,11 @@ pub(super) fn select(
                 device_id: provider.device_id(),
             },
             preparation: entry.cost_query.preparation,
-            output_residency: CandidateOutputResidency::Provider {
-                device_id: provider.device_id(),
-            },
+            output_residency: entry
+                .exact_residency
+                .unwrap_or(CandidateOutputResidency::Provider {
+                    device_id: provider.device_id(),
+                }),
             presentation: runmat_execution::CandidateOutputPresentation::Direct,
             route_facts: Digest::sha256_serialized(&(&entry.identity, &entry.cost_query))
                 .expect("physical route facts serialize"),

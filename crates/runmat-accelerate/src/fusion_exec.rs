@@ -604,6 +604,7 @@ fn select_fusion_provider_with_implementation(
     match crate::placement::plan_local_vm_cpu_with_provider(
         provider,
         LocalPlacementRequest {
+            compound: None,
             operation,
             semantic_identity,
             observation_contract: if vm_right.is_some() {

@@ -3,6 +3,21 @@ use anyhow::{ensure, Result};
 use runmat_accelerate_api::allocation::TensorViewIdentity;
 use runmat_accelerate_api::observation::ProviderResourceTicket;
 
+/// Ordinary scalar probe download decodes directly into one f64 lane and a
+/// two-axis shape vector. Native mapped/staging backing is provider storage,
+/// separately included by the original probe geometry.
+pub(crate) fn power_probe_host_workspace_bytes() -> Result<u64> {
+    let metadata = std::mem::size_of::<usize>()
+        .checked_mul(2)
+        .ok_or_else(|| anyhow::anyhow!("POWER scalar shape metadata overflow"))?;
+    u64::try_from(
+        std::mem::size_of::<f64>()
+            .checked_add(metadata)
+            .ok_or_else(|| anyhow::anyhow!("POWER scalar host workspace overflow"))?,
+    )
+    .map_err(Into::into)
+}
+
 /// The ticket travels with the actual staging buffer across async mapping,
 /// including cancellation, and retires only after the readback owner drops.
 pub(crate) struct ProbeStaging {

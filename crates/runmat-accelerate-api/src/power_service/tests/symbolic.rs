@@ -97,6 +97,53 @@ fn future_allocator_extent_is_revalidated_then_bound_to_authentic_live_input() {
     );
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn typed_future_allocator_extent_survives_live_binding() {
+    let provider = provider(false);
+    let control = PowerScalarControl::SingleBits(1.8_f32.to_bits());
+    let operation = ProviderOperationIdentity::new("test.power");
+    let plan = crate::power_service::plan_scalar_power_for_dense_output(
+        provider,
+        resident(&[2, 2], ProviderElementType::F32),
+        control,
+        RealPowerOperand::Base,
+        &[1, 1],
+        operation.clone(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        plan.physical_recipe().route,
+        PowerPhysicalRoute::TypedDomain
+    );
+    assert!(matches!(
+        plan.resident_input_description(),
+        Some(crate::PowerInputDescription::PlannedDense { .. })
+    ));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let prepared = prepare_resident_scalar_power_against_plan(
+        provider,
+        &source.handle,
+        &plan,
+        control,
+        RealPowerOperand::Base,
+        &[1, 1],
+        operation,
+    )
+    .unwrap();
+    assert!(matches!(
+        prepared.symbolic_plan().resident_input_description(),
+        Some(crate::PowerInputDescription::Live { .. })
+    ));
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.probes.load(Ordering::SeqCst), 0);
+    assert_eq!(source.probe.retirements(), 0);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn unavailable_exact_byte_geometry_does_not_fabricate_a_proposal_or_hide_typed_route() {
@@ -233,7 +280,7 @@ fn symbolic_mixed_recipe_matches_live_preparation_and_preserves_source_controls(
         work.widened_resident.as_ref().unwrap().element_type,
         ProviderElementType::F64
     );
-    assert_eq!(work.scalar.shape, [2, 4, 5]);
+    assert_eq!(work.scalar.shape, [1, 1]);
     assert_eq!(work.scalar.element_type, ProviderElementType::F64);
     assert_eq!(work.native_result.element_type, ProviderElementType::F64);
     assert_eq!(
@@ -397,6 +444,40 @@ fn symbolic_native_single_uses_exact_upload_without_widening() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn exact_scalar_upload_projection_keeps_the_actual_host_scalar_view() {
+    let provider = provider(false);
+    for shape in [&[1_usize][..], &[1, 1, 1][..]] {
+        let plan = plan_resident_scalar_power(
+            provider,
+            resident(&[2, 4, 5], ProviderElementType::F32),
+            PowerScalarControl::SingleBits(1.8_f32.to_bits()),
+            RealPowerOperand::Base,
+            shape,
+            ProviderOperationIdentity::new("test.power"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            plan.physical_recipe().scalar,
+            PowerScalarConstruction::ExactTypedUpload
+        );
+        assert_eq!(
+            plan.physical_work(PowerResultDomain::Real)
+                .unwrap()
+                .scalar
+                .shape,
+            shape
+                .iter()
+                .map(|&extent| extent as u64)
+                .collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.probes.load(Ordering::SeqCst), 0);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn legacy_proven_real_plan_has_no_complex_physical_branch() {
     let provider = provider(false);
     provider.advertise_power.store(false, Ordering::SeqCst);
@@ -413,6 +494,10 @@ fn legacy_proven_real_plan_has_no_complex_physical_branch() {
     assert_eq!(
         plan.physical_recipe().route,
         PowerPhysicalRoute::LegacyProvenReal
+    );
+    assert_eq!(
+        plan.physical_recipe().scalar,
+        PowerScalarConstruction::ProviderFill
     );
     assert!(plan.physical_work(PowerResultDomain::Real).is_some());
     assert!(plan.physical_work(PowerResultDomain::Complex).is_none());

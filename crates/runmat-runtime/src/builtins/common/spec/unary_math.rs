@@ -26,6 +26,19 @@ pub fn unary_math_expression(
         ScalarUnaryMath::Asinh => "asinh",
         ScalarUnaryMath::Acosh => "acosh",
         ScalarUnaryMath::Atanh => "atanh",
+        // These instructions are used by ordinary physical unary recipes.
+        // Adding their vocabulary does not admit a new fused numerical route.
+        ScalarUnaryMath::Log
+        | ScalarUnaryMath::Log1p
+        | ScalarUnaryMath::Log10
+        | ScalarUnaryMath::Log2
+        | ScalarUnaryMath::Sqrt
+        | ScalarUnaryMath::Asin
+        | ScalarUnaryMath::Acos => {
+            return Err(FusionError::Message(
+                "unary instruction has no fused implementation",
+            ));
+        }
     };
     Ok(format!("{instruction}({input})"))
 }

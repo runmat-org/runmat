@@ -40,7 +40,31 @@ async fn realsqrt_builtin(
     crate::builtins::common::real_unary_preparation::execute(
         runtime.as_ref(),
         &runmat_builtins::REALSQRT_CATALOG_ENTRY,
-        runmat_types::RealUnaryPredicate::Nonnegative,
+        runmat_types::ScalarUnaryMath::Sqrt,
+        crate::context::preparation::RealUnaryPublication::Restore,
+        crate::builtins::common::real_unary_preparation::RealUnaryAdapter {
+            internal_error: &runmat_builtins::REALSQRT_ERROR_INTERNAL,
+            before_host: |_, classification| {
+                if classification == runmat_types::RealUnaryClassification::Outside {
+                    return Err(errors::with_detail(
+                        &runmat_builtins::REALSQRT_ERROR_DOMAIN,
+                        "gpuArray contains negative values",
+                    ));
+                }
+                Ok(())
+            },
+            publish_host: |provider, input, output| {
+                super::super::unary_provider::restore_output(provider, input, output, BUILTIN_NAME)
+            },
+            publish_real: |provider, input, output| {
+                super::super::unary_provider::validate_real_unary_output(
+                    provider,
+                    input,
+                    output,
+                    BUILTIN_NAME,
+                )
+            },
+        },
         value,
         |value| async move {
             let output = evaluation::evaluate_admitted(value).await?;

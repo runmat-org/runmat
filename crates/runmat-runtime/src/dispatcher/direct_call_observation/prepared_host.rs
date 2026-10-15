@@ -102,6 +102,32 @@ impl PreparedHostExecution {
                 !state.invalidated && state.prepared_claimed
             })
     }
+    pub(crate) fn matches_admission(
+        &self,
+        admission: crate::context::preparation::BuiltinPreparationAdmission,
+    ) -> bool {
+        self.binding.identity == admission.binding
+            && self.requested_outputs == admission.requested_outputs
+            && self.is_current()
+    }
+
+    pub(crate) fn is_current_for(&self, runtime: &RuntimeContext) -> bool {
+        self.is_current()
+            && !runtime.is_cancelled()
+            && runtime.local_identity() == self.owner
+            && runtime.vm_fusion_selected_binding() == Some(self.binding.identity)
+            && crate::builtins::common::spec::selected_builtin_binding(
+                self.binding.identity.builtin.name,
+                Some(self.binding.identity),
+                Some(runtime),
+            )
+            .is_some()
+            && runtime
+                .service_ports()
+                .placement()
+                .zip(self.placement.upgrade().as_ref())
+                .is_some_and(|(actual, original)| Rc::ptr_eq(actual, original))
+    }
     fn live(&self) -> bool {
         !self.cancellation.is_cancelled()
             && self.authority.is_current(self.binding)

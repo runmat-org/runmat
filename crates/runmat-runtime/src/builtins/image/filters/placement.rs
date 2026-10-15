@@ -9,9 +9,9 @@ use crate::context::provider_operation::{
 use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{
-    GpuTensorHandle, ImfilterOptions, ProviderElementType, ProviderFeasibility,
-    ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
+    GpuTensorHandle, ImfilterOptions, ProviderElementType, ProviderFeasibilityQuery,
+    ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation,
+    ProviderResidency, ProviderStorage, ProviderWorkload,
 };
 use runmat_execution::{Digest, ResourceByteBound};
 mod host_only;
@@ -54,12 +54,13 @@ pub(in crate::builtins::image::filters) struct FilterRouteRequest<'a> {
 }
 
 fn exact_conditional_upload(
+    runtime: Option<&RuntimeContext>,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     hook_query: &ProviderFeasibilityQuery,
     host_scratch_bytes: ResourceByteBound,
-) -> Option<ExactConditionalProviderUpload> {
+) -> BuiltinResult<Option<ExactConditionalProviderUpload>> {
     let [output] = hook_query.outputs.as_slice() else {
-        return None;
+        return Ok(None);
     };
     if !matches!(
         output.element_type,
@@ -68,9 +69,11 @@ fn exact_conditional_upload(
         || output.layout != ProviderLayout::ColumnMajorContiguous
         || output.residency != ProviderResidency::Device
     {
-        return None;
+        return Ok(None);
     }
-    let transfer_bytes = output.checked_byte_len()?;
+    let Some(transfer_bytes) = output.checked_byte_len() else {
+        return Ok(None);
+    };
     let mut input = output.clone();
     input.residency = ProviderResidency::Host;
     let upload = ProviderFeasibilityQuery {
@@ -83,23 +86,27 @@ fn exact_conditional_upload(
             ..ProviderWorkload::default()
         },
     };
-    let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&upload) else {
-        return None;
+    let Some(estimate) =
+        crate::context::provider_operation::provider_resource_estimate(runtime, provider, &upload)?
+    else {
+        return Ok(None);
     };
-    let physical = provider.numeric_upload_physical_evidence(&upload)?;
+    let Some(physical) = provider.numeric_upload_physical_evidence(&upload) else {
+        return Ok(None);
+    };
     if estimate.output_bytes != Some(physical.output_requested_bytes)
         || physical.completion_queue_slots == 0
     {
-        return None;
+        return Ok(None);
     }
-    Some(ExactConditionalProviderUpload {
+    Ok(Some(ExactConditionalProviderUpload {
         provider_output_requested_bytes: physical.output_requested_bytes,
         transfer_bytes: Some(transfer_bytes),
         host_result_bytes: ResourceByteBound::Known(transfer_bytes),
         host_scratch_bytes,
         provider_scratch_bytes: physical.provider_scratch_bytes,
         queue_slots: physical.completion_queue_slots,
-    })
+    }))
 }
 
 fn add_provider_bytes(bound: ResourceByteBound, retained: u64) -> BuiltinResult<ResourceByteBound> {
@@ -119,27 +126,7 @@ fn missing_physical_route<T>(
     runtime: Option<&RuntimeContext>,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> BuiltinResult<Option<T>> {
-    let Some(runtime) = runtime.filter(|runtime| runtime.service_ports().placement().is_some())
-    else {
-        return Ok(None);
-    };
-    let provider_resources = provider.placement_resources();
-    let host_limited = runtime
-        .service_ports()
-        .parallel()
-        .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some());
-    if host_limited
-        || provider_resources.capacity_bytes.is_some()
-        || provider_resources.scratch_available_bytes.is_some()
-        || provider_resources.queue_limit.is_some()
-    {
-        return Err(crate::build_runtime_error(
-            "imfilter provider route has no proven physical continuation",
-        )
-        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
-        .build());
-    }
-    Ok(None)
+    crate::context::provider_operation::unavailable_provider_route(runtime, provider)
 }
 
 /// The narrow no-preparation route: both original operands already belong to
@@ -166,24 +153,31 @@ pub(in crate::builtins::image::filters) fn select_direct(
         return Ok(None);
     };
     let Some(kernel_owner) = runmat_accelerate_api::provider_for_handle(kernel) else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
     if !runmat_accelerate_api::same_provider_instance(provider, kernel_owner) {
-        return Ok(None);
+        // The caller's hook still belongs to the authenticated image owner;
+        // a foreign kernel does not authorize that owner's physical demand.
+        return missing_physical_route(runtime, provider);
     }
     let Some(query) = exact_hook_query(image, kernel, options) else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
+    if crate::context::provider_operation::provider_resource_estimate(runtime, provider, &query)?
+        .is_none()
+    {
+        return Ok(None);
+    }
     let Some(backings) = query
         .workload
         .imfilter
         .as_ref()
         .and_then(|facts| facts.input_backings.as_ref())
     else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
     let Some(already_live_bytes) = backings.live_unique_requested_bytes() else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
     let Some(physical) = provider.imfilter_physical_evidence(&query) else {
         return missing_physical_route(runtime, provider);
@@ -243,7 +237,9 @@ pub(in crate::builtins::image::filters) fn select_direct(
         .map_or(ResourceByteBound::Known(0), |route| route.operation_scratch);
     let conditional_upload = conditional_provider
         .as_ref()
-        .and_then(|route| exact_conditional_upload(provider, &query, route.operation_scratch));
+        .map(|route| exact_conditional_upload(runtime, provider, &query, route.operation_scratch))
+        .transpose()?
+        .flatten();
     if conditional_provider.is_some() && conditional_upload.is_none() {
         return missing_physical_route(runtime, provider);
     }
@@ -300,18 +296,23 @@ pub(in crate::builtins::image::filters) fn select_prepared(
         return Ok(None);
     };
     let Some(query) = prepared_hook_query(image, projected_kernel, options) else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
+    if crate::context::provider_operation::provider_resource_estimate(runtime, provider, &query)?
+        .is_none()
+    {
+        return Ok(None);
+    }
     let Some(prepared) = query
         .workload
         .imfilter
         .as_ref()
         .and_then(|workload| workload.prepared_kernel.as_ref())
     else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
     let Some(already_live_bytes) = prepared.live_image_requested_bytes() else {
-        return Ok(None);
+        return missing_physical_route(runtime, provider);
     };
     let Some(physical) = provider.imfilter_physical_evidence(&query) else {
         return missing_physical_route(runtime, provider);
@@ -378,7 +379,9 @@ pub(in crate::builtins::image::filters) fn select_prepared(
         .map_or(ResourceByteBound::Known(0), |route| route.operation_scratch);
     let mut conditional_upload = conditional_provider
         .as_ref()
-        .and_then(|route| exact_conditional_upload(provider, &query, route.operation_scratch));
+        .map(|route| exact_conditional_upload(runtime, provider, &query, route.operation_scratch))
+        .transpose()?
+        .flatten();
     if conditional_provider.is_some() && conditional_upload.is_none() {
         return missing_physical_route(runtime, provider);
     }
