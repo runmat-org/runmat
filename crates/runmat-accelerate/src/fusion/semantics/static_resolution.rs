@@ -10,11 +10,37 @@ impl ResolvedProgram {
         provider_precision: ProviderPrecision,
         snapshots: &[Option<SemanticBinding>],
     ) -> std::result::Result<Option<Self>, FusionResolveFailure> {
+        Self::resolve_static_source(plan, inputs, provider_precision, snapshots, false)
+    }
+
+    /// Ordinary CPU execution consumes original source classes, not the
+    /// provider-effective precision projection. Reuse canonical inference and
+    /// static admission without acquiring data-dependent sign/domain proofs.
+    pub(crate) fn resolve_host_static_captured(
+        plan: &FusionGroupPlan,
+        inputs: &[&Value],
+        provider_precision: ProviderPrecision,
+        snapshots: &[Option<SemanticBinding>],
+    ) -> std::result::Result<Option<Self>, FusionResolveFailure> {
+        Self::resolve_static_source(plan, inputs, provider_precision, snapshots, true)
+    }
+
+    fn resolve_static_source(
+        plan: &FusionGroupPlan,
+        inputs: &[&Value],
+        provider_precision: ProviderPrecision,
+        snapshots: &[Option<SemanticBinding>],
+        host: bool,
+    ) -> std::result::Result<Option<Self>, FusionResolveFailure> {
         let (mut program, leaves) = source_assembly(
             plan,
             inputs,
             provider_precision,
-            PrecisionPolicy::current(),
+            if host {
+                PrecisionPolicy::Exact
+            } else {
+                PrecisionPolicy::current()
+            },
             None,
             snapshots,
         )?;
@@ -32,7 +58,21 @@ impl ResolvedProgram {
                 return Ok(None);
             }
             let inferred = inferred_operation(&program, operation, *snapshot, &leaves)?;
-            let values = selected_values(&leaves, inferred.input_ids);
+            let mut values = selected_values(&leaves, inferred.input_ids);
+            if host {
+                // Static owners may inspect literal scalar controls (including
+                // Single scalars), but must not rescan host arrays or read a
+                // resident provider merely to price a CPU candidate.
+                for value in &mut values {
+                    if !matches!(
+                        value,
+                        Some(Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_))
+                    ) && !matches!(value, Some(Value::Tensor(tensor)) if tensor.len() == 1)
+                    {
+                        *value = None;
+                    }
+                }
+            }
             let admitted = if let (Some(_output), Some(snapshot)) = (inferred.output, snapshot) {
                 if let Some(semantics) = snapshot.declaration.semantics {
                     if semantics.admit.is_some() {
@@ -83,7 +123,8 @@ impl ResolvedProgram {
                 return Ok(None);
             }
             let output = inferred.output;
-            let add_refinement = if output.is_some() && sign::applies(operation, *snapshot) {
+            let add_refinement = if !host && output.is_some() && sign::applies(operation, *snapshot)
+            {
                 let mut observed = super::super::admission::AdmissionObservation::new(None);
                 let result = sign::add_sign(
                     &program,

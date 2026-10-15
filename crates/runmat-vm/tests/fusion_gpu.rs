@@ -147,6 +147,7 @@ struct TestProvider {
     fused_dispatches: AtomicU64,
     fail_next_fused_single: AtomicBool,
     numeric_downloads: AtomicU64,
+    report_f32: AtomicBool,
 }
 
 impl TestProvider {
@@ -162,6 +163,7 @@ impl TestProvider {
             fused_dispatches: AtomicU64::new(0),
             fail_next_fused_single: AtomicBool::new(false),
             numeric_downloads: AtomicU64::new(0),
+            report_f32: AtomicBool::new(false),
         }
     }
 
@@ -396,7 +398,11 @@ impl AccelProvider for TestProvider {
     }
 
     fn precision(&self) -> ProviderPrecision {
-        ProviderPrecision::F64
+        if self.report_f32.load(Ordering::Relaxed) {
+            ProviderPrecision::F32
+        } else {
+            ProviderPrecision::F64
+        }
     }
 
     fn supports_shader_requirements(
@@ -2033,6 +2039,7 @@ struct RejectFusion(&'static TestProvider);
 impl Drop for RejectFusion {
     fn drop(&mut self) {
         self.0.reject_fusion.store(false, Ordering::Relaxed);
+        self.0.report_f32.store(false, Ordering::Relaxed);
     }
 }
 

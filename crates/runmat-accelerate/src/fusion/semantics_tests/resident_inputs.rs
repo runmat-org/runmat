@@ -30,6 +30,94 @@ fn owner() -> &'static ResidentProvider {
     provider
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn exact_host_resources_keep_double_intermediates_beside_automatic_single_inputs() {
+    use runmat_runtime::builtins::common::spec::{
+        FusionHostResourceInput, FusionHostResourceQuery,
+    };
+
+    let provider = owner();
+    let resident = Value::GpuTensor(
+        provider
+            .0
+            .allocate_zeroed(vec![1, 3], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap()
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap(),
+    );
+    let double =
+        Value::Tensor(runmat_value::Tensor::new(vec![0.25, 0.5, 0.75], vec![1, 3]).unwrap());
+    let mut source = plan(
+        vec![
+            FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![1, 4],
+                output: Some(2),
+            },
+            cast("exp", 2, 3),
+            FusionOp::Builtin {
+                origin: Default::default(),
+                name: "times".into(),
+                inputs: vec![3, 0],
+                output: Some(5),
+            },
+        ],
+        5,
+    );
+    source.const_values.insert(4, Value::Num(1.0));
+    let bindings = semantic_bindings::capture(&source).unwrap();
+    let host = ResolvedProgram::resolve_host_static_captured(
+        &source,
+        &[&resident, &double],
+        ProviderPrecision::F32,
+        &bindings,
+    )
+    .unwrap()
+    .unwrap();
+    let exp_bound = |program: &ResolvedProgram| {
+        bindings[1].unwrap().declaration.host_resources.unwrap()(&FusionHostResourceQuery {
+            inputs: &[FusionHostResourceInput {
+                shape: &[1, 3],
+                class: program.floating_class(2).unwrap(),
+            }],
+            output: FusionHostResourceInput {
+                shape: &[1, 3],
+                class: program.floating_class(3).unwrap(),
+            },
+        })
+        .unwrap()
+    };
+    for policy in [PrecisionPolicy::Exact, PrecisionPolicy::AllowDoubleToSingle] {
+        let effective = resolve_policy(
+            &source,
+            &[resident.clone(), double.clone()],
+            ProviderPrecision::F32,
+            policy,
+        )
+        .unwrap();
+        assert_eq!(host.floating_class(0).unwrap(), NumericClass::Single);
+        for id in [1, 2, 3, 4] {
+            assert_eq!(host.floating_class(id).unwrap(), NumericClass::Double);
+        }
+        assert_eq!(host.floating_class(5).unwrap(), NumericClass::Single);
+        let actual = exp_bound(&host);
+        assert_eq!(
+            actual.retained_bytes,
+            3 * 8 + 2 * std::mem::size_of::<usize>() as u64
+        );
+        let projected = exp_bound(&effective);
+        if policy == PrecisionPolicy::AllowDoubleToSingle {
+            assert_eq!(effective.floating_class(3).unwrap(), NumericClass::Single);
+            assert_eq!(actual.retained_bytes - projected.retained_bytes, 3 * 4);
+            assert_eq!(actual.scratch_bytes - projected.scratch_bytes, 3 * 4);
+        } else {
+            assert_eq!(actual.retained_bytes, projected.retained_bytes);
+        }
+    }
+}
+
 fn storage(leaves: &FusionInvocationLeaves<'_>, id: ValueId, value: &Value) -> ValueFact {
     let mut fact = value_fact(value);
     leaves.refine_input_storage(id, value, &mut fact);

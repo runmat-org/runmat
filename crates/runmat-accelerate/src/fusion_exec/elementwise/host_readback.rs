@@ -28,11 +28,15 @@ fn shape(program: &crate::fusion::semantics::ResolvedProgram, id: ValueId) -> Op
 
 pub(super) fn admit(
     request: &FusionExecutionRequest<'_>,
-    program: &crate::fusion::semantics::ResolvedProgram,
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     uses: &VmHostInputUses,
 ) -> Option<Admission> {
+    // This route executes ordinary host operators. Provider-effective facts
+    // may narrow Double under an opted F32 policy and cannot bound its host
+    // allocations or determine the classes of intermediate CPU results.
+    let host_program = bindings.host_facts(request, provider.precision())?;
+    let program = &host_program;
     // These exact compiler offsets can cover a proper subset of operation
     // inputs: later occurrences have separately certified ordinary load PCs.
     let layout = request.plan.group.stack_layout.as_ref()?;

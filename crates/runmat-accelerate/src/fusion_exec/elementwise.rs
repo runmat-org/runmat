@@ -227,7 +227,7 @@ async fn execute_elementwise_outputs(
     let admission = vm_right
         .and(input_uses)
         .filter(|_| has_host_operations)
-        .and_then(|uses| host_readback::admit(request, &program, &bindings, provider, uses));
+        .and_then(|uses| host_readback::admit(request, &bindings, provider, uses));
     let host = if has_resident && vm_right.is_some() {
         admission.as_ref().map_or(
             super::host_readback::CpuHostPlacement::Unavailable,

@@ -22,13 +22,23 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
         provider.reject_fusion.store(true, Ordering::Relaxed);
         let _reject = RejectFusion(provider);
         for single in [false, true] {
+            // A fresh process with RUNMAT_ALLOW_PRECISION_DOWNCAST=1 exercises
+            // provider-effective Single facts while the CPU exp intermediate
+            // below must retain the original Double host allocation contract.
+            provider.report_f32.store(
+                single
+                    && runmat_accelerate::precision::downcast_permitted(
+                        runmat_value::NumericDType::F64,
+                    ),
+                Ordering::Relaxed,
+            );
             for decoded in [false, true] {
                 runmat_accelerate::placement::reset();
-                let expression = "exp(-x).*sin(4*x)+tanh(x).*tanh(x)";
+                let expression = "exp(-h).*sin(4*x)+tanh(x).*tanh(x)";
                 let source = if decoded {
-                    format!("function y = resident_chain(x)\ny = {expression};\nend\nx = [0.25, 0.5, 0.75]; y = resident_chain(x);")
+                    format!("function y = resident_chain(x,h)\ny = {expression};\nend\nx = [0.25, 0.5, 0.75]; h = [0.25, 0.5, 0.75]; y = resident_chain(x,h);")
                 } else {
-                    format!("x = [0.25, 0.5, 0.75]; y = {expression};")
+                    format!("x = [0.25, 0.5, 0.75]; h = [0.25, 0.5, 0.75]; y = {expression};")
                 };
                 let mut bytecode = compile_semantic(&source);
                 if decoded {
@@ -98,6 +108,10 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
                         && actual.wire_descriptor() == handle.wire_descriptor()),
                     "workspace keeps its exact original resident source"
                 );
+                let Value::Tensor(host) = &vars[fusion_var_index(&bytecode, "h")] else {
+                    panic!("ordinary host source stays host-resident");
+                };
+                assert_eq!(host.numeric_dtype(), runmat_value::NumericDType::F64);
                 assert_eq!(
                     provider.numeric_downloads.load(Ordering::Relaxed) - downloads,
                     1,

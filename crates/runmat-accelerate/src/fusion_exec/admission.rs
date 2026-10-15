@@ -35,6 +35,26 @@ pub(super) struct AdmittedBindings {
 }
 
 impl AdmittedBindings {
+    pub(super) fn host_facts(
+        &self,
+        request: &FusionExecutionRequest<'_>,
+        precision: runmat_accelerate_api::ProviderPrecision,
+    ) -> Option<crate::fusion::semantics::ResolvedProgram> {
+        let snapshots = self
+            .operations
+            .iter()
+            .map(|operation| operation.semantic)
+            .collect::<Vec<_>>();
+        let inputs = request.inputs.iter().collect::<Vec<_>>();
+        crate::fusion::semantics::ResolvedProgram::resolve_host_static_captured(
+            request.plan,
+            &inputs,
+            precision,
+            &snapshots,
+        )
+        .ok()?
+    }
+
     pub(super) fn host_resource_bound(
         &self,
         index: usize,
