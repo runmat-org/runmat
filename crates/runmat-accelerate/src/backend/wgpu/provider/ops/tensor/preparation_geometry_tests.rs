@@ -20,6 +20,13 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
     );
     let tiled = provider.repmat(&empty, &[1, 1, 1, 1]).unwrap().unwrap();
     assert_eq!(tiled.shape(), shape);
+    let flipped = provider.flip(&empty, &[0, usize::MAX]).unwrap().unwrap();
+    assert!(flipped.shares_allocation_with(&empty));
+    assert!(
+        futures::executor::block_on(provider.reduce_mean_nd(&empty, &[0]))
+            .unwrap()
+            .is_none()
+    );
     let source = provider
         .upload_numeric_exec(&HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -32,6 +39,9 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
     assert!(runmat_accelerate_api::handle_is_transposed(&lazy));
     provider.reset_telemetry();
     let before = provider.telemetry_snapshot();
+    assert!(provider.flip(&lazy, &[0]).unwrap().is_none());
+    let unchanged = provider.flip(&source, &[usize::MAX]).unwrap().unwrap();
+    assert!(unchanged.shares_allocation_with(&source));
     let inverse = provider.permute(&lazy, &[1, 0]).unwrap().unwrap();
     assert_eq!(inverse.shape(), [3, 2]);
     assert!(!runmat_accelerate_api::handle_is_transposed(&inverse));
@@ -55,7 +65,7 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
         .unwrap()
         .is_none());
     assert_eq!(provider.telemetry_snapshot(), before);
-    for permutation in [true, false] {
+    for stage in 0..3 {
         let allocated = std::cell::Cell::new(false);
         let retired = std::cell::RefCell::new(None);
         let fault = |buffer: &runmat_accelerate_api::WgpuBufferOwner| -> Result<()> {
@@ -64,10 +74,10 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
                 "request-local structural allocation fault",
             ))
         };
-        let result = if permutation {
-            provider.permute_optional_exec(&source, &[1, 0], &allocated, &fault)
-        } else {
-            provider.repmat_optional_exec(&source, &[2, 1], &allocated, &fault)
+        let result = match stage {
+            0 => provider.permute_optional_exec(&source, &[1, 0], &allocated, &fault),
+            1 => provider.repmat_optional_exec(&source, &[2, 1], &allocated, &fault),
+            _ => provider.flip_optional_exec(&source, &[0], &allocated, &fault),
         };
         let error = result
             .map_err(|source| {

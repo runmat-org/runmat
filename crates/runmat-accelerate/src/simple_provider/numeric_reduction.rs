@@ -8,6 +8,27 @@ use std::ops::AddAssign;
 mod tests;
 
 impl InProcessProvider {
+    pub(super) fn mean_hook_admitted(
+        &self,
+        input: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<bool> {
+        let guard = numeric_registry()
+            .lock_for(self.device_id)
+            .map_err(|_| anyhow!("mean: allocation owner is poisoned"))?;
+        ensure!(
+            guard.get(input).is_some(),
+            "mean: input is not a live owned allocation"
+        );
+        if let Some(dim) = dim {
+            ensure!(
+                dim < input.shape().len(),
+                "reduce_mean_dim: dimension out of bounds"
+            );
+        }
+        Ok(input.physical().storage() != GpuTensorStorage::ComplexInterleaved)
+    }
+
     pub(super) fn admit_mean_storage(&self, input: &GpuTensorHandle) -> Result<()> {
         if input.physical().storage() != GpuTensorStorage::ComplexInterleaved {
             return Ok(());

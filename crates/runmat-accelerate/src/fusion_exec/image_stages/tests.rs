@@ -631,16 +631,22 @@ impl AccelProvider for StagedProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         dims: &'a [usize],
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
-                std::future::pending::<()>().await;
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
+                    std::future::pending::<()>().await;
+                }
+                let mut shape = input.shape().to_vec();
+                for &dimension in dims {
+                    shape[dimension] = 1;
+                }
+                self.produce(shape, StageHook::Nd(dims.to_vec()))
             }
-            let mut shape = input.shape().to_vec();
-            for &dimension in dims {
-                shape[dimension] = 1;
-            }
-            self.produce(shape, StageHook::Nd(dims.to_vec()))
+            .await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
@@ -648,14 +654,20 @@ impl AccelProvider for StagedProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
-                std::future::pending::<()>().await;
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
+                    std::future::pending::<()>().await;
+                }
+                let mut shape = input.shape().to_vec();
+                shape[dim] = 1;
+                self.produce(shape, StageHook::Dim(dim))
             }
-            let mut shape = input.shape().to_vec();
-            shape[dim] = 1;
-            self.produce(shape, StageHook::Dim(dim))
+            .await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 

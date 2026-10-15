@@ -777,8 +777,8 @@ pub(crate) async fn flip_gpu_with(
     let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
     if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
         match provider.flip(&handle, &zero_based) {
-            Ok(mut output) => {
-                if !flip_native_output_matches(&handle, &output, provider) {
+            Ok(Some(mut output)) => {
+                if !gpu_helpers::flip_output_matches(&handle, &output, provider, &zero_based) {
                     return Err(gpu_helpers::reject_gpu_output(
                         output,
                         flip_error_for(builtin, format!("{builtin}: invalid provider flip output")),
@@ -787,17 +787,27 @@ pub(crate) async fn flip_gpu_with(
                 gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
-            Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {}
+            Ok(None) => {}
             Err(cause) => {
-                return Err(crate::build_runtime_error(format!(
-                    "{builtin}: provider flip failed: {cause}"
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    crate::build_runtime_error(format!("{builtin}: provider flip failed: {cause}"))
+                        .with_builtin(builtin)
+                        .build(),
+                    cause,
                 ))
-                .with_builtin(builtin)
-                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-                .build())
             }
         }
     }
+    flip_gpu_fallback_with(builtin, provider, handle, dims).await
+}
+
+/// Adapt only this already-owned input after certified hook absence.
+pub(crate) async fn flip_gpu_fallback_with(
+    builtin: &'static str,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    handle: GpuTensorHandle,
+    dims: &[usize],
+) -> crate::BuiltinResult<Value> {
     let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
     let mut output = match host {
         Value::Tensor(tensor) => {
@@ -834,28 +844,6 @@ pub(crate) async fn flip_gpu_with(
     };
     gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
     gpu_helpers::resident_gpu_value(output)
-}
-
-fn flip_native_output_matches(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    output.shape() == input.shape()
-        && output.device_id() == input.device_id()
-        && !gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && output.view().is_logical() == input.view().is_logical()
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-}
-
-fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.shares_allocation_with(rhs)
 }
 
 fn flip_generic<T: Clone>(

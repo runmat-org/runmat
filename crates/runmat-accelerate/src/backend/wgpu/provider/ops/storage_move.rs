@@ -3,6 +3,8 @@
 use super::*;
 #[path = "storage_move/permutation.rs"]
 mod permutation;
+#[path = "storage_move/flip.rs"]
+mod flip;
 
 impl WgpuProvider {
     pub(super) fn get_entry_for_bitwise_move(

@@ -68,6 +68,20 @@ pub(super) fn select(
             transactional_results: transactional,
         });
     }
+    // Match the numeric selector's price domain before whole-set validation.
+    // A malformed estimate is not unavailable evidence and cannot invalidate
+    // otherwise legal routes. Preserve the original sequence for receipts.
+    let original_candidates = candidates;
+    let candidates = original_candidates
+        .iter()
+        .filter(|candidate| {
+            candidate
+                .cost
+                .estimate()
+                .is_none_or(|estimate| estimate.checked_risk_adjusted_ns().is_some())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     // Apply the same physical owner before either local policy or service
     // selection. Keep the original sequence for receipt/index projection.
     if !candidates.is_empty() {
@@ -86,9 +100,8 @@ pub(super) fn select(
             message: "placement cancelled before dispatch".into(),
         }));
     }
-    let original_candidates = candidates;
     let mut insufficient = false;
-    let candidates = original_candidates.iter().filter(|candidate| {
+    let candidates = candidates.into_iter().filter(|candidate| {
         match crate::placement::session::candidate_resources_admitted(candidate, &resources, true) {
             Ok(()) => true,
             Err(reason) => {
@@ -96,7 +109,7 @@ pub(super) fn select(
                 false
             }
         }
-    }).cloned().collect::<Vec<_>>();
+    }).collect::<Vec<_>>();
     if candidates.is_empty() {
         return Err(plan_error(
             crate::placement::session::no_resource_candidate(insufficient),

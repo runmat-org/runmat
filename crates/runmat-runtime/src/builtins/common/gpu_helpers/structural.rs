@@ -98,6 +98,30 @@ pub(crate) fn replication_output_matches(
         && output.view().layout() == GpuTensorLayout::Contiguous
 }
 
+pub(crate) fn flip_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+    axes: &[usize],
+) -> bool {
+    if !unary_gpu_output_matches_shape(
+        output,
+        input,
+        provider,
+        input.shape(),
+        like(input, GpuOutputAliasPolicy::AllowInput),
+    ) || output.physical().element_type() != input.physical().element_type()
+        || output.view().validate(output.physical()).is_err()
+    {
+        return false;
+    }
+    if !input.shares_allocation_with(output) {
+        return output.view().layout() == GpuTensorLayout::Contiguous;
+    }
+    !runmat_types::geometry::FlipGeometry::new(input.shape(), axes).has_effect()
+        && output.view() == input.view()
+}
+
 pub(crate) fn permutation_output_matches(
     input: &GpuTensorHandle,
     output: &GpuTensorHandle,

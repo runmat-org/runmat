@@ -790,7 +790,11 @@ async fn run_reduction_case(
                         .reduce_sum_dim(&handles[0], dim - 1)
                         .await
                         .map_err(anyhow::Error::new),
-                    ReductionKind::MeanDim(dim) => prov.reduce_mean_dim(&handles[0], dim - 1).await,
+                    ReductionKind::MeanDim(dim) => prov
+                        .reduce_mean_dim(&handles[0], dim - 1)
+                        .await
+                        .map_err(anyhow::Error::new)?
+                        .ok_or_else(|| anyhow::anyhow!("profile case requires dimensional mean")),
                 }
             })
         },

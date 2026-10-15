@@ -22,12 +22,15 @@ enum Mode {
     BorrowedAlias,
     WrongClass,
     LazyAlias,
+    CompletedFlipNone,
+    CompletedFlipFailure,
 }
 struct Provider {
     inner: InProcessProvider,
     view_owner: runmat_accelerate_api::test_support::TestAllocationOwner,
     mode: Mode,
     reads: AtomicUsize,
+    permutations: AtomicUsize,
     unpublished: Mutex<Vec<WeakAllocationLease>>,
 }
 impl Provider {
@@ -37,8 +40,8 @@ impl Provider {
         shape: Vec<usize>,
     ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
         match self.mode {
-            Mode::NoAttempt => Ok(None),
-            Mode::Failed => Err(ProviderExecutionError::from(
+            Mode::NoAttempt | Mode::CompletedFlipNone => Ok(None),
+            Mode::Failed | Mode::CompletedFlipFailure => Err(ProviderExecutionError::from(
                 runmat_accelerate_api::unsupported_provider_operation(
                     "structural hook failed after unreported staging",
                 ),
@@ -109,9 +112,23 @@ impl AccelProvider for Provider {
     fn permute(
         &self,
         input: &GpuTensorHandle,
+        order: &[usize],
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.permutations.fetch_add(1, Ordering::SeqCst);
+        if matches!(
+            self.mode,
+            Mode::CompletedFlipNone | Mode::CompletedFlipFailure
+        ) {
+            return self.inner.permute(input, order);
+        }
+        self.result(input, vec![3, 2])
+    }
+    fn flip(
+        &self,
+        input: &GpuTensorHandle,
         _: &[usize],
     ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
-        self.result(input, vec![3, 2])
+        self.result(input, input.shape().to_vec())
     }
     fn repmat(
         &self,
@@ -155,6 +172,7 @@ fn structural_no_attempt_fallback_and_terminal_failures_preserve_borrowed_explic
                 view_owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
                 mode,
                 reads: AtomicUsize::new(0),
+                permutations: AtomicUsize::new(0),
                 unpublished: Mutex::new(Vec::new()),
             }));
             let _selected = ThreadProviderGuard::set(Some(provider));
@@ -308,3 +326,6 @@ fn structural_no_attempt_fallback_and_terminal_failures_preserve_borrowed_explic
         }
     }
 }
+
+#[path = "structural_provider_tests/flip.rs"]
+mod flip_tests;

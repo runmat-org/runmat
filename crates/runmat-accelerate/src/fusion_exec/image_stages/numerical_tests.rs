@@ -172,15 +172,27 @@ impl AccelProvider for NumericProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         axis: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce(input, &[axis], "mean_dim") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            let result: anyhow::Result<GpuTensorHandle> =
+                async move { self.reduce(input, &[axis], "mean_dim") }.await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
+        })
     }
     fn reduce_mean_nd<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
         axes: &'a [usize],
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce(input, axes, "mean_nd") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            let result: anyhow::Result<GpuTensorHandle> =
+                async move { self.reduce(input, axes, "mean_nd") }.await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
+        })
     }
     fn elem_sub<'a>(
         &'a self,

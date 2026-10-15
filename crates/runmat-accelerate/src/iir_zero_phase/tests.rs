@@ -129,6 +129,13 @@ fn rejected_borrowed_stage_alias_does_not_retire_the_caller_operand() {
     let mut stages = Stages::new(provider, [&input, &numerator, &denominator], &borrowed).unwrap();
     let rejection = stages.admit(caller_coefficient.clone(), &[2, 1], StageClass::Real);
     assert!(rejection.is_err());
+    let owned = stages.admit(source(), &[2, 1], StageClass::Real).unwrap();
+    let identity = provider.flip(stages.get(owned), &[1]).unwrap();
+    assert_eq!(
+        stages.admit_flip(identity, owned, 1, &[2, 1]).unwrap(),
+        owned
+    );
+    assert!(stages.admit_flip(None, owned, 1, &[2, 1]).is_err());
     assert!(input.allocation_lease().validate_live().is_ok());
     assert!(caller_coefficient
         .allocation_lease()

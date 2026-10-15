@@ -112,7 +112,7 @@ pub(crate) use rejection::{reject_gpu_output, reject_gpu_outputs};
 #[path = "gpu_helpers/structural.rs"]
 mod structural;
 pub(crate) use structural::{
-    permutation_output_matches, replication_output_matches, replication_shape,
+    flip_output_matches, permutation_output_matches, replication_output_matches, replication_shape,
     reshape_output_matches,
 };
 

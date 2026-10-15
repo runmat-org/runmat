@@ -386,18 +386,24 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         dims: &'a [usize],
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let stage = self.step()?;
-            let mut shape = input.shape().to_vec();
-            for &dim in dims {
-                shape[dim] = 1;
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                let stage = self.step()?;
+                let mut shape = input.shape().to_vec();
+                for &dim in dims {
+                    shape[dim] = 1;
+                }
+                let output = self.shaped(input, shape, GpuTensorStorage::Real, stage)?;
+                if stage == self.pending_stage.load(Ordering::SeqCst) {
+                    std::future::pending::<()>().await;
+                }
+                Ok(output)
             }
-            let output = self.shaped(input, shape, GpuTensorStorage::Real, stage)?;
-            if stage == self.pending_stage.load(Ordering::SeqCst) {
-                std::future::pending::<()>().await;
-            }
-            Ok(output)
+            .await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
     fn supports_signal_hilbert(&self, _: &ProviderHilbertRequest<'_>) -> bool {

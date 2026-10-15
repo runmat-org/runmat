@@ -93,10 +93,11 @@ pub(super) async fn mean(
     if missing == MissingMode::Include {
         let mut current = transformed.clone();
         for axis in &selected {
-            let next = provider
-                .reduce_mean_dim(&current, *axis)
-                .await
-                .observe(progress, kind)?;
+            let next = progress.observe_optional(
+                kind,
+                provider.reduce_mean_dim(&current, *axis).await,
+                "resident mean dimensional stage unavailable",
+            )?;
             let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
             current = admitted_real(kind, provider, original, next, &expected, precision)?;
         }

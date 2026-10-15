@@ -1457,16 +1457,20 @@ fn mean_public_shape(shape: &[usize], count: usize) -> Vec<usize> {
 }
 
 fn publish_mean_gpu_shape(output: GpuTensorHandle) -> BuiltinResult<GpuTensorHandle> {
-    let count = output
-        .shape()
-        .iter()
-        .try_fold(1usize, |total, &extent| total.checked_mul(extent))
-        .ok_or_else(|| {
-            let mut error =
-                mean_internal_error("mean: provider output shape overflows at publication");
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            error
-        })?;
+    let count = if output.shape().contains(&0) {
+        0
+    } else {
+        output
+            .shape()
+            .iter()
+            .try_fold(1usize, |total, &extent| total.checked_mul(extent))
+            .ok_or_else(|| {
+                let mut error =
+                    mean_internal_error("mean: provider output shape overflows at publication");
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            })?
+    };
     let public_shape = mean_public_shape(output.shape(), count);
     if public_shape == output.shape() {
         return Ok(output);

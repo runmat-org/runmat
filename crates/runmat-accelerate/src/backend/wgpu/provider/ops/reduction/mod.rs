@@ -15,6 +15,7 @@ mod global_pass;
 mod global_resources;
 mod median;
 mod nd;
+mod mean_dispatch;
 pub(super) mod phase_context;
 mod typed_extrema;
 mod typed_std;

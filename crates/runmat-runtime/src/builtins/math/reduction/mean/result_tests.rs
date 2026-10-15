@@ -80,7 +80,11 @@ impl AccelProvider for Provider {
             .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
                 data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![
                     value;
-                    shape.iter().product()
+                    if shape.contains(&0) {
+                        0
+                    } else {
+                        shape.iter().product()
+                    }
                 ]),
                 shape: shape.to_vec(),
                 storage: GpuTensorStorage::Real,
@@ -207,9 +211,15 @@ impl AccelProvider for OrderedFailureProvider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a [usize],
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         self.fallback_calls.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { anyhow::bail!("selected route must not replay") })
+        Box::pin(async move {
+            let result: anyhow::Result<GpuTensorHandle> =
+                async move { anyhow::bail!("selected route must not replay") }.await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
+        })
     }
 }
 
@@ -481,7 +491,8 @@ fn publication_rejects_wrong_class_shape_and_physical_alias_and_retires_output()
 
 #[test]
 fn empty_nd_strategy_preserves_unreduced_dimensions_without_permute() {
-    let provider = Provider(TestAllocationOwner::new());
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider
         .0
         .allocate_zeroed(
@@ -492,10 +503,29 @@ fn empty_nd_strategy_preserves_unreduced_dimensions_without_permute() {
         .unwrap();
     // This provider has no permute hook. Empty shape resolution precedes it.
     let output =
-        futures::executor::block_on(reduce_mean_vecdim_nd_gpu(&provider, &input.handle, &[1]))
+        futures::executor::block_on(reduce_mean_vecdim_nd_gpu(provider, &input.handle, &[1]))
             .unwrap();
     assert_eq!(output.shape(), &[1, 3, 2]);
     assert_eq!(input.probe.retirements(), 0);
+    let huge = u32::MAX as usize;
+    let empty = provider
+        .0
+        .allocate_zeroed(
+            vec![huge, huge, 2, 0],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let output =
+        futures::executor::block_on(reduce_mean_vecdim_nd_gpu(provider, &empty.handle, &[1]))
+            .unwrap();
+    assert_eq!(output.shape(), &[1, huge, 2, 0]);
+    // Reducing the only zero extent would create an unrepresentable nonempty
+    // output; reject its geometry before asking this fixture to allocate it.
+    assert!(matches!(
+        futures::executor::block_on(reduce_mean_vecdim_nd_gpu(provider, &empty.handle, &[4])),
+        Err(MeanProviderFailure::Execution(_))
+    ));
 }
 
 #[test]

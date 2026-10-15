@@ -97,12 +97,18 @@ impl AccelProvider for StageProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         _: &'a [usize],
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            self.mean_calls.fetch_add(1, Ordering::SeqCst);
-            let mut shape = input.shape().to_vec();
-            shape[1] = 1;
-            Ok(self.output(shape, GpuTensorStorage::Real))
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                self.mean_calls.fetch_add(1, Ordering::SeqCst);
+                let mut shape = input.shape().to_vec();
+                shape[1] = 1;
+                Ok(self.output(shape, GpuTensorStorage::Real))
+            }
+            .await;
+            result.map(Some).map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
     fn reduce_max_dim<'a>(

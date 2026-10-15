@@ -51,20 +51,16 @@ impl WgpuProvider {
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
-    ) -> Result<GpuTensorHandle> {
+    ) -> Result<Option<GpuTensorHandle>> {
         // Cache hits must not bypass the original input's owner/live/precision admission.
         let source_entry = self.real_floating_entry(a)?;
         if source_entry.storage != GpuTensorStorage::Real {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "N-D mean requires real physical storage",
-            ));
+            return Ok(None);
         }
         if source_entry.precision != self.precision
             && runmat_accelerate_api::handle_is_transposed(a)
         {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "alternate-precision N-D mean requires a canonical source view",
-            ));
+            return Ok(None);
         }
         if self.reduction_reuse.is_poisoned() {
             // The original uncached ND kernel remains authoritative when only
@@ -85,7 +81,7 @@ impl WgpuProvider {
                     if let Some((_, ex2)) =
                         self.cached_moment_pair(&base_handle, dims_zero_based)?
                     {
-                        return Ok(ex2);
+                        return Ok(Some(ex2));
                     }
                     let moments = self.reduce_moments_nd_exec(&base_handle, dims_zero_based)?;
                     self.remember_moments(
@@ -94,16 +90,16 @@ impl WgpuProvider {
                         &moments.mean,
                         &moments.ex2,
                     )?;
-                    return Ok(moments.ex2);
+                    return Ok(Some(moments.ex2));
                 }
             }
             // Prefer computing moments once and caching ex2 for future reuse.
             if let Some((mean, _)) = self.cached_moment_pair(a, dims_zero_based)? {
-                return Ok(mean);
+                return Ok(Some(mean));
             }
             let moments = self.reduce_moments_nd_exec(a, dims_zero_based)?;
             self.remember_moments(a, dims_zero_based, &moments.mean, &moments.ex2)?;
-            return Ok(moments.mean);
+            return Ok(Some(moments.mean));
         }
         let entry = self.real_floating_entry(a)?;
         let NdReductionGeometry {
@@ -122,9 +118,7 @@ impl WgpuProvider {
         if entry.precision != self.precision
             && self.prepare_cold_mean_nd_exec(a, &reduce)?.is_none()
         {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "alternate-precision N-D mean has no qualified physical route",
-            ));
+            return Ok(None);
         }
 
         // Geometry above is logical. The stride-based kernel (and sequenced fallback)
@@ -140,14 +134,21 @@ impl WgpuProvider {
             let mut current = a.clone();
             let mut owned = false;
             for &d in &reduce {
-                let next = self.reduce_mean_dim(&current, d).await?;
+                let next = self
+                    .mean_dim_optional_exec(&current, d)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "mean: required dimensional stage unavailable after N-D preparation"
+                        )
+                    })?;
                 if owned {
                     drop(current);
                 }
                 current = next;
                 owned = true;
             }
-            return Ok(current);
+            return Ok(Some(current));
         }
 
         let (out_buffer, out_shape) = self.with_emission(|emission, pending| -> Result<_> {
@@ -328,6 +329,7 @@ impl WgpuProvider {
             Ok((out_buffer, out_shape))
         })??;
         self.register_real_floating_output(out_buffer, out_shape, cols, entry.precision)
+            .map(Some)
     }
 
     pub(crate) fn reduce_moments_nd_exec(

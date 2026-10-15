@@ -39,6 +39,13 @@ fn mean_provider_error_after_effect(
     mean_provider_error(source.into().after_effect())
 }
 
+fn mean_reduction_error(
+    source: runmat_accelerate_api::ProviderExecutionError,
+) -> MeanProviderFailure {
+    // Optional reduction hooks report absence only as None, never by Err.
+    mean_provider_error(source.with_unproven_effects())
+}
+
 pub(super) async fn execute(
     provider: &dyn AccelProvider,
     input: &GpuTensorHandle,
@@ -163,9 +170,11 @@ async fn mean_gpu_try(
                 return Ok(handle.clone());
             }
             let dim = default_dimension_from_shape(handle.shape());
-            reduce_mean_dim_gpu(provider, handle.clone(), dim, false).await
+            reduce_mean_dim_gpu(provider, handle, handle.clone(), dim, false).await
         }
-        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim, false).await,
+        MeanAxes::Dim(dim) => {
+            reduce_mean_dim_gpu(provider, handle, handle.clone(), *dim, false).await
+        }
         MeanAxes::Vec(dims) => {
             // Prefer provider N-D reduce if available
             let mut dims0: Vec<usize> = dims
@@ -184,10 +193,10 @@ async fn mean_gpu_try(
                 match provider
                     .reduce_mean_nd(handle, &dims0)
                     .await
-                    .map_err(mean_provider_error)
+                    .map_err(mean_reduction_error)
                 {
-                    Ok(out) => return Ok(out),
-                    Err(MeanProviderFailure::Unsupported) => {}
+                    Ok(Some(out)) => return Ok(out),
+                    Ok(None) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -207,7 +216,7 @@ async fn mean_gpu_try(
                 if is_scalar_shape(result.shape()) {
                     break;
                 }
-                result = reduce_mean_dim_gpu(provider, result, dim, prior_effect).await?;
+                result = reduce_mean_dim_gpu(provider, handle, result, dim, prior_effect).await?;
                 prior_effect = true;
             }
             Ok(result)
@@ -219,10 +228,10 @@ async fn mean_gpu_try(
             match provider
                 .reduce_mean(handle)
                 .await
-                .map_err(mean_provider_error)
+                .map_err(mean_reduction_error)
             {
-                Ok(out) => Ok(out),
-                Err(MeanProviderFailure::Unsupported) => {
+                Ok(Some(out)) => Ok(out),
+                Ok(None) => {
                     let rank = handle.shape().len();
                     if is_scalar_shape(handle.shape()) || rank == 0 {
                         Ok(handle.clone())
@@ -234,9 +243,14 @@ async fn mean_gpu_try(
                                 let mut result = handle.clone();
                                 let mut prior_effect = false;
                                 for dim in 1..=rank {
-                                    result =
-                                        reduce_mean_dim_gpu(provider, result, dim, prior_effect)
-                                            .await?;
+                                    result = reduce_mean_dim_gpu(
+                                        provider,
+                                        handle,
+                                        result,
+                                        dim,
+                                        prior_effect,
+                                    )
+                                    .await?;
                                     prior_effect = true;
                                 }
                                 Ok(result)
@@ -253,6 +267,7 @@ async fn mean_gpu_try(
 
 async fn reduce_mean_dim_gpu(
     provider: &dyn AccelProvider,
+    original: &GpuTensorHandle,
     handle: GpuTensorHandle,
     dim: usize,
     prior_effect: bool,
@@ -263,138 +278,33 @@ async fn reduce_mean_dim_gpu(
     if handle.shape().len() < dim {
         return Ok(handle);
     }
-    provider
+    let mut expected = handle.shape().to_vec();
+    expected[dim - 1] = 1;
+    let output = provider
         .reduce_mean_dim(&handle, dim - 1)
         .await
         .map_err(|source| {
             if prior_effect {
                 mean_provider_error_after_effect(source)
             } else {
-                mean_provider_error(source)
+                mean_reduction_error(source)
             }
-        })
+        })?
+        .ok_or_else(|| {
+            if prior_effect {
+                mean_provider_error_after_effect(anyhow::anyhow!(
+                    "mean: required dimensional stage unavailable"
+                ))
+            } else {
+                MeanProviderFailure::Unsupported
+            }
+        })?;
+    admission::admit_include_reduction(provider, original, &handle, output, &expected, dim - 1)
 }
 
-/// Reduce mean across multiple (1-based) dimensions in a single device pass by
-/// permuting reduce dims to the front, reshaping to 2-D, reducing rows, and
-/// reshaping/permuting back to the original order with size-1 dims preserved.
-// (N-D mean fast path omitted for now; sequential per-dimension GPU reductions used instead.)
-pub(super) async fn reduce_mean_vecdim_nd_gpu(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    dims_1based: &[usize],
-) -> Result<GpuTensorHandle, MeanProviderFailure> {
-    let rank = handle.shape().len();
-    if rank == 0 || dims_1based.is_empty() {
-        return Ok(handle.clone());
-    }
-    // The generic permutation/reshape shortcut is a real-lane strategy.
-    // Complex owners may still provide direct N-D, global, or dimensional
-    // reduction hooks; do not stage an unqualified pairwise shortcut first.
-    if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
-        return Err(MeanProviderFailure::Unsupported);
-    }
-    // Convert to 0-based and filter in-bounds
-    let mut reduce_dims: Vec<usize> = dims_1based
-        .iter()
-        .filter_map(|&d| {
-            if d > 0 && d <= rank {
-                Some(d - 1)
-            } else {
-                None
-            }
-        })
-        .collect();
-    if reduce_dims.is_empty() {
-        return Ok(handle.clone());
-    }
-    reduce_dims.sort_unstable();
-    reduce_dims.dedup();
-    // Kept dims
-    let kept_dims: Vec<usize> = (0..rank).filter(|i| !reduce_dims.contains(i)).collect();
-    // Permute reduced dims first
-    let mut order: Vec<usize> = Vec::with_capacity(rank);
-    order.extend_from_slice(&reduce_dims);
-    order.extend_from_slice(&kept_dims);
-    // Compute rows/cols
-    let mut reduce_len: usize = 1;
-    for &d in &reduce_dims {
-        reduce_len = reduce_len.saturating_mul(handle.shape()[d]);
-    }
-    let total_elems: usize = handle.shape().iter().copied().product();
-    if reduce_len == 0 || total_elems == 0 {
-        let mut output_shape = handle.shape().to_vec();
-        for &dim in &reduce_dims {
-            output_shape[dim] = 1;
-        }
-        return provider
-            .fill(&output_shape, f64::NAN)
-            .map_err(mean_provider_error);
-    }
-    let permuted = provider
-        .permute(handle, &order)
-        .map_err(|error| mean_provider_error(error.with_unproven_effects()))?;
-    let Some(permuted) = permuted else {
-        return Err(MeanProviderFailure::Unsupported);
-    };
-    if !gpu_helpers::permutation_output_matches(handle, &permuted, provider, &order) {
-        return Err(MeanProviderFailure::Execution(Box::new(
-            gpu_helpers::reject_gpu_output(
-                permuted,
-                mean_internal_error("mean: invalid provider permutation output"),
-            ),
-        )));
-    }
-    let num_slices = total_elems / reduce_len;
-    // Reshape permuted view to [rows, cols]
-    let reshaped2d = provider
-        .reshape(&permuted, &[reduce_len, num_slices])
-        .map_err(mean_provider_error_after_effect)?;
-    // Reduce along rows (dim 0) -> [1, num_slices]
-    let reduced_rows = provider
-        .reduce_mean_dim(&reshaped2d, 0)
-        .await
-        .map_err(mean_provider_error_after_effect)?;
-    // Reshape to kept sizes (permuted order)
-    let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape()[d]).collect();
-    let kept_shape = if kept_sizes.is_empty() {
-        vec![1, 1]
-    } else {
-        kept_sizes.clone()
-    };
-    let reshaped_kept = provider
-        .reshape(&reduced_rows, &kept_shape)
-        .map_err(mean_provider_error_after_effect)?;
-    // Expand permuted shape by inserting ones for reduced axes
-    let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
-    expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
-    expanded_perm_shape.extend_from_slice(&kept_sizes);
-    let expanded = provider
-        .reshape(&reshaped_kept, &expanded_perm_shape)
-        .map_err(mean_provider_error_after_effect)?;
-    // Inverse permute back to original axis order
-    let mut inv_order = vec![0usize; rank];
-    for (dst, &src) in order.iter().enumerate() {
-        inv_order[src] = dst;
-    }
-    let out = provider
-        .permute(&expanded, &inv_order)
-        .map_err(mean_provider_error_after_effect)?;
-    let out = out.ok_or_else(|| {
-        mean_provider_error_after_effect(anyhow::anyhow!(
-            "mean: required inverse permutation unavailable"
-        ))
-    })?;
-    if !gpu_helpers::permutation_output_matches(&expanded, &out, provider, &inv_order) {
-        return Err(MeanProviderFailure::Execution(Box::new(
-            gpu_helpers::reject_gpu_output(
-                out,
-                mean_internal_error("mean: invalid inverse permutation output"),
-            ),
-        )));
-    }
-    Ok(out)
-}
+#[path = "provider_execution/vector.rs"]
+mod vector;
+pub(super) use vector::reduce_mean_vecdim_nd_gpu;
 
 async fn mean_gpu_omitnan(
     provider: &dyn AccelProvider,
