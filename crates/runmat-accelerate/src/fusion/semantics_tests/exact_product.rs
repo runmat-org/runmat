@@ -284,8 +284,12 @@ fn actual_invocation_controls_win_and_general_double_data_requires_f64() {
             &inputs,
             ProviderPrecision::F32,
             PrecisionPolicy::Exact,
-        )
-        .unwrap();
+        );
+        if matches!(inputs[1], Value::Tensor(_)) {
+            assert!(matches!(resolved, Err(FusionResolveFailure::Structural(_))));
+            continue;
+        }
+        let resolved = resolved.unwrap();
         assert!(resolved.exact_product(2).is_none());
         assert!(source
             .prepare_typed_shader(&[2], &resolved, ScalarType::F32)

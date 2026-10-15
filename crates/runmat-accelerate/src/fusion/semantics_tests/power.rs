@@ -55,7 +55,8 @@ fn certified_power_fusion_embeds_original_double_controls_before_operand_casts()
             assert!(shader.contains("struct Tensor { data: array<u32>"));
             assert!(!shader.contains("var<storage, read> input1"));
             assert!(!shader.contains("fn rm_power_f32("));
-            assert!(!shader.contains("f64"));
+            // Capability validation below checks actual types. The source
+            // identity comment can contain arbitrary hexadecimal substrings.
             crate::wgsl::validation_tests::validate_generated(
                 "certified-power-fusion",
                 &shader,
@@ -83,7 +84,6 @@ fn certified_power_fusion_embeds_original_double_controls_before_operand_casts()
                 generated.requirements(),
                 runmat_accelerate_api::ProviderShaderRequirements::Basic
             );
-            assert!(!generated.source().contains("f64"));
             assert!(!generated.source().contains("let control1"));
             crate::wgsl::validation_tests::validate_generated(
                 "captured-power-control",

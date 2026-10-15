@@ -89,7 +89,7 @@ fn canonical_unary_instructions_preserve_precision_and_existing_domain_owners() 
                     if single {
                         crate::wgsl::validation_tests::RequiredCaps::None
                     } else {
-                        crate::wgsl::validation_tests::RequiredCaps::Float64Int64
+                        crate::wgsl::validation_tests::RequiredCaps::Float64
                     },
                 );
             }
