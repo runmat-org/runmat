@@ -3159,7 +3159,9 @@ fn scalar_operator_expr(operation: OperatorKind, arguments: &[String]) -> Option
         (OperatorKind::ElementwiseDivide, [a, b]) => Some(format!("({a} / {b})")),
         (OperatorKind::ElementwiseLeftDivide, [a, b]) => Some(format!("({b} / {a})")),
         (OperatorKind::UnaryMinus, [a]) => Some(format!("(-{a})")),
-        (OperatorKind::UnaryPlus, [a]) => Some(format!("(+{a})")),
+        // WGSL has no unary `+`; numeric admission already establishes the
+        // operand's class, so unary plus preserves the expression unchanged.
+        (OperatorKind::UnaryPlus, [a]) => Some(a.clone()),
         _ => None,
     }
 }

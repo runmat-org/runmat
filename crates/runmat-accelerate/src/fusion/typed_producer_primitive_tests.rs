@@ -48,6 +48,40 @@ fn host_values(output: runmat_runtime::execution::RootedValue) -> Vec<f64> {
 }
 
 #[test]
+fn unary_signs_emit_valid_wgsl_at_both_floating_precisions() {
+    use crate::wgsl::validation_tests::{validate_generated, RequiredCaps};
+    for (single, precision, scalar, capabilities) in [
+        (
+            true,
+            ProviderPrecision::F32,
+            ScalarType::F32,
+            RequiredCaps::None,
+        ),
+        (
+            false,
+            ProviderPrecision::F64,
+            ScalarType::F64,
+            RequiredCaps::Float64,
+        ),
+    ] {
+        for op in [PrimitiveOp::UPlus, PrimitiveOp::Neg] {
+            let source = plan(
+                vec![FusionOp::Primitive {
+                    op,
+                    inputs: vec![0],
+                    output: Some(2),
+                }],
+                2,
+            );
+            let input = tensor(single, &[-0.0, -2.0], &[1, 2]);
+            let program = resolve(&source, &[input.clone(), input], precision);
+            let shader = source.generate_typed_wgsl(&[2], &program, scalar).unwrap();
+            validate_generated("typed-unary-sign", &shader, 64, 8, capabilities);
+        }
+    }
+}
+
+#[test]
 fn mixed_add_uses_double_sum_then_single_result_in_checked_and_legacy_emission() {
     runmat_gc::gc_test_context(|| {
         let below_one = f64::from(f32::from_bits(0x3f7f_ffff));

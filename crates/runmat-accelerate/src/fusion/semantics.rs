@@ -502,15 +502,6 @@ impl ResolvedProgram {
         self.source_input_set.contains(&id)
     }
 
-    pub fn uses_implicit_downcast(&self) -> bool {
-        self.precision_policy.permits_double_to_single()
-            && self.provider_precision == ProviderPrecision::F32
-            && self.source_inputs.iter().any(|fact| {
-                fact.numeric()
-                    .is_some_and(|numeric| numeric.class == NumericClass::Double)
-            })
-    }
-
     pub fn declaration(&self, id: ValueId) -> Option<CanonicalFusionDeclaration> {
         self.declarations
             .get(&id)
