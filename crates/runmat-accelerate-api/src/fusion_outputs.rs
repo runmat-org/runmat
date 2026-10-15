@@ -2,6 +2,54 @@
 //! output types are deliberately not substituted for these physical facts.
 use crate::{unsupported_provider_operation, ProviderElementType, ProviderPrecision};
 
+/// Descriptive buffer/index ABI, not source arithmetic or allocation authority.
+/// Ordinary typed shaders currently use one uniform real floating class and
+/// the canonical column-major broadcast shape/stride uniform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum ProviderFusedElementwiseAbi {
+    BroadcastReal { precision: ProviderPrecision },
+}
+impl ProviderFusedElementwiseAbi {
+    pub fn precision(self) -> ProviderPrecision {
+        match self {
+            Self::BroadcastReal { precision } => precision,
+        }
+    }
+}
+
+/// Request-derived physical preparation description. This does not authenticate
+/// host views, issue allocations, or authorize source numerical conversions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderFusedElementwiseWorkload {
+    pub abi: ProviderFusedElementwiseAbi,
+    pub host_materialization_elements: u64,
+    /// Peak one-at-a-time host materialization; visits above sum all copies.
+    pub host_workspace_bytes: u64,
+}
+impl ProviderFusedElementwiseWorkload {
+    pub fn checked_host_workspace_bytes(self) -> Option<u64> {
+        let maximum =
+            self.host_materialization_elements
+                .checked_mul(match self.abi.precision() {
+                    ProviderPrecision::F32 => 4,
+                    ProviderPrecision::F64 => 8,
+                })?;
+        (self.host_workspace_bytes <= maximum).then_some(self.host_workspace_bytes)
+    }
+}
+
+pub struct ProviderFusedElementwiseRequest<'a> {
+    pub shader: &'a str,
+    pub requirements: crate::ProviderShaderRequirements,
+    pub inputs: &'a [crate::GpuTensorHandle],
+    pub output_shape: &'a [usize],
+    pub len: usize,
+    pub output_classes: &'a [ProviderElementType],
+    pub abi: ProviderFusedElementwiseAbi,
+}
+
 /// Validate before allocating output buffers or dispatching. Backend binding
 /// limits are checked by that backend; no separate count can contradict this
 /// list. A numeric raw output must match the executing shader precision.

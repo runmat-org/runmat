@@ -8,6 +8,9 @@ impl GeometryProvider {
     }
 }
 impl AccelProvider for GeometryProvider {
+    fn supports_fused_elementwise_abi(&self, _: ProviderFusedElementwiseAbi) -> bool {
+        true
+    }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }

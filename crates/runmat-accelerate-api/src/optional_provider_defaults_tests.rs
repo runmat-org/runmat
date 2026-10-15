@@ -197,6 +197,40 @@ fn fused_defaults_are_lazy_typed_unsupported_and_preserve_borrowed_input() {
 }
 
 #[test]
+fn explicit_fused_data_abi_defaults_are_lazy_unsupported() {
+    let owner = TestAllocationOwner::new();
+    let allocated = owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let inputs = [allocated.handle.clone()];
+    let abi = ProviderFusedElementwiseAbi::BroadcastReal {
+        precision: ProviderPrecision::F32,
+    };
+    let request = || ProviderFusedElementwiseRequest {
+        shader: "",
+        requirements: ProviderShaderRequirements::Basic,
+        inputs: &inputs,
+        output_shape: &[1, 2],
+        len: 2,
+        output_classes: &[ProviderElementType::F32],
+        abi,
+    };
+    let provider = Defaults;
+    assert!(!provider.supports_fused_elementwise_abi(abi));
+    drop(provider.fused_elementwise_typed(request()));
+    assert!(ready_default(provider.fused_elementwise_typed(request()))
+        .unwrap_err()
+        .is_unsupported());
+    assert!(
+        ready_default(provider.fused_elementwise_multi_typed(request()))
+            .unwrap_err()
+            .is_unsupported()
+    );
+    allocated.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(allocated.probe.retirements(), 0);
+}
+
+#[test]
 fn polynomial_defaults_are_typed_unsupported() {
     let input = Provider::new(FillMode::Unsupported).allocation(&[1, 2]);
     let options = ProviderPolyvalOptions { mu: None };

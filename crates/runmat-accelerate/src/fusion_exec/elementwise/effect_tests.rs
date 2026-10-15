@@ -13,6 +13,8 @@ use std::sync::{
 };
 
 struct FailingProvider {
+    typed: bool,
+    typed_dispatches: AtomicUsize,
     precision: ProviderPrecision,
     allocations: TestAllocationOwner,
     fail_upload_at: usize,
@@ -27,7 +29,12 @@ impl FailingProvider {
         Self::with_precision(fail_upload_at, ProviderPrecision::F64)
     }
     fn with_precision(fail_upload_at: usize, precision: ProviderPrecision) -> &'static Self {
+        Self::with_abi(fail_upload_at, precision, false)
+    }
+    fn with_abi(fail_upload_at: usize, precision: ProviderPrecision, typed: bool) -> &'static Self {
         Box::leak(Box::new(Self {
+            typed,
+            typed_dispatches: AtomicUsize::new(0),
             precision,
             allocations: TestAllocationOwner::new(),
             fail_upload_at,
@@ -69,9 +76,14 @@ impl AccelProvider for FailingProvider {
         }
         let allocated = self.allocations.allocate_zeroed(
             host.shape.to_vec(),
-            match self.precision {
-                ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-                ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+            match host.data {
+                runmat_accelerate_api::HostNumericDataView::F32(_) => {
+                    runmat_accelerate_api::NumericElementType::F32
+                }
+                runmat_accelerate_api::HostNumericDataView::F64(_) => {
+                    runmat_accelerate_api::NumericElementType::F64
+                }
+                _ => panic!("floating fixture input required"),
             },
             runmat_accelerate_api::GpuTensorStorage::Real,
         )?;
@@ -85,6 +97,42 @@ impl AccelProvider for FailingProvider {
 
     fn query_feasibility(&self, _: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         ProviderFeasibility::supported(Default::default())
+    }
+    fn supports_fused_elementwise_abi(
+        &self,
+        _: runmat_accelerate_api::ProviderFusedElementwiseAbi,
+    ) -> bool {
+        self.typed
+    }
+    fn fused_elementwise_typed<'a>(
+        &'a self,
+        request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'a>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            assert_eq!(request.abi.precision(), ProviderPrecision::F32);
+            assert!(request
+                .inputs
+                .iter()
+                .all(|input| input.physical().element_type()
+                    == runmat_accelerate_api::NumericElementType::F32));
+            assert!(request
+                .output_classes
+                .iter()
+                .all(|class| *class == ProviderElementType::F32));
+            assert!(!request.shader.contains("f64"));
+            assert!(
+                request.shader.contains(&format!(
+                    "@binding({}) var<storage, read_write> output0",
+                    request.inputs.len()
+                )),
+                "typed fallback must keep the prepared projection and output binding"
+            );
+            self.typed_dispatches.fetch_add(1, Ordering::SeqCst);
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "injected typed dispatch unsupported",
+            )
+            .into())
+        })
     }
 
     fn fused_elementwise<'a>(
@@ -239,6 +287,121 @@ fn assert_original_unsupported(error: &ProviderExecutionError) {
             .source()
             .expect("original typed unsupported provider cause retained");
     }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn f64_owner_uses_explicit_single_data_abi_without_narrowing_double_data() {
+    runmat_gc::gc_test_context(|| {
+        for (case, capable) in [
+            (0, true),
+            (0, false),
+            (1, true),
+            (2, true),
+            (3, true),
+            (4, true),
+        ] {
+            let provider = FailingProvider::with_abi(usize::MAX, ProviderPrecision::F64, capable);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let mut source = plan();
+            let single = || {
+                Value::Tensor(
+                    runmat_value::Tensor::from_f32(vec![f32::from_bits(1), -2.0], vec![1, 2])
+                        .unwrap(),
+                )
+            };
+            let inputs = match case {
+                0 => {
+                    source.inputs = vec![0];
+                    source.stack_pattern = vec![0];
+                    source.operations = vec![crate::fusion::FusionOp::Primitive {
+                        op: crate::graph::PrimitiveOp::UPlus,
+                        inputs: vec![0],
+                        output: Some(2),
+                    }];
+                    vec![single()]
+                }
+                1 | 4 => {
+                    source.operations = vec![crate::fusion::FusionOp::Primitive {
+                        op: crate::graph::PrimitiveOp::ElemPow,
+                        inputs: vec![0, 1],
+                        output: Some(2),
+                    }];
+                    vec![single(), Value::Num(2.0)]
+                }
+                2 => vec![
+                    single(),
+                    Value::Tensor(
+                        runmat_value::Tensor::new(vec![1.0 + f64::EPSILON, 2.0], vec![1, 2])
+                            .unwrap(),
+                    ),
+                ],
+                _ => {
+                    source.inputs = vec![0];
+                    source.stack_pattern = vec![0];
+                    source.output = Some(4);
+                    source.operations = vec![
+                        crate::fusion::FusionOp::Builtin {
+                            origin: Default::default(),
+                            name: "double".into(),
+                            inputs: vec![0],
+                            output: Some(2),
+                        },
+                        crate::fusion::FusionOp::Primitive {
+                            op: crate::graph::PrimitiveOp::Add,
+                            inputs: vec![2, 1],
+                            output: Some(3),
+                        },
+                        crate::fusion::FusionOp::Builtin {
+                            origin: Default::default(),
+                            name: "single".into(),
+                            inputs: vec![3],
+                            output: Some(4),
+                        },
+                    ];
+                    source.const_values.insert(1, Value::Num(0.1));
+                    vec![single()]
+                }
+            };
+            if case == 4 {
+                source
+                    .materialized_stores
+                    .push(crate::fusion::FusionStoreMaterialization {
+                        value_id: 0,
+                        binding: crate::graph::VarBinding {
+                            kind: crate::graph::VarKind::Global,
+                            index: 0,
+                        },
+                    });
+            }
+            source.group.shape = ShapeInfo::Tensor(vec![Some(1), Some(2)]);
+            let result =
+                futures::executor::block_on(execute_elementwise_placed(FusionExecutionRequest {
+                    plan: &source,
+                    inputs,
+                    placement: None,
+                    runtime: None,
+                }));
+            let error = match result {
+                Err(error) => error,
+                _ => panic!("selected fixture dispatch must fail"),
+            };
+            assert_original_unsupported(&error);
+            let typed = capable && case != 2 && case != 3;
+            assert_eq!(
+                provider.typed_dispatches.load(Ordering::SeqCst),
+                usize::from(typed)
+            );
+            assert_eq!(
+                provider.dispatches.load(Ordering::SeqCst),
+                usize::from(!typed)
+            );
+            assert_eq!(
+                provider.uploads.load(Ordering::SeqCst),
+                if case == 2 { 2 } else { 1 }
+            );
+        }
+    });
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

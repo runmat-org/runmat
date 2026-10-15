@@ -1,4 +1,6 @@
 use super::*;
+#[path = "trait_impl/typed_elementwise.rs"]
+mod typed_elementwise;
 use runmat_accelerate_api::{
     AccelIntegerDownloadFuture, AccelNumericDownloadFuture, HostIntegerTensorView,
     HostNumericTensorView, IntegerElementType,
@@ -3069,6 +3071,27 @@ impl AccelProvider for WgpuProvider {
             }
             Ok(output)
         })
+    }
+
+    fn supports_fused_elementwise_abi(
+        &self,
+        abi: runmat_accelerate_api::ProviderFusedElementwiseAbi,
+    ) -> bool {
+        abi.precision() == runmat_accelerate_api::ProviderPrecision::F32
+            || self.precision == NumericPrecision::F64
+    }
+
+    fn fused_elementwise_typed<'a>(
+        &'a self,
+        request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'a>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.execute_typed_elementwise(request).await })
+    }
+    fn fused_elementwise_multi_typed<'a>(
+        &'a self,
+        request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'a>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move { self.execute_typed_elementwise_multi(request).await })
     }
 
     fn fused_elementwise_multi<'a>(

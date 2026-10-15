@@ -7,6 +7,7 @@ use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 #[path = "elementwise/effects.rs"]
 mod effects;
 use effects::ElementwiseEffects;
+mod abi;
 
 #[cfg(test)]
 #[path = "elementwise/effect_tests.rs"]
@@ -78,10 +79,6 @@ async fn execute_elementwise_outputs(
             }
         }
     }
-    let scalar_type = match provider.precision() {
-        ProviderPrecision::F32 => runmat_runtime::builtins::common::spec::ScalarType::F32,
-        ProviderPrecision::F64 => runmat_runtime::builtins::common::spec::ScalarType::F64,
-    };
     let typed = async {
         let program = crate::fusion::semantics::ResolvedProgram::resolve(
             request.plan,
@@ -95,19 +92,24 @@ async fn execute_elementwise_outputs(
             .map(|id| program.floating_class(*id))
             .collect::<Result<Vec<_>>>()?;
         let started = Instant::now();
-        let generated_shader =
-            request
-                .plan
-                .prepare_typed_shader(output_ids, &program, scalar_type)?;
+        let (generated_shader, typed_abi) = abi::select_shader(
+            request.plan,
+            output_ids,
+            &program,
+            &classes,
+            provider,
+            &request.inputs,
+        )?;
         FusionPlacementObserver::new(request.placement).shader_source_generation(started);
         Ok::<_, crate::fusion::semantics::FusionResolveFailure>((
             program,
             classes,
             generated_shader,
+            typed_abi,
         ))
     }
     .await;
-    let (program, output_classes, generated_shader) = match typed {
+    let (program, output_classes, generated_shader, typed_abi) = match typed {
         Ok(typed) => typed,
         Err(error) => {
             let error = match error.into_execution_or_structural() {
@@ -124,6 +126,11 @@ async fn execute_elementwise_outputs(
                 FusionCpuObservation::new(None),
             ));
         }
+    };
+    let physical_precision = generated_shader.abi().precision();
+    let scalar_type = match physical_precision {
+        ProviderPrecision::F32 => runmat_runtime::builtins::common::spec::ScalarType::F32,
+        ProviderPrecision::F64 => runmat_runtime::builtins::common::spec::ScalarType::F64,
     };
     let (shader, shader_requirements, input_indices) = generated_shader.into_parts();
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
@@ -207,6 +214,7 @@ async fn execute_elementwise_outputs(
         &bindings,
         provider,
         FusionProviderContract {
+            elementwise_abi: typed_abi,
             input_indices: Some(&input_indices),
             outputs: representations,
             semantic_identity: Some(semantic_identity),
@@ -229,13 +237,14 @@ async fn execute_elementwise_outputs(
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         let mut effects = ElementwiseEffects::default();
         let result: ExecutionResult<_> = async {
+        if let Some(work) = typed_abi { abi::validate_inputs(request.plan, &program, &input_indices, &request.inputs, work)?; }
         let observer = selection.observer;
         let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
         let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
         let mut prepared = Vec::with_capacity(request.inputs.len());
         let mut allocations = outputs::FusionOutputAdmission::new(&request.inputs);
         let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
-        let scalar_dtype = scalar_upload_dtype(provider);
+        let scalar_dtype = match physical_precision { ProviderPrecision::F32 => NumericDType::F32, ProviderPrecision::F64 => NumericDType::F64 };
         if program.uses_implicit_downcast_for(&input_indices) {
             // Reuse the existing policy warning and admission authority. Explicit
             // Single conversions need no implicit-policy warning: typed codegen
@@ -255,7 +264,7 @@ async fn execute_elementwise_outputs(
                     {
                         return Err(anyhow!("fusion input has no matching exact provider owner").into());
                     }
-                    let expected = match provider.precision() {
+                    let expected = match physical_precision {
                         ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                         ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                     };
@@ -298,7 +307,7 @@ async fn execute_elementwise_outputs(
                         contiguous
                     } else {
                         let metadata = ResidencyRestoreGuard::new(&contiguous);
-                        let converted = match provider.precision() {
+                        let converted = match physical_precision {
                             ProviderPrecision::F64 => provider
                                 .unary_double(&contiguous)
                                 .await,
@@ -311,7 +320,7 @@ async fn execute_elementwise_outputs(
                             converted,
                             provider,
                             handle.shape(),
-                            provider.precision(),
+                            physical_precision,
                         )?
                     };
                     prepared.push(PreparedInput {
@@ -319,6 +328,22 @@ async fn execute_elementwise_outputs(
                     });
                 }
                 Value::Tensor(t) => {
+                    if typed_abi.is_some() {
+                        let owned;
+                        let data = if let Some(data) = t.as_f32_slice() { data } else {
+                            owned = (0..t.len()).map(|index| match t.numeric_value_at(index) {
+                                Some(runmat_value::NumericScalar::F32(value)) => Ok(value),
+                                _ => Err(anyhow!("typed Single host materialization changed class")),
+                            }).collect::<Result<Vec<_>>>()?;
+                            &owned
+                        };
+                        let started = Instant::now();
+                        let handle = allocations.upload_typed(provider, &runmat_accelerate_api::HostNumericTensorView { data: runmat_accelerate_api::HostNumericDataView::F32(data), shape: t.shape(), storage: runmat_accelerate_api::GpuTensorStorage::Real })?;
+                        effects.succeeded();
+                        observer.upload(started, physical_upload_bytes(physical_precision, data.len()));
+                        prepared.push(PreparedInput { handle });
+                        continue;
+                    }
                     if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                         return Err(anyhow!(
                             "fusion: tensor input requires unsupported precision ({msg})"
@@ -366,7 +391,7 @@ async fn execute_elementwise_outputs(
         let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
         let mut outputs = HashMap::new();
         // Shader stores use backend precision; semantic Single adaptation follows dispatch.
-        let physical_output_class = match provider.precision() {
+        let physical_output_class = match physical_precision {
             ProviderPrecision::F32 => ProviderElementType::F32,
             ProviderPrecision::F64 => ProviderElementType::F64,
         };
@@ -377,19 +402,14 @@ async fn execute_elementwise_outputs(
             timer.mark("generate_wgsl");
             let started = Instant::now();
             let metadata = protect_kernel_inputs(&handles);
-            let output = provider.fused_elementwise(
-                &shader,
-                shader_requirements,
-                &handles,
-                &output_shape,
-                len,
-                physical_output_class,
-            ).await;
+            let output = abi::dispatch_single(provider, typed_abi, runmat_accelerate_api::ProviderFusedElementwiseRequest {
+                shader: &shader, requirements: shader_requirements, inputs: &handles, output_shape: &output_shape, len, output_classes: &[physical_output_class], abi: runmat_accelerate_api::ProviderFusedElementwiseAbi::BroadcastReal { precision: physical_precision },
+            }).await;
             drop(metadata);
             let output = output?;
             effects.succeeded();
             let output =
-                allocations.admit(output, provider, &output_shape, provider.precision())?;
+                allocations.admit(output, provider, &output_shape, physical_precision)?;
             observer.queue(started);
             observer.kernel_unmeasured();
             outputs.insert(output_id, Value::GpuTensor(output));
@@ -400,14 +420,9 @@ async fn execute_elementwise_outputs(
             let started = Instant::now();
             let metadata = protect_kernel_inputs(&handles);
             let physical_output_classes = vec![physical_output_class; output_ids.len()];
-            let multi_result = provider.fused_elementwise_multi(
-                &shader,
-                shader_requirements,
-                &handles,
-                &output_shape,
-                len,
-                &physical_output_classes,
-            ).await;
+            let multi_result = abi::dispatch_multi(provider, typed_abi, runmat_accelerate_api::ProviderFusedElementwiseRequest {
+                shader: &shader, requirements: shader_requirements, inputs: &handles, output_shape: &output_shape, len, output_classes: &physical_output_classes, abi: runmat_accelerate_api::ProviderFusedElementwiseAbi::BroadcastReal { precision: physical_precision },
+            }).await;
             drop(metadata);
             observer.queue(started);
             match multi_result {
@@ -418,7 +433,7 @@ async fn execute_elementwise_outputs(
                         provider,
                         output_ids.len(),
                         &output_shape,
-                        provider.precision(),
+                        physical_precision,
                     )?;
                     observer.kernel_unmeasured();
                     for (output_id, handle) in output_ids.iter().copied().zip(out_handles) {
@@ -444,14 +459,9 @@ async fn execute_elementwise_outputs(
                         }
                         let started = Instant::now();
                         let metadata = protect_kernel_inputs(&handles);
-                        let output = provider.fused_elementwise(
-                            single_shader.source(),
-                            single_shader.requirements(),
-                            &handles,
-                            &output_shape,
-                            len,
-                            physical_output_class,
-                        ).await;
+                        let output = abi::dispatch_single(provider, typed_abi, runmat_accelerate_api::ProviderFusedElementwiseRequest {
+                            shader: single_shader.source(), requirements: single_shader.requirements(), inputs: &handles, output_shape: &output_shape, len, output_classes: &[physical_output_class], abi: single_shader.abi(),
+                        }).await;
                         drop(metadata);
                         let output = output?;
                         effects.succeeded();
@@ -459,7 +469,7 @@ async fn execute_elementwise_outputs(
                             output,
                             provider,
                             &output_shape,
-                            provider.precision(),
+                            physical_precision,
                         )?;
                         observer.queue(started);
                         observer.kernel_unmeasured();
@@ -479,7 +489,7 @@ async fn execute_elementwise_outputs(
                 return Err(anyhow!("fusion returned a nonresident output").into());
             };
             let output = if class == runmat_types::NumericClass::Single
-                && provider.precision() == ProviderPrecision::F64
+                && physical_precision == ProviderPrecision::F64
             {
                 let metadata =
                     runmat_runtime::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(

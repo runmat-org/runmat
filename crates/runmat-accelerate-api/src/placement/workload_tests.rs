@@ -138,6 +138,7 @@ fn scalar_work_is_optional_in_older_queries_and_round_trips_exactly() {
         serde_json::from_str(r#"{"elements":3,"flops":null,"batch":null}"#).unwrap();
     assert_eq!(workload.scalar_work_units, None);
     assert_eq!(workload.preparation_route, None);
+    assert_eq!(workload.fused_elementwise, None);
     for units in [0, 1, u64::MAX] {
         workload.scalar_work_units = Some(units);
         let bytes = serde_json::to_vec(&workload).unwrap();
@@ -145,6 +146,31 @@ fn scalar_work_is_optional_in_older_queries_and_round_trips_exactly() {
             serde_json::from_slice::<ProviderWorkload>(&bytes).unwrap(),
             workload
         );
+    }
+    workload.fused_elementwise = Some(crate::ProviderFusedElementwiseWorkload {
+        abi: crate::ProviderFusedElementwiseAbi::BroadcastReal {
+            precision: ProviderPrecision::F32,
+        },
+        host_materialization_elements: 8,
+        host_workspace_bytes: 32,
+    });
+    let encoded = serde_json::to_value(&workload).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ProviderWorkload>(encoded.clone()).unwrap(),
+        workload
+    );
+    for abi_nested in [false, true] {
+        let mut unknown = encoded.clone();
+        let target = if abi_nested {
+            &mut unknown["fused_elementwise"]["abi"]["BroadcastReal"]
+        } else {
+            &mut unknown["fused_elementwise"]
+        };
+        target
+            .as_object_mut()
+            .unwrap()
+            .insert("unrecognized".into(), serde_json::json!(true));
+        assert!(serde_json::from_value::<ProviderWorkload>(unknown).is_err());
     }
 }
 

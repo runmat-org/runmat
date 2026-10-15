@@ -2,7 +2,37 @@
 use super::*;
 use crate::backend::wgpu::residency::BufferResidency;
 
+/// Internal physical-frame input shared by legacy and explicit typed hooks.
+/// Legacy compatibility may use Simple; it never invents a public typed ABI.
+struct FrameRequest<'a> {
+    shader: &'a str,
+    inputs: &'a [GpuTensorHandle],
+    output_shape: &'a [usize],
+    len: usize,
+    output_classes: &'a [runmat_accelerate_api::ProviderElementType],
+    precision: runmat_accelerate_api::ProviderPrecision,
+    uniform_abi: FusionUniformAbi,
+}
+impl<'a> FrameRequest<'a> {
+    fn typed(request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'a>) -> Self {
+        Self {
+            shader: request.shader,
+            inputs: request.inputs,
+            output_shape: request.output_shape,
+            len: request.len,
+            output_classes: request.output_classes,
+            precision: request.abi.precision(),
+            uniform_abi: match request.abi {
+                runmat_accelerate_api::ProviderFusedElementwiseAbi::BroadcastReal { .. } => {
+                    FusionUniformAbi::Broadcast
+                }
+            },
+        }
+    }
+}
+
 pub(in crate::backend::wgpu::provider::backend) struct SingleFrame {
+    pub(in crate::backend::wgpu::provider::backend) precision: NumericPrecision,
     pub(in crate::backend::wgpu::provider::backend) recipe: FrozenFusionRecipe,
     pub(in crate::backend::wgpu::provider::backend) entries:
         Vec<super::super::backend_types::BufferEntry>,
@@ -17,6 +47,7 @@ pub(in crate::backend::wgpu::provider::backend) struct SingleFrame {
 }
 
 pub(in crate::backend::wgpu::provider::backend) struct MultiFrame {
+    pub(in crate::backend::wgpu::provider::backend) precision: NumericPrecision,
     pub(in crate::backend::wgpu::provider::backend) recipe:
         super::super::pipeline_recipe::PipelineRecipe,
     pub(in crate::backend::wgpu::provider::backend) entries:
@@ -55,6 +86,8 @@ impl SingleFrame {
         };
         ensure!(
             self.logical_output == representation.logical_output
+                && self.precision == representation.input_precision
+                && self.precision == representation.output_precision
                 && self.output_class == output_class
                 && self.shape.as_slice() == output_shape
                 && self.len == len,
@@ -89,6 +122,22 @@ impl MultiFrame {
 }
 
 impl WgpuProvider {
+    pub(in crate::backend::wgpu::provider::backend) fn fusion_entry_for_precision(
+        &self,
+        handle: &GpuTensorHandle,
+        precision: NumericPrecision,
+    ) -> Result<super::super::backend_types::BufferEntry> {
+        let entry = if precision == self.precision {
+            self.get_entry(handle)?
+        } else {
+            self.real_floating_entry(handle)?
+        };
+        ensure!(
+            entry.precision == precision && entry.storage == GpuTensorStorage::Real,
+            "fused input does not match frozen physical precision"
+        );
+        Ok(entry)
+    }
     pub(in crate::backend::wgpu::provider::backend) fn plan_ordinary_single_fusion(
         &self,
         shader: &str,
@@ -97,10 +146,47 @@ impl WgpuProvider {
         len: usize,
         output_class: runmat_accelerate_api::ProviderElementType,
     ) -> Result<SingleFrame> {
-        runmat_accelerate_api::validate_fused_output_classes(
-            self.provider_precision_exec(),
-            &[output_class],
-        )?;
+        let abi = if shader.contains("out_shape") || shader.contains("a_shape") {
+            FusionUniformAbi::Broadcast
+        } else {
+            FusionUniformAbi::Simple
+        };
+        self.plan_single_frame(FrameRequest {
+            shader,
+            inputs,
+            output_shape,
+            len,
+            output_classes: &[output_class],
+            precision: self.provider_precision_exec(),
+            uniform_abi: abi,
+        })
+    }
+
+    pub(in crate::backend::wgpu::provider::backend) fn plan_single_fusion(
+        &self,
+        request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'_>,
+    ) -> Result<SingleFrame> {
+        self.plan_single_frame(FrameRequest::typed(request))
+    }
+    fn plan_single_frame(&self, request: FrameRequest<'_>) -> Result<SingleFrame> {
+        let FrameRequest {
+            shader,
+            inputs,
+            output_shape,
+            len,
+            output_classes,
+            precision: data_precision,
+            uniform_abi: abi,
+        } = request;
+        let [output_class] = output_classes else {
+            return Err(anyhow!("single fusion requires one output"));
+        };
+        let output_class = *output_class;
+        let precision = match data_precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => NumericPrecision::F32,
+            runmat_accelerate_api::ProviderPrecision::F64 => NumericPrecision::F64,
+        };
+        runmat_accelerate_api::validate_fused_output_classes(data_precision, &[output_class])?;
         // Preserve the existing public rejection order before the recipe's
         // shape/output-word check and any scoped driver creation.
         ensure!(!inputs.is_empty(), "fused_elementwise: no inputs");
@@ -109,14 +195,9 @@ impl WgpuProvider {
             "fused_elementwise: tensor too large"
         );
         let logical_output = output_class == runmat_accelerate_api::ProviderElementType::Logical;
-        let abi = if shader.contains("out_shape") || shader.contains("a_shape") {
-            FusionUniformAbi::Broadcast
-        } else {
-            FusionUniformAbi::Simple
-        };
         let representation = FusedElementwiseRepresentation {
-            input_precision: self.precision,
-            output_precision: self.precision,
+            input_precision: precision,
+            output_precision: precision,
             output_storage: GpuTensorStorage::Real,
             logical_output,
         };
@@ -137,7 +218,7 @@ impl WgpuProvider {
         let total_bindings = checked_binding_count("fused_elementwise", storage_bindings, 1)?;
         let entries = inputs
             .iter()
-            .map(|handle| self.get_entry(handle))
+            .map(|handle| self.fusion_entry_for_precision(handle, precision))
             .collect::<Result<Vec<_>>>()?;
         let layouts = match abi {
             FusionUniformAbi::Broadcast => inputs
@@ -160,6 +241,7 @@ impl WgpuProvider {
             }
         };
         Ok(SingleFrame {
+            precision,
             recipe,
             entries,
             storage_bindings,
@@ -180,10 +262,42 @@ impl WgpuProvider {
         len: usize,
         output_classes: &[runmat_accelerate_api::ProviderElementType],
     ) -> Result<MultiFrame> {
-        runmat_accelerate_api::validate_fused_output_classes(
-            self.provider_precision_exec(),
+        self.plan_multi_frame(FrameRequest {
+            shader,
+            inputs,
+            output_shape,
+            len,
             output_classes,
-        )?;
+            precision: self.provider_precision_exec(),
+            uniform_abi: FusionUniformAbi::Broadcast,
+        })
+    }
+
+    pub(in crate::backend::wgpu::provider::backend) fn plan_multi_fusion(
+        &self,
+        request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'_>,
+    ) -> Result<MultiFrame> {
+        self.plan_multi_frame(FrameRequest::typed(request))
+    }
+    fn plan_multi_frame(&self, request: FrameRequest<'_>) -> Result<MultiFrame> {
+        let FrameRequest {
+            shader,
+            inputs,
+            output_shape,
+            len,
+            output_classes,
+            precision: data_precision,
+            uniform_abi,
+        } = request;
+        ensure!(
+            matches!(uniform_abi, FusionUniformAbi::Broadcast),
+            "multi fusion requires broadcast indexing"
+        );
+        let precision = match data_precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => NumericPrecision::F32,
+            runmat_accelerate_api::ProviderPrecision::F64 => NumericPrecision::F64,
+        };
+        runmat_accelerate_api::validate_fused_output_classes(data_precision, output_classes)?;
         ensure!(!inputs.is_empty(), "fused_elementwise_multi: no inputs");
         ensure!(
             !output_classes.is_empty(),
@@ -197,8 +311,8 @@ impl WgpuProvider {
             output_shape,
             len,
             &FusedElementwiseRepresentation {
-                input_precision: self.precision,
-                output_precision: self.precision,
+                input_precision: precision,
+                output_precision: precision,
                 output_storage: GpuTensorStorage::Real,
                 logical_output: false,
             },
@@ -239,7 +353,11 @@ impl WgpuProvider {
                 && uniform_bytes <= self.adapter_limits.max_buffer_size,
             "fused_elementwise_multi: uniform exceeds enabled limits"
         );
-        let output_bytes = BufferResidency::requested_bytes(len, self.element_size)
+        let element_size = match precision {
+            NumericPrecision::F32 => 4,
+            NumericPrecision::F64 => 8,
+        };
+        let output_bytes = BufferResidency::requested_bytes(len, element_size)
             .ok_or_else(|| anyhow!("fused_elementwise_multi: output extent overflows"))?;
         ensure!(
             output_bytes <= self.adapter_limits.max_buffer_size
@@ -256,7 +374,7 @@ impl WgpuProvider {
         );
         let entries = inputs
             .iter()
-            .map(|handle| self.get_entry(handle))
+            .map(|handle| self.fusion_entry_for_precision(handle, precision))
             .collect::<Result<Vec<_>>>()?;
         let layouts = inputs
             .iter()
@@ -272,6 +390,7 @@ impl WgpuProvider {
             workgroup_size,
         );
         Ok(MultiFrame {
+            precision,
             recipe,
             entries,
             layouts,

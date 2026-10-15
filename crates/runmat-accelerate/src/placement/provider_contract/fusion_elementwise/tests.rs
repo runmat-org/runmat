@@ -106,6 +106,58 @@ fn value(
 }
 
 #[test]
+fn uniform_single_abi_costs_no_widening_or_publication_adapters_on_double_owner() {
+    use runmat_accelerate_api::{ProviderFusedElementwiseAbi, ProviderFusedElementwiseWorkload};
+    let provider = GeometryProvider::new();
+    let abi = ProviderFusedElementwiseAbi::BroadcastReal {
+        precision: ProviderPrecision::F32,
+    };
+    for (residency, visits) in [
+        (ProviderResidency::Device, 0),
+        (ProviderResidency::Host, 0),
+        (ProviderResidency::Host, 8),
+    ] {
+        let mut input = value(ProviderElementType::F32, residency);
+        if residency == ProviderResidency::Device {
+            input.layout = ProviderLayout::Strided;
+        }
+        let mut query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("fusion.elementwise"),
+            family: ProviderOperationFamily::Fusion,
+            inputs: vec![input],
+            outputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+            workload: ProviderWorkload {
+                fused_elementwise: Some(ProviderFusedElementwiseWorkload {
+                    abi,
+                    host_materialization_elements: visits,
+                    host_workspace_bytes: visits * 4,
+                }),
+                ..Default::default()
+            },
+        };
+        let work = physical_work(&provider, &query).unwrap();
+        assert_eq!(work.estimate.transient_bytes, Some(64));
+        assert_eq!(work.estimate.output_bytes, Some(32));
+        assert_eq!(work.estimate.dispatches, Some(1));
+        assert_eq!(work.queue_submissions, 2);
+        assert_eq!(work.adapter_element_visits, visits);
+        assert_eq!(
+            work.scratch_bytes,
+            if residency == ProviderResidency::Host {
+                32 + visits * 4
+            } else {
+                0
+            }
+        );
+        query.inputs[0].element_type = ProviderElementType::F64;
+        assert!(
+            physical_work(&provider, &query).is_none(),
+            "Double data is not authorized to narrow by a Single output ABI"
+        );
+    }
+}
+
+#[test]
 fn output_cast_and_resident_widening_are_both_in_peak_and_dispatch_estimates() {
     let provider = GeometryProvider::new(); // F64 physical geometry; not an execution witness.
     let query = ProviderFeasibilityQuery {

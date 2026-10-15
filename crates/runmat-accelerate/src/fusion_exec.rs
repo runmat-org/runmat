@@ -298,6 +298,7 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
 }
 
 struct FusionProviderContract<'a> {
+    elementwise_abi: Option<runmat_accelerate_api::ProviderFusedElementwiseWorkload>,
     /// Physical data operands only; logical controls remain in source identity.
     input_indices: Option<&'a [usize]>,
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
@@ -320,6 +321,7 @@ fn select_fusion_provider(
         bindings,
         provider,
         FusionProviderContract {
+            elementwise_abi: None,
             input_indices: None,
             outputs: output_shapes
                 .iter()
@@ -351,6 +353,7 @@ fn select_fusion_provider_with_contract_vm(
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
+        elementwise_abi,
         input_indices,
         outputs,
         semantic_identity,
@@ -402,7 +405,8 @@ fn select_fusion_provider_with_contract_vm(
     let required_upload_bytes = if let Some(contract) = &matmul {
         Some(contract.upload_bytes)
     } else if typed_elementwise {
-        let width = match provider.precision() {
+        let width = match elementwise_abi.map_or(provider.precision(), |work| work.abi.precision())
+        {
             ProviderPrecision::F32 => 4u64,
             ProviderPrecision::F64 => 8u64,
         };
@@ -439,6 +443,7 @@ fn select_fusion_provider_with_contract_vm(
             &input_refs,
             &outputs,
             ProviderWorkload {
+                fused_elementwise: elementwise_abi,
                 elements: elements.and_then(|n| u64::try_from(n).ok()),
                 scalar_work_units,
                 matmul: matmul.as_ref().map(|contract| contract.workload.clone()),
@@ -502,6 +507,7 @@ fn select_fusion_provider_with_contract_vm(
             inputs: &input_refs,
             outputs,
             workload: ProviderWorkload {
+                fused_elementwise: elementwise_abi,
                 real_power_mode: None,
                 real_power_scalar: None,
                 preparation_route: None,
@@ -1241,6 +1247,7 @@ pub async fn execute_image_normalize_placed(
         &bindings,
         provider,
         FusionProviderContract {
+            elementwise_abi: None,
             input_indices: None,
             outputs: vec![dense_output_representation(output_precision, output_shape)],
             semantic_identity: None,

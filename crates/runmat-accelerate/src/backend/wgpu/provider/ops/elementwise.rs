@@ -2424,8 +2424,8 @@ impl WgpuProvider {
                 output_shape,
                 len,
                 representation: FusedElementwiseRepresentation {
-                    input_precision: self.precision,
-                    output_precision: self.precision,
+                    input_precision: frame.precision,
+                    output_precision: frame.precision,
                     output_storage: GpuTensorStorage::Real,
                     logical_output: frame.logical_output,
                 },
@@ -2598,7 +2598,7 @@ impl WgpuProvider {
             self.with_emission(|emission, pending| -> Result<_> {
                 if let Some(frame) = validated_frame {
                     for (handle, prepared) in inputs.iter().zip(&frame.entries) {
-                        let live = self.get_entry(handle)?;
+                        let live = self.fusion_entry_for_precision(handle, frame.precision)?;
                         ensure!(
                             runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
                                 &live.buffer,
@@ -2964,6 +2964,11 @@ impl WgpuProvider {
             layout,
         } = request;
         let validated_frame = validated.map(|(frame, _)| frame);
+        let physical_precision = validated_frame.map_or(self.precision, |frame| frame.precision);
+        let output_element_size = match physical_precision {
+            NumericPrecision::F32 => 4,
+            NumericPrecision::F64 => 8,
+        };
         if validated_frame.is_none() {
             runmat_accelerate_api::validate_fused_output_classes(
                 self.provider_precision_exec(),
@@ -3068,7 +3073,7 @@ impl WgpuProvider {
             self.with_emission(|emission, pending| -> Result<_> {
                 if let Some(frame) = validated_frame {
                     for (handle, prepared) in inputs.iter().zip(&frame.entries) {
-                        let live = self.get_entry(handle)?;
+                        let live = self.fusion_entry_for_precision(handle, frame.precision)?;
                         ensure!(
                             runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
                                 &live.buffer,
@@ -3080,11 +3085,12 @@ impl WgpuProvider {
                 }
                 let output_buffers: Vec<_> = (0..num_outputs)
                     .map(|_| {
-                        self.create_storage_buffer_for_usage(
+                        self.create_storage_buffer_checked_with_element_size(
                             emission,
-                            BufferUsageClass::FusionOut,
                             len,
                             "runmat-fusion-multi-output",
+                            BufferUsageClass::FusionOut,
+                            output_element_size,
                         )
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -3260,11 +3266,20 @@ impl WgpuProvider {
                     BufferUsageClass::FusionOut,
                 )?
             } else {
-                self.register_existing_buffer_with_usage(
+                let allocated_bytes = out_buf.size();
+                self.register_numeric_buffer(
                     out_buf,
-                    output_shape.to_vec(),
-                    len,
-                    BufferUsageClass::FusionOut,
+                    super::backend_types::NumericBufferRegistration {
+                        shape: output_shape.to_vec(),
+                        len,
+                        physical_element_type: match physical_precision {
+                            NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                            NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                        },
+                        storage: GpuTensorStorage::Real,
+                        allocated_bytes,
+                        usage: BufferUsageClass::FusionOut,
+                    },
                 )?
             };
             if let Some(submission_id) = last_submission_id {

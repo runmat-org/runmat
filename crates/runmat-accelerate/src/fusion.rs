@@ -37,7 +37,7 @@ pub(crate) mod semantic_bindings;
 pub(crate) mod semantics;
 pub use semantics::exact_source_plan_identity;
 pub(crate) mod typed_producer;
-mod typed_shader;
+pub(crate) mod typed_shader;
 mod work;
 
 /// Fusion plans can contain `Value` constants, including GC handles. Keep them

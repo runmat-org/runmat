@@ -14,9 +14,13 @@ pub(crate) struct GeneratedElementwiseShader {
     source: String,
     requirements: ProviderShaderRequirements,
     input_indices: Vec<usize>,
+    abi: runmat_accelerate_api::ProviderFusedElementwiseAbi,
 }
 
 impl GeneratedElementwiseShader {
+    pub(crate) fn abi(&self) -> runmat_accelerate_api::ProviderFusedElementwiseAbi {
+        self.abi
+    }
     pub(crate) fn source(&self) -> &str {
         &self.source
     }
@@ -144,6 +148,13 @@ impl FusionGroupPlan {
             )
         );
         Ok(GeneratedElementwiseShader {
+            abi: runmat_accelerate_api::ProviderFusedElementwiseAbi::BroadcastReal {
+                precision: match buffer_type {
+                    ScalarType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                    ScalarType::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                    _ => unreachable!("floating buffer validated"),
+                },
+            },
             source,
             requirements,
             input_indices: input_indices.to_vec(),

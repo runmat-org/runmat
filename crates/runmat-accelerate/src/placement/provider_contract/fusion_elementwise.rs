@@ -159,14 +159,45 @@ fn analyze(
             );
         }
     }
-    let native = ProviderElementType::from(provider.precision());
+    let typed = query.workload.fused_elementwise;
+    if typed.is_some_and(|work| !provider.supports_fused_elementwise_abi(work.abi)) {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "fusion.elementwise.typed_abi_unsupported",
+        );
+    }
+    let native =
+        ProviderElementType::from(typed.map_or(provider.precision(), |work| work.abi.precision()));
+    let host_elements = query
+        .inputs
+        .iter()
+        .filter(|input| input.residency == ProviderResidency::Host)
+        .try_fold(0_u64, |count, input| {
+            count.checked_add(input.checked_element_count()?)
+        });
+    if typed.is_some_and(|work| {
+        work.checked_host_workspace_bytes().is_none()
+            || host_elements.is_none_or(|elements| work.host_materialization_elements > elements)
+            || query
+                .inputs
+                .iter()
+                .chain(&query.outputs)
+                .any(|value| value.element_type != native)
+    }) {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "fusion.elementwise.typed_preparation_invalid",
+        );
+    }
     let mut physical = query.clone();
     physical.inputs.clear();
     physical.outputs.clear();
     let mut adapter_dispatches = 0u64;
-    let mut adapter_element_visits = 0u64;
+    let mut adapter_element_visits = typed.map_or(0, |work| work.host_materialization_elements);
     let mut final_output_bytes = 0u64;
-    let mut scratch_bytes = 0u64;
+    // Cost scratch includes host workspace as well as device adapters; the
+    // device feasibility estimate below still comes from actual GPU buffers.
+    let mut scratch_bytes = typed.map_or(0, |work| work.host_workspace_bytes);
     let mut materialization_setup_submissions = 0u32;
     let mut shape = None;
     for input in &query.inputs {
@@ -206,7 +237,9 @@ fn analyze(
         // Host tensors materialize an f64 staging vector; F32 providers then
         // convert that vector to f32 before upload. Resident inputs instead
         // execute one pass per selected materialization/widening adapter.
-        let passes = if input.residency == ProviderResidency::Host {
+        let passes = if typed.is_some() && input.residency == ProviderResidency::Host {
+            0 // Already described by the immutable host view projection above.
+        } else if input.residency == ProviderResidency::Host {
             1 + u64::from(native == ProviderElementType::F32)
         } else {
             u64::from(materialize) + u64::from(cast)

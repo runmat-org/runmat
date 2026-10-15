@@ -249,17 +249,78 @@ async fn certified_power_preserves_live_layout_and_empty_backing_authority() {
     ignore = "requires actual WGPU adapter; qualifies receipt-based ordinary POWER fusion"
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
-async fn certified_power_ordinary_fusion_executes_words_or_retains_original_runtime() {
+async fn certified_power_ordinary_fusion_executes_words_on_uniform_data_abi() {
+    qualify_ordinary_fusion(owner().await).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+#[ignore = "requires actual F64 WGPU owner; qualifies F32 input/output ABI without widening or publication adapters"]
+async fn f64_owner_preserves_binary32_words_in_single_and_multi_fusion() {
+    let provider = owner().await;
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F64,
+        "actual F64 owner is required, never skipped or substituted"
+    );
+    let data = [1.0_f64 + f64::EPSILON, 2.0];
+    let double = provider
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&data),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let inputs = [double.clone()];
+    let shader = crate::backend::wgpu::shaders::exact_power::shader_for_layout(
+        ExactSingleBasePower::Identity,
+        true,
+    );
+    let abi = runmat_accelerate_api::ProviderFusedElementwiseAbi::BroadcastReal {
+        precision: runmat_accelerate_api::ProviderPrecision::F32,
+    };
+    let before = provider.allocations.record_count().unwrap();
+    for classes in [
+        &[runmat_accelerate_api::ProviderElementType::F32][..],
+        &[runmat_accelerate_api::ProviderElementType::F32; 2][..],
+    ] {
+        let request = runmat_accelerate_api::ProviderFusedElementwiseRequest {
+            shader: &shader,
+            requirements: runmat_accelerate_api::ProviderShaderRequirements::Basic,
+            inputs: &inputs,
+            output_shape: &[1, 2],
+            len: 2,
+            output_classes: classes,
+            abi,
+        };
+        if classes.len() == 1 {
+            assert!(provider.fused_elementwise_typed(request).await.is_err());
+        } else {
+            assert!(provider
+                .fused_elementwise_multi_typed(request)
+                .await
+                .is_err());
+        }
+        assert_eq!(
+            provider.allocations.record_count().unwrap(),
+            before,
+            "wrong physical Double data must reject before output allocation"
+        );
+        double.allocation_lease().validate_live().unwrap();
+    }
+    qualify_ordinary_fusion(provider).await;
+}
+
+async fn qualify_ordinary_fusion(provider: &'static WgpuProvider) {
     use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
     use crate::fusion_exec::{
         execute_elementwise_placed, FusionExecutionOutcome, FusionExecutionRequest,
     };
     use crate::graph::{InstrSpan, PrimitiveOp, ShapeInfo};
-    use runmat_accelerate_api::{ProviderPrecision, ThreadProviderGuard};
+    use runmat_accelerate_api::ThreadProviderGuard;
     use runmat_value::Value;
     use std::collections::HashMap;
 
-    let provider = owner().await;
     let _selected = ThreadProviderGuard::set(Some(provider));
     let values = [f32::from_bits(1), -0.0, -2.0, f32::from_bits(0x1fffffff)];
     let input = provider
@@ -270,7 +331,7 @@ async fn certified_power_ordinary_fusion_executes_words_or_retains_original_runt
         })
         .unwrap();
     let transposed = provider.transpose(&input).unwrap();
-    let source = FusionGroupPlan {
+    let mut source = FusionGroupPlan {
         index: 0,
         group: FusionGroup {
             id: 0,
@@ -309,49 +370,72 @@ async fn certified_power_ordinary_fusion_executes_words_or_retains_original_runt
         reduction_axes: None,
         pattern: None,
     };
-    for handle in [&input, &transposed] {
-        for (exponent, operation) in [
-            (0.0_f64, ExactSingleBasePower::Zero),
-            (-0.0, ExactSingleBasePower::Zero),
-            (1.0, ExactSingleBasePower::Identity),
-            (2.0, ExactSingleBasePower::Square),
-        ] {
-            let result = execute_elementwise_placed(FusionExecutionRequest {
-                plan: &source,
-                inputs: vec![Value::GpuTensor(handle.clone()), Value::Num(exponent)],
-                placement: None,
-                runtime: None,
-            })
-            .await
-            .unwrap();
-            if provider.precision() == ProviderPrecision::F64 {
-                assert!(
-                    matches!(result, FusionExecutionOutcome::SharedRuntime(_)),
-                    "unqualified F64 staging must not masquerade as binary32 word transport"
-                );
-                continue;
-            }
-            let FusionExecutionOutcome::Executed(result) = result else {
-                panic!("F32 ordinary scalar-expression fusion must execute");
-            };
-            let Value::GpuTensor(output) = result.final_value else {
-                panic!("resident fused result");
-            };
-            let HostNumericDataOwned::F32(actual) =
-                provider.download_numeric(&output).await.unwrap().data
-            else {
-                panic!("Single result");
-            };
-            let order = if runmat_accelerate_api::handle_is_transposed(handle) {
-                [0, 2, 1, 3]
-            } else {
-                [0, 1, 2, 3]
-            };
-            for (&actual, index) in actual.iter().zip(order) {
+    for multi in [false, true] {
+        source.materialized_stores = if multi {
+            vec![crate::fusion::FusionStoreMaterialization {
+                value_id: 0,
+                binding: crate::graph::VarBinding {
+                    kind: crate::graph::VarKind::Global,
+                    index: 0,
+                },
+            }]
+        } else {
+            vec![]
+        };
+        for handle in [&input, &transposed] {
+            for (exponent, operation) in [
+                (0.0_f64, ExactSingleBasePower::Zero),
+                (-0.0, ExactSingleBasePower::Zero),
+                (1.0, ExactSingleBasePower::Identity),
+                (2.0, ExactSingleBasePower::Square),
+            ] {
+                let result = execute_elementwise_placed(FusionExecutionRequest {
+                    plan: &source,
+                    inputs: vec![Value::GpuTensor(handle.clone()), Value::Num(exponent)],
+                    placement: None,
+                    runtime: None,
+                })
+                .await
+                .unwrap();
+                let FusionExecutionOutcome::Executed(result) = result else {
+                    panic!("ordinary scalar-expression fusion must execute with binary32 data ABI");
+                };
+                let Value::GpuTensor(output) = result.final_value else {
+                    panic!("resident fused result");
+                };
                 assert_eq!(
-                    actual.to_bits(),
-                    operation.evaluate(values[index]).to_bits()
+                    output.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::F32
                 );
+                assert_eq!(output.physical().requested_bytes(), 16);
+                assert!(!output.shares_allocation_with(handle));
+                assert_eq!(result.materialized_stores.len(), usize::from(multi));
+                for (_, stored) in result.materialized_stores {
+                    let Value::GpuTensor(stored) = stored else {
+                        panic!("resident stored result");
+                    };
+                    assert_eq!(
+                        stored.physical().element_type(),
+                        runmat_accelerate_api::NumericElementType::F32
+                    );
+                    assert!(!stored.shares_allocation_with(handle));
+                }
+                let HostNumericDataOwned::F32(actual) =
+                    provider.download_numeric(&output).await.unwrap().data
+                else {
+                    panic!("Single result");
+                };
+                let order = if runmat_accelerate_api::handle_is_transposed(handle) {
+                    [0, 2, 1, 3]
+                } else {
+                    [0, 1, 2, 3]
+                };
+                for (&actual, index) in actual.iter().zip(order) {
+                    assert_eq!(
+                        actual.to_bits(),
+                        operation.evaluate(values[index]).to_bits()
+                    );
+                }
             }
         }
     }

@@ -59,6 +59,9 @@ impl ProviderOperationIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWorkload {
+    /// Explicit physical ABI for the existing ordinary typed fusion owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fused_elementwise: Option<crate::ProviderFusedElementwiseWorkload>,
     /// One exact selected checked fused-reduction route. Absence leaves its
     /// physical execution inventory unknown, never a zero-cost default.
     #[serde(default, skip_serializing_if = "Option::is_none")]

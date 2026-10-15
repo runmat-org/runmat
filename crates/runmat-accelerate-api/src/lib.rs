@@ -83,7 +83,10 @@ pub use wgpu_access::{
 #[cfg(feature = "wgpu")]
 pub use wgpu_buffer_owner::WgpuBufferOwner;
 
-pub use fusion_outputs::validate_fused_output_classes;
+pub use fusion_outputs::{
+    validate_fused_output_classes, ProviderFusedElementwiseAbi, ProviderFusedElementwiseRequest,
+    ProviderFusedElementwiseWorkload,
+};
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
@@ -4480,14 +4483,41 @@ pub trait AccelProvider: AcceleratorThreadBound {
         })
     }
 
-    /// Execute a single fused elementwise kernel that writes `num_outputs` output buffers in one
-    /// dispatch. The shader is expected to declare `output0`, `output1`, … `output{N-1}` storage
-    /// bindings (at binding indices `inputs.len()` through `inputs.len() + num_outputs - 1`) and a
-    /// uniform `params` binding at `inputs.len() + num_outputs`.
-    ///
-    /// Output count is exactly `output_classes.len()`. Classes describe this
-    /// physical hook stage, not a later output adaptation. Logical outputs use
-    /// the provider's native floating encoding and producer-owned classification.
+    /// Optional typed data ABI. Preferred provider precision is not proof that
+    /// a provider can bind another physical floating class.
+    fn supports_fused_elementwise_abi(&self, _abi: ProviderFusedElementwiseAbi) -> bool {
+        false
+    }
+
+    /// Lazy typed-unsupported by default. Source semantics remain caller-owned;
+    /// implementations validate actual inputs and freeze their physical recipe.
+    fn fused_elementwise_typed<'a>(
+        &'a self,
+        _request: ProviderFusedElementwiseRequest<'a>,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation(
+                "typed fused elementwise ABI is not supported by provider",
+            )
+            .into())
+        })
+    }
+    fn fused_elementwise_multi_typed<'a>(
+        &'a self,
+        _request: ProviderFusedElementwiseRequest<'a>,
+    ) -> ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async {
+            Err(unsupported_provider_operation(
+                "typed fused multi-elementwise ABI is not supported by provider",
+            )
+            .into())
+        })
+    }
+
+    /// Execute one fused kernel writing `output_classes.len()` output buffers.
+    /// Output bindings follow the inputs, followed by one uniform `params`.
+    /// Classes describe this physical hook, not a later output adaptation.
+    /// Logical outputs use native floating encoding and producer classification.
     /// The default is typed Unsupported, never guessed shader rewriting.
     fn fused_elementwise_multi<'a>(
         &'a self,

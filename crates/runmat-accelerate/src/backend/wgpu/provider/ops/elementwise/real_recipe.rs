@@ -364,7 +364,7 @@ impl WgpuProvider {
             .map_err(ProviderExecutionError::from_source)?;
         let source = source_representation(input).ok_or_else(|| {
             ProviderExecutionError::from(anyhow!(
-                "real recipe input is not contiguous floating real"
+                "real recipe input has an unsupported floating-real view"
             ))
         })?;
         let empty_exact = matches!(

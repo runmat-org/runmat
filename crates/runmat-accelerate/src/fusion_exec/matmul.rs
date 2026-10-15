@@ -53,6 +53,7 @@ pub async fn execute_matmul_epilogue_placed(
         &bindings,
         provider,
         FusionProviderContract {
+            elementwise_abi: None,
             input_indices: None,
             outputs: vec![dense_output_representation(
                 provider.precision(),

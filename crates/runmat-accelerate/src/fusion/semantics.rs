@@ -502,6 +502,15 @@ impl ResolvedProgram {
         self.source_input_set.contains(&id)
     }
 
+    pub fn physical_inputs_are_single(&self, indices: &[usize]) -> bool {
+        indices.iter().all(|&index| {
+            self.source_inputs.get(index).is_some_and(|fact| {
+                fact.numeric()
+                    .is_some_and(|numeric| numeric.class == NumericClass::Single)
+            })
+        })
+    }
+
     pub fn declaration(&self, id: ValueId) -> Option<CanonicalFusionDeclaration> {
         self.declarations
             .get(&id)

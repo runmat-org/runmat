@@ -293,6 +293,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 workload: ProviderWorkload {
+                    fused_elementwise: None,
                     real_power_mode: None,
                     real_power_scalar: None,
                     preparation_route: None,
