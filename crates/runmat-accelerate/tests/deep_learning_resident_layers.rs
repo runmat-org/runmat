@@ -28,7 +28,7 @@ fn run_source(
     source: &str,
     provider: &'static dyn AccelProvider,
 ) -> Result<(), Box<runmat_runtime::RuntimeError>> {
-    let source = source.to_owned();
+    let source: std::sync::Arc<str> = std::sync::Arc::from(source);
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
@@ -42,7 +42,21 @@ fn run_source(
             let entrypoint = hir.assembly.entrypoints[0].id;
             let bytecode = runmat_vm::compile(&hir.assembly, &mir, entrypoint)
                 .expect("compile public DL program");
-            block_on(runmat_vm::interpret(&bytecode))
+            let ordinal = bytecode
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::program)
+                .expect("public DL bytecode retains its compiled source ordinal");
+            let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_program_sources([runmat_runtime::source_context::ProgramSourceRecord {
+                ordinal,
+                name: std::sync::Arc::from("<resident-layer>"),
+                fullpath_name: None,
+                text: source,
+            }])
+            .expect("bind the exact public DL source to its VM session");
+            block_on(runtime.scope(runmat_vm::interpret(&bytecode)))
                 .map(|_| ())
                 .map_err(Box::new)
         })
