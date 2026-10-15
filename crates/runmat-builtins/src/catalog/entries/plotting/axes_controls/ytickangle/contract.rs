@@ -1,0 +1,151 @@
+use crate::*;
+
+pub const YTICKANGLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "ytickangle-integer-axes-handle",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Allow a typed-integer alias for an encoded axes handle",
+        error_identifier: Some("RunMat:compatibility:YtickangleIntegerAxesHandleExtension"),
+    };
+pub const YTICKANGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    YTICKANGLE_INTEGER_AXES_EXTENSION,
+    AXES_CONTROL_SETTER_OUTPUT_EXTENSION,
+];
+const YTICKANGLE_INTEGER_ANGLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "angle",
+        classes: &crate::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric-scalar rotation contract accepts integer degree values.",
+    }];
+const YTICKANGLE_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
+    }];
+pub const YTICKANGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ytickangle(integer_angle)",
+        inputs: &YTICKANGLE_INTEGER_ANGLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The finite angle crosses the graphics rotation boundary; queries return double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ytickangle(integer_ax, angle)",
+        inputs: &YTICKANGLE_INTEGER_AXES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Strict mode rejects before graphics state access.",
+    },
+];
+
+const OUTPUT_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "angle",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Current Y-axis tick label rotation in degrees.",
+}];
+const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const INPUTS_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "angle",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y-axis tick label rotation in degrees.",
+}];
+
+const INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::AxesHandle,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Scalar target axes handle.",
+}];
+
+const INPUTS_AX_ANGLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle or array of axes handles.",
+    },
+    BuiltinParamDescriptor {
+        name: "angle",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y-axis tick label rotation in degrees.",
+    },
+];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "angle = ytickangle()",
+        inputs: &INPUTS_NONE,
+        outputs: &OUTPUT_ANGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ytickangle(angle)",
+        inputs: &INPUTS_ANGLE,
+        outputs: &NO_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angle = ytickangle(ax)",
+        inputs: &INPUTS_AX,
+        outputs: &OUTPUT_ANGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ytickangle(ax, angle)",
+        inputs: &INPUTS_AX_ANGLE,
+        outputs: &NO_OUTPUTS,
+    },
+];
+
+const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.YTICKANGLE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:ytickangle:InvalidArgument"),
+    when: "Argument count, angle value, or axes handle is invalid.",
+    message: "ytickangle: invalid argument",
+};
+
+const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.YTICKANGLE.INTERNAL",
+    identifier: Some("RunMat:ytickangle:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "ytickangle: internal operation failed",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ERROR_INVALID_ARGUMENT,
+    ERROR_INTERNAL,
+    YTICKANGLE_ERROR_TOO_MANY_OUTPUTS,
+];
+
+pub const YTICKANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const YTICKANGLE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.YTICKANGLE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:ytickangle:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "ytickangle: at most one output is supported",
+};

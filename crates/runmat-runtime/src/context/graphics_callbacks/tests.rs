@@ -1,4 +1,8 @@
 use super::*;
+
+#[cfg(feature = "plot-core")]
+#[path = "tests/axes_mutations.rs"]
+mod axes_mutations;
 use crate::execution::RootedValueSequence;
 use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,

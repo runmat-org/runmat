@@ -1,13 +1,12 @@
 use runmat_value::{CellArray, CharArray, Value};
 
 use super::axis_ticks::TickAxis;
-use super::op_common::axes_target::AxesTarget;
-use super::properties::{resolve_plot_handle, PlotHandle};
+use super::op_common::axes_target::prepare_axes_call;
 use super::state::{
-    axis_display_bounds_snapshot, axis_display_bounds_snapshot_for_axes,
-    axis_tick_formats_snapshot, axis_tick_formats_snapshot_for_axes, axis_tick_labels_snapshot,
-    axis_tick_labels_snapshot_for_axes, axis_ticks_snapshot, axis_ticks_snapshot_for_axes,
-    set_axis_tick_labels, set_axis_tick_labels_for_axes, set_axis_ticks, set_axis_ticks_for_axes,
+    axis_display_bounds_snapshot_for_axes_for_property,
+    axis_tick_formats_snapshot_for_axes_for_property,
+    axis_tick_labels_snapshot_for_axes_for_property, axis_ticks_snapshot_for_axes_for_property,
+    set_axis_tick_labels_for_axes_for_property, set_axis_ticks_for_axes_for_property,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
@@ -20,30 +19,49 @@ enum TickLabelMode {
 }
 
 pub fn axis_tick_labels_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let (target, args) = split_optional_axes_target(builtin, args)?;
-    match args.as_slice() {
-        [] => query_labels(builtin, axis, target),
+    let (target, args) = prepare_axes_call(runtime, builtin, &args)?;
+    match args {
+        [] => query_labels(builtin, axis, &target.resolve(builtin)?),
         [value] => {
             if let Some(text) = value_as_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
-                        apply_mode(builtin, axis, target, TickLabelMode::Auto)?;
+                        super::op_common::axes_output::validate_setter_output(builtin)?;
+                        apply_mode(
+                            builtin,
+                            axis,
+                            &target.resolve(builtin)?,
+                            TickLabelMode::Auto,
+                        )?;
                         return Ok(Value::String("auto".into()));
                     }
                     "manual" => {
-                        apply_mode(builtin, axis, target, TickLabelMode::Manual)?;
+                        super::op_common::axes_output::validate_setter_output(builtin)?;
+                        apply_mode(
+                            builtin,
+                            axis,
+                            &target.resolve(builtin)?,
+                            TickLabelMode::Manual,
+                        )?;
                         return Ok(Value::String("manual".into()));
                     }
-                    "mode" => return query_mode(builtin, axis, target),
+                    "mode" => return query_mode(builtin, axis, &target.resolve(builtin)?),
                     _ => {}
                 }
             }
             let labels = labels_from_value(value, builtin)?;
-            Ok(label_value(set_labels(builtin, axis, target, labels)?))
+            super::op_common::axes_output::validate_setter_output(builtin)?;
+            Ok(label_value(set_labels(
+                builtin,
+                axis,
+                &target.resolve(builtin)?,
+                labels,
+            )?))
         }
         _ => Err(plotting_error(
             builtin,
@@ -52,45 +70,30 @@ pub fn axis_tick_labels_builtin(
     }
 }
 
-fn split_optional_axes_target(
+fn query_labels(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
-    };
-    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, builtin) {
-        return Ok((Some((handle, axes_index)), iter.collect()));
-    }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
-}
-
-fn query_labels(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<Value> {
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<Value> {
     Ok(label_value(current_labels(builtin, axis, target)?))
 }
 
-fn query_mode(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<Value> {
-    let manual = match target {
-        Some((handle, axes_index)) => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            match axis {
-                TickAxis::X => x_labels.is_some(),
-                TickAxis::Y => y_labels.is_some(),
-            }
-        }
-        None => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot();
-            match axis {
-                TickAxis::X => x_labels.is_some(),
-                TickAxis::Y => y_labels.is_some(),
-            }
+fn query_mode(
+    builtin: &'static str,
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<Value> {
+    let manual = {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        match axis {
+            TickAxis::X => x_labels.is_some(),
+            TickAxis::Y => y_labels.is_some(),
         }
     };
     Ok(Value::String(if manual { "manual" } else { "auto" }.into()))
@@ -99,7 +102,7 @@ fn query_mode(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> Buil
 fn apply_mode(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
     mode: TickLabelMode,
 ) -> BuiltinResult<()> {
     match mode {
@@ -115,25 +118,19 @@ fn apply_mode(
 fn current_labels(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
 ) -> BuiltinResult<Vec<String>> {
-    let explicit = match target {
-        Some((handle, axes_index)) => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            match axis {
-                TickAxis::X => x_labels,
-                TickAxis::Y => y_labels,
-            }
-        }
-        None => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot();
-            match axis {
-                TickAxis::X => x_labels,
-                TickAxis::Y => y_labels,
-            }
+    let explicit = {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        match axis {
+            TickAxis::X => x_labels,
+            TickAxis::Y => y_labels,
         }
     };
     if let Some(labels) = explicit {
@@ -150,13 +147,12 @@ fn current_labels(
 fn current_format(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
 ) -> BuiltinResult<Option<String>> {
-    let formats = match target {
-        Some((handle, axes_index)) => axis_tick_formats_snapshot_for_axes(handle, axes_index)
-            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?,
-        None => axis_tick_formats_snapshot(),
-    };
+    let (handle, axes_index) = target.coordinates();
+    let formats =
+        axis_tick_formats_snapshot_for_axes_for_property(target.authority(), handle, axes_index)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
     Ok(match axis {
         TickAxis::X => formats.0,
         TickAxis::Y => formats.1,
@@ -166,31 +162,25 @@ fn current_format(
 fn current_ticks(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
 ) -> BuiltinResult<Vec<f64>> {
-    let (ticks, bounds) = match target {
-        Some((handle, axes_index)) => {
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
+    let (ticks, bounds) = {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let bounds =
+            axis_display_bounds_snapshot_for_axes_for_property(property, handle, axes_index)
+                .map_err(|err| {
                     plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
                 })?;
-            let bounds =
-                axis_display_bounds_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            (
-                axis_ticks(axis, x_ticks, y_ticks),
-                axis_bounds(bounds, axis),
-            )
-        }
-        None => {
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            let bounds = axis_display_bounds_snapshot();
-            (
-                axis_ticks(axis, x_ticks, y_ticks),
-                axis_bounds(bounds, axis),
-            )
-        }
+        (
+            axis_ticks(axis, x_ticks, y_ticks),
+            axis_bounds(bounds, axis),
+        )
     };
     Ok(ticks.unwrap_or_else(|| {
         let (lo, hi) = bounds.unwrap_or((-1.0, 1.0));
@@ -219,81 +209,61 @@ fn axis_bounds(bounds: Option<(f64, f64, f64, f64)>, axis: TickAxis) -> Option<(
 fn set_labels(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
     labels: Vec<String>,
 ) -> BuiltinResult<Vec<String>> {
     let ticks = current_ticks(builtin, axis, target)?;
     let labels = labels_padded_to_ticks(labels, ticks.len());
-    match target {
-        Some((handle, axes_index)) => {
-            let stored_labels = labels.clone();
-            let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            let (labels_x, labels_y) = match axis {
-                TickAxis::X => (Some(labels), y_labels),
-                TickAxis::Y => (x_labels, Some(labels)),
-            };
-            let (ticks_x, ticks_y) = match axis {
-                TickAxis::X => (Some(ticks), y_ticks),
-                TickAxis::Y => (x_ticks, Some(ticks)),
-            };
-            set_axis_ticks_for_axes(handle, axes_index, ticks_x, ticks_y).map_err(|err| {
-                plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-            })?;
-            set_axis_tick_labels_for_axes(handle, axes_index, labels_x, labels_y).map_err(
-                |err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err),
-            )?;
-            Ok(stored_labels)
-        }
-        None => {
-            let stored_labels = labels.clone();
-            let (x_labels, y_labels) = axis_tick_labels_snapshot();
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            let (labels_x, labels_y) = match axis {
-                TickAxis::X => (Some(labels), y_labels),
-                TickAxis::Y => (x_labels, Some(labels)),
-            };
-            let (ticks_x, ticks_y) = match axis {
-                TickAxis::X => (Some(ticks), y_ticks),
-                TickAxis::Y => (x_ticks, Some(ticks)),
-            };
-            set_axis_ticks(ticks_x, ticks_y);
-            set_axis_tick_labels(labels_x, labels_y);
-            Ok(stored_labels)
-        }
+    {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let stored_labels = labels.clone();
+        let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let (labels_x, labels_y) = match axis {
+            TickAxis::X => (Some(labels), y_labels),
+            TickAxis::Y => (x_labels, Some(labels)),
+        };
+        let (ticks_x, ticks_y) = match axis {
+            TickAxis::X => (Some(ticks), y_ticks),
+            TickAxis::Y => (x_ticks, Some(ticks)),
+        };
+        set_axis_ticks_for_axes_for_property(property, handle, axes_index, ticks_x, ticks_y)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        set_axis_tick_labels_for_axes_for_property(
+            property, handle, axes_index, labels_x, labels_y,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        Ok(stored_labels)
     }
 }
 
-fn clear_labels(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<()> {
-    match target {
-        Some((handle, axes_index)) => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            let (x, y) = match axis {
-                TickAxis::X => (None, y_labels),
-                TickAxis::Y => (x_labels, None),
-            };
-            set_axis_tick_labels_for_axes(handle, axes_index, x, y).map_err(|err| {
-                plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-            })
-        }
-        None => {
-            let (x_labels, y_labels) = axis_tick_labels_snapshot();
-            let (x, y) = match axis {
-                TickAxis::X => (None, y_labels),
-                TickAxis::Y => (x_labels, None),
-            };
-            set_axis_tick_labels(x, y);
-            Ok(())
-        }
+fn clear_labels(
+    builtin: &'static str,
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<()> {
+    {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_labels, y_labels) = axis_tick_labels_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let (x, y) = match axis {
+            TickAxis::X => (None, y_labels),
+            TickAxis::Y => (x_labels, None),
+        };
+        set_axis_tick_labels_for_axes_for_property(property, handle, axes_index, x, y)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
     }
 }
 

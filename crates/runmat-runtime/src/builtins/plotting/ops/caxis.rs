@@ -1,102 +1,36 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{CAXIS_DESCRIPTOR, CAXIS_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::clim::clim_impl;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const CAXIS_OUTPUT_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "limits",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto.",
-}];
-
-const CAXIS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const CAXIS_INPUTS_LIMIT_VECTOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "limits",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Two-element numeric vector [cmin cmax].",
-}];
-
-const CAXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Limit mode string ('auto', 'tight', or 'manual').",
-}];
-
-const CAXIS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "limits = caxis()",
-        inputs: &CAXIS_INPUTS_NONE,
-        outputs: &CAXIS_OUTPUT_LIMITS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "limits = caxis([cmin cmax])",
-        inputs: &CAXIS_INPUTS_LIMIT_VECTOR,
-        outputs: &CAXIS_OUTPUT_LIMITS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "limits = caxis(mode)",
-        inputs: &CAXIS_INPUTS_MODE,
-        outputs: &CAXIS_OUTPUT_LIMITS,
-    },
-];
-
-const CAXIS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAXIS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:caxis:InvalidArgument"),
-    when: "Argument count, mode, or limit vector is invalid.",
-    message: "caxis: invalid argument",
-};
-
-const CAXIS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAXIS.INTERNAL",
-    identifier: Some("RunMat:caxis:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "caxis: internal operation failed",
-};
-
-const CAXIS_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [CAXIS_ERROR_INVALID_ARGUMENT, CAXIS_ERROR_INTERNAL];
-
-pub const CAXIS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CAXIS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CAXIS_ERRORS,
-};
-
-pub const CAXIS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::AliasOf,
-    canonical_builtin: Some("clim"),
-    notes: "Current public documentation identifies caxis as the legacy name for clim; both names share the same RunMat-only typed-integer limit extension and host-double graphics-state boundary.",
-};
+use super::op_common::color_limits::apply_color_limits;
 
 #[runtime_builtin(
     name = "caxis",
-    category = "plotting",
-    summary = "Query or set color limits.",
-    keywords = "caxis,plotting,color",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::caxis::CAXIS_DESCRIPTOR),
-    extensions(crate::builtins::plotting::clim::CLIM_EXTENSIONS),
-    integer_audit(crate::builtins::plotting::caxis::CAXIS_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::caxis"
 )]
+pub fn caxis_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    caxis_with_runtime(runtime.as_ref(), args)
+}
+
 pub fn caxis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    clim_impl("caxis", args)
+    caxis_with_runtime(None, args)
+}
+
+fn caxis_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &CAXIS_DESCRIPTOR,
+        &CAXIS_ERROR_TOO_MANY_OUTPUTS,
+        "caxis",
+    )?;
+    apply_color_limits(runtime, "caxis", args)
 }
 
 #[cfg(test)]
@@ -114,8 +48,8 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"limits = caxis()"));
-        assert!(labels.contains(&"limits = caxis([cmin cmax])"));
-        assert!(labels.contains(&"limits = caxis(mode)"));
+        assert!(labels.contains(&"caxis([cmin cmax])"));
+        assert!(labels.contains(&"caxis('auto'|'manual')"));
     }
 
     #[test]

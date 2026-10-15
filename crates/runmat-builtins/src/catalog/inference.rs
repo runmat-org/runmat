@@ -24,6 +24,7 @@ pub use distributed::infer_partition_local_call;
 pub use routing::infer as infer_catalog_call;
 pub(crate) use support::facts::materialize;
 pub use support::materialization::gathered_value_fact;
+pub(crate) use support::object_handle::known_invalid_scalar_object_handle;
 pub(crate) use support::text::known_invalid_text_scalar;
 pub(crate) use support::text::possible_character_row;
 pub(crate) use support::text::{invalid_text_comparison_container, text_comparison_result};

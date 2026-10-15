@@ -24,10 +24,12 @@ mod set;
 mod shading;
 mod view;
 mod drawnow;
+mod axes_controls;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
 pub use self::axes::*;
+pub use self::axes_controls::*;
 pub use self::axis::*;
 pub use self::cla::*;
 pub use self::colorbar::*;
@@ -73,4 +75,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(annotations::ENTRIES.iter().copied());
     values.extend(print::ENTRIES.iter().copied());
     values.extend(drawnow::ENTRIES.iter().copied());
+    axes_controls::extend_entries(values);
 }

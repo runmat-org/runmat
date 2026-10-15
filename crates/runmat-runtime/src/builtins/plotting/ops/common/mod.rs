@@ -1,4 +1,6 @@
 pub(crate) mod axes_target;
+pub(crate) mod axes_output;
+pub(crate) mod color_limits;
 pub(crate) mod cmd_parsing;
 pub(crate) mod figure_actions;
 pub(crate) mod handles;

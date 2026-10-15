@@ -8,6 +8,12 @@ use crate::BuiltinResult;
 pub type AxesTarget = Option<(FigureHandle, usize)>;
 pub type SplitAxesArgs = (AxesTarget, Vec<Value>);
 
+#[path = "axes_target/prepared.rs"]
+mod prepared;
+pub(crate) use prepared::{
+    prepare_axes_call, prepare_graphics_target, PreparedAxesTarget, PreparedGraphicsTarget,
+};
+
 pub fn split_leading_axes_handle(
     args: Vec<Value>,
     builtin: &'static str,
