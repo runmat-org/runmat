@@ -2745,6 +2745,19 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.reduce_median_dim_exec(a, dim).await })
     }
 
+    fn preflight_double_sum(
+        &self,
+        a: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderDoubleSumPreflight {
+        if self.precision == crate::backend::wgpu::types::NumericPrecision::F32
+            || runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::ComplexInterleaved
+        {
+            runmat_accelerate_api::ProviderDoubleSumPreflight::Unsupported
+        } else {
+            runmat_accelerate_api::ProviderDoubleSumPreflight::Unknown
+        }
+    }
+
     fn reduce_sum<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

@@ -47,8 +47,12 @@ fn logarithm_probe_keeps_original_source_and_rejected_view_keeps_input_alive() {
             .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     let probe = error.source.as_ref().unwrap();
-    assert!(probe
+    let provider_failure = probe
         .source()
+        .unwrap()
+        .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+        .expect("probe retains the typed provider failure");
+    assert!(std::error::Error::source(provider_failure)
         .unwrap()
         .downcast_ref::<std::io::Error>()
         .is_some());
@@ -70,11 +74,15 @@ fn logarithm_probe_keeps_original_source_and_rejected_view_keeps_input_alive() {
     ))
     .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-    assert!(error
+    let probe = error
         .source
         .as_ref()
         .unwrap()
         .source()
+        .unwrap()
+        .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+        .expect("mapped probe retains the typed provider failure");
+    assert!(std::error::Error::source(probe)
         .unwrap()
         .downcast_ref::<std::io::Error>()
         .is_some());

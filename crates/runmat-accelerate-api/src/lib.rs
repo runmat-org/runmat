@@ -69,6 +69,7 @@ pub use resident_select::ResidentSelectPlan;
 pub const RESIDENT_SELECT_OPERATION_IDENTITY: &str = "provider.resident_select";
 mod numerical_domain;
 pub mod reduction;
+pub use reduction::ProviderDoubleSumPreflight;
 pub mod scalar_program;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;
@@ -3851,6 +3852,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cross not supported by provider"))
     }
+    /// Certify a known-unavailable double sum before a caller stages other
+    /// provider work. The default cannot infer capability from the provider's
+    /// preferred precision and leaves the existing hook attempt unchanged.
+    fn preflight_double_sum(&self, _a: &GpuTensorHandle) -> ProviderDoubleSumPreflight {
+        ProviderDoubleSumPreflight::Unknown
+    }
+
     /// Ordinary sum accumulates and returns F64 physical values for real,
     /// logical, and integer inputs. Complex floating input retains complex
     /// storage with F64 components. Public `single`/`native` output adaptation

@@ -51,7 +51,7 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
             0,
             "unpolled resume preserves work"
         );
-        let mut resume = loop {
+        let resume = loop {
             let mut resume = Box::pin(invocation.resume_suspension(continuation, generation));
             match resume.as_mut().now_or_never() {
                 None => break resume,

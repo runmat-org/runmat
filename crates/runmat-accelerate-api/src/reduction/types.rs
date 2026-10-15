@@ -1,6 +1,15 @@
 use crate::{GpuTensorLayout, ProviderPrecision};
 use serde::Serialize;
 
+/// Side-effect-free negative admission for the double-accumulating sum hook.
+/// `Unknown` retains the hook's existing effect-aware execution contract;
+/// it is not a claim that the reduction will succeed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderDoubleSumPreflight {
+    Unknown,
+    Unsupported,
+}
+
 /// Frozen dimensions/limits supplied by the provider owner, not ambient knobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ReductionRecipeConfig {

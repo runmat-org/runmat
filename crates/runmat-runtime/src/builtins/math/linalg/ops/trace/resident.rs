@@ -1,7 +1,9 @@
 //! Resident diagonal reduction and class-preserving host fallback for `trace`.
 use super::*;
 use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderDoubleSumPreflight, ProviderPrecision,
+};
 
 pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, handle.shape())?;
@@ -12,7 +14,12 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let floating_input = runmat_accelerate_api::handle_integer_type(&handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(&handle);
     if diag_len != 0 && floating_input {
-        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        // Resident trace uses the same double-accumulating sum contract as the
+        // host path. Only the owning provider may certify this hook unavailable
+        // before diagonal extraction creates an effect that forbids fallback.
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle).filter(|provider| {
+            provider.preflight_double_sum(&handle) != ProviderDoubleSumPreflight::Unsupported
+        }) {
             let diagonal = match provider.diag_extract(&handle, 0) {
                 Ok(diagonal) => Some(diagonal),
                 Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => None,

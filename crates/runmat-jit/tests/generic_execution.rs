@@ -1977,7 +1977,7 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
             workspace: None,
         })
         .unwrap();
-    let mut retained_transferred = false;
+    let mut retained_root = Some(rooted);
     let resume = loop {
         let runmat_native_executor::execute::NativeInvocationStep::Suspended {
             continuation,
@@ -1989,16 +1989,15 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
         let resume = invocation.resume_state();
         futures::executor::block_on(invocation.resume_suspension(continuation, generation))
             .unwrap();
-        if calls.load(Ordering::SeqCst) == 1 && !retained_transferred {
-            rooted
-                .unroot()
+        if let Some(root) = retained_root.take_if(|_| calls.load(Ordering::SeqCst) == 1) {
+            root.unroot()
                 .expect("transfer handle ownership to contextual native roots");
-            retained_transferred = true;
         }
         if calls.load(Ordering::SeqCst) == 2 {
             break resume;
         }
     };
+    assert!(retained_root.is_none(), "first completed call owns the handle");
     let suspended_safepoint = assembly.functions[0].blocks[resume.block as usize]
         .instructions
         .iter()

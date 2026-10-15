@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Prefers the owning provider's diagonal and reduction hooks; otherwise gathers once and restores a class-preserving 1×1 result through that owner."
+    "notes": "Resident execution requires diagonal extraction and a double-accumulating reduction. If the provider certifies that route unavailable before staging, RunMat gathers once, computes on the host, and restores a class-preserving 1×1 result through the same owner. Failures after provider work starts are reported without replay."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,7 @@
     "RunMat mode additionally accepts logical, character, and native integer matrices. Integer diagonal values are accumulated exactly and converted to double only when the sum is exactly representable.",
     "Full and sparse real floating matrices are supported. Complex sparse storage is not yet represented by the runtime.",
     "Empty matrices yield `0`. Empty complex matrices yield `0 + 0i`.",
-    "`gpuArray` inputs stay on the device when the provider implements diagonal extraction and sum reductions; otherwise RunMat gathers once, computes on the host, and uploads a 1×1 scalar."
+    "`gpuArray` inputs stay resident when the provider supports diagonal extraction and double accumulation. Known-unavailable routes are selected before staging and compute on the host, restoring a class-preserving 1×1 GPU result."
   ],
   "examples": [
     {
@@ -62,8 +62,8 @@
       "output": "zTrace = 5.0000 - 3.0000i"
     },
     {
-      "description": "Tracing a gpuArray without gathering",
-      "input": "G = gpuArray(rand(1024));\ngpuResult = trace(G);     % stays on the GPU\nscalarHost = gather(gpuResult)"
+      "description": "Tracing a gpuArray and gathering the scalar result",
+      "input": "G = gpuArray(rand(1024));\ngpuResult = trace(G);     % gpuArray result; execution depends on the provider\nscalarHost = gather(gpuResult)"
     },
     {
       "description": "Handling empty matrices safely",
@@ -90,7 +90,7 @@
     },
     {
       "question": "Does the result stay on the GPU?",
-      "answer": "Yes, when the provider implements the required hooks. Otherwise RunMat re-uploads the scalar so later GPU-friendly code still sees a `gpuArray`."
+      "answer": "The result remains a `gpuArray`. Execution stays resident when the provider supports the required double accumulation; a known-unavailable route gathers before staging and restores the scalar afterward. A provider failure after work starts is reported without replay."
     },
     {
       "question": "Can I call `trace` on complex data?",

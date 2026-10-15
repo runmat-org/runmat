@@ -139,7 +139,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: Some(256),
     accepts_nan_mode: false,
     notes:
-        "Resident inputs retain their exact owner. A capable provider extracts the diagonal and sums it in double precision, then restores single precision when required; scalar identity results may share the input allocation. Unsupported hooks gather once, compute on the host, and restore the typed scalar to the same owner.",
+        "Resident inputs retain their exact owner. A provider with double accumulation extracts the diagonal and sums it in double precision, then restores single precision when required; scalar identity results may share the input allocation. A provider that certifies its double-sum hook unavailable takes the class-preserving host route before resident staging; other unsupported hooks follow effect-aware fallback rules.",
 };
 
 fn trace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {

@@ -92,6 +92,11 @@ impl AccelProvider for ComplexTraceProvider {
         self.owner.device_id()
     }
 
+    fn precision(&self) -> ProviderPrecision {
+        // Preference is not proof that this owner lacks its F64 sum hook.
+        ProviderPrecision::F32
+    }
+
     fn device_info(&self) -> String {
         "complex trace contract fixture".into()
     }
@@ -216,6 +221,10 @@ fn complex_diagonal_and_sum_remain_resident_for_capable_provider() {
             _ => unreachable!(),
         };
         let input = provider.allocate(vec![2, 2], data);
+        assert_eq!(
+            provider.preflight_double_sum(&input),
+            runmat_accelerate_api::ProviderDoubleSumPreflight::Unknown,
+        );
         let output = block_on(super::trace_builtin(Value::GpuTensor(input.clone()))).unwrap();
         let Value::GpuTensor(output) = output else {
             panic!("capable provider must keep complex trace resident")

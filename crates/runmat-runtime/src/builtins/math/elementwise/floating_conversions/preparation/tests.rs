@@ -96,7 +96,7 @@ fn runtime(events: &Events, replace: bool) -> RuntimeContext {
 fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
     let events = Events::default();
     let runtime = runtime(&events, false);
-    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    runtime.set_runmat_extensions_enabled(true);
     for name in ["double", "single"] {
         let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
         assert!(runmat_builtins::validate_builtin_preparation(entry).is_empty());
@@ -132,7 +132,7 @@ fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
 fn invalid_options_prototypes_and_output_counts_never_prepare() {
     let events = Events::default();
     let runtime = runtime(&events, false);
-    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    runtime.set_runmat_extensions_enabled(true);
     for name in ["double", "single"] {
         for args in [
             vec![

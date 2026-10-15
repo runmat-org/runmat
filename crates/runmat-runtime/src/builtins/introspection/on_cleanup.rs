@@ -544,10 +544,18 @@ mod tests {
         let ports = runtime
             .service_ports()
             .clone()
-            .with_local_tasks(Rc::new(SynchronousRetirementPort { delegate, behavior }));
+            .with_local_tasks(delegate.clone());
         let runtime = runtime.with_service_ports(ports);
+        // The lifecycle dispatcher is permanent host work. Admit it through
+        // the ordinary supervisor before substituting the callback-only test
+        // port on this same session context.
         let host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone())
             .expect("exact lifecycle host");
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_local_tasks(Rc::new(SynchronousRetirementPort { delegate, behavior }));
+        let runtime = runtime.with_service_ports(ports);
         (runtime, supervisor, host)
     }
 
