@@ -399,52 +399,19 @@ fn valid_identity(value: &str, maximum: usize) -> bool {
     !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NativeObjectFormat {
-    Elf,
-    MachO,
-    Coff,
-}
+pub use runmat_execution::host::{NativeObjectFormat, NativeOptimization};
 
-impl NativeObjectFormat {
-    pub fn for_target(target: &NativeTarget) -> Result<Self, crate::NativeCodegenError> {
-        match target.operating_system.as_str() {
-            "linux" => Ok(Self::Elf),
-            "macos" => Ok(Self::MachO),
-            "windows" => Ok(Self::Coff),
-            _ => Err(crate::NativeCodegenError::new(
-                "native.object.format",
-                "target does not have a supported native object format",
-            )),
-        }
-    }
-
-    pub fn token(self) -> &'static str {
-        match self {
-            Self::Elf => "elf",
-            Self::MachO => "mach-o",
-            Self::Coff => "coff",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NativeOptimization {
-    None,
-    Speed,
-    SpeedAndSize,
-}
-
-impl NativeOptimization {
-    #[cfg(feature = "compiler")]
-    pub(super) fn cranelift_name(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Speed => "speed",
-            Self::SpeedAndSize => "speed_and_size",
-        }
+pub fn native_object_format_for_target(
+    target: &NativeTarget,
+) -> Result<NativeObjectFormat, crate::NativeCodegenError> {
+    match target.operating_system.as_str() {
+        "linux" => Ok(NativeObjectFormat::Elf),
+        "macos" => Ok(NativeObjectFormat::MachO),
+        "windows" => Ok(NativeObjectFormat::Coff),
+        _ => Err(crate::NativeCodegenError::new(
+            "native.object.format",
+            "target does not have a supported native object format",
+        )),
     }
 }
 
@@ -530,7 +497,7 @@ impl RelocatableNativeObject {
                 crate::NativeCodegenError::new("native.object.foreign_policy", error.to_string())
             })?;
         }
-        if self.manifest.object_format != NativeObjectFormat::for_target(&self.manifest.target)? {
+        if self.manifest.object_format != native_object_format_for_target(&self.manifest.target)? {
             return Err(crate::NativeCodegenError::new(
                 "native.object.format",
                 "native object format does not match its target",

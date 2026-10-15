@@ -5,8 +5,8 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use super::{
     AotBuiltinBinding, AotRuntimeBindingMode, NativeObjectData, NativeObjectDataDescriptor,
-    NativeObjectFormat, NativeObjectFunction, NativeObjectManifest, NativeOptimization,
-    RelocatableNativeObject, NATIVE_OBJECT_SCHEMA_VERSION,
+    NativeObjectFunction, NativeObjectManifest, NativeOptimization, RelocatableNativeObject,
+    NATIVE_OBJECT_SCHEMA_VERSION,
 };
 
 pub fn emit_relocatable_object(
@@ -58,7 +58,14 @@ pub fn emit_relocatable_object_for_runtime(
     flags.set("is_pic", "true").map_err(module_error)?;
     flags.set("enable_verifier", "true").map_err(module_error)?;
     flags
-        .set("opt_level", optimization.cranelift_name())
+        .set(
+            "opt_level",
+            match optimization {
+                NativeOptimization::None => "none",
+                NativeOptimization::Speed => "speed",
+                NativeOptimization::SpeedAndSize => "speed_and_size",
+            },
+        )
         .map_err(module_error)?;
     let isa = cranelift_native::builder()
         .map_err(module_error)?
@@ -209,7 +216,7 @@ pub fn emit_relocatable_object_for_runtime(
     let manifest = NativeObjectManifest {
         schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
         target: assembly.target.clone(),
-        object_format: NativeObjectFormat::for_target(&assembly.target)?,
+        object_format: super::product::native_object_format_for_target(&assembly.target)?,
         executable_cache_key: assembly.executable_cache_key,
         native_cache_key: assembly.native_cache_key,
         runtime_fingerprint: *assembly.program.runtime_fingerprint(),

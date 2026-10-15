@@ -387,7 +387,7 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
     assert_eq!(first.manifest.target, assembly.target);
     assert_eq!(
         first.manifest.object_format,
-        runmat_native_codegen::aot::NativeObjectFormat::for_target(&assembly.target).unwrap()
+        runmat_native_codegen::aot::native_object_format_for_target(&assembly.target).unwrap()
     );
     assert_eq!(
         first.manifest.executable_cache_key,

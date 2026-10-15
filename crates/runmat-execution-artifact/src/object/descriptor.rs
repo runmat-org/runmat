@@ -94,7 +94,7 @@ impl LogicalObject {
     }
 }
 
-fn validate_logical_name(name: &str) -> ArtifactResult<()> {
+pub(crate) fn validate_logical_name(name: &str) -> ArtifactResult<()> {
     if name.is_empty()
         || name.len() > 4096
         || !name.is_ascii()

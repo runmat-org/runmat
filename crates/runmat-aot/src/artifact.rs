@@ -3,7 +3,8 @@ use runmat_execution_artifact::{
     ExecutableForm, NativeObjectPayload, ProgramArtifact, ProgramBuildRecipe, ProgramTarget,
 };
 use runmat_native_codegen::aot::{
-    NativeObjectFormat, NativeObjectManifest, RelocatableNativeObject, NATIVE_OBJECT_SCHEMA_VERSION,
+    native_object_format_for_target, NativeObjectManifest, RelocatableNativeObject,
+    NATIVE_OBJECT_SCHEMA_VERSION,
 };
 
 use crate::{AotError, AotResult};
@@ -113,7 +114,7 @@ pub fn read_native_object_artifact(
             format!("native target actual {target:?}, expected {expected_target:?}"),
         ));
     }
-    let expected_format = NativeObjectFormat::for_target(&manifest.target)
+    let expected_format = native_object_format_for_target(&manifest.target)
         .map_err(|error| AotError::contract("aot.artifact.format", error.to_string()))?;
     if manifest.object_format != expected_format {
         return Err(AotError::contract(
@@ -254,8 +255,8 @@ mod tests {
     use runmat_types::ProgramFunctionId;
 
     use super::{
-        execution_object_format, materialize_native_object_artifact, read_native_object_artifact,
-        ExecutionObjectFormat,
+        execution_object_format, materialize_native_object_artifact,
+        native_object_format_for_target, read_native_object_artifact, ExecutionObjectFormat,
     };
 
     fn artifact_with_manifest(
@@ -297,7 +298,7 @@ mod tests {
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
-                object_format: NativeObjectFormat::for_target(&target).unwrap(),
+                object_format: native_object_format_for_target(&target).unwrap(),
                 target,
                 executable_cache_key,
                 native_cache_key,
@@ -360,7 +361,7 @@ mod tests {
         assert_eq!(
             payload.object_format,
             execution_object_format(
-                NativeObjectFormat::for_target(&NativeTarget::current())
+                native_object_format_for_target(&NativeTarget::current())
                     .unwrap()
                     .token(),
             )

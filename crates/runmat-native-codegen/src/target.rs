@@ -15,7 +15,7 @@ impl NativeTarget {
             architecture: std::env::consts::ARCH.to_string(),
             operating_system: current_operating_system().to_string(),
             pointer_width: usize::BITS as u16,
-            abi: NativeAbiBinding::current(),
+            abi: crate::abi::current_native_abi_binding(),
         }
     }
 
@@ -38,7 +38,7 @@ impl NativeTarget {
             && self.operating_system == current_operating_system()
             && self.pointer_width == usize::BITS as u16
         {
-            self.abi.validate()
+            crate::abi::validate_current_native_abi(&self.abi)
         } else {
             Err(NativeCodegenError::new(
                 "native.target.cross_layout",
@@ -82,14 +82,10 @@ impl NativeTarget {
                 ))
             }
         };
-        let abi = runmat_execution::host::NativeAbi::new(format!(
-            "{}:{}:{}:{}",
-            self.abi.schema_version,
-            self.abi.encoded_version,
-            self.abi.contract_fingerprint,
-            self.abi.layout_fingerprint
-        ))
-        .map_err(|error| NativeCodegenError::new("native.target.abi", error.to_string()))?;
+        let abi = self
+            .abi
+            .identity()
+            .map_err(|error| NativeCodegenError::new("native.target.abi", error.to_string()))?;
         runmat_execution::host::NativeTargetIdentity::new(
             architecture,
             operating_system,

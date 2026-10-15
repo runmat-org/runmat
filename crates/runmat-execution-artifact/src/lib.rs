@@ -9,6 +9,7 @@ mod error;
 mod materialized;
 pub mod object;
 pub mod program;
+pub mod target_pack;
 
 pub use bundle::{
     BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,

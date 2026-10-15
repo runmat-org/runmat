@@ -108,8 +108,8 @@ mod tests {
     use runmat_execution::{Digest, ProgramEnvironment};
     use runmat_native_codegen::{
         aot::{
-            AotRuntimeBindingMode, NativeObjectFormat, NativeObjectFunction, NativeObjectManifest,
-            NativeOptimization, RelocatableNativeObject, AOT_ENTRY_SYMBOL,
+            native_object_format_for_target, AotRuntimeBindingMode, NativeObjectFunction,
+            NativeObjectManifest, NativeOptimization, RelocatableNativeObject, AOT_ENTRY_SYMBOL,
             NATIVE_OBJECT_SCHEMA_VERSION,
         },
         NativeTarget,
@@ -150,7 +150,7 @@ mod tests {
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
-                object_format: NativeObjectFormat::for_target(&target).unwrap(),
+                object_format: native_object_format_for_target(&target).unwrap(),
                 target,
                 executable_cache_key: Digest::sha256(b"executable"),
                 native_cache_key: Digest::sha256(b"native"),
