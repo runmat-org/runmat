@@ -55,10 +55,14 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(handle)
     }
-    fn fill_like(&self, handle: &GpuTensorHandle, value: f64) -> anyhow::Result<GpuTensorHandle> {
+    fn fill_like(
+        &self,
+        handle: &GpuTensorHandle,
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         self.inner
             .fill_like(handle, value)
-            .map(|output| self.observe(output))
+            .map(|output| output.map(|output| self.observe(output)))
     }
     fn repmat(
         &self,

@@ -212,7 +212,10 @@ async fn qualify(provider: &'static WgpuProvider, single: bool) {
         // which chooses fill_like then elem_max for this native-class form.
         // The alternate-class fill owner is a separate typed capability.
         for scalar in [f64::NAN, -0.0, 0.0, tiny] {
-            let fill = provider.fill_like(&lhs, scalar).unwrap();
+            let fill = provider
+                .fill_like(&lhs, scalar)
+                .unwrap()
+                .expect("admitted optional constructor");
             let expected = host_max(&left, &[6, 1], &[scalar], &[1, 1], single).await;
             for (a, b) in [(&lhs, &fill), (&fill, &lhs)] {
                 let output = provider.elem_max(a, b).await.unwrap();

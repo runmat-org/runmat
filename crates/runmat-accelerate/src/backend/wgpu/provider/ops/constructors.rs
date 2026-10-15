@@ -1,4 +1,6 @@
 use super::*;
+#[path = "constructors/optional.rs"]
+mod optional;
 
 const FILL_MAX_DISPATCH_WORKGROUPS: u64 =
     crate::backend::wgpu_geometry::MAX_DISPATCH_WORKGROUPS as u64;
@@ -313,6 +315,7 @@ impl WgpuProvider {
         &self,
         prototype: &GpuTensorHandle,
         shape: &[usize],
+        effect: &std::cell::Cell<bool>,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(prototype)?;
         let logical =
@@ -335,6 +338,7 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("zeros_like: word count overflow"))?;
         let buffer = self.with_emission(|emission, pending| -> Result<_> {
             let buffer = self.create_integer_word_buffer(emission, words, "runmat-zeros-like")?;
+            effect.set(true);
             let mut encoder = pending.profiled_encoder(
                 emission,
                 &wgpu::CommandEncoderDescriptor {

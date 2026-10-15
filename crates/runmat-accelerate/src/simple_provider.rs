@@ -2,6 +2,7 @@ use crate::host_lu::{lu_factor_host, LuHostFactors};
 mod allocation_state;
 use allocation_state::{integer_registry, numeric_registry, registry};
 mod arithmetic;
+mod constructors;
 mod deep_learning_activation;
 mod dimensional_extrema;
 mod dot;
@@ -5202,92 +5203,36 @@ impl AccelProvider for InProcessProvider {
         self.allocate_tensor_with_storage(vec![0.0; raw_len], shape.to_vec(), storage)
     }
 
-    fn zeros_like(&self, prototype: &GpuTensorHandle, shape: &[usize]) -> Result<GpuTensorHandle> {
-        let logical = {
-            let guard = numeric_registry()
-                .lock_for(self.device_id)
-                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-            guard
-                .get(prototype)
-                .ok_or_else(|| anyhow!("zeros_like requires a live owned prototype"))?;
-            guard
-                .producer_is_logical(prototype)
-                .ok_or_else(|| anyhow!("zeros_like producer facts unavailable"))?
-        };
-        let len = logical_len_for_shape("zeros_like", shape)?;
-        let storage = prototype.physical().storage();
-        let lanes = len
-            .checked_mul(if storage == GpuTensorStorage::ComplexInterleaved {
-                2
-            } else {
-                1
-            })
-            .ok_or_else(|| anyhow!("zeros_like: tensor size overflow"))?;
-        let data = match prototype.physical().element_type() {
-            NumericElementType::F64 => InProcessNumericData::F64(vec![0.0; lanes]),
-            NumericElementType::F32 => InProcessNumericData::F32(vec![0.0; lanes]),
-            element => {
-                let data = match element
-                    .integer_type()
-                    .ok_or_else(|| anyhow!("zeros_like: unsupported element type"))?
-                {
-                    IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![0; lanes]),
-                    IntegerElementType::I16 => HostIntegerDataOwned::I16(vec![0; lanes]),
-                    IntegerElementType::I32 => HostIntegerDataOwned::I32(vec![0; lanes]),
-                    IntegerElementType::I64 => HostIntegerDataOwned::I64(vec![0; lanes]),
-                    IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![0; lanes]),
-                    IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![0; lanes]),
-                    IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![0; lanes]),
-                    IntegerElementType::U64 => HostIntegerDataOwned::U64(vec![0; lanes]),
-                };
-                InProcessNumericData::Integer(data)
-            }
-        };
-        self.allocate_produced(
-            data,
-            shape.to_vec(),
-            storage,
-            logical && prototype.view().is_logical(),
-        )
+    fn zeros_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.zeros_like_constructor(prototype, shape)
     }
 
-    fn logical_fill(&self, shape: &[usize], value: bool) -> Result<GpuTensorHandle> {
-        self.allocate_logical_tensor(
-            vec![if value { 1.0 } else { 0.0 }; logical_len_for_shape("logical_fill", shape)?],
-            shape.to_vec(),
-        )
+    fn logical_fill(
+        &self,
+        shape: &[usize],
+        value: bool,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.logical_fill_constructor(shape, value)
     }
 
-    fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
-        if value.to_bits() == 0.0f64.to_bits() {
-            return self.zeros_like(prototype, prototype.shape());
-        }
-        {
-            let guard = numeric_registry()
-                .lock_for(self.device_id)
-                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-            ensure!(
-                guard.get(prototype).is_some(),
-                "fill_like: prototype is not a live owned allocation"
-            );
-        }
-        if prototype.physical().storage() != GpuTensorStorage::Real || prototype.view().is_logical()
-        {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "fill_like: non-native class requires typed host construction",
-            ));
-        }
-        let len = logical_len_for_shape("fill_like", prototype.shape())?;
-        let data = match prototype.physical().element_type() {
-            NumericElementType::F32 => InProcessNumericData::F32(vec![value as f32; len]),
-            NumericElementType::F64 => InProcessNumericData::F64(vec![value; len]),
-            _ => {
-                return Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "fill_like: native floating class is required",
-                ))
-            }
-        };
-        self.allocate_numeric_data(data, prototype.shape().to_vec(), GpuTensorStorage::Real)
+    fn fill(
+        &self,
+        shape: &[usize],
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.fill_constructor(shape, value)
+    }
+
+    fn fill_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.fill_like_constructor(prototype, value)
     }
 
     fn zeros_integer_like(
@@ -5317,12 +5262,17 @@ impl AccelProvider for InProcessProvider {
         self.allocate_integer_tensor(data, shape.to_vec())
     }
 
-    fn ones(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
-        let len: usize = shape.iter().copied().product();
-        self.allocate_tensor_with_storage(vec![1.0; len], shape.to_vec(), GpuTensorStorage::Real)
+    fn ones(
+        &self,
+        shape: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.ones_constructor(shape)
     }
 
-    fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+    fn ones_like(
+        &self,
+        prototype: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         self.fill_like(prototype, 1.0)
     }
 

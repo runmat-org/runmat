@@ -42,18 +42,22 @@ pub(super) async fn run(
                 .iter()
                 .all(|axis| input.shape()[*axis] == 1)
             {
-                let zero = provider
-                    .zeros_like(input, input.shape())
-                    .observe(progress, kind)?;
+                let zero = progress.observe_optional(
+                    kind,
+                    provider.zeros_like(input, input.shape()),
+                    "resident constant constructor unavailable",
+                )?;
                 let zero = admitted_real(kind, provider, input, zero, input.shape(), precision)?;
                 let nonnegative = provider
                     .elem_ge(input, &zero)
                     .await
                     .observe(progress, kind)?;
                 let nonnegative = admitted_mask(kind, provider, input, nonnegative, input.shape())?;
-                let nan = provider
-                    .fill_like(input, f64::NAN)
-                    .observe(progress, kind)?;
+                let nan = progress.observe_optional(
+                    kind,
+                    provider.fill_like(input, f64::NAN),
+                    "resident constant constructor unavailable",
+                )?;
                 let nan = admitted_real(kind, provider, input, nan, input.shape(), precision)?;
                 let output = provider
                     .select(&nonnegative, input, &nan)
@@ -76,9 +80,11 @@ pub(super) async fn run(
                 );
                 minimum = admitted_real(kind, provider, input, next, &expected, precision)?;
             }
-            let zero = provider
-                .zeros_like(&minimum, minimum.shape())
-                .observe(progress, kind)?;
+            let zero = progress.observe_optional(
+                kind,
+                provider.zeros_like(&minimum, minimum.shape()),
+                "resident constant constructor unavailable",
+            )?;
             let zero = admitted_real(kind, provider, input, zero, minimum.shape(), precision)?;
             let nonnegative = provider
                 .elem_ge(&minimum, &zero)
@@ -108,9 +114,11 @@ pub(super) async fn run(
             )?;
             let result = provider.unary_exp(&average).await.observe(progress, kind)?;
             let result = admitted_real(kind, provider, input, result, minimum.shape(), precision)?;
-            let nan = provider
-                .fill_like(&result, f64::NAN)
-                .observe(progress, kind)?;
+            let nan = progress.observe_optional(
+                kind,
+                provider.fill_like(&result, f64::NAN),
+                "resident constant constructor unavailable",
+            )?;
             let nan = admitted_real(kind, provider, input, nan, minimum.shape(), precision)?;
             provider
                 .select(&nonnegative, &result, &nan)

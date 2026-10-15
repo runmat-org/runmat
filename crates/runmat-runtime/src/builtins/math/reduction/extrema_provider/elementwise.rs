@@ -195,7 +195,13 @@ impl ExtremaKind {
         }
         let contract = like_contract(input, input.shape().to_vec());
         let result = if matches!(self, Self::Max) {
-            if let Some(fill) = self.optional("fill_like", provider.fill_like(input, scalar))? {
+            let fill = provider.fill_like(input, scalar).map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(
+                    self.contract_error(format!("provider fill_like failed: {source}")),
+                    source.with_unproven_effects(),
+                )
+            })?;
+            if let Some(fill) = fill {
                 let fill = self.admit_output(provider, input, input, &contract, fill)?;
                 let result = if scalar_left {
                     provider.elem_max(&fill, input).await

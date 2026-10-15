@@ -759,12 +759,20 @@ impl AccelProvider for WgpuProvider {
         self.zeros_with_storage_exec(shape, storage)
     }
 
-    fn zeros_like(&self, prototype: &GpuTensorHandle, shape: &[usize]) -> Result<GpuTensorHandle> {
-        self.zeros_like_exec(prototype, shape)
+    fn zeros_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.zeros_like_constructor(prototype, shape)
     }
 
-    fn logical_fill(&self, shape: &[usize], value: bool) -> Result<GpuTensorHandle> {
-        self.logical_fill_exec(shape, value)
+    fn logical_fill(
+        &self,
+        shape: &[usize],
+        value: bool,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.logical_fill_constructor(shape, value)
     }
 
     fn zeros_integer_like(
@@ -792,28 +800,20 @@ impl AccelProvider for WgpuProvider {
         self.provider_precision_exec()
     }
 
-    fn fill(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
-        self.fill_exec(shape, value)
+    fn fill(
+        &self,
+        shape: &[usize],
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.fill_constructor(shape, value)
     }
 
-    fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
-        if value.to_bits() == 0 {
-            return self.zeros_like_exec(prototype, prototype.shape());
-        }
-        let entry = self.get_entry_raw(prototype)?;
-        let expected = match self.precision {
-            NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-            NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-        };
-        if entry.element_type != expected
-            || entry.storage != GpuTensorStorage::Real
-            || prototype.view().is_logical()
-        {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "fill_like: non-native class requires typed host construction",
-            ));
-        }
-        self.fill_exec(prototype.shape(), value)
+    fn fill_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.fill_like_constructor(prototype, value)
     }
 
     fn eye(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

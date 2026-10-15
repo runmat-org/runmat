@@ -73,17 +73,39 @@ impl AccelProvider for GuardProvider {
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
-    fn logical_fill(&self, shape: &[usize], _: bool) -> anyhow::Result<GpuTensorHandle> {
+    fn logical_fill(
+        &self,
+        shape: &[usize],
+        _: bool,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         match self.fill_mode.load(Ordering::SeqCst) {
-            1 => {
-                return Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "fixture fill",
-                ))
+            1 => return Ok(None),
+            2 => {
+                return Err(
+                    runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                        "injected device allocation failure"
+                    ))
+                    .with_unproven_effects(),
+                )
             }
-            2 => return Err(anyhow::anyhow!("injected device allocation failure")),
+            3 => {
+                let output = self.result(shape).map_err(|source| {
+                    runmat_accelerate_api::ProviderExecutionError::from(source)
+                        .with_unproven_effects()
+                })?;
+                drop(output);
+                return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "injected unsupported after constructor allocation",
+                    ),
+                )
+                .after_effect());
+            }
             _ => {}
         }
-        self.result(shape)
+        self.result(shape).map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn upload_logical_raw(
         &self,
@@ -102,14 +124,34 @@ impl AccelProvider for GuardProvider {
     fn zeros(&self, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         self.result(shape)
     }
-    fn ones(&self, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        self.result(shape)
+    fn ones(
+        &self,
+        shape: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.result(shape);
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
-    fn fill(&self, shape: &[usize], _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.result(shape)
+    fn fill(
+        &self,
+        shape: &[usize],
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.result(shape);
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
-    fn fill_like(&self, handle: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.result(handle.shape())
+    fn fill_like(
+        &self,
+        handle: &GpuTensorHandle,
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.result(handle.shape());
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 
@@ -173,7 +215,7 @@ fn all_constructors_accept_discarded_scalar_output() {
 }
 
 #[test]
-fn logical_fill_only_unsupported_uses_owned_logical_upload() {
+fn logical_fill_only_no_attempt_uses_owned_logical_upload() {
     let _lock = test_support::accel_test_lock();
     let provider = GuardProvider::new(false, false);
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -230,6 +272,40 @@ fn logical_fill_only_unsupported_uses_owned_logical_upload() {
         "real device failure must not trigger upload fallback"
     );
     assert_eq!(prototype.probe.retirements(), 0);
+    provider.fill_mode.store(3, Ordering::SeqCst);
+    for name in ["true", "false"] {
+        let error = call(
+            name,
+            vec![
+                Value::from("like"),
+                Value::GpuTensor(prototype.handle.clone()),
+            ],
+        )
+        .expect_err("raw Unsupported after allocation is terminal");
+        assert!(error
+            .message()
+            .contains("injected unsupported after constructor allocation"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        let mut source = std::error::Error::source(&error);
+        let mut after_effect = false;
+        while let Some(cause) = source {
+            if let Some(provider) =
+                cause.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+            {
+                after_effect |= provider.is_after_effect();
+            }
+            source = cause.source();
+        }
+        assert!(after_effect, "allocation phase remains in the cause chain");
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
+        assert_eq!(prototype.probe.retirements(), 0);
+        assert!(provider
+            .rejected
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|probe| probe.retirements() == 1));
+    }
 }
 
 #[test]
@@ -255,11 +331,11 @@ fn logical_constructors_reject_numeric_producer_before_adoption() {
 }
 
 #[test]
-fn logical_constructors_preserve_borrowed_alias_metadata_and_storage() {
+fn all_constructors_preserve_borrowed_alias_metadata_and_storage() {
     let _lock = test_support::accel_test_lock();
     let provider = GuardProvider::new(false, true);
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    for name in ["true", "false"] {
+    for name in ["true", "false", "inf", "nan"] {
         let allocation = provider
             .owner
             .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
@@ -280,7 +356,7 @@ fn logical_constructors_preserve_borrowed_alias_metadata_and_storage() {
 #[test]
 fn logical_constructors_upload_native_logical_when_f32_provider_has_no_fill_hooks() {
     test_support::with_native_logical_test_provider(|provider| {
-        assert!(provider.ones(&[2, 3]).is_err());
+        assert!(provider.ones(&[2, 3]).unwrap().is_none());
         assert!(provider.zeros(&[2, 3]).is_err());
         let host = Tensor::from_f32(vec![7.0], vec![1, 1]).expect("single prototype");
         let prototype = crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)

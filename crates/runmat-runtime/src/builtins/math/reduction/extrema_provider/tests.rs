@@ -288,8 +288,15 @@ impl AccelProvider for Provider {
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.reject_execution() })
     }
-    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.reject()
+    fn fill_like(
+        &self,
+        _: &GpuTensorHandle,
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.reject();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.reject()

@@ -56,25 +56,37 @@ impl AccelProvider for ContinuationProvider {
         self.downloads.fetch_add(1, Ordering::SeqCst);
         panic!("operational failure must not gather native data")
     }
-    fn fill_like(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.fills.fetch_add(1, Ordering::SeqCst);
-        input.allocation_lease().validate_live().unwrap();
-        assert_eq!(scalar, 2.0);
-        match self.stage {
-            FillStage::Unsupported => Err(unsupported_provider_operation(
-                "fill capability unavailable",
-            )),
-            FillStage::Success => {
-                let fill = self.owner.allocate_numeric(HostNumericTensorOwned {
-                    data: HostNumericDataOwned::F64(vec![scalar; input.shape().iter().product()]),
-                    shape: input.shape().to_vec(),
-                    storage: GpuTensorStorage::Real,
-                })?;
-                assert!(!fill.handle.shares_allocation_with(input));
-                *self.fill_probe.lock().unwrap() = Some(fill.probe);
-                Ok(fill.handle)
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        scalar: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = (|| {
+            self.fills.fetch_add(1, Ordering::SeqCst);
+            input.allocation_lease().validate_live().unwrap();
+            assert_eq!(scalar, 2.0);
+            match self.stage {
+                FillStage::Unsupported => Err(unsupported_provider_operation(
+                    "fill capability unavailable",
+                )),
+                FillStage::Success => {
+                    let fill = self.owner.allocate_numeric(HostNumericTensorOwned {
+                        data: HostNumericDataOwned::F64(vec![
+                            scalar;
+                            input.shape().iter().product()
+                        ]),
+                        shape: input.shape().to_vec(),
+                        storage: GpuTensorStorage::Real,
+                    })?;
+                    assert!(!fill.handle.shares_allocation_with(input));
+                    *self.fill_probe.lock().unwrap() = Some(fill.probe);
+                    Ok(fill.handle)
+                }
             }
-        }
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn scalar_max(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         self.scalars.fetch_add(1, Ordering::SeqCst);

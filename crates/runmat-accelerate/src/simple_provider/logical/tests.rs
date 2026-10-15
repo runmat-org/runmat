@@ -15,7 +15,10 @@ fn native_single_and_double_predicates_preserve_logical_outputs() {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        let zero = provider.zeros_like(&data, &[2, 2]).unwrap();
+        let zero = provider
+            .zeros_like(&data, &[2, 2])
+            .unwrap()
+            .expect("admitted optional constructor");
         let finite = provider.logical_isfinite(&data).unwrap();
         let nonzero = block_on(provider.elem_ne(&data, &zero)).unwrap();
         let selected = provider.logical_and(&finite, &nonzero).unwrap();

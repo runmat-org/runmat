@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
+use runmat_accelerate_api::GpuTensorStorage;
 
 fn clear_accel_provider_state() -> test_support::AccelTestGuard {
     test_support::accel_test_lock()

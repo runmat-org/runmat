@@ -257,15 +257,25 @@ fn zero_for_unconnected_resident_target(target: &Value) -> BuiltinResult<Value> 
                 .ok_or_else(|| {
                     deep_learning_error("dlgradient", "dlgradient: target resident owner retired")
                 })?;
-            let mut zero = provider.fill_like(handle, 0.0).map_err(|error| {
-                crate::runtime_error::with_provider_execution_source(
-                    deep_learning_error(
+            let mut zero = provider
+                .fill_like(handle, 0.0)
+                .map_err(|error| {
+                    crate::runtime_error::with_provider_execution_source(
+                        deep_learning_error(
+                            "dlgradient",
+                            "dlgradient: resident zero allocation failed",
+                        ),
+                        error.with_unproven_effects(),
+                    )
+                })?
+                .ok_or_else(|| {
+                    let mut error = deep_learning_error(
                         "dlgradient",
-                        "dlgradient: resident zero allocation failed",
-                    ),
-                    error.into(),
-                )
-            })?;
+                        "dlgradient: resident zero constructor unavailable",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?;
             use crate::builtins::common::gpu_helpers::{
                 reject_gpu_output, unary_gpu_output_matches, GpuOutputAliasPolicy,
                 UnaryGpuOutputContract,

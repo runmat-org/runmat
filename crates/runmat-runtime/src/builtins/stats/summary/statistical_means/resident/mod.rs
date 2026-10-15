@@ -184,9 +184,11 @@ async fn usable_scale(
     let scale = admitted_real(kind, provider, input, scale, &scale_shape, precision)?;
     let finite = provider.logical_isfinite(&scale).observe(progress, kind)?;
     let finite = admitted_mask(kind, provider, input, finite, scale.shape())?;
-    let zero = provider
-        .zeros_like(&scale, scale.shape())
-        .observe(progress, kind)?;
+    let zero = progress.observe_optional(
+        kind,
+        provider.zeros_like(&scale, scale.shape()),
+        "resident constant constructor unavailable",
+    )?;
     let zero = admitted_real(kind, provider, input, zero, scale.shape(), precision)?;
     let nonzero = provider
         .elem_ne(&scale, &zero)
@@ -197,7 +199,11 @@ async fn usable_scale(
         .logical_and(&finite, &nonzero)
         .observe(progress, kind)?;
     let usable = admitted_mask(kind, provider, input, usable, scale.shape())?;
-    let one = provider.ones_like(&scale).observe(progress, kind)?;
+    let one = progress.observe_optional(
+        kind,
+        provider.ones_like(&scale),
+        "resident constant constructor unavailable",
+    )?;
     let one = admitted_real(kind, provider, input, one, scale.shape(), precision)?;
     let result = provider
         .select(&usable, &scale, &one)

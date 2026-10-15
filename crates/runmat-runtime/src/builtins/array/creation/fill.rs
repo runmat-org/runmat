@@ -1009,7 +1009,7 @@ fn fill_like_gpu(
     };
     if let Some(attempt) = attempt {
         match attempt {
-            Ok(output) => {
+            Ok(Some(output)) => {
                 let mut output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
                     "createArray", provider, output, shape, GpuTensorStorage::Real,
                     if logical { None } else { precision }, None, logical, &[prototype],
@@ -1017,14 +1017,16 @@ fn fill_like_gpu(
                 gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
-            Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {}
+            Ok(None) => {}
             Err(cause) => {
-                return Err(crate::build_runtime_error(format!(
-                    "createArray: provider fill failed: {cause}"
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    crate::build_runtime_error(format!(
+                        "createArray: provider fill failed: {cause}"
+                    ))
+                    .with_builtin("createArray")
+                    .build(),
+                    cause.with_unproven_effects(),
                 ))
-                .with_builtin("createArray")
-                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-                .build())
             }
         }
     }
@@ -1982,7 +1984,10 @@ pub(crate) mod tests {
                     return;
                 }
             };
-        let prototype = provider.fill(&[1, 1], 0.0).expect("prototype allocation");
+        let prototype = provider
+            .fill(&[1, 1], 0.0)
+            .expect("prototype allocation")
+            .expect("admitted optional constructor");
         let args = vec![
             Value::Num(2.0),
             Value::Num(3.0),

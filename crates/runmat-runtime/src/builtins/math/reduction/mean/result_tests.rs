@@ -74,22 +74,31 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused download") })
     }
-    fn fill(&self, shape: &[usize], value: f64) -> anyhow::Result<GpuTensorHandle> {
-        Ok(self
-            .0
-            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
-                data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![
-                    value;
-                    if shape.contains(&0) {
-                        0
-                    } else {
-                        shape.iter().product()
-                    }
-                ]),
-                shape: shape.to_vec(),
-                storage: GpuTensorStorage::Real,
-            })?
-            .handle)
+    fn fill(
+        &self,
+        shape: &[usize],
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = (|| {
+            Ok(self
+                .0
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![
+                        value;
+                        if shape.contains(&0) {
+                            0
+                        } else {
+                            shape.iter().product()
+                        }
+                    ]),
+                    shape: shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })?
+                .handle)
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 
@@ -173,8 +182,15 @@ impl AccelProvider for OrderedFailureProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused download") })
     }
-    fn fill(&self, _: &[usize], _: f64) -> anyhow::Result<GpuTensorHandle> {
-        anyhow::bail!("unused fill")
+    fn fill(
+        &self,
+        _: &[usize],
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = Err(anyhow::anyhow!("unused fill"));
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn prepare_ordered_real_mean(
         &self,
@@ -265,8 +281,15 @@ impl AccelProvider for OrderedPublicationProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused download") })
     }
-    fn fill(&self, _: &[usize], _: f64) -> anyhow::Result<GpuTensorHandle> {
-        anyhow::bail!("unused fill")
+    fn fill(
+        &self,
+        _: &[usize],
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = Err(anyhow::anyhow!("unused fill"));
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn prepare_ordered_real_mean(
         &self,

@@ -63,7 +63,10 @@ fn exact_canonical_queries_match_actual_in_process_logical_hooks() {
         ));
         let output = match operation {
             Operation::Cast => {
-                let zeros = provider.zeros_like(&left, left.shape()).unwrap();
+                let zeros = provider
+                    .zeros_like(&left, left.shape())
+                    .unwrap()
+                    .expect("admitted optional constructor");
                 let result = block_on(provider.elem_ne(&left, &zeros)).unwrap();
                 zeros.release().unwrap();
                 result
@@ -189,7 +192,10 @@ fn native_single_feasibility_matches_supported_in_process_hooks() {
         );
         let output = match operation {
             Operation::Cast => {
-                let zero = provider.zeros_like(&left, left.shape()).unwrap();
+                let zero = provider
+                    .zeros_like(&left, left.shape())
+                    .unwrap()
+                    .expect("admitted optional constructor");
                 block_on(provider.elem_ne(&left, &zero)).unwrap()
             }
             Operation::Binary(LogicalBinaryOperator::And) => {
