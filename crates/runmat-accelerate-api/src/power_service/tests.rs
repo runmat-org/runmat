@@ -300,7 +300,7 @@ impl AccelProvider for Recorder {
         &self,
         input: &GpuTensorHandle,
         value: f64,
-    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+    ) -> crate::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let result: anyhow::Result<GpuTensorHandle> = (|| {
             self.fills.fetch_add(1, Ordering::SeqCst);
             self.last_double_bits
@@ -314,9 +314,9 @@ impl AccelProvider for Recorder {
                 )?
                 .handle)
         })();
-        result.map(Some).map_err(|source| {
-            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
-        })
+        result
+            .map(Some)
+            .map_err(|source| crate::ProviderExecutionError::from(source).with_unproven_effects())
     }
     fn unary_single<'a>(
         &'a self,

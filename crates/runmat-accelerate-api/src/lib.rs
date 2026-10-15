@@ -2355,7 +2355,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         }
     }
 
-    /// Optional constructor. None certifies no attempt before any provider
+    /// Allocate a one-initialized tensor with the provided shape on the device.
+    /// None certifies no attempt before any provider
     /// effects; every Err retains its cause and is terminal, never a miss.
     fn ones(&self, _shape: &[usize]) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
         Ok(None)

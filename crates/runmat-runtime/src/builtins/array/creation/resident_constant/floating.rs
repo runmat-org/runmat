@@ -4,7 +4,7 @@ use runmat_accelerate_api::ProviderPrecision;
 use runmat_value::{ComplexTensor, NumericDType, Tensor};
 
 pub(in super::super) fn floating_constant(
-    provider: &dyn AccelProvider,
+    provider: &'static dyn AccelProvider,
     name: &str,
     shape: &[usize],
     value: f64,

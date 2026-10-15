@@ -158,10 +158,9 @@ impl AccelProvider for Owner {
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
         if self.unsupported_trig {
             return Box::pin(async {
-                Err(
-                    runmat_accelerate_api::unsupported_provider_operation("fixture sine refusal")
-                        .into(),
-                )
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "fixture sine refusal",
+                ))
             });
         }
         Box::pin(async move { Ok(self.publish(self.inner.unary_sin(input).await?)) })
@@ -172,10 +171,9 @@ impl AccelProvider for Owner {
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
         if self.unsupported_trig {
             return Box::pin(async {
-                Err(
-                    runmat_accelerate_api::unsupported_provider_operation("fixture cosine refusal")
-                        .into(),
-                )
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "fixture cosine refusal",
+                ))
             });
         }
         Box::pin(async move { Ok(self.publish(self.inner.unary_cos(input).await?)) })
