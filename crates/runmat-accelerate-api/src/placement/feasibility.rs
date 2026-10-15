@@ -70,7 +70,7 @@ pub struct ProviderWorkload {
     /// Original typed scalar exponent for a separately certified POWER route.
     /// Absence never authorizes specialization of a general mixed operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub real_power_scalar: Option<crate::PowerScalarControl>,
+    pub real_power_scalar: Option<crate::PowerScalarWorkload>,
     /// Source-qualified staged image program. Its presence alone cannot
     /// establish physical provider work or numerical equivalence.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -434,11 +434,57 @@ fn exact_scalar_work(
         return Err(reject);
     }
     let source = &query.inputs[0];
+    let scalar = query.workload.real_power_scalar.as_ref().ok_or(reject)?;
+    let logical_source_bytes = source.checked_byte_len().ok_or(reject)?;
+    let backing_bytes = if let Some(input) = &scalar.input {
+        match input {
+            runmat_accelerate_api::PowerInputDescription::Live { physical, view } => {
+                if view.validate(physical).is_err()
+                    || physical.element_type() != runmat_accelerate_api::NumericElementType::F32
+                    || physical.storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                    || view.is_logical()
+                    || view.shape().iter().map(|&n| n as u64).collect::<Vec<_>>() != source.shape
+                    || !matches!(
+                        (source.layout, view.layout()),
+                        (
+                            ProviderLayout::ColumnMajorContiguous,
+                            runmat_accelerate_api::GpuTensorLayout::Contiguous
+                        ) | (
+                            ProviderLayout::Strided,
+                            runmat_accelerate_api::GpuTensorLayout::Transpose(_)
+                        )
+                    )
+                {
+                    return Err(reject);
+                }
+                Some(physical.requested_bytes())
+            }
+            runmat_accelerate_api::PowerInputDescription::PlannedDense { requested_bytes } => {
+                if source.layout != ProviderLayout::ColumnMajorContiguous
+                    || *requested_bytes < logical_source_bytes
+                    || provider
+                        .plan_dense_real_output_buffer_bytes(source)
+                        .map_err(|_| {
+                            (
+                                Reject::ProviderUnavailable,
+                                "power.exact_scalar.input_projection_failed",
+                            )
+                        })?
+                        != Some(*requested_bytes)
+                {
+                    return Err(reject);
+                }
+                Some(*requested_bytes)
+            }
+        }
+    } else {
+        None
+    };
     let request = runmat_accelerate_api::power_service::exact_single_base_request(
         source,
-        query.workload.real_power_scalar.ok_or(reject)?,
+        scalar.control,
         RealPowerOperand::Base,
-        source.checked_byte_len().ok_or(reject)?,
+        backing_bytes.unwrap_or(logical_source_bytes),
     )
     .ok_or(reject)?;
     let physical = match provider.propose_real_elementwise(&request) {
@@ -467,6 +513,7 @@ fn exact_scalar_work(
     let shape = runmat_types::geometry::broadcast_concrete_shape(&source_shape, &scalar_shape)
         .map_err(|_| reject)?;
     let mut output = source.clone();
+    output.layout = ProviderLayout::ColumnMajorContiguous;
     output.shape = shape.into_iter().map(|n| n as u64).collect();
     if query
         .outputs
@@ -480,13 +527,22 @@ fn exact_scalar_work(
         .output_buffer_bytes
         .checked_sub(logical)
         .and_then(|pad| pad.checked_add(physical.uniform_buffer_bytes))
+        .and_then(|bytes| {
+            bytes.checked_add(
+                backing_bytes
+                    .unwrap_or(logical_source_bytes)
+                    .checked_sub(logical_source_bytes)?,
+            )
+        })
         .ok_or(reject)?;
     Ok(PowerWork {
         physical_output_bytes: Some(physical.output_buffer_bytes),
         #[cfg(feature = "wgpu")]
         elements: source.checked_element_count().ok_or(reject)?,
         temporary_bytes,
-        unknown_peak: false,
+        // Shape geometry does not prove the size of a retained allocation,
+        // including a nonempty subview of a larger backing buffer.
+        unknown_peak: backing_bytes.is_none(),
         #[cfg(feature = "wgpu")]
         readback_bytes: 0,
         dispatches: physical.queue_submissions,

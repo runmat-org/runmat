@@ -13,6 +13,7 @@ use std::sync::{
 };
 
 struct FailingProvider {
+    precision: ProviderPrecision,
     allocations: TestAllocationOwner,
     fail_upload_at: usize,
     uploads: AtomicUsize,
@@ -23,7 +24,11 @@ struct FailingProvider {
 
 impl FailingProvider {
     fn new(fail_upload_at: usize) -> &'static Self {
+        Self::with_precision(fail_upload_at, ProviderPrecision::F64)
+    }
+    fn with_precision(fail_upload_at: usize, precision: ProviderPrecision) -> &'static Self {
         Box::leak(Box::new(Self {
+            precision,
             allocations: TestAllocationOwner::new(),
             fail_upload_at,
             uploads: AtomicUsize::new(0),
@@ -40,7 +45,7 @@ impl AccelProvider for FailingProvider {
     }
 
     fn precision(&self) -> ProviderPrecision {
-        ProviderPrecision::F64
+        self.precision
     }
 
     fn device_info(&self) -> String {
@@ -64,7 +69,10 @@ impl AccelProvider for FailingProvider {
         }
         let allocated = self.allocations.allocate_zeroed(
             host.shape.to_vec(),
-            runmat_accelerate_api::NumericElementType::F64,
+            match self.precision {
+                ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+            },
             runmat_accelerate_api::GpuTensorStorage::Real,
         )?;
         self.probes.lock().unwrap().push(allocated.probe);
@@ -81,14 +89,23 @@ impl AccelProvider for FailingProvider {
 
     fn fused_elementwise<'a>(
         &'a self,
-        _: &'a str,
+        shader: &'a str,
         _: runmat_accelerate_api::ProviderShaderRequirements,
-        _: &'a [GpuTensorHandle],
+        inputs: &'a [GpuTensorHandle],
         _: &'a [usize],
         _: usize,
         _: ProviderElementType,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if !shader.is_empty() {
+                assert!(
+                    shader.contains(&format!(
+                        "@binding({}) var<storage, read_write> output0",
+                        inputs.len()
+                    )),
+                    "single dispatch bindings must match the already prepared physical inputs"
+                );
+            }
             if self.suspend_dispatch.load(Ordering::SeqCst) {
                 std::future::pending::<()>().await;
             }
@@ -152,6 +169,64 @@ fn invoke(provider: &'static FailingProvider) -> ProviderExecutionError {
             Ok(_) => panic!("injected provider hook must fail, not select a continuation"),
         }
     })
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn certified_double_control_is_not_a_physical_upload_and_empty_fusion_is_pre_effect() {
+    runmat_gc::gc_test_context(|| {
+        for (empty, multi) in [(false, false), (false, true), (true, false)] {
+            let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let mut source = plan();
+            source.operations = vec![crate::fusion::FusionOp::Primitive {
+                op: crate::graph::PrimitiveOp::ElemPow,
+                inputs: vec![0, 1],
+                output: Some(2),
+            }];
+            if multi {
+                source
+                    .materialized_stores
+                    .push(crate::fusion::FusionStoreMaterialization {
+                        value_id: 0,
+                        binding: crate::graph::VarBinding {
+                            kind: crate::graph::VarKind::Global,
+                            index: 0,
+                        },
+                    });
+            }
+            let values = if empty { vec![] } else { vec![-0.0_f32, -2.0] };
+            let shape = vec![1, values.len()];
+            source.group.shape = ShapeInfo::Tensor(vec![Some(1), Some(values.len())]);
+            let request = FusionExecutionRequest {
+                plan: &source,
+                inputs: vec![
+                    Value::Tensor(runmat_value::Tensor::from_f32(values, shape).unwrap()),
+                    Value::Num(2.0),
+                ],
+                placement: None,
+                runtime: None,
+            };
+            let result = futures::executor::block_on(execute_elementwise_placed(request));
+            if empty {
+                assert!(matches!(result, Ok(FusionExecutionOutcome::SharedRuntime(_))), "empty source stays with the original per-operation runtime, without a fake provider execution");
+                assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+                assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+            } else {
+                let error = match result {
+                    Err(error) => error,
+                    _ => panic!("injected dispatch must be reached"),
+                };
+                assert_original_unsupported(&error);
+                assert_eq!(
+                    provider.uploads.load(Ordering::SeqCst),
+                    1,
+                    "original Double scalar control is embedded, never uploaded or narrowed"
+                );
+                assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
+            }
+        }
+    });
 }
 
 fn assert_original_unsupported(error: &ProviderExecutionError) {

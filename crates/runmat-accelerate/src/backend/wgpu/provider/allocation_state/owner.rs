@@ -36,9 +36,45 @@ impl AllocationState {
             return Err(AllocationAcquisitionError::WrongOwner.into());
         }
         self.validate_view(handle.allocation_identity(), handle.view())?;
+        // A zero-element carrier may retain a larger allocation, but existing
+        // kernels still require a full-allocation view and physical length.
+        if handle.shape().contains(&0) && lease.physical().element_capacity() != 0 {
+            return Err(AllocationAcquisitionError::Unsupported.into());
+        }
         entry.shape = handle.shape().to_vec();
         entry.logical = handle.view().is_logical();
         Ok(entry)
+    }
+
+    /// Authenticate an empty carrier without exposing a physical BufferEntry
+    /// whose length could accidentally authorize work on its retained backing.
+    pub(in super::super) fn validate_empty_view(&self, handle: &GpuTensorHandle) -> Result<()> {
+        self.check_identity(handle.allocation_identity())?;
+        self.validate_view(handle.allocation_identity(), handle.view())?;
+        let records = self.lock_records()?;
+        let record = records
+            .get(&handle.buffer_id())
+            .ok_or(AllocationAcquisitionError::NotLive)?;
+        if record.phase != Phase::Live
+            || record.entry.is_none()
+            || record.physical != *handle.physical()
+            || !handle.shape().contains(&0)
+        {
+            return Err(AllocationAcquisitionError::Unsupported.into());
+        }
+        handle
+            .view()
+            .validate(&record.physical)
+            .map_err(AllocationAcquisitionError::InvalidView)?;
+        let lease = record
+            .lease
+            .as_ref()
+            .and_then(WeakAllocationLease::acquire)
+            .ok_or(AllocationAcquisitionError::NotLive)?;
+        if !lease.shares_allocation_with(handle.allocation_lease()) {
+            return Err(AllocationAcquisitionError::WrongOwner.into());
+        }
+        Ok(())
     }
 
     pub(in super::super) fn requires_logical_encoding(
@@ -173,9 +209,11 @@ impl AllocationOwner for AllocationState {
                 .iter()
                 .try_fold(1_u64, |count, &dim| count.checked_mul(dim as u64))
         };
-        // Existing WGPU kernels address complete allocations; prefix views
-        // would expose a physical length inconsistent with their shorter shape.
-        if count != Some(record.physical.element_capacity()) {
+        // Carrier admission permits numeric zero views without exposing the
+        // retained payload. entry_for_handle separately requires complete
+        // allocations before any existing kernel/transfer sees BufferEntry.
+        // Nonempty prefixes remain unsupported even as carriers.
+        if count != Some(record.physical.element_capacity()) && count != Some(0) {
             return Err(AllocationAcquisitionError::Unsupported);
         }
         if view.is_logical() && !record.logical_producer {

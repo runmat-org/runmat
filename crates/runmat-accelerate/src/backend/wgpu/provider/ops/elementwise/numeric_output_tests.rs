@@ -79,7 +79,7 @@ async fn dense_real_projection_matches_actual_allocator_and_rejects_other_forms(
         provider
             .plan_dense_real_output_buffer_bytes(&unsupported)
             .unwrap(),
-        None
+        Some(4)
     );
     unsupported.shape = vec![u64::MAX, 2];
     assert_eq!(

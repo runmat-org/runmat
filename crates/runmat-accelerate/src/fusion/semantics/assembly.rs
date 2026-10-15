@@ -32,9 +32,35 @@ pub(super) fn source_assembly<'a>(
         return Err(anyhow!("selected fusion binding differs from source"));
     }
     let source_inputs: Vec<_> = inputs.iter().map(|value| value_fact(value)).collect();
-    let effective_input = |mut fact: ValueFact| {
+    // A selected POWER scalar is source-typed control, not a staging buffer.
+    // Keep its original Double fact even under an opted physical downcast
+    // policy. Arithmetic admission still owns whether any specialization exists.
+    let power_controls = plan
+        .operations
+        .iter()
+        .zip(snapshots)
+        .filter_map(|(operation, snapshot)| {
+            let snapshot = snapshot.as_ref()?;
+            if snapshot.entry.identity != runmat_builtins::POWER_CATALOG_ENTRY.identity {
+                return None;
+            }
+            let inputs = match operation {
+                FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
+            };
+            let [_, exponent] = inputs.as_slice() else {
+                return None;
+            };
+            matches!(
+                exact_scalar_control(leaves.values().get(exponent).copied()),
+                Some(runmat_accelerate_api::PowerScalarControl::DoubleBits(_))
+            )
+            .then_some(*exponent)
+        })
+        .collect::<HashSet<_>>();
+    let effective_input = |id: ValueId, mut fact: ValueFact| {
         if precision_policy.permits_double_to_single()
             && provider_precision == ProviderPrecision::F32
+            && !power_controls.contains(&id)
         {
             if let runmat_types::ValueKindFact::Numeric(ref mut numeric) = fact.kind {
                 if numeric.class == NumericClass::Double {
@@ -52,7 +78,7 @@ pub(super) fn source_assembly<'a>(
             // Authenticate the actual physical class first. An opted class is
             // semantic precision policy, never physical representation proof.
             leaves.refine_input_storage(id, value, &mut fact);
-            (id, effective_input(fact))
+            (id, effective_input(id, fact))
         })
         .collect();
     Ok((

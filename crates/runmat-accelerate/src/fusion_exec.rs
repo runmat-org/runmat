@@ -298,6 +298,8 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
 }
 
 struct FusionProviderContract<'a> {
+    /// Physical data operands only; logical controls remain in source identity.
+    input_indices: Option<&'a [usize]>,
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     semantic_identity: Option<runmat_execution::Digest>,
     scalar_work_units: Option<u64>,
@@ -318,6 +320,7 @@ fn select_fusion_provider(
         bindings,
         provider,
         FusionProviderContract {
+            input_indices: None,
             outputs: output_shapes
                 .iter()
                 .map(|shape| dense_output_representation(provider.precision(), shape))
@@ -348,6 +351,7 @@ fn select_fusion_provider_with_contract_vm(
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
+        input_indices,
         outputs,
         semantic_identity,
         scalar_work_units,
@@ -366,10 +370,21 @@ fn select_fusion_provider_with_contract_vm(
     let observer = FusionPlacementObserver::new(request.placement);
     let typed_elementwise = semantic_identity.is_some() && request.plan.group.kind.is_elementwise();
     let semantic_identity = Some(bindings.identity(semantic_identity)?);
-    let input_refs = matmul.as_ref().map_or_else(
-        || request.inputs.iter().collect::<Vec<_>>(),
-        |contract| contract.inputs.clone(),
-    );
+    let input_refs = if let Some(contract) = &matmul {
+        contract.inputs.clone()
+    } else if let Some(indices) = input_indices {
+        indices
+            .iter()
+            .map(|&index| {
+                request
+                    .inputs
+                    .get(index)
+                    .ok_or_else(|| anyhow!("fusion physical input projection is out of bounds"))
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        request.inputs.iter().collect::<Vec<_>>()
+    };
     let elements = if let Some(contract) = &matmul {
         contract
             .workload
@@ -392,9 +407,9 @@ fn select_fusion_provider_with_contract_vm(
             ProviderPrecision::F64 => 8u64,
         };
         Some(
-            request
-                .inputs
+            input_refs
                 .iter()
+                .copied()
                 .try_fold(0u64, |bytes, value| {
                     let elements = match value {
                         Value::Num(_) => 1,
@@ -1226,6 +1241,7 @@ pub async fn execute_image_normalize_placed(
         &bindings,
         provider,
         FusionProviderContract {
+            input_indices: None,
             outputs: vec![dense_output_representation(output_precision, output_shape)],
             semantic_identity: None,
             scalar_work_units: None,

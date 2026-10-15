@@ -7,9 +7,7 @@ use crate::{
     ProviderStorage, RealPowerArithmeticMode, RealPowerOperand,
 };
 
-use super::symbolic::{
-    legacy_real_proof, plan_resident_scalar_power, validate_scalar_shape, PowerSymbolicPlan,
-};
+use super::symbolic::{legacy_real_proof, validate_scalar_shape, PowerSymbolicPlan};
 pub use super::symbolic::{PowerPhysicalRecipe, PowerPhysicalRoute, PowerScalarConstruction};
 use super::validate::PowerServiceError;
 
@@ -186,14 +184,19 @@ impl PreparedResidentScalarPower {
             ));
         }
         if self.route == PowerPhysicalRoute::ExactSingleBase {
-            let current = plan_resident_scalar_power(
-                self.provider,
-                representation(resident)?,
-                self.control,
-                self.resident_operand,
-                &self.host_shape,
-                self.query.operation.clone(),
-            )?;
+            if self
+                .query
+                .workload
+                .real_power_scalar
+                .as_ref()
+                .and_then(|work| work.input.as_ref())
+                .is_some_and(|input| !input.matches(resident))
+            {
+                return Err(PowerServiceError::pre(
+                    "certified POWER input description changed",
+                ));
+            }
+            let current = self.symbolic.replan(self.provider)?;
             if current.as_ref() != Some(&self.symbolic) {
                 return Err(PowerServiceError::pre("certified POWER capability changed"));
             }
@@ -239,13 +242,14 @@ pub fn prepare_resident_scalar_power(
     {
         return Ok(None);
     }
-    let symbolic = plan_resident_scalar_power(
+    let symbolic = super::symbolic::plan_with_input(
         provider,
         representation(resident)?,
         control,
         resident_operand,
         host_shape,
         operation,
+        Some(crate::PowerInputDescription::from_handle(resident)),
     )?;
     Ok(symbolic.map(|symbolic| prepared_from_plan(provider, resident, symbolic)))
 }
@@ -286,24 +290,65 @@ pub fn prepare_resident_scalar_power_against_plan(
             "planned POWER resident view changed",
         ));
     }
-    let replanned = plan_resident_scalar_power(
+    if planned
+        .query
+        .workload
+        .real_power_scalar
+        .as_ref()
+        .and_then(|work| work.input.as_ref())
+        .is_some_and(|input| !input.matches(resident))
+    {
+        return Err(PowerServiceError::pre(
+            "planned POWER input description changed",
+        ));
+    }
+    // Revalidate the future allocator projection before replacing descriptive
+    // geometry with authentic live input facts. All other receipt fields must
+    // remain unchanged across this transition.
+    if planned.replan(provider)?.as_ref() != Some(planned) {
+        return Err(PowerServiceError::pre(
+            "planned POWER allocator route changed",
+        ));
+    }
+    let Some(mut replanned) = super::symbolic::plan_with_input(
         provider,
         actual,
         control,
         resident_operand,
         host_shape,
         operation,
-    )?;
-    if replanned.as_ref() != Some(planned) {
+        Some(crate::PowerInputDescription::from_handle(resident)),
+    )?
+    else {
+        return Err(PowerServiceError::pre(
+            "planned POWER live route unavailable",
+        ));
+    };
+    let live_input = replanned
+        .query
+        .workload
+        .real_power_scalar
+        .as_mut()
+        .and_then(|work| {
+            std::mem::replace(
+                &mut work.input,
+                planned
+                    .query
+                    .workload
+                    .real_power_scalar
+                    .as_ref()
+                    .and_then(|work| work.input.clone()),
+            )
+        });
+    if &replanned != planned {
         return Err(PowerServiceError::pre(
             "planned POWER physical route changed",
         ));
     }
-    Ok(prepared_from_plan(
-        provider,
-        resident,
-        replanned.expect("matched plan"),
-    ))
+    if let Some(work) = &mut replanned.query.workload.real_power_scalar {
+        work.input = live_input;
+    }
+    Ok(prepared_from_plan(provider, resident, replanned))
 }
 
 fn validate_owner(

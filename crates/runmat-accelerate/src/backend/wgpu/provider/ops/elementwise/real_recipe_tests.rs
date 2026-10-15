@@ -4,6 +4,8 @@
 mod mixed_add;
 #[path = "real_recipe/cast_tests.rs"]
 mod casts;
+#[path = "real_recipe/exact_layout_tests.rs"]
+mod exact_layouts;
 use super::*;
 use crate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate_api::{

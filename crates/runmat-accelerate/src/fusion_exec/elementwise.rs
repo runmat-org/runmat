@@ -125,7 +125,7 @@ async fn execute_elementwise_outputs(
             ));
         }
     };
-    let (shader, shader_requirements) = generated_shader.into_parts();
+    let (shader, shader_requirements, input_indices) = generated_shader.into_parts();
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
     // Determine output shape from the fusion plan and derive the element count from it.
     let runtime_shape = runtime_broadcast_shape(&request.inputs);
@@ -207,6 +207,7 @@ async fn execute_elementwise_outputs(
         &bindings,
         provider,
         FusionProviderContract {
+            input_indices: Some(&input_indices),
             outputs: representations,
             semantic_identity: Some(semantic_identity),
             scalar_work_units: Some(scalar_work_units),
@@ -235,14 +236,15 @@ async fn execute_elementwise_outputs(
         let mut allocations = outputs::FusionOutputAdmission::new(&request.inputs);
         let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
         let scalar_dtype = scalar_upload_dtype(provider);
-        if program.uses_implicit_downcast() {
+        if program.uses_implicit_downcast_for(&input_indices) {
             // Reuse the existing policy warning and admission authority. Explicit
             // Single conversions need no implicit-policy warning: typed codegen
             // has already proved every operation on an F32 backend is F32.
             ensure_provider_supports_dtype(provider, NumericDType::F64)
                 .map_err(anyhow::Error::msg)?;
         }
-        for value in &request.inputs {
+        for &input_index in &input_indices {
+            let value = &request.inputs[input_index];
             match value {
                 Value::GpuTensor(handle) => {
                     use runmat_runtime::builtins::common::gpu_helpers::{
@@ -427,10 +429,11 @@ async fn execute_elementwise_outputs(
                     // Provider does not support multi-output dispatch; fall back to N single dispatches.
                     for output_id in output_ids.iter().copied() {
                         let started = Instant::now();
-                        let single_shader = request.plan.prepare_typed_shader(
+                        let single_shader = request.plan.prepare_typed_shader_with_inputs(
                             &[output_id],
                             &program,
                             scalar_type,
+                            &input_indices,
                         )?;
                         observer.shader_source_generation(started);
                         if !provider.supports_shader_requirements(single_shader.requirements()) {

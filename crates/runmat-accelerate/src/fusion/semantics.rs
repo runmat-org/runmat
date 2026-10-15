@@ -521,12 +521,85 @@ impl ResolvedProgram {
             FusionArithmeticEvidence::RealPower(receipt) => Some(receipt),
         }
     }
+    pub fn exact_single_base_power(
+        &self,
+        id: ValueId,
+    ) -> Option<runmat_accelerate_api::ExactSingleBasePower> {
+        use runmat_accelerate_api::{
+            ExactSingleBasePower, RealPowerArithmeticMode, RealPowerOperand,
+        };
+        let receipt = self.power_arithmetic(id)?;
+        if receipt.base_class != NumericClass::Single
+            || receipt.exponent_class != NumericClass::Double
+            || receipt.output_class != NumericClass::Single
+            || receipt.mode
+                != (RealPowerArithmeticMode::MixedDoubleThenSingle {
+                    single_operand: RealPowerOperand::Base,
+                })
+            || self.fact(receipt.exponent_id).ok()?.shape.element_count() != Some(1)
+        {
+            return None;
+        }
+        ExactSingleBasePower::for_control(receipt.exponent_scalar?)
+    }
+
+    /// Controls are omitted only if every use is an authenticated exponent.
+    /// They remain source inputs and original-bit semantic identity facts.
+    pub fn embedded_power_controls(
+        &self,
+        plan: &FusionGroupPlan,
+        outputs: &[ValueId],
+    ) -> HashSet<ValueId> {
+        let mut controls = plan
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                let output = match operation {
+                    FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => {
+                        *output
+                    }
+                }?;
+                self.exact_single_base_power(output)?;
+                Some(self.power_arithmetic(output)?.exponent_id)
+            })
+            .filter(|id| plan.inputs.contains(id) && !outputs.contains(id))
+            .collect::<HashSet<_>>();
+        for operation in &plan.operations {
+            let (inputs, output) = match operation {
+                FusionOp::Primitive { inputs, output, .. }
+                | FusionOp::Builtin { inputs, output, .. } => (inputs, output),
+            };
+            let exact = output.and_then(|output| self.exact_single_base_power(output));
+            for (position, input) in inputs.iter().enumerate() {
+                if position != 1 || exact.is_none() {
+                    controls.remove(input);
+                }
+            }
+        }
+        controls
+    }
+
+    pub fn uses_implicit_downcast_for(&self, inputs: &[usize]) -> bool {
+        self.precision_policy.permits_double_to_single()
+            && self.provider_precision == ProviderPrecision::F32
+            && inputs.iter().any(|&index| {
+                self.source_inputs.get(index).is_some_and(|fact| {
+                    fact.numeric()
+                        .is_some_and(|numeric| numeric.class == NumericClass::Double)
+                })
+            })
+    }
     pub fn require_ordinary_arithmetic(
         &self,
         id: ValueId,
         precision: ProviderPrecision,
     ) -> Result<()> {
         match self.arithmetic.get(&id) {
+            Some(FusionArithmeticEvidence::RealPower(_))
+                if self.exact_single_base_power(id).is_some() =>
+            {
+                Ok(())
+            }
             Some(FusionArithmeticEvidence::RealPower(receipt))
                 if matches!(
                     receipt.mode,

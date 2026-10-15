@@ -312,7 +312,7 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
 #[ignore = "requires an actual SHADER_F64 adapter and RUNMAT_WGPU_FORCE_PRECISION=f64"]
 fn future_mixed_power_output_supplies_provider_owned_variance_extent() {
     use runmat_accelerate_api::power_service::{
-        execute_resident_scalar_power, plan_resident_scalar_power,
+        execute_resident_scalar_power, plan_scalar_power_for_dense_output,
         prepare_resident_scalar_power_against_plan,
     };
     use runmat_accelerate_api::{
@@ -332,7 +332,7 @@ fn future_mixed_power_output_supplies_provider_owned_variance_extent() {
         })
         .unwrap();
     let (representation, _) = provider.ordered_mean_live_source(&input).unwrap();
-    let square = plan_resident_scalar_power(
+    let square = plan_scalar_power_for_dense_output(
         provider,
         representation,
         PowerScalarControl::DoubleBits(2.0f64.to_bits()),

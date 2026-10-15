@@ -270,6 +270,19 @@ pub(super) fn plan_selected(
     else {
         return Ok(None);
     };
+    // The variance source is the future POWER allocation, not just its
+    // logical shape. Preserve the exact proposal's allocator-rounded extent.
+    if square_work
+        .output
+        .checked_byte_len()
+        .is_none_or(|logical| logical > square_bytes)
+        || powers
+            .square
+            .exact_physical_proposal()
+            .is_some_and(|proposal| proposal.output_buffer_bytes != square_bytes)
+    {
+        return Ok(None);
+    }
     let Some(variance) = route(
         provider,
         square_work.output.clone(),

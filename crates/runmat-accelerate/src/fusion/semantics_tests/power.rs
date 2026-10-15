@@ -2,6 +2,197 @@ use super::*;
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn certified_power_fusion_embeds_original_double_controls_before_operand_casts() {
+    let source = plan(
+        vec![
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![0, 1],
+                output: Some(2),
+            },
+            FusionOp::Primitive {
+                op: PrimitiveOp::UPlus,
+                inputs: vec![2],
+                output: Some(3),
+            },
+        ],
+        3,
+    );
+    let base = Value::Tensor(runmat_value::Tensor::from_f32(vec![-0.0, -2.0], vec![1, 2]).unwrap());
+    let mut identities = Vec::new();
+    for exponent in [0.0_f64, -0.0, 1.0, 2.0] {
+        for policy in [PrecisionPolicy::Exact, PrecisionPolicy::AllowDoubleToSingle] {
+            let program = resolve_policy(
+                &source,
+                &[base.clone(), Value::Num(exponent)],
+                ProviderPrecision::F32,
+                policy,
+            )
+            .unwrap();
+            let receipt = program.power_arithmetic(2).unwrap();
+            assert_eq!(
+                receipt.exponent_scalar,
+                Some(runmat_accelerate_api::PowerScalarControl::DoubleBits(
+                    exponent.to_bits()
+                ))
+            );
+            assert_eq!(
+                receipt.mode,
+                runmat_accelerate_api::RealPowerArithmeticMode::MixedDoubleThenSingle {
+                    single_operand: runmat_accelerate_api::RealPowerOperand::Base
+                }
+            );
+            let generated = source
+                .prepare_typed_shader(&[3], &program, ScalarType::F32)
+                .unwrap();
+            let (shader, requirements, data_inputs) = generated.into_parts();
+            assert_eq!(data_inputs, [0]);
+            assert_eq!(
+                requirements,
+                runmat_accelerate_api::ProviderShaderRequirements::Basic
+            );
+            assert!(shader.contains("bitcast<f32>(rm_exact_power_"));
+            assert!(!shader.contains("var<storage, read> input1"));
+            assert!(!shader.contains("fn rm_power_f32("));
+            assert!(!shader.contains("f64"));
+            crate::wgsl::validation_tests::validate_generated(
+                "certified-power-fusion",
+                &shader,
+                64,
+                8,
+                crate::wgsl::validation_tests::RequiredCaps::None,
+            );
+            if policy == PrecisionPolicy::Exact {
+                identities.push(program.cache_identity().unwrap());
+            }
+        }
+    }
+    assert_ne!(
+        identities[0], identities[1],
+        "signed Double control bits remain semantic identity"
+    );
+    let f64_program = resolve_policy(
+        &source,
+        &[base.clone(), Value::Num(2.0)],
+        ProviderPrecision::F64,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert!(
+        source
+            .prepare_typed_shader(&[3], &f64_program, ScalarType::F64)
+            .is_err(),
+        "legacy F64 data staging is not certified binary32 word transport"
+    );
+    for exponent in [3.0_f64, f64::from_bits(2.0_f64.to_bits() + 1), 0.5] {
+        let inputs = [base.clone(), Value::Num(exponent)];
+        if let Ok(program) = resolve_policy(
+            &source,
+            &inputs,
+            ProviderPrecision::F32,
+            PrecisionPolicy::Exact,
+        ) {
+            assert!(source
+                .prepare_typed_shader(&[3], &program, ScalarType::F32)
+                .is_err());
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn certified_exponent_fanout_cannot_be_omitted_from_physical_data_inputs() {
+    let source = plan(
+        vec![
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![0, 1],
+                output: Some(2),
+            },
+            FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![2, 1],
+                output: Some(3),
+            },
+        ],
+        3,
+    );
+    let base = Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let program = resolve_policy(
+        &source,
+        &[base, Value::Num(2.0)],
+        ProviderPrecision::F64,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert!(program.embedded_power_controls(&source, &[3]).is_empty());
+    assert!(program.embedded_power_controls(&source, &[1, 2]).is_empty());
+    assert!(
+        source
+            .prepare_typed_shader_with_inputs(&[3], &program, ScalarType::F32, &[0])
+            .is_err(),
+        "fanout data operand cannot be omitted by a variant projection"
+    );
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn single_fallback_shaders_preserve_primary_physical_projection_and_output_binding() {
+    let source = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::ElemPow,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let base = Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let program = resolve_policy(
+        &source,
+        &[base, Value::Num(2.0)],
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    // Public Double control output currently forces runtime F32 admission to
+    // decline. Still verify the shader projection invariant independently so
+    // extending that ABI cannot make fallback rebind prepared handles.
+    for outputs in [&[0, 2][..], &[1, 2][..]] {
+        let (_, _, projection) = source
+            .prepare_typed_shader(outputs, &program, ScalarType::F32)
+            .unwrap()
+            .into_parts();
+        assert_eq!(
+            projection,
+            if outputs[0] == 0 { vec![0] } else { vec![0, 1] }
+        );
+        for &output in outputs {
+            let single = source
+                .prepare_typed_shader_with_inputs(&[output], &program, ScalarType::F32, &projection)
+                .unwrap();
+            assert!(single.source().contains(&format!(
+                "@binding({}) var<storage, read_write> output0",
+                projection.len()
+            )));
+            assert!(single.source().contains(&format!(
+                "@binding({}) var<uniform> params",
+                projection.len() + 1
+            )));
+            let (shader, _, inputs) = single.into_parts();
+            assert_eq!(inputs, projection);
+            crate::wgsl::validation_tests::validate_generated(
+                "stable-projection-single-fallback",
+                &shader,
+                64,
+                8,
+                crate::wgsl::validation_tests::RequiredCaps::None,
+            );
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn double_round_and_remainder_keep_ieee_word_requirement() {
     let inputs = [
         Value::Tensor(runmat_value::Tensor::new(vec![2.5, -1.5], vec![1, 2]).unwrap()),

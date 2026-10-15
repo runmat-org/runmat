@@ -90,6 +90,12 @@ impl PowerSymbolicPlan {
     pub fn operation(&self) -> &ProviderOperationIdentity {
         &self.query.operation
     }
+    /// Descriptive allocation/dispatch proposal, never an executable recipe.
+    pub fn exact_physical_proposal(
+        &self,
+    ) -> Option<&crate::ProviderRealElementwisePhysicalProposal> {
+        self.exact_proposal.as_ref()
+    }
 
     pub fn physical_recipe(&self) -> PowerPhysicalRecipe {
         if self.route == PowerPhysicalRoute::ExactSingleBase {
@@ -151,6 +157,7 @@ impl PowerSymbolicPlan {
                 return None;
             }
             let mut output = self.resident.clone();
+            output.layout = ProviderLayout::ColumnMajorContiguous;
             output.shape = self
                 .output_shape
                 .iter()
@@ -295,6 +302,11 @@ fn broadcast_u64(a: &[u64], b: &[u64]) -> Result<Vec<u64>, PowerServiceError> {
         .collect()
 }
 
+struct ExactDescription {
+    proposal: crate::ProviderRealElementwisePhysicalProposal,
+    input: Option<crate::PowerInputDescription>,
+}
+
 fn derive(
     provider: &dyn AccelProvider,
     resident: ProviderRepresentation,
@@ -302,10 +314,12 @@ fn derive(
     resident_operand: RealPowerOperand,
     host_shape: &[usize],
     operation: ProviderOperationIdentity,
-    exact_proposal: Option<crate::ProviderRealElementwisePhysicalProposal>,
+    exact: Option<ExactDescription>,
 ) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
     let provider_precision = provider.precision();
     let capability = provider.capability_snapshot();
+    let (exact_proposal, source_input) =
+        exact.map_or((None, None), |exact| (Some(exact.proposal), exact.input));
     validate_scalar_shape(host_shape)?;
     if resident.residency != ProviderResidency::Device
         || resident.storage != ProviderStorage::DenseReal
@@ -386,7 +400,10 @@ fn derive(
         outputs: Vec::new(),
         workload: ProviderWorkload {
             real_power_mode: Some(mode),
-            real_power_scalar: exact_proposal.as_ref().map(|_| control),
+            real_power_scalar: exact_proposal.as_ref().map(|_| crate::PowerScalarWorkload {
+                control,
+                input: source_input,
+            }),
             ..ProviderWorkload::default()
         },
     };
@@ -444,9 +461,11 @@ pub(super) fn validate_scalar_shape(host_shape: &[usize]) -> Result<(), PowerSer
     Ok(())
 }
 
-/// Effect-free admission for a hypothetical future resident representation.
-/// `Some` is a physical query/recipe, not source binding, owner proof, or a
-/// placement decision. The live-handle preparation must compare it later.
+/// Effect-free geometry projection for a hypothetical resident representation.
+/// `Some` is not full feasibility, source binding, owner proof, or placement:
+/// an exact route without backing description has unknown retained peak.
+/// Future dense allocator outputs should use `plan_scalar_power_for_dense_output`;
+/// live preparation independently binds actual extent and checks feasibility.
 pub fn plan_resident_scalar_power(
     provider: &dyn AccelProvider,
     resident: ProviderRepresentation,
@@ -455,12 +474,48 @@ pub fn plan_resident_scalar_power(
     host_shape: &[usize],
     operation: ProviderOperationIdentity,
 ) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
+    plan_with_input(
+        provider,
+        resident,
+        control,
+        resident_operand,
+        host_shape,
+        operation,
+        None,
+    )
+}
+
+pub(super) fn plan_with_input(
+    provider: &dyn AccelProvider,
+    resident: ProviderRepresentation,
+    control: PowerScalarControl,
+    resident_operand: RealPowerOperand,
+    host_shape: &[usize],
+    operation: ProviderOperationIdentity,
+    input: Option<crate::PowerInputDescription>,
+) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
     validate_scalar_shape(host_shape)?;
     // Unavailable byte geometry makes only this specialization unavailable.
     // Do not fabricate a maximum extent, or suppress an independent existing
     // typed/legacy route whose provider owns its own physical admission.
-    let exact_proposal = resident
-        .checked_byte_len()
+    if let Some(crate::PowerInputDescription::PlannedDense { requested_bytes }) = &input {
+        if resident.layout != ProviderLayout::ColumnMajorContiguous
+            || resident
+                .checked_byte_len()
+                .is_none_or(|logical| logical > *requested_bytes)
+            || provider
+                .plan_dense_real_output_buffer_bytes(&resident)
+                .map_err(PowerServiceError)?
+                != Some(*requested_bytes)
+        {
+            return Ok(None);
+        }
+    }
+    let source_bytes = input
+        .as_ref()
+        .map(crate::PowerInputDescription::requested_bytes)
+        .or_else(|| resident.checked_byte_len());
+    let exact_proposal = source_bytes
         .and_then(|bytes| exact_single_base_request(&resident, control, resident_operand, bytes))
         .map(|request| provider.propose_real_elementwise(&request))
         .transpose()
@@ -473,12 +528,23 @@ pub fn plan_resident_scalar_power(
         resident_operand,
         host_shape,
         operation,
-        exact_proposal,
+        exact_proposal.map(|proposal| ExactDescription { proposal, input }),
     )?
     else {
         return Ok(None);
     };
     if plan.route == PowerPhysicalRoute::ExactSingleBase {
+        if plan
+            .query
+            .workload
+            .real_power_scalar
+            .as_ref()
+            .is_some_and(|work| work.input.is_none())
+        {
+            // Preserve shape-only projection without inventing retained source
+            // bytes or confusing its query with admitted finite-budget work.
+            return Ok(Some(plan));
+        }
         if !plan
             .feasibility_query(PowerResultDomain::Real)
             .is_some_and(|query| provider.query_feasibility(&query).is_supported())
@@ -505,6 +571,52 @@ pub fn plan_resident_scalar_power(
     Ok(Some(plan))
 }
 
+/// Plan a POWER input that will be produced by the existing dense real output
+/// allocator. The extent is reprojected on every replan; no live handle or
+/// allocation authority is manufactured from this future description.
+pub fn plan_scalar_power_for_dense_output(
+    provider: &dyn AccelProvider,
+    resident: ProviderRepresentation,
+    control: PowerScalarControl,
+    resident_operand: RealPowerOperand,
+    host_shape: &[usize],
+    operation: ProviderOperationIdentity,
+) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
+    let Some(requested_bytes) = provider
+        .plan_dense_real_output_buffer_bytes(&resident)
+        .map_err(PowerServiceError)?
+    else {
+        return Ok(None);
+    };
+    plan_with_input(
+        provider,
+        resident,
+        control,
+        resident_operand,
+        host_shape,
+        operation,
+        Some(crate::PowerInputDescription::PlannedDense { requested_bytes }),
+    )
+}
+
+impl PowerSymbolicPlan {
+    pub fn replan(&self, provider: &dyn AccelProvider) -> Result<Option<Self>, PowerServiceError> {
+        plan_with_input(
+            provider,
+            self.resident.clone(),
+            self.control,
+            self.resident_operand,
+            &self.host_shape,
+            self.query.operation.clone(),
+            self.query
+                .workload
+                .real_power_scalar
+                .as_ref()
+                .and_then(|work| work.input.clone()),
+        )
+    }
+}
+
 /// Description only; ProviderRealElementwiseRecipe owns live execution rights.
 pub fn exact_single_base_request(
     resident: &ProviderRepresentation,
@@ -516,8 +628,9 @@ pub fn exact_single_base_request(
         || resident.element_type != ProviderElementType::F32
         || resident.storage != ProviderStorage::DenseReal
         || resident.residency != ProviderResidency::Device
-        || resident.layout != ProviderLayout::ColumnMajorContiguous
-        || resident.checked_element_count().is_none_or(|n| n == 0)
+        || !(resident.layout == ProviderLayout::ColumnMajorContiguous
+            || (resident.layout == ProviderLayout::Strided && resident.shape.len() == 2))
+        || resident.checked_element_count().is_none()
         || crate::ExactSingleBasePower::for_control(control).is_none()
     {
         return None;

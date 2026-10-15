@@ -317,15 +317,24 @@ impl ProviderRealElementwiseRecipe {
 fn native_request(request: &ProviderRealElementwiseRequest) -> bool {
     let source = &request.source;
     if source.storage != ProviderStorage::DenseReal
-        || source.layout != ProviderLayout::ColumnMajorContiguous
+        || !(source.layout == ProviderLayout::ColumnMajorContiguous
+            || (matches!(
+                request.operation,
+                ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
+            ) && source.layout == ProviderLayout::Strided
+                && source.shape.len() == 2))
         || source.residency != ProviderResidency::Device
         || !matches!(
             source.element_type,
             ProviderElementType::F32 | ProviderElementType::F64
         )
-        || source
-            .checked_element_count()
-            .is_none_or(|count| count == 0)
+        || source.checked_element_count().is_none_or(|count| {
+            count == 0
+                && !matches!(
+                    request.operation,
+                    ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
+                )
+        })
         || source
             .checked_byte_len()
             .is_none_or(|bytes| bytes > request.source_buffer_bytes)
@@ -381,6 +390,7 @@ fn output_projection(
         | ProviderRealElementwiseOperation::ScalarMul { .. }
         | ProviderRealElementwiseOperation::ScalarMax { .. }
         | ProviderRealElementwiseOperation::Sqrt => {
+            output.layout = ProviderLayout::ColumnMajorContiguous;
             ProviderRealElementwiseOutputRoute::FreshAllocation
         }
     };
@@ -392,7 +402,14 @@ fn valid_route(
     physical: &ProviderRealElementwisePhysicalProposal,
 ) -> bool {
     match physical.output_route {
-        ProviderRealElementwiseOutputRoute::FreshAllocation => physical.pipeline_key.is_some(),
+        ProviderRealElementwiseOutputRoute::FreshAllocation => {
+            physical.pipeline_key.is_some()
+                || (request.source.checked_element_count() == Some(0)
+                    && physical.uniform_allocations == 0
+                    && physical.uniform_buffer_bytes == 0
+                    && physical.dispatches == 0
+                    && physical.queue_submissions == 0)
+        }
         ProviderRealElementwiseOutputRoute::SameClassFloatingCastAlias => {
             physical.output_buffer_bytes == request.source_buffer_bytes
                 && physical.uniform_allocations == 0
@@ -423,7 +440,13 @@ fn live_matches(
         && handle.physical().element_type() == expected
         && handle.physical().storage() == GpuTensorStorage::Real
         && !handle.view().is_logical()
-        && handle.view().layout() == GpuTensorLayout::Contiguous
+        && matches!(
+            (representation.layout, handle.view().layout()),
+            (
+                ProviderLayout::ColumnMajorContiguous,
+                GpuTensorLayout::Contiguous
+            ) | (ProviderLayout::Strided, GpuTensorLayout::Transpose(_))
+        )
         && handle.physical().requested_bytes() == bytes
         && handle
             .shape()

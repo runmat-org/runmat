@@ -196,6 +196,7 @@ impl TypedProducer {
             expressions,
             helpers: Vec::new(),
             checked_program: Some(checked.clone()),
+            exact_power: false,
         }))
     }
 }

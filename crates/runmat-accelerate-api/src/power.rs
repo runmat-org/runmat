@@ -37,6 +37,53 @@ pub enum PowerScalarControl {
     DoubleBits(u64),
 }
 
+/// Cost/query description, never allocation or execution authority. A live
+/// preparation compares this description with its independently owned handle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PowerInputDescription {
+    Live {
+        physical: crate::GpuPhysicalDescriptor,
+        view: crate::GpuTensorView,
+    },
+    /// Future dense contiguous allocation extent supplied by the owning
+    /// allocator projection. This is not a physical descriptor or a lease.
+    PlannedDense { requested_bytes: u64 },
+}
+
+impl PowerInputDescription {
+    pub(crate) fn from_handle(handle: &crate::GpuTensorHandle) -> Self {
+        Self::Live {
+            physical: *handle.physical(),
+            view: handle.view().clone(),
+        }
+    }
+    pub(crate) fn matches(&self, handle: &crate::GpuTensorHandle) -> bool {
+        match self {
+            Self::Live { physical, view } => {
+                *physical == *handle.physical() && *view == *handle.view()
+            }
+            Self::PlannedDense { requested_bytes } => {
+                *requested_bytes == handle.physical().requested_bytes()
+                    && matches!(handle.view().layout(), crate::GpuTensorLayout::Contiguous)
+            }
+        }
+    }
+    pub fn requested_bytes(&self) -> u64 {
+        match self {
+            Self::Live { physical, .. } => physical.requested_bytes(),
+            Self::PlannedDense { requested_bytes } => *requested_bytes,
+        }
+    }
+}
+
+/// Exact scalar program plus optional physical source description. Unknown
+/// backing remains None, especially for empty views retaining a large buffer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PowerScalarWorkload {
+    pub control: PowerScalarControl,
+    pub input: Option<PowerInputDescription>,
+}
+
 /// Certified algebraic cases of a Double exponent applied to a real Single
 /// base. This describes an implementation, not permission to narrow a control
 /// or to execute general mixed POWER in Single arithmetic.

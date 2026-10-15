@@ -1624,6 +1624,26 @@ impl FusionGroupPlan {
         final_writes: &str,
         include_ieee_helpers: bool,
     ) -> String {
+        self.build_wgsl_shader_with_inputs(
+            (self.inputs.len(), scalar_ty),
+            output_bindings,
+            params_binding_idx,
+            body,
+            final_writes,
+            include_ieee_helpers,
+        )
+    }
+
+    fn build_wgsl_shader_with_inputs(
+        &self,
+        input_abi: (usize, &str),
+        output_bindings: &str,
+        params_binding_idx: usize,
+        body: &str,
+        final_writes: &str,
+        include_ieee_helpers: bool,
+    ) -> String {
+        let (input_count, scalar_ty) = input_abi;
         let mut shader = String::new();
 
         // ── type definitions ──────────────────────────────────────────────────
@@ -1636,7 +1656,7 @@ impl FusionGroupPlan {
         shader.push_str(
             "struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n",
         );
-        for idx in 0..self.inputs.len() {
+        for idx in 0..input_count {
             shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
             shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
         }
@@ -1682,7 +1702,7 @@ impl FusionGroupPlan {
         }
 
         // ── resource bindings ─────────────────────────────────────────────────
-        for (idx, _) in self.inputs.iter().enumerate() {
+        for idx in 0..input_count {
             shader.push_str(&format!(
                 "@group(0) @binding({idx}) var<storage, read> input{idx}: Tensor;\n",
             ));
@@ -1705,7 +1725,7 @@ impl FusionGroupPlan {
         );
 
         // Compute broadcasted flat indices per input
-        for (idx, _) in self.inputs.iter().enumerate() {
+        for idx in 0..input_count {
             shader.push_str(&format!(
                 "    var i{idx}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{idx}_shape[d].value; let st = params.in{idx}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{idx} = i{idx} + c * st; d = d + 1u; }}\n",
             ));

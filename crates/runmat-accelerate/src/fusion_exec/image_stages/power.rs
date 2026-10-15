@@ -4,8 +4,9 @@
 use super::*;
 use runmat_accelerate_api::{
     power_service::{
-        execute_resident_scalar_power, plan_resident_scalar_power, prepare_resident_scalar_power,
-        prepare_resident_scalar_power_against_plan, PowerSymbolicPlan,
+        execute_resident_scalar_power, plan_scalar_power_for_dense_output,
+        prepare_resident_scalar_power, prepare_resident_scalar_power_against_plan,
+        PowerSymbolicPlan,
     },
     PowerResultDomain, PowerScalarControl, ProviderElementType, ProviderImagePowerCall,
     ProviderLayout, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
@@ -43,7 +44,7 @@ pub(super) fn plan_selected(
         return Ok(None);
     }
     let plan = |call: &ProviderImagePowerCall| {
-        plan_resident_scalar_power(
+        plan_scalar_power_for_dense_output(
             provider,
             future_representation(call.base_class, program.input_shape).ok_or_else(|| {
                 ProviderExecutionError::from(anyhow!("selected POWER base class is unavailable"))

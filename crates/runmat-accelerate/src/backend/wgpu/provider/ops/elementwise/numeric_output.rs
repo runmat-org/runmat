@@ -28,7 +28,7 @@ impl WgpuProvider {
         let Some(elements) = output.checked_element_count() else {
             return Ok(None);
         };
-        if elements == 0 || elements > u64::from(u32::MAX) {
+        if elements > u64::from(u32::MAX) {
             return Ok(None);
         }
         let Some(len) = usize::try_from(elements).ok() else {

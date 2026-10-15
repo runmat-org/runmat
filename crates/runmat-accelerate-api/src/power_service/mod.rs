@@ -11,8 +11,8 @@ pub use prepare::{
     PowerPhysicalRoute, PowerScalarConstruction, PreparedResidentScalarPower,
 };
 pub use symbolic::{
-    exact_single_base_request, plan_resident_scalar_power, PowerSymbolicPhysicalWork,
-    PowerSymbolicPlan,
+    exact_single_base_request, plan_resident_scalar_power, plan_scalar_power_for_dense_output,
+    PowerSymbolicPhysicalWork, PowerSymbolicPlan,
 };
 pub use validate::PowerServiceError;
 

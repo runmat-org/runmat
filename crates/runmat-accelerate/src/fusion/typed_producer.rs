@@ -18,6 +18,7 @@ pub(crate) struct TypedProducer {
     expressions: HashMap<ValueId, String>,
     helpers: Vec<(FusionMathHelper, ScalarType)>,
     checked_program: Option<ScalarProgram>,
+    exact_power: bool,
 }
 impl TypedProducer {
     pub fn checked_program(&self) -> Option<&ScalarProgram> {
@@ -91,6 +92,7 @@ impl TypedProducer {
         }
         let mut body = String::new();
         let mut helpers = Vec::new();
+        let mut exact_power = false;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()
@@ -103,6 +105,30 @@ impl TypedProducer {
                 | FusionOp::Builtin { inputs, output, .. } => (inputs, output),
             };
             let output = output.ok_or_else(|| anyhow!("fusion operation has no output"))?;
+            if let Some(operation) = program.exact_single_base_power(output) {
+                // The certified implementation reads original binary32 words.
+                // The legacy F64 fusion ABI stages Single data as doubles;
+                // converting those back in WGSL is not a proven subnormal-
+                // preserving bit transport. Let the original operation use
+                // its exact F32-storage recipe instead of claiming that ABI.
+                if buffer_type != ScalarType::F32 {
+                    return Err(anyhow!("certified POWER fusion requires binary32 data ABI"));
+                }
+                let [base, _] = inputs.as_slice() else {
+                    return Err(anyhow!("certified POWER arity changed"));
+                };
+                let base = expressions
+                    .get(base)
+                    .ok_or_else(|| anyhow!("missing certified POWER base"))?;
+                let name = crate::kernel_math::power_exact::entrypoint(operation);
+                let temporary = format!("typed{index}");
+                body.push_str(&format!(
+                    "    let {temporary}: f32 = bitcast<f32>({name}(bitcast<u32>({base})));\n"
+                ));
+                expressions.insert(output, temporary);
+                exact_power = true;
+                continue;
+            }
             let operation_type = match program.floating_class(output)? {
                 NumericClass::Single => ScalarType::F32,
                 NumericClass::Double => ScalarType::F64,
@@ -216,6 +242,7 @@ impl TypedProducer {
             expressions,
             helpers,
             checked_program: None,
+            exact_power,
         })
     }
     pub fn expression(&self, id: ValueId) -> Result<&str> {
@@ -230,6 +257,9 @@ impl TypedProducer {
         // arithmetic, so representation contracts do not share a stale key.
         let identity = program.cache_identity()?;
         let mut math = String::new();
+        if self.exact_power {
+            math.push_str(crate::kernel_math::power_exact::functions());
+        }
         for &(helper, precision) in &self.helpers {
             let precision = match precision {
                 ScalarType::F32 => runmat_accelerate_api::ProviderPrecision::F32,

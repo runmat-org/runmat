@@ -77,10 +77,7 @@ impl RealObserved {
 }
 
 pub(super) fn source_representation(input: &GpuTensorHandle) -> Option<ProviderRepresentation> {
-    if input.physical().storage() != GpuTensorStorage::Real
-        || input.view().is_logical()
-        || runmat_accelerate_api::handle_is_transposed(input)
-    {
+    if input.physical().storage() != GpuTensorStorage::Real || input.view().is_logical() {
         return None;
     }
     let element_type = match input.physical().element_type() {
@@ -91,7 +88,11 @@ pub(super) fn source_representation(input: &GpuTensorHandle) -> Option<ProviderR
     Some(ProviderRepresentation {
         element_type,
         storage: ProviderStorage::DenseReal,
-        layout: ProviderLayout::ColumnMajorContiguous,
+        layout: if runmat_accelerate_api::handle_is_transposed(input) {
+            ProviderLayout::Strided
+        } else {
+            ProviderLayout::ColumnMajorContiguous
+        },
         residency: ProviderResidency::Device,
         shape: input
             .shape()
@@ -140,14 +141,43 @@ impl WgpuProvider {
         if let Operation::FloatingCast { target } = request.operation {
             return self.propose_real_floating_cast(request, target);
         }
-        let Some(output_buffer_bytes) =
-            self.plan_dense_real_output_buffer_bytes_exec(&request.source)?
+        let mut output = request.source.clone();
+        output.layout = ProviderLayout::ColumnMajorContiguous;
+        let Some(output_buffer_bytes) = self.plan_dense_real_output_buffer_bytes_exec(&output)?
         else {
             return Ok(None);
         };
         let Some(elements) = request.source.checked_element_count() else {
             return Ok(None);
         };
+        if elements == 0 {
+            if !matches!(request.operation, Operation::ExactSingleBasePower { control }
+                if runmat_accelerate_api::ExactSingleBasePower::for_control(control).is_some())
+                || request.source.element_type != ProviderElementType::F32
+            {
+                return Ok(None);
+            }
+            return Ok(Some(Proposal {
+                output_route:
+                    runmat_accelerate_api::ProviderRealElementwiseOutputRoute::FreshAllocation,
+                output_buffer_bytes,
+                workgroup_size: self.linear_launch.workgroup(),
+                chunk_capacity: self
+                    .linear_launch
+                    .chunk_capacity()
+                    .and_then(|n| n.try_into().ok())
+                    .ok_or_else(|| {
+                        ProviderExecutionError::from(anyhow!(
+                            "empty POWER launch capacity unavailable"
+                        ))
+                    })?,
+                uniform_allocations: 0,
+                uniform_buffer_bytes: 0,
+                dispatches: 0,
+                queue_submissions: 0,
+                pipeline_key: None,
+            }));
+        }
         if elements > u64::from(u32::MAX)
             || self.adapter_limits.max_storage_buffers_per_shader_stage < 2
         {
@@ -234,7 +264,15 @@ impl WgpuProvider {
                         else {
                             return Ok(None);
                         };
-                        crate::backend::wgpu::shaders::exact_power::shader(operation)
+                        if request.source.layout == ProviderLayout::Strided
+                            && request.source.shape.len() != 2
+                        {
+                            return Ok(None);
+                        }
+                        crate::backend::wgpu::shaders::exact_power::shader_for_layout(
+                            operation,
+                            request.source.layout == ProviderLayout::Strided,
+                        )
                     } else {
                         real_unary_shader(crate::backend::wgpu::types::UnaryOpCode::Sqrt, precision)
                     };
@@ -254,7 +292,13 @@ impl WgpuProvider {
                     (
                         recipe.workgroup,
                         chunk_capacity,
-                        std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64,
+                        if request.source.layout == ProviderLayout::Strided {
+                            FusionUniformAbi::Broadcast
+                                .requested_bytes(1)
+                                .map_err(ProviderExecutionError::from)?
+                        } else {
+                            std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64
+                        },
                         recipe.key(),
                         1,
                     )
@@ -323,8 +367,18 @@ impl WgpuProvider {
                 "real recipe input is not contiguous floating real"
             ))
         })?;
-        self.real_floating_entry(input)
-            .map_err(ProviderExecutionError::from)?;
+        let empty_exact = matches!(
+            recipe.request().operation,
+            Operation::ExactSingleBasePower { .. }
+        ) && source.checked_element_count() == Some(0);
+        if empty_exact {
+            self.allocations
+                .validate_empty_view(input)
+                .map_err(ProviderExecutionError::from)?;
+        } else {
+            self.real_floating_entry(input)
+                .map_err(ProviderExecutionError::from)?;
+        }
         if source != recipe.request().source
             || input.physical().requested_bytes() != recipe.request().source_buffer_bytes
             || self
@@ -370,36 +424,69 @@ impl WgpuProvider {
                     .ok_or_else(|| {
                     ProviderExecutionError::from(anyhow!("uncertified POWER control"))
                 })?;
-                let entry = self.real_floating_entry(input)?;
-                let shader = crate::backend::wgpu::shaders::exact_power::shader(operation);
-                self.fused_elementwise_typed_exec_recorded(
-                    &shader,
-                    std::slice::from_ref(input),
-                    FusedElementwiseWork {
-                        output_shape: &entry.shape,
-                        len: entry.len,
-                        uniform_abi: Some(FusionUniformAbi::Simple),
-                        representation: FusedElementwiseRepresentation {
-                            input_precision: NumericPrecision::F32,
-                            output_precision: NumericPrecision::F32,
-                            output_storage: GpuTensorStorage::Real,
-                            logical_output: false,
+                if empty_exact {
+                    let buffer = self.with_emission(|emission, _| {
+                        self.create_storage_buffer_checked_with_element_size(
+                            emission,
+                            0,
+                            "runmat-empty-exact-power",
+                            BufferUsageClass::FusionOut,
+                            4,
+                        )
+                    })??;
+                    observed.borrow_mut().output(&buffer);
+                    let allocated_bytes = buffer.size();
+                    self.register_numeric_buffer(
+                        buffer,
+                        super::super::backend_types::NumericBufferRegistration {
+                            shape: input.shape().to_vec(),
+                            len: 0,
+                            physical_element_type: runmat_accelerate_api::NumericElementType::F32,
+                            storage: GpuTensorStorage::Real,
+                            allocated_bytes,
+                            usage: BufferUsageClass::FusionOut,
                         },
-                    },
-                    |_| Ok(()),
-                    SingleFusionEvidence::Legacy {
-                        observed: Some(&observed),
-                        prepared: None,
-                    },
-                )
-                .map_err(|cause| {
-                    let error = ProviderExecutionError::from(cause);
-                    if observed.borrow().effect {
-                        error.after_effect()
-                    } else {
-                        error
-                    }
-                })
+                    )
+                    .map_err(|error| ProviderExecutionError::from(error).after_effect())
+                } else {
+                    let entry = self.real_floating_entry(input)?;
+                    let broadcast = runmat_accelerate_api::handle_is_transposed(input);
+                    let shader = crate::backend::wgpu::shaders::exact_power::shader_for_layout(
+                        operation, broadcast,
+                    );
+                    self.fused_elementwise_typed_exec_recorded(
+                        &shader,
+                        std::slice::from_ref(input),
+                        FusedElementwiseWork {
+                            output_shape: &entry.shape,
+                            len: entry.len,
+                            uniform_abi: Some(if broadcast {
+                                FusionUniformAbi::Broadcast
+                            } else {
+                                FusionUniformAbi::Simple
+                            }),
+                            representation: FusedElementwiseRepresentation {
+                                input_precision: NumericPrecision::F32,
+                                output_precision: NumericPrecision::F32,
+                                output_storage: GpuTensorStorage::Real,
+                                logical_output: false,
+                            },
+                        },
+                        |_| Ok(()),
+                        SingleFusionEvidence::Legacy {
+                            observed: Some(&observed),
+                            prepared: None,
+                        },
+                    )
+                    .map_err(|cause| {
+                        let error = ProviderExecutionError::from(cause);
+                        if observed.borrow().effect {
+                            error.after_effect()
+                        } else {
+                            error
+                        }
+                    })
+                }
             }
             Operation::Sqrt => self
                 .unary_op_exec_recorded(

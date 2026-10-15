@@ -13,6 +13,90 @@ fn resident(shape: &[u64], element_type: ProviderElementType) -> ProviderReprese
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn future_allocator_extent_is_revalidated_then_bound_to_authentic_live_input() {
+    let provider = provider_with_mode(
+        false,
+        true,
+        RealPowerArithmeticMode::MixedDoubleThenSingle {
+            single_operand: RealPowerOperand::Base,
+        },
+    );
+    provider.exact_scalar.store(true, Ordering::SeqCst);
+    let control = PowerScalarControl::DoubleBits(2.0_f64.to_bits());
+    let plan = || {
+        crate::power_service::plan_scalar_power_for_dense_output(
+            provider,
+            resident(&[2, 2], ProviderElementType::F32),
+            control,
+            RealPowerOperand::Base,
+            &[1, 1],
+            ProviderOperationIdentity::new("test.power"),
+        )
+        .unwrap()
+        .unwrap()
+    };
+    provider.dense_output_padding.store(16, Ordering::SeqCst);
+    let padded = plan();
+    assert!(matches!(
+        padded
+            .feasibility_query(PowerResultDomain::Real)
+            .unwrap()
+            .workload
+            .real_power_scalar
+            .unwrap()
+            .input,
+        Some(crate::PowerInputDescription::PlannedDense {
+            requested_bytes: 32
+        })
+    ));
+    let input = provider
+        .owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let bind = |planned: &PowerSymbolicPlan| {
+        crate::power_service::prepare_resident_scalar_power_against_plan(
+            provider,
+            &input.handle,
+            planned,
+            control,
+            RealPowerOperand::Base,
+            &[1, 1],
+            ProviderOperationIdentity::new("test.power"),
+        )
+    };
+    assert!(
+        bind(&padded).is_err(),
+        "future rounded extent is not authority to accept a different live backing"
+    );
+    provider.dense_output_padding.store(0, Ordering::SeqCst);
+    assert!(
+        padded.replan(provider).unwrap().is_none(),
+        "changed allocator projection invalidates the future receipt"
+    );
+    let exact = plan();
+    let prepared = bind(&exact).unwrap();
+    assert!(matches!(
+        prepared
+            .symbolic_plan()
+            .feasibility_query(PowerResultDomain::Real)
+            .unwrap()
+            .workload
+            .real_power_scalar
+            .unwrap()
+            .input,
+        Some(crate::PowerInputDescription::Live { .. })
+    ));
+    assert_eq!(prepared.control(), control);
+    assert_eq!(input.probe.retirements(), 0);
+    assert_eq!(
+        provider.probes.load(Ordering::SeqCst),
+        0,
+        "planning/binding never probes device payloads"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn unavailable_exact_byte_geometry_does_not_fabricate_a_proposal_or_hide_typed_route() {
@@ -104,6 +188,10 @@ fn certified_family_is_capability_bound_and_does_not_admit_other_mixed_forms() {
     let mut strided = source.clone();
     strided.layout = ProviderLayout::Strided;
     assert!(exact_single_base_request(&strided, control, RealPowerOperand::Base, 160).is_none());
+    strided.shape = vec![5, 8];
+    assert!(exact_single_base_request(&strided, control, RealPowerOperand::Base, 160).is_some());
+    let empty = resident(&[0, 4, 5], ProviderElementType::F32);
+    assert!(exact_single_base_request(&empty, control, RealPowerOperand::Base, 4096).is_some());
     assert!(plan_resident_scalar_power(
         provider,
         source,

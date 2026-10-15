@@ -13,6 +13,7 @@ use crate::graph::ValueId;
 pub(crate) struct GeneratedElementwiseShader {
     source: String,
     requirements: ProviderShaderRequirements,
+    input_indices: Vec<usize>,
 }
 
 impl GeneratedElementwiseShader {
@@ -24,8 +25,8 @@ impl GeneratedElementwiseShader {
         self.requirements
     }
 
-    pub(crate) fn into_parts(self) -> (String, ProviderShaderRequirements) {
-        (self.source, self.requirements)
+    pub(crate) fn into_parts(self) -> (String, ProviderShaderRequirements, Vec<usize>) {
+        (self.source, self.requirements, self.input_indices)
     }
 }
 
@@ -51,10 +52,55 @@ impl FusionGroupPlan {
         program: &ResolvedProgram,
         buffer_type: ScalarType,
     ) -> Result<GeneratedElementwiseShader> {
+        let controls = program.embedded_power_controls(self, outputs);
+        let input_indices = self
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| (!controls.contains(id)).then_some(index))
+            .collect::<Vec<_>>();
+        self.prepare_typed_shader_with_inputs(outputs, program, buffer_type, &input_indices)
+    }
+
+    /// Reuse one already prepared physical input projection across dispatch
+    /// variants. Extra data bindings retain their original order; an omitted
+    /// leaf must still be a receipt-authenticated control for these outputs.
+    pub(crate) fn prepare_typed_shader_with_inputs(
+        &self,
+        outputs: &[ValueId],
+        program: &ResolvedProgram,
+        buffer_type: ScalarType,
+        input_indices: &[usize],
+    ) -> Result<GeneratedElementwiseShader> {
         let buffer_name = scalar_name(buffer_type)?;
         let mut expressions = HashMap::new();
-        for (index, id) in self.inputs.iter().enumerate() {
-            expressions.insert(*id, format!("input{index}.data[i{index}]"));
+        let allowed_controls = program.embedded_power_controls(self, outputs);
+        if input_indices
+            .iter()
+            .any(|&index| index >= self.inputs.len())
+            || input_indices.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(anyhow::anyhow!("invalid fusion physical input projection"));
+        }
+        let controls = self
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| (!input_indices.contains(&index)).then_some(*id))
+            .collect::<Vec<_>>();
+        if controls.iter().any(|id| !allowed_controls.contains(id)) {
+            return Err(anyhow::anyhow!(
+                "fusion physical projection omits a data input"
+            ));
+        }
+        for (binding, &index) in input_indices.iter().enumerate() {
+            expressions.insert(
+                self.inputs[index],
+                format!("input{binding}.data[i{binding}]"),
+            );
+        }
+        for id in controls {
+            expressions.insert(id, String::new());
         }
         // A single public result may use checked lowering only when it covers
         // every source operation. A partial slice could hide an effect or an
@@ -77,7 +123,7 @@ impl FusionGroupPlan {
         let mut writes = String::new();
         for (index, id) in outputs.iter().enumerate() {
             let expression = producer.expression(*id)?;
-            let binding = self.inputs.len() + index;
+            let binding = input_indices.len() + index;
             bindings.push_str(&format!(
                 "@group(0) @binding({binding}) var<storage, read_write> output{index}: Tensor;\n"
             ));
@@ -88,10 +134,10 @@ impl FusionGroupPlan {
         let preamble = producer.preamble(program)?;
         let source = format!(
             "{preamble}{}",
-            self.build_wgsl_shader(
-                buffer_name,
+            self.build_wgsl_shader_with_inputs(
+                (input_indices.len(), buffer_name),
                 &bindings,
-                self.inputs.len() + outputs.len(),
+                input_indices.len() + outputs.len(),
                 &producer.body,
                 &writes,
                 include_ieee_helpers,
@@ -100,6 +146,7 @@ impl FusionGroupPlan {
         Ok(GeneratedElementwiseShader {
             source,
             requirements,
+            input_indices: input_indices.to_vec(),
         })
     }
 

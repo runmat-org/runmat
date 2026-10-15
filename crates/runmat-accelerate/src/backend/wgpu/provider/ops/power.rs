@@ -44,17 +44,9 @@ impl WgpuProvider {
         planned: &runmat_accelerate_api::power_service::PowerSymbolicPlan,
         domain: PowerResultDomain,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
-        use runmat_accelerate_api::power_service::plan_resident_scalar_power;
-
-        let current = plan_resident_scalar_power(
-            self,
-            planned.resident_representation().clone(),
-            planned.control(),
-            planned.resident_operand(),
-            planned.scalar_shape(),
-            planned.operation().clone(),
-        )
-        .map_err(runmat_accelerate_api::power_service::PowerServiceError::into_execution_error)?;
+        let current = planned.replan(self).map_err(
+            runmat_accelerate_api::power_service::PowerServiceError::into_execution_error,
+        )?;
         if current.as_ref() != Some(planned)
             || planned.feasibility_query(domain).is_some_and(|query| {
                 !runmat_accelerate_api::AccelProvider::query_feasibility(self, &query)
@@ -62,6 +54,11 @@ impl WgpuProvider {
             })
         {
             return Ok(None);
+        }
+        if let Some(proposal) = planned.exact_physical_proposal() {
+            // Replan above revalidated both source extent and the exact recipe
+            // against this owner. Do not substitute a parallel size formula.
+            return Ok((domain == PowerResultDomain::Real).then_some(proposal.output_buffer_bytes));
         }
         if planned.physical_recipe().route
             != runmat_accelerate_api::power_service::PowerPhysicalRoute::ExactSingleBase

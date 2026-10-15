@@ -22,6 +22,7 @@ enum ExactFault {
 }
 
 struct Recorder {
+    dense_output_padding: AtomicU64,
     exact_scalar: AtomicBool,
     exact_proposals: AtomicUsize,
     exact_fault: Mutex<Option<ExactFault>>,
@@ -145,6 +146,16 @@ impl AccelProvider for Recorder {
             dispatches: 1,
             queue_submissions: 2,
             pipeline_key: Some(71),
+        }))
+    }
+    fn plan_dense_real_output_buffer_bytes(
+        &self,
+        output: &crate::ProviderRepresentation,
+    ) -> crate::ProviderExecutionResult<Option<u64>> {
+        Ok(output.checked_byte_len().and_then(|logical| {
+            logical
+                .max(4)
+                .checked_add(self.dense_output_padding.load(Ordering::SeqCst))
         }))
     }
     fn device_id(&self) -> u32 {
@@ -340,6 +351,7 @@ fn provider_with_suspension(
     suspend_probe: bool,
 ) -> &'static Recorder {
     let provider = Box::leak(Box::new(Recorder {
+        dense_output_padding: AtomicU64::new(0),
         exact_scalar: AtomicBool::new(false),
         exact_proposals: AtomicUsize::new(0),
         exact_fault: Mutex::new(None),

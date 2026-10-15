@@ -94,8 +94,8 @@ pub use numeric_upload::{
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::{
-    ExactSingleBasePower, PowerResultDomain, PowerScalarControl, RealPowerArithmeticMode,
-    RealPowerOperand,
+    ExactSingleBasePower, PowerInputDescription, PowerResultDomain, PowerScalarControl,
+    PowerScalarWorkload, RealPowerArithmeticMode, RealPowerOperand,
 };
 pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
 
