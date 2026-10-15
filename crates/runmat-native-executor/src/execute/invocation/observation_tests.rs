@@ -43,6 +43,12 @@ unsafe extern "C" fn one_result_entry(
 
 #[test]
 fn terminal_result_outlives_the_native_arena() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::terminal_result_outlives_the_native_arena"
+    )) {
+        return;
+    }
     runmat_gc::gc_test_context(|| {
         let mut state = observed_state(&Rc::new(Probe::default()));
         let initial = runmat_gc::gc_allocate_rooted(Value::String("terminal result".into()))

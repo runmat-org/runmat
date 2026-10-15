@@ -359,6 +359,12 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn live_arena_values_are_traced_as_gc_roots() {
+        if crate::test_support::run_isolated_gc_test(concat!(
+            module_path!(),
+            "::live_arena_values_are_traced_as_gc_roots"
+        )) {
+            return;
+        }
         runmat_gc::gc_test_context(|| {
             let rooted = runmat_gc::gc_allocate_rooted(Value::String("live".to_string()))
                 .expect("allocate rooted test value");

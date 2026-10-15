@@ -25,6 +25,12 @@ mod tests {
 
     #[test]
     fn pending_dotted_path_roots_receiver_and_argument_until_scope_drop() {
+        if crate::test_support::run_isolated_gc_test(concat!(
+            module_path!(),
+            "::pending_dotted_path_roots_receiver_and_argument_until_scope_drop"
+        )) {
+            return;
+        }
         runmat_gc::gc_test_context(|| {
             let receiver = runmat_gc::gc_allocate_rooted(Value::String("receiver".into()))
                 .expect("allocate receiver");

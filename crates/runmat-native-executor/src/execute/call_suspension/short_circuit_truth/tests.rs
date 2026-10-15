@@ -85,6 +85,12 @@ fn exact_region_step_rejects_other_site_without_consuming_truth() {
 
 #[test]
 fn unpolled_truth_input_keeps_managed_target_until_abandonment() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::unpolled_truth_input_keeps_managed_target_until_abandonment"
+    )) {
+        return;
+    }
     runmat_gc::gc_test_context(|| {
         let mut state = observed_state(&Rc::new(Probe::default()));
         enter_left(&mut state, request());
@@ -125,7 +131,9 @@ fn unpolled_truth_input_keeps_managed_target_until_abandonment() {
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());
         drop(state);
         drop(observer);
+        let before = runmat_gc::gc_collection_epoch();
         runmat_gc::gc_collect_major().unwrap();
+        assert_eq!(runmat_gc::gc_collection_epoch(), before + 1);
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
     });
 }

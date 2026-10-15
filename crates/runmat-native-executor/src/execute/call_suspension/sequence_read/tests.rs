@@ -74,6 +74,12 @@ fn sequence_read_reenters_only_the_exact_typed_site_without_replaying() {
 
 #[test]
 fn unpolled_sequence_input_lease_retires_only_after_pending_future_drop() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::unpolled_sequence_input_lease_retires_only_after_pending_future_drop"
+    )) {
+        return;
+    }
     runmat_gc::gc_test_context(|| {
         let mut state = state();
         let allocation = runmat_gc::gc_allocate_rooted(Value::String("sequence".into())).unwrap();

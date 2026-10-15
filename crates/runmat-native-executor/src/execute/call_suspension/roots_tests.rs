@@ -11,6 +11,12 @@ use std::task::Poll;
 
 #[test]
 fn managed_arguments_suspend_before_first_poll_and_survive_publication() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::managed_arguments_suspend_before_first_poll_and_survive_publication"
+    )) {
+        return;
+    }
     runmat_gc::gc_test_context(|| {
         for pending in [false, true] {
             let mut state = observed_state(&Rc::new(Probe::default()));
@@ -210,6 +216,12 @@ fn single_arguments_use_the_synchronous_arena_path() {
 
 #[test]
 fn unpolled_native_call_releases_its_captured_input_root_on_abandonment() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::unpolled_native_call_releases_its_captured_input_root_on_abandonment"
+    )) {
+        return;
+    }
     runmat_gc::gc_test_context(|| {
         let mut state = observed_state(&Rc::new(Probe::default()));
         state.current_request = Some(NativeSiteRequest {
