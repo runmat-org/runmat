@@ -1,5 +1,12 @@
 #[derive(Debug, thiserror::Error)]
 pub enum AotError {
+    #[error("atomic publication to `{output}` failed; prior destination was not moved; recoverable inputs retained at `{recovery}`: {source}")]
+    Publication {
+        output: std::path::PathBuf,
+        recovery: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("{code}: {message}")]
     Contract { code: &'static str, message: String },
     #[error("{operation} `{path}` failed: {source}")]

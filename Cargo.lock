@@ -6402,6 +6402,8 @@ dependencies = [
  "runmat-mir",
  "runmat-native-codegen",
  "runmat-native-ffi",
+ "runmat-package",
+ "runmat-package-cache",
  "runmat-python",
  "runmat-runtime",
  "runmat-types",

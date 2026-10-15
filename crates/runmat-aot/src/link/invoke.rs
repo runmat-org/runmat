@@ -18,6 +18,15 @@ pub struct LinkRequest {
 pub struct LinkedProgram {
     pub output: PathBuf,
     pub retained_temps: Option<PathBuf>,
+    pub product: runmat_execution::host::NativeProductMode,
+    pub output_digest: runmat_execution::Digest,
+    pub selected_build: Option<super::NativeLinkBuildIdentity>,
+    pub inputs: super::NativeProgramLinkIdentity,
+}
+
+pub(super) enum LinkProcessEnvironment {
+    AmbientHost,
+    QualifiedTree,
 }
 
 pub fn link_standalone(
@@ -64,7 +73,6 @@ pub fn link_standalone(
     } else {
         "program"
     });
-    let response_path = temporary.path().join("link.rsp");
     std::fs::write(&object_path, &object.bytes)
         .map_err(|error| AotError::io("write user object", &object_path, error))?;
     let archive = runtime.decode()?;
@@ -79,10 +87,47 @@ pub fn link_standalone(
         &archive_path,
         &linked_path,
     )?;
+    invoke_prepared(
+        plan,
+        temporary,
+        request,
+        LinkProcessEnvironment::AmbientHost,
+    )
+}
+
+/// Both admission routes converge here only after their own exact inputs and
+/// tool authority are established. The private lease survives process exit,
+/// linked-image validation and recoverable publication (including failures).
+pub(super) fn invoke_prepared(
+    plan: super::LinkPlan,
+    temporary: tempfile::TempDir,
+    request: &LinkRequest,
+    environment: LinkProcessEnvironment,
+) -> AotResult<LinkedProgram> {
+    match (&environment, plan.product.selected(), &plan.selected_build) {
+        (LinkProcessEnvironment::AmbientHost, None, None) => {}
+        (LinkProcessEnvironment::QualifiedTree, Some(binding), Some(build))
+            if binding
+                .fingerprint()
+                .map_err(|error| AotError::contract("aot.link.product", error.to_string()))?
+                == build.product => {}
+        _ => {
+            return Err(AotError::contract(
+                "aot.link.product",
+                "link process mode differs from selected build admission",
+            ))
+        }
+    }
+    let response_path = temporary.path().join("link.rsp");
+    let linked_path = plan.output.clone();
     let response = super::response::encode(&plan.response_tokens, plan.driver.family)?;
     std::fs::write(&response_path, response)
         .map_err(|error| AotError::io("write linker response file", &response_path, error))?;
-    let result = std::process::Command::new(&plan.driver.path)
+    let mut command = std::process::Command::new(&plan.driver.path);
+    if matches!(environment, LinkProcessEnvironment::QualifiedTree) {
+        command.env_clear().current_dir(temporary.path());
+    }
+    let result = command
         .arg(format!("@{}", response_path.display()))
         .output()
         .map_err(|error| AotError::io("invoke native linker", &plan.driver.path, error))?;
@@ -94,45 +139,65 @@ pub fn link_standalone(
             diagnostic: bounded_diagnostic(&diagnostic),
         });
     }
-    if !linked_path.is_file() {
+    if !std::fs::symlink_metadata(&linked_path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+    {
         return Err(AotError::contract(
             "aot.link.output",
             "native linker succeeded without producing the requested executable",
         ));
     }
-    let prior_output = temporary.path().join("prior-output");
-    let had_prior_output = request.output.exists();
-    if had_prior_output && !request.overwrite {
-        return Err(AotError::contract(
-            "aot.link.output_exists",
-            format!(
-                "output `{}` already exists; enable overwrite explicitly to replace it",
-                request.output.display()
-            ),
-        ));
+    let mut linked_file = std::fs::File::open(&linked_path)
+        .map_err(|error| AotError::io("open completed linked image", &linked_path, error))?;
+    if let Some(binding) = plan.product.selected() {
+        #[cfg(unix)]
+        super::native_input::require_unix_executable_mode(
+            &linked_file
+                .metadata()
+                .map_err(|error| AotError::io("inspect linked image mode", &linked_path, error))?,
+            binding.target.target.operating_system,
+            super::native_input::NativeImagePurpose::FinalExecutable,
+        )?;
+        // Non-Unix build hosts do not certify a Unix deployment mode. Target
+        // installation remains an independent deployment obligation.
+        let reader = linked_file
+            .try_clone()
+            .map_err(|error| AotError::io("inspect completed linked image", &linked_path, error))?;
+        let cache = object::read::ReadCache::new(reader);
+        super::native_input::validate_linked_program(&cache, &binding.target.target)?;
     }
-    if had_prior_output {
-        std::fs::rename(&request.output, &prior_output)
-            .map_err(|error| AotError::io("preserve existing output", &request.output, error))?;
-    }
-    if let Err(error) = std::fs::rename(&linked_path, &request.output) {
-        if had_prior_output {
-            let _ = std::fs::rename(&prior_output, &request.output);
+    use std::io::{Read, Seek};
+    linked_file
+        .rewind()
+        .map_err(|error| AotError::io("rewind completed linked image", &linked_path, error))?;
+    let mut digest = runmat_execution::DigestStream::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = linked_file
+            .read(&mut buffer)
+            .map_err(|error| AotError::io("hash completed linked image", &linked_path, error))?;
+        if count == 0 {
+            break;
         }
-        return Err(AotError::io(
-            "publish output executable",
-            &request.output,
-            error,
-        ));
+        digest.update(&buffer[..count]);
     }
-    let retained_temps = if request.keep_temps {
-        Some(temporary.keep())
-    } else {
-        None
-    };
+    let output_digest = digest.finish();
+    drop(linked_file);
+    let retained_temps = super::publication::publish(
+        temporary,
+        &linked_path,
+        &request.output,
+        request.overwrite,
+        request.keep_temps,
+    )?;
     Ok(LinkedProgram {
         output: request.output.clone(),
         retained_temps,
+        product: plan.product,
+        output_digest,
+        selected_build: plan.selected_build,
+        inputs: plan.inputs,
     })
 }
 
