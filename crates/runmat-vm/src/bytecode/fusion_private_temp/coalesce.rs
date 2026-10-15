@@ -45,6 +45,14 @@ impl GroupIntervals {
 }
 
 pub(super) fn reduction_groups(groups: &mut Vec<FusionGroup>, bridges: &[FusionPrivateTempBridge]) {
+    close_groups(groups, bridges, false);
+}
+
+pub(super) fn chain_groups(groups: &mut Vec<FusionGroup>, bridges: &[FusionPrivateTempBridge]) {
+    close_groups(groups, bridges, true);
+}
+
+fn close_groups(groups: &mut Vec<FusionGroup>, bridges: &[FusionPrivateTempBridge], chains: bool) {
     let intervals = GroupIntervals::new(groups);
     let producers = groups
         .iter()
@@ -66,9 +74,15 @@ pub(super) fn reduction_groups(groups: &mut Vec<FusionGroup>, bridges: &[FusionP
     }
     let mut removed = HashSet::new();
     let mut widened: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
-    for root_index in 0..groups.len() {
+    // Visit sinks first so a partial prefix does not consume the producers
+    // needed by a later, complete dependency closure.
+    for root_index in (0..groups.len()).rev() {
         let root = &groups[root_index];
-        if root.kind != FusionKind::Reduction || root.span.start != root.span.end {
+        if removed.contains(&root_index)
+            || !(root.kind == FusionKind::Reduction
+                || (chains && root.kind == FusionKind::ElementwiseChain))
+            || (!chains && root.span.start != root.span.end)
+        {
             continue;
         }
         let mut selected = HashSet::from([root_index]);

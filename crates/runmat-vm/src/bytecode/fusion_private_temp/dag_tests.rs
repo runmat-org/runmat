@@ -48,6 +48,168 @@ fn pure_dag() -> Bytecode {
     compiled("x = gpuArray(single(ones(4, 4))); y = min((x + x) + (x + x)); z = gather(y);")
 }
 
+#[test]
+fn authentic_elementwise_private_dag_closes_without_materializing_private_stores() {
+    for expression in ["(x + x) + (x + x)", "exp(-x) .* sin(4*x) + tanh(x).^2"] {
+        let bytecode = compiled(&format!(
+            "x = gpuArray(single(ones(4, 1))); y = {expression}; z = gather(y);"
+        ));
+        assert_elementwise_private_closure(&bytecode);
+    }
+}
+
+fn assert_elementwise_private_closure(bytecode: &Bytecode) {
+    let edges = bridges(bytecode);
+    assert!(
+        edges.len() >= 2,
+        "authentic private expression edges: {edges:?}"
+    );
+    let (plan, graph) = bytecode.prepare_vm_fusion_plan();
+    let plan = plan.expect("checked elementwise plan");
+    let graph = graph.expect("selected instruction graph");
+    let selected = plan
+        .groups
+        .iter()
+        .find(|selected| {
+            selected.group.kind == FusionKind::ElementwiseChain
+                && edges.iter().all(|edge| {
+                    selected.group.span.start <= edge.producer_pc
+                        && edge.consumer_pc <= selected.group.span.end
+                })
+        })
+        .expect("one complete elementwise dependency closure");
+    assert!(
+        selected.materialized_stores.is_empty(),
+        "private temporaries are not publication outputs"
+    );
+    assert!(
+        selected.group.stack_layout.is_some(),
+        "exact bytecode-derived stack contract"
+    );
+    for edge in &edges {
+        let producer = graph
+            .nodes
+            .iter()
+            .find(|node| node.span.end == edge.producer_pc)
+            .unwrap();
+        assert!(graph.node_binding(producer.id).is_none());
+        assert!(graph.var_binding(producer.outputs[0]).is_none());
+    }
+    assert!(
+        selected
+            .inputs
+            .iter()
+            .all(|input| !selected.operations.iter().any(|operation| {
+                match operation {
+                    FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => {
+                        *output == Some(*input)
+                    }
+                }
+            })),
+        "no hidden private intermediate input"
+    );
+}
+
+#[test]
+fn function_elementwise_private_dag_survives_portable_roundtrip() {
+    let ast = runmat_parser::parse("function y = f(x)\ny = (x + x) + (x + x);\nend\n").unwrap();
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).unwrap();
+    let function = hir.assembly.functions[0].id;
+    let registry = crate::bytecode::FunctionRegistry::new(
+        crate::bytecode::compile_semantic_function_registry(&hir.assembly, &mir).unwrap(),
+    );
+    assert_elementwise_private_closure(
+        &registry
+            .get(function)
+            .unwrap()
+            .execution_bytecode(&registry),
+    );
+    let encoded = crate::bytecode::encode_interpreter_program_v2(&registry).unwrap();
+    let decoded = crate::bytecode::decode_interpreter_program_v2(&encoded).unwrap();
+    assert_elementwise_private_closure(
+        &decoded.get(function).unwrap().execution_bytecode(&decoded),
+    );
+}
+
+#[test]
+fn nonscalar_matrix_product_is_not_a_private_elementwise_bridge() {
+    let bytecode = compiled("x = gpuArray(single(ones(4, 4))); y = sin(x*x); z = gather(y);");
+    let (plan, _) = bytecode.prepare_vm_fusion_plan();
+    if let Some(plan) = plan {
+        assert!(!plan.groups.iter().any(|selected| selected.group.kind
+            == FusionKind::ElementwiseChain
+            && selected.operations.len() > 1));
+    }
+}
+
+#[test]
+fn elementwise_closure_never_elides_observable_binding_stores() {
+    let bytecode = compiled(
+        "x = gpuArray(single(ones(4, 1))); a = x + x; y = (a + a) + (a + a); z = gather(y);",
+    );
+    let edges = bridges(&bytecode);
+    let (plan, _) = bytecode.prepare_vm_fusion_plan();
+    let plan = plan.expect("checked elementwise DAG");
+    let (_, stores) = crate::accel::graph::build_accel_graph_with_stores(
+        &bytecode.instructions,
+        &bytecode.var_types,
+    );
+    for selected in &plan.groups {
+        if selected.group.kind != FusionKind::ElementwiseChain {
+            continue;
+        }
+        for store in stores.iter().filter(|store| {
+            selected.group.span.start <= store.pc && store.pc <= selected.group.span.end
+        }) {
+            if edges.iter().any(|edge| edge.store_pc == store.pc) {
+                continue;
+            }
+            assert!(
+                selected
+                    .materialized_stores
+                    .iter()
+                    .any(|materialized| materialized.value_id == store.value_id
+                        && materialized.binding == store.binding),
+                "observable store cannot disappear inside chain"
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_elementwise_markers_cannot_authorize_added_statement_effects() {
+    let bytecode = compiled("x = gpuArray(single(ones(4, 1))); y = exp(-x) + x; z = gather(y);");
+    let edge = bridges(&bytecode).into_iter().find(|edge| {
+        matches!(&bytecode.instructions[edge.producer_pc], Instr::CallBuiltinMulti(name, 1, 1) if name == "exp")
+    }).expect("authentic canonical exp producer bridge");
+    for effect in [
+        runmat_types::EffectKind::WorkspaceWrite,
+        runmat_types::EffectKind::HostCallback,
+        runmat_types::EffectKind::Unknown,
+        runmat_types::EffectKind::MaySuspend,
+    ] {
+        let mut changed = bytecode.clone();
+        let projection =
+            std::sync::Arc::make_mut(changed.fusion_metadata.stage_projection.as_mut().unwrap());
+        projection
+            .statements
+            .iter_mut()
+            .find(|statement| {
+                statement.pc.start <= edge.producer_pc && edge.producer_pc < statement.pc.end
+            })
+            .unwrap()
+            .contract
+            .effects
+            .0
+            .insert(effect);
+        changed.reseal_fusion_stage_after_owned_remap();
+        assert!(changed.validate_fusion_stage_projection().is_ok());
+        assert!(!bridges(&changed).iter().any(|candidate| candidate.slot == edge.slot),
+            "neither external effects nor undeclared numerical markers may borrow canonical admission");
+    }
+}
+
 fn function_dag() -> (crate::bytecode::FunctionRegistry, runmat_hir::FunctionId) {
     let ast = runmat_parser::parse("function y = f(x)\ny = min((x + x) + (x + x));\nend\n")
         .expect("parse authentic function source");

@@ -75,6 +75,29 @@ pub(crate) fn coalesce_reduction_groups(
     coalesce::reduction_groups(groups, bridges);
 }
 
+pub(crate) fn coalesce_chain_groups(
+    groups: &mut Vec<FusionGroup>,
+    bridges: &[FusionPrivateTempBridge],
+) {
+    coalesce::chain_groups(groups, bridges);
+}
+
+pub(crate) fn private_chain_store_pcs(
+    group: &FusionGroup,
+    bridges: &[FusionPrivateTempBridge],
+) -> Vec<usize> {
+    if !group.kind.is_elementwise() {
+        return Vec::new();
+    }
+    bridges
+        .iter()
+        .filter(|bridge| {
+            group.span.start <= bridge.producer_pc && bridge.consumer_pc <= group.span.end
+        })
+        .map(|bridge| bridge.store_pc)
+        .collect()
+}
+
 pub(crate) fn project_private_bindings(
     graph: &mut AccelGraph,
     groups: &[FusionGroup],
@@ -84,7 +107,7 @@ pub(crate) fn project_private_bindings(
 ) -> bool {
     let index = projection_index::ProjectionIndex::new(graph, groups, stores);
     for bridge in bridges {
-        if !index.reduction_covers(bridge.producer_pc, bridge.consumer_pc) {
+        if !index.region_covers(bridge.producer_pc, bridge.consumer_pc) {
             continue;
         }
         let (Some(producer_position), Some(consumer_position), Some(store_position)) = (

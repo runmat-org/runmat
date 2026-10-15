@@ -167,6 +167,7 @@ fn external_variable_values(
     group: &FusionGroup,
 ) -> HashMap<(VarKind, usize), Option<ValueId>> {
     let mut values = HashMap::new();
+    let node_set: HashSet<_> = group.nodes.iter().copied().collect();
     for node_id in &group.nodes {
         let Some(node) = graph.node(*node_id) else {
             continue;
@@ -175,10 +176,21 @@ fn external_variable_values(
             let Some(info) = graph.value(value_id) else {
                 continue;
             };
-            let ValueOrigin::Variable { ref kind, index } = info.origin else {
+            if matches!(info.origin, ValueOrigin::NodeOutput { node, .. } if node_set.contains(&node))
+            {
+                continue;
+            }
+            // A previous instruction-produced value can be the current
+            // contents of a VM binding (for example x = gpuArray(...)). Its
+            // graph origin remains NodeOutput; the exact binding map, not
+            // origin syntax, authenticates each LoadVar occurrence at entry.
+            let key = if let Some(binding) = graph.var_binding(value_id) {
+                (binding.kind, binding.index)
+            } else if let ValueOrigin::Variable { kind, index } = info.origin {
+                (kind, index)
+            } else {
                 continue;
             };
-            let key = (*kind, index);
             values
                 .entry(key)
                 .and_modify(|existing| {

@@ -252,12 +252,10 @@ impl BridgeProof<'_> {
             unique_statement_signal(instructions, definition)?;
         let (consumer_pc, consumer_kind) = unique_statement_signal(instructions, use_site)?;
         if unique_producer_pc != producer_pc
-            || producer_kind != FusionInstructionKind::Elementwise
+            || !private_elementwise_signal(instructions, producer_pc, producer_kind)
             || consumer_pc <= load_pc
-            || !matches!(
-                consumer_kind,
-                FusionInstructionKind::Elementwise | FusionInstructionKind::Reduction
-            )
+            || !(consumer_kind == FusionInstructionKind::Reduction
+                || private_elementwise_signal(instructions, consumer_pc, consumer_kind))
             || self.bytecode.catch_scopes[producer_pc..=consumer_pc]
                 .iter()
                 .any(|scope| scope != &self.bytecode.catch_scopes[producer_pc])
@@ -278,12 +276,12 @@ impl BridgeProof<'_> {
                 == Some(candidate.stmt_end);
         if !selected_statement(candidate, candidate_block, definition, store_pc)
             || !selected_statement(candidate, candidate_block, use_site, load_pc)
-            || !definition.contract.effects.0.is_empty()
+            || !elementwise_statement_effects_are_compatible(instructions, definition)
             || !(if terminal_reduction {
                 terminal_reduction_effects_are_compatible(use_site)
             } else {
-                consumer_kind == FusionInstructionKind::Elementwise
-                    && use_site.contract.effects.0.is_empty()
+                private_elementwise_signal(instructions, consumer_pc, consumer_kind)
+                    && elementwise_statement_effects_are_compatible(instructions, use_site)
             })
             || !self
                 .statements
@@ -291,7 +289,10 @@ impl BridgeProof<'_> {
                 .all(|statement| {
                     selected_statement(candidate, candidate_block, statement, statement.pc.start)
                         && (statement.pc.start == use_site.pc.start && terminal_reduction
-                            || statement.contract.effects.0.is_empty())
+                            || elementwise_statement_effects_are_compatible(
+                                instructions,
+                                statement,
+                            ))
                 })
             || !definition
                 .contract
@@ -314,6 +315,50 @@ impl BridgeProof<'_> {
             consumer_pc,
         })
     }
+}
+
+// `Mul` is structurally Matmul until the authoritative graph proves a scalar
+// operand. This only permits an edge proposal; closure never selects a
+// Matmul group, and graph binding projection still checks the exact edge.
+fn private_elementwise_signal(
+    instructions: &[Instr],
+    pc: usize,
+    kind: FusionInstructionKind,
+) -> bool {
+    kind == FusionInstructionKind::Elementwise
+        || (kind == FusionInstructionKind::Matmul
+            && matches!(instructions.get(pc), Some(Instr::Mul)))
+}
+
+// Throw/suspend markers on an authenticated canonical numerical call describe
+// its ordinary typed adapters, not permission to hide arbitrary effects. The
+// actual selected operation must still pass runtime binding/domain admission.
+// Primitive statements cannot borrow a builtin's markers, and all workspace,
+// callback, unknown, or other externally observable effects remain barriers.
+fn elementwise_statement_effects_are_compatible(
+    instructions: &[Instr],
+    statement: &CompiledFusionStageStatement,
+) -> bool {
+    if statement.contract.effects.0.is_empty() {
+        return true;
+    }
+    let Some((pc, FusionInstructionKind::Elementwise)) =
+        unique_statement_signal(instructions, statement)
+    else {
+        return false;
+    };
+    let Some(Instr::CallBuiltinMulti(name, arguments, 1)) = instructions.get(pc) else {
+        return false;
+    };
+    let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) else {
+        return false;
+    };
+    crate::accel::fusion_declaration::canonical_kind(entry, Some(*arguments))
+        == Some(FusionInstructionKind::Elementwise)
+        && statement.contract.effects.0.iter().all(|effect| {
+            matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)
+                && entry.contract.effects.contains(effect)
+        })
 }
 
 fn unique_statement_signal(

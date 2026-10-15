@@ -2238,8 +2238,32 @@ impl Bytecode {
                 false
             }
         });
+        super::fusion_private_temp::coalesce_chain_groups(
+            &mut groups,
+            &super::fusion_private_temp::bridges(self),
+        );
         if groups.iter().any(|group| group.stack_layout.is_none()) {
-            annotate_fusion_groups_with_stack_layout(&self.instructions, graph, &mut groups);
+            // Span proposals carry no node ownership yet. Stack occurrence
+            // discovery still needs the exact graph inventory in each span;
+            // final preparation independently sanitizes and re-annotates the
+            // selected nodes before installing any execution right.
+            let mut stack_groups = groups.clone();
+            for group in &mut stack_groups {
+                if group.nodes.is_empty() {
+                    group.nodes = graph
+                        .nodes
+                        .iter()
+                        .filter(|node| {
+                            group.span.start <= node.span.start && node.span.end <= group.span.end
+                        })
+                        .map(|node| node.id)
+                        .collect();
+                }
+            }
+            annotate_fusion_groups_with_stack_layout(&self.instructions, graph, &mut stack_groups);
+            for (group, annotated) in groups.iter_mut().zip(stack_groups) {
+                group.stack_layout = annotated.stack_layout;
+            }
         }
         groups
     }

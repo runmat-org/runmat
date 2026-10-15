@@ -122,6 +122,9 @@ impl Bytecode {
 
         let (mut graph, stores) =
             build_accel_graph_with_stores(&self.instructions, &self.var_types);
+        // Scalar-vs-matrix normalization belongs to this exact graph. Close
+        // certified private edges only after that distinction is available.
+        let groups = self.runtime_fusion_groups_for_graph(&graph);
         if !crate::bytecode::fusion_private_temp::project_private_bindings(
             &mut graph,
             &groups,
@@ -158,6 +161,25 @@ impl Bytecode {
                 selected.group.stack_layout = reconciled.stack_layout;
             }
             reconcile_stores(&mut owned, &self.instructions, &stores);
+            let bridges = crate::bytecode::fusion_private_temp::bridges(self);
+            for selected in &mut owned.groups {
+                let private_pcs = crate::bytecode::fusion_private_temp::private_chain_store_pcs(
+                    &selected.group,
+                    &bridges,
+                );
+                // Reconciliation has already authenticated every skipped
+                // Store. Only sealed, graph-checked private stores disappear.
+                let private_bindings = stores
+                    .iter()
+                    .filter(|store| private_pcs.contains(&store.pc))
+                    .map(|store| (store.value_id, store.binding.clone()))
+                    .collect::<Vec<_>>();
+                selected.materialized_stores.retain(|store| {
+                    !private_bindings.iter().any(|(value, binding)| {
+                        *value == store.value_id && binding == &store.binding
+                    })
+                });
+            }
             Rc::new(owned)
         });
         (plan, Some(graph), stores)
