@@ -84,6 +84,9 @@ name = "native_gui_smoke"
 path = "examples/native_gui_smoke.rs"
 required-features = ["gui"]
 
+[dev-dependencies]
+naga = { version = "24.0.0", features = ["wgsl-in"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }

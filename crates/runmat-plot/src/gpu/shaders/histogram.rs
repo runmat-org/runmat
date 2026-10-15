@@ -22,12 +22,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(3)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -48,9 +61,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
     let bin_index = u32(clamped);
 
-    atomic_add_f32(&counts[bin_index], 1.0);
+    atomic_add_count(bin_index, 1.0);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, 1.0);
+        atomic_add_total(1.0);
     }
 }
 "#;
@@ -81,12 +94,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(4)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -108,9 +134,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bin_index = u32(clamped);
     let weight = weights[idx];
 
-    atomic_add_f32(&counts[bin_index], weight);
+    atomic_add_count(bin_index, weight);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
+        atomic_add_total(weight);
     }
 }
 "#;
@@ -141,12 +167,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(4)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -168,9 +207,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bin_index = u32(clamped);
     let weight = f32(weights[idx]);
 
-    atomic_add_f32(&counts[bin_index], weight);
+    atomic_add_count(bin_index, weight);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
+        atomic_add_total(weight);
     }
 }
 "#;
@@ -198,12 +237,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(3)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -224,9 +276,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
     let bin_index = u32(clamped);
 
-    atomic_add_f32(&counts[bin_index], 1.0);
+    atomic_add_count(bin_index, 1.0);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, 1.0);
+        atomic_add_total(1.0);
     }
 }
 "#;
@@ -257,12 +309,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(4)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -284,9 +349,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bin_index = u32(clamped);
     let weight = weights[idx];
 
-    atomic_add_f32(&counts[bin_index], weight);
+    atomic_add_count(bin_index, weight);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
+        atomic_add_total(weight);
     }
 }
 "#;
@@ -317,12 +382,25 @@ var<storage, read_write> total_weight: atomic<u32>;
 @group(0) @binding(4)
 var<uniform> params: HistogramParams;
 
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn atomic_add_count(bin_index: u32, value: f32) {
+    var old_bits = atomicLoad(&counts[bin_index]);
     loop {
         let old_value = bitcast<f32>(old_bits);
         let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
+        let exchange = atomicCompareExchangeWeak(&counts[bin_index], old_bits, new_bits);
+        if (exchange.exchanged) {
+            break;
+        }
+        old_bits = exchange.old_value;
+    }
+}
+
+fn atomic_add_total(value: f32) {
+    var old_bits = atomicLoad(&total_weight);
+    loop {
+        let old_value = bitcast<f32>(old_bits);
+        let new_bits = bitcast<u32>(old_value + value);
+        let exchange = atomicCompareExchangeWeak(&total_weight, old_bits, new_bits);
         if (exchange.exchanged) {
             break;
         }
@@ -344,9 +422,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bin_index = u32(clamped);
     let weight = f32(weights[idx]);
 
-    atomic_add_f32(&counts[bin_index], weight);
+    atomic_add_count(bin_index, weight);
     if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
+        atomic_add_total(weight);
     }
 }
 "#;

@@ -606,7 +606,7 @@ fn compile_counts_shader(
         (ScalarType::F64, WeightMode::F32) => shaders::histogram::counts::F64_WEIGHTS_F32,
         (ScalarType::F64, WeightMode::F64) => shaders::histogram::counts::F64_WEIGHTS_F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("histogram-counts-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -614,8 +614,7 @@ fn compile_counts_shader(
 }
 
 fn compile_convert_shader(device: &wgpu::Device, workgroup_size: u32) -> wgpu::ShaderModule {
-    let source = shaders::histogram::convert::TEMPLATE
-        .replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(shaders::histogram::convert::TEMPLATE, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("histogram-convert-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

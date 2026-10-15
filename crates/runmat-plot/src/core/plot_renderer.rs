@@ -4168,17 +4168,18 @@ mod tests {
         let figure = Figure::new();
         let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
 
-        let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
-
-        assert!(PlotRenderer::bounds_are_finite(display));
-        // Shared display normalization gives collapsed dimensions a 0.1 span
-        // before camera/export/manual-limit capture, centered on the data.
-        assert_eq!(display.min.z, -0.05);
-        assert_eq!(display.max.z, 0.05);
-        assert_eq!(display.min.x, bounds.min.x);
-        assert_eq!(display.max.x, bounds.max.x);
-        assert_eq!(display.min.y, bounds.min.y);
-        assert_eq!(display.max.y, bounds.max.y);
+        // Figure metadata applies its default tick-aligned axis limits. The
+        // metadata-free fallback instead supplies the minimum camera span.
+        for (figure, z_min, z_max) in [(Some(&figure), -0.6, 0.6), (None, -0.05, 0.05)] {
+            let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, figure, 0);
+            assert!(PlotRenderer::bounds_are_finite(display));
+            assert_eq!(display.min.z, z_min);
+            assert_eq!(display.max.z, z_max);
+            assert_eq!(display.min.x, bounds.min.x);
+            assert_eq!(display.max.x, bounds.max.x);
+            assert_eq!(display.min.y, bounds.min.y);
+            assert_eq!(display.max.y, bounds.max.y);
+        }
     }
 
     #[test]

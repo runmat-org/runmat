@@ -14,6 +14,11 @@ pub mod stairs;
 pub mod stem;
 pub mod surface;
 pub mod vertex;
+mod source;
+pub(crate) use source::compute_source;
+
+#[cfg(test)]
+mod validation_tests;
 
 /// Backwards-compatible re-export so existing code can keep referencing
 /// `shaders::histogram_counts::F32/F64`.

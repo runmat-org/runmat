@@ -237,7 +237,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::line::F32,
         ScalarType::F64 => shaders::line::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("line-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -406,7 +406,7 @@ fn compile_marker_shader(
         ScalarType::F32 => shaders::line::MARKER_F32,
         ScalarType::F64 => shaders::line::MARKER_F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("line-marker-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

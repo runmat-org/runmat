@@ -75,6 +75,20 @@ cargo test -p runmat-accelerate --lib --no-default-features --features wgpu sele
 
 Add generator cases beside their owning shader or provider module, using the shared validation helper rather than copying shader source into a test. Cover precision, operation, operand layout and specialization variants that alter emitted code. Parsing and validation do not establish device support, numerical accuracy, residency or performance; those require separate execution tests on the relevant backend and precision.
 
+Plotting has a GPU-free source census covering its compute precision variants, workgroup specializations, and vertex shaders through the same source materializer used by production pipelines:
+
+```bash
+cargo test -p runmat-plot --no-default-features --lib plotting_shader_sources_parse_and_validate_for_every_declared_variant
+```
+
+Run the surface packer's device geometry check explicitly on a machine with a GPU:
+
+```bash
+RUNMAT_PLOT_FORCE_GPU_TESTS=1 cargo test -p runmat-plot --no-default-features --lib gpu_surface_layout_matches_non_square_cpu_surface_contract
+```
+
+This command requires an adapter and device; their absence fails the test. Do not also set `RUNMAT_PLOT_SKIP_GPU_TESTS`. A normal library run without the force flag does not establish surface GPU execution coverage.
+
 ## WASM Tests
 
 WASM CI builds the runtime for `wasm32-unknown-unknown`, then runs the headless browser script:

@@ -66,15 +66,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r = buf_colors[base];
         let g = buf_colors[base + 1u];
         let b = buf_colors[base + 2u];
-        let a = if params.color_stride > 3u {
-            buf_colors[base + 3u]
-        } else {
-            1.0
-        };
+        var a = 1.0;
+        if (params.color_stride > 3u) {
+            a = buf_colors[base + 3u];
+        }
         v_color = vec4<f32>(r, g, b, a);
     }
 
-    let mut point_size = params.point_size;
+    var point_size = params.point_size;
     if (params.has_sizes != 0u) {
         point_size = buf_sizes[idx];
     }
@@ -175,15 +174,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r = buf_colors[base];
         let g = buf_colors[base + 1u];
         let b = buf_colors[base + 2u];
-        let a = if params.color_stride > 3u {
-            buf_colors[base + 3u]
-        } else {
-            1.0
-        };
+        var a = 1.0;
+        if (params.color_stride > 3u) {
+            a = buf_colors[base + 3u];
+        }
         v_color = vec4<f32>(r, g, b, a);
     }
 
-    let mut point_size = params.point_size;
+    var point_size = params.point_size;
     if (params.has_sizes != 0u) {
         point_size = buf_sizes[idx];
     }

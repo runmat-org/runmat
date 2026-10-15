@@ -201,7 +201,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::errorbar::F32,
         ScalarType::F64 => shaders::errorbar::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("errorbar-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

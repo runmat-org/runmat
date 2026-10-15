@@ -292,7 +292,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::surface::F32,
         ScalarType::F64 => shaders::surface::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("surface-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -305,9 +305,13 @@ mod stress_tests {
     use pollster::FutureExt;
 
     fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
-        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
-            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
-        {
+        let skip = std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok();
+        let force = std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_ok();
+        assert!(
+            !skip || !force,
+            "conflicting surface-packer GPU test policies"
+        );
+        if skip || !force {
             return None;
         }
         let instance = wgpu::Instance::default();
@@ -317,7 +321,8 @@ mod stress_tests {
                 compatible_surface: None,
                 force_fallback_adapter: false,
             })
-            .block_on()?;
+            .block_on()
+            .expect("required surface-packer GPU qualification adapter unavailable");
         let limits = adapter.limits();
         let (device, queue) = adapter
             .request_device(
@@ -329,7 +334,7 @@ mod stress_tests {
                 None,
             )
             .block_on()
-            .ok()?;
+            .expect("required surface-packer GPU qualification device unavailable");
         Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 

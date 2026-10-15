@@ -145,7 +145,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::area::F32,
         ScalarType::F64 => shaders::area::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("area-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
