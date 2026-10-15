@@ -114,10 +114,13 @@ impl Provider {
                 shape: &shape,
                 storage: GpuTensorStorage::Real,
             })?,
-            Mode::Logical => self.inner.upload_logical_raw(&HostLogicalTensorView {
-                data: &vec![0; len],
-                shape: &shape,
-            })?,
+            Mode::Logical => self
+                .inner
+                .upload_logical_raw(&HostLogicalTensorView {
+                    data: &vec![0; len],
+                    shape: &shape,
+                })
+                .expect("fixed logical fixture upload must succeed"),
             Mode::Owner => self.foreign.upload(&HostTensorView {
                 data: &vec![0.; len],
                 shape: &shape,

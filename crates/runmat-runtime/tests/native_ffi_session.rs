@@ -1,20 +1,43 @@
-#![cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#![cfg(any(
+    target_arch = "wasm32",
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows"
+))]
 
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    // Cargo requires an entry point for this harness=false target on wasm.
+    // This does not execute or qualify the native ExtensionHost scenario.
+    panic!("native FFI session conformance requires a native host");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsStr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
+#[cfg(not(target_arch = "wasm32"))]
 use std::rc::Rc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_native_ffi::NativeInterfaceArtifactManifest;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime::context::{ForeignCall, RuntimeContext, RuntimeServicePorts};
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime::execution::RuntimeExecutionService;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime::foreign::{
     ForeignPlatform, ForeignRuntime, NativeFfiAdapter, NativeFfiIsolationPolicy,
     NATIVE_FFI_ADAPTER_ID,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_types::ForeignOwnership;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_value::{IntValue, Tensor, Value};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     if std::env::args_os().nth(1).as_deref()
         == Some(OsStr::new(
@@ -32,6 +55,7 @@ fn main() {
     library_and_pointer_state_are_owned_by_one_runtime_session();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
     let source =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native_ffi/interface.c");
@@ -58,6 +82,7 @@ fn compile_fixture(directory: &Path) -> Option<PathBuf> {
     status.success().then_some(output)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn invoke(
     context: &RuntimeContext,
     symbol: &str,
@@ -77,6 +102,7 @@ fn invoke(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn invoke_outputs(
     context: &RuntimeContext,
     symbol: &str,
@@ -104,6 +130,7 @@ fn invoke_outputs(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     if Command::new("clang").arg("--version").output().is_err() {
         eprintln!("skipping native FFI session test because clang is unavailable");
@@ -571,6 +598,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     isolated_direct_capture_retirement_replays(&library_path, &manifest_path, temporary.path());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn isolated_direct_capture_retirement_replays(
     library_path: &Path,
     manifest_path: &Path,
@@ -624,6 +652,7 @@ fn isolated_direct_capture_retirement_replays(
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn isolated_add(context: &RuntimeContext) -> Value {
     let service = context
         .service_ports()

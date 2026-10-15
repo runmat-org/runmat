@@ -135,10 +135,13 @@ impl AccelProvider for Provider {
                 shape: &[3, 2],
                 storage: GpuTensorStorage::ComplexInterleaved,
             })?,
-            Mode::Logical => self.inner.upload_logical_raw(&HostLogicalTensorView {
-                data: &[0; 6],
-                shape: &[3, 2],
-            })?,
+            Mode::Logical => self
+                .inner
+                .upload_logical_raw(&HostLogicalTensorView {
+                    data: &[0; 6],
+                    shape: &[3, 2],
+                })
+                .expect("fixed logical fixture upload must succeed"),
             Mode::Foreign => self
                 .foreign
                 .transpose(&self.foreign.upload(&HostTensorView {

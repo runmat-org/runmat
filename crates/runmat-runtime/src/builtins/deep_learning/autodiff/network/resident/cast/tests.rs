@@ -1,9 +1,10 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
+use std::cell::RefCell;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Mutex, OnceLock,
+    OnceLock,
 };
 
 struct AliasingCastProvider {
@@ -117,7 +118,10 @@ static CHANGING_CAST_PROVIDER: ChangingCastProvider = ChangingCastProvider {
 
 struct WrongClassCastProvider {
     owner: OnceLock<runmat_accelerate_api::test_support::TestAllocationOwner>,
-    result_probe: Mutex<Option<runmat_accelerate_api::test_support::RetirementProbe>>,
+}
+
+thread_local! {
+    static WRONG_CLASS_RESULT_PROBE: RefCell<Option<runmat_accelerate_api::test_support::RetirementProbe>> = const { RefCell::new(None) };
 }
 
 impl WrongClassCastProvider {
@@ -174,7 +178,7 @@ impl AccelProvider for WrongClassCastProvider {
                     GpuTensorStorage::Real,
                 )
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
-            *self.result_probe.lock().unwrap() = Some(result.probe);
+            WRONG_CLASS_RESULT_PROBE.with(|probe| *probe.borrow_mut() = Some(result.probe));
             Ok(result.handle)
         })
     }
@@ -182,7 +186,6 @@ impl AccelProvider for WrongClassCastProvider {
 
 static WRONG_CLASS_CAST_PROVIDER: WrongClassCastProvider = WrongClassCastProvider {
     owner: OnceLock::new(),
-    result_probe: Mutex::new(None),
 };
 
 fn requirement(
@@ -442,7 +445,7 @@ fn wrong_class_cast_result_is_retired_without_releasing_borrowed_input() {
         "dlgradient",
     ))
     .is_err());
-    let probe = provider.result_probe.lock().unwrap().take().unwrap();
+    let probe = WRONG_CLASS_RESULT_PROBE.with(|probe| probe.borrow_mut().take().unwrap());
     assert_eq!(probe.retirements(), 1);
     assert_eq!(input.probe.retirements(), 0);
     input.handle.allocation_lease().validate_live().unwrap();
