@@ -16,9 +16,8 @@ use runmat_accelerate_api::{
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateDescriptor, ExecutionCandidateKind,
-    ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits,
-    PlacementGraphNode, PlacementPlanRequest, PlacementSignature, ResourceBoundUnavailable,
-    ResourceByteBound,
+    PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits, PlacementGraphNode,
+    PlacementPlanRequest, PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
 };
 use runmat_value::Value;
 

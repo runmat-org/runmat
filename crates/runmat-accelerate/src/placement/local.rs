@@ -296,45 +296,19 @@ impl LocalPlacementFeedback {
     }
 }
 
-/// Normalize provider feasibility and complete transfer costs before comparing
-/// profitability. This is the one local authority shared by legacy automatic
-/// offload and correlated fusion execution.
+/// Exercise the production owner with ordinary host admission in fixtures.
+#[cfg(test)]
 pub(crate) fn plan_local(
     provider: &dyn AccelProvider,
     request: LocalPlacementRequest<'_>,
     policy: PlacementPolicy,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    plan_local_vm(provider, request, policy, None)
-}
-
-pub(crate) fn plan_local_vm(
-    provider: &dyn AccelProvider,
-    request: LocalPlacementRequest<'_>,
-    policy: PlacementPolicy,
-    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
-) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    plan_local_vm_cpu(
-        provider,
-        request,
-        policy,
-        vm_right,
-        multi::LocalCpuAdmission::Legacy,
-    )
-}
-
-pub(crate) fn plan_local_vm_cpu(
-    provider: &dyn AccelProvider,
-    request: LocalPlacementRequest<'_>,
-    policy: PlacementPolicy,
-    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
-    cpu_admission: multi::LocalCpuAdmission,
-) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     plan_local_vm_cpu_with_provider(
         provider,
         request,
         policy,
-        vm_right,
-        cpu_admission,
+        None,
+        multi::LocalCpuAdmission::Legacy,
         LocalProviderAdmission::Available,
     )
 }

@@ -116,13 +116,13 @@ impl AccelProvider for Owner {
     fn unary_sin<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Ok(self.publish(self.inner.unary_sin(input).await?)) })
     }
     fn unary_cos<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Ok(self.publish(self.inner.unary_cos(input).await?)) })
     }
     fn elem_mul<'a>(
