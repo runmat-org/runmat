@@ -1,4 +1,5 @@
 use super::*;
+use crate::BuiltinCatalogEntry;
 use runmat_types::*;
 
 fn request(arguments: Vec<ValueFact>, outputs: usize) -> CallRequest {

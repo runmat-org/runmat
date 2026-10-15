@@ -190,7 +190,7 @@ pub(super) fn infer_axis_setting(
         let target = index == 0
             && (request.arguments.len() == 2 || matches!(argument.kind, ValueKindFact::Object(_)));
         let invalid = if target {
-            match &argument.kind {
+            (match &argument.kind {
                 ValueKindFact::Unknown => false,
                 ValueKindFact::Numeric(numeric) => numeric.domain != NumericDomain::Real,
                 ValueKindFact::Object(_) => {
@@ -200,8 +200,7 @@ pub(super) fn infer_axis_setting(
                     )
                 }
                 _ => true,
-            }
-            || {
+            }) || {
                 (!matches!(form, AxisSettingForm::Angle | AxisSettingForm::Format)
                     && argument
                         .shape
@@ -297,7 +296,7 @@ pub(super) fn infer_axis_setting(
         AxisSettingForm::Labels => {
             let control = control_index.map(|index| &request.arguments[index]);
             let literal = control_index.and_then(|index| request.literals.literal_string_at(index));
-            let mode_token = literal.is_some_and(|mode| {
+            let mode_token = literal.as_deref().is_some_and(|mode| {
                 matches!(
                     mode.trim().to_ascii_lowercase().as_str(),
                     "auto" | "manual" | "mode"

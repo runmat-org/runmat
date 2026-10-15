@@ -7,6 +7,7 @@ mod tests;
 pub use contract::*;
 
 pub const CAXIS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "caxis" },
     category: "plotting",

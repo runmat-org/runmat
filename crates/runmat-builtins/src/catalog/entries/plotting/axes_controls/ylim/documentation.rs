@@ -27,7 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     examples: &[
         BuiltinExample { id: "example-1", title: "Set integer limits", program: "plot(1:10);\nylim(int16([0 12]))", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isequal(ylim(),[0 12]));" } },
-        BuiltinExample { id: "example-2", title: "Query current limits", program: "limits = ylim()", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 0, assertions: "assert(numel(limits)==2);" } },
+        BuiltinExample { id: "example-2", title: "Query current limits", program: "limits = ylim()", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limits,'double')); assert(isequal(size(limits),[1 2]));" } },
     ],
     example_exemption: None,
     faqs: &[],
