@@ -2,7 +2,7 @@
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, TOC_ERROR_INVALID_HANDLE, TOC_ERROR_NO_MATCHING_TIC,
-    TOC_ERROR_TOO_MANY_INPUTS,
+    TOC_ERROR_TOO_MANY_INPUTS, TOC_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Value};
@@ -22,11 +22,19 @@ fn toc_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     name = "toc",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::toc"
 )]
-pub async fn toc_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<f64> {
+pub async fn toc_builtin(
+    runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<f64> {
     if args.len() > 1 {
         return Err(toc_error(&TOC_ERROR_TOO_MANY_INPUTS));
+    }
+    if requested_outputs.is_some_and(|count| count > 1) {
+        return Err(toc_error(&TOC_ERROR_TOO_MANY_OUTPUTS));
     }
     let runtime = runtime.ok_or_else(|| toc_error(&TOC_ERROR_NO_MATCHING_TIC))?;
     let start = if let Some(value) = args.first() {
@@ -49,7 +57,14 @@ pub async fn toc_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> B
     let elapsed = now
         .checked_sub(start)
         .ok_or_else(|| toc_error(&TOC_ERROR_INVALID_HANDLE))?;
-    Ok(elapsed.as_secs_f64())
+    let seconds = elapsed.as_secs_f64();
+    if requested_outputs == Some(0) {
+        crate::console::record_console_line(
+            crate::console::ConsoleStream::Stdout,
+            format!("Elapsed time is {seconds:.6} seconds."),
+        );
+    }
+    Ok(seconds)
 }
 
 fn parse_token(value: &Value) -> Option<StopwatchToken> {
@@ -80,7 +95,7 @@ mod tests {
 
     #[test]
     fn toc_requires_matching_tic() {
-        let error = block_on(toc_builtin(Some(runtime()), Vec::new())).unwrap_err();
+        let error = block_on(toc_builtin(Some(runtime()), None, Vec::new())).unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_NO_MATCHING_TIC.identifier);
     }
 
@@ -89,10 +104,11 @@ mod tests {
         let first = runtime();
         let second = runtime();
         let token = block_on(tic_builtin(Some(first.clone()), None)).unwrap();
-        let elapsed = block_on(toc_builtin(Some(first.clone()), vec![token.clone()])).unwrap();
-        let latest = block_on(toc_builtin(Some(first), Vec::new())).unwrap();
+        let elapsed =
+            block_on(toc_builtin(Some(first.clone()), None, vec![token.clone()])).unwrap();
+        let latest = block_on(toc_builtin(Some(first), None, Vec::new())).unwrap();
         assert!(latest >= elapsed);
-        let error = block_on(toc_builtin(Some(second), vec![token])).unwrap_err();
+        let error = block_on(toc_builtin(Some(second), None, vec![token])).unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_INVALID_HANDLE.identifier);
     }
 
@@ -104,15 +120,26 @@ mod tests {
             panic!("uint64")
         };
         for invalid in [Value::Num(raw as f64), Value::Int(IntValue::U64(0))] {
-            let error = block_on(toc_builtin(Some(runtime.clone()), vec![invalid])).unwrap_err();
+            let error =
+                block_on(toc_builtin(Some(runtime.clone()), None, vec![invalid])).unwrap_err();
             assert_eq!(error.identifier(), TOC_ERROR_INVALID_HANDLE.identifier);
         }
     }
 
     #[test]
     fn toc_rejects_extra_inputs_before_state_access() {
-        let error =
-            block_on(toc_builtin(None, vec![Value::Num(0.0), Value::Num(0.0)])).unwrap_err();
+        let error = block_on(toc_builtin(
+            None,
+            None,
+            vec![Value::Num(0.0), Value::Num(0.0)],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_TOO_MANY_INPUTS.identifier);
+    }
+
+    #[test]
+    fn toc_rejects_extra_outputs_before_state_access() {
+        let error = block_on(toc_builtin(None, Some(2), Vec::new())).unwrap_err();
+        assert_eq!(error.identifier(), TOC_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 }

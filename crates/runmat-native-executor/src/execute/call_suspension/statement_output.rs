@@ -6,7 +6,9 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::super::state::HostState;
 use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
 
-pub(super) fn take_completed_statement_output(state: &mut HostState) -> NativeExecutorResult<bool> {
+pub(in crate::execute) fn take_completed_statement_output(
+    state: &mut HostState,
+) -> NativeExecutorResult<bool> {
     let Some(completed) = state.completed_call.take() else {
         return Ok(false);
     };
@@ -28,7 +30,7 @@ pub(super) fn take_completed_statement_output(state: &mut HostState) -> NativeEx
     Ok(true)
 }
 
-pub(super) fn begin_statement_output(
+pub(in crate::execute) fn begin_statement_output(
     state: &mut HostState,
     output: &MirStatementOutput,
 ) -> NativeExecutorResult<()> {

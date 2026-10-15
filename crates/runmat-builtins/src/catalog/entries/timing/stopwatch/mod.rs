@@ -7,7 +7,7 @@ mod tests;
 
 pub use contract::{
     TIC_ERROR_CONTEXT_UNAVAILABLE, TIC_ERROR_TOKEN_EXHAUSTED, TOC_ERROR_INVALID_HANDLE,
-    TOC_ERROR_NO_MATCHING_TIC, TOC_ERROR_TOO_MANY_INPUTS,
+    TOC_ERROR_NO_MATCHING_TIC, TOC_ERROR_TOO_MANY_INPUTS, TOC_ERROR_TOO_MANY_OUTPUTS,
 };
 
 use crate::*;
@@ -82,8 +82,10 @@ pub const TOC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::EnvironmentRead,
             EffectKind::Clock,
             EffectKind::MayThrow,
+            EffectKind::UserInterface,
+            EffectKind::HostCallback,
         ],
-        capabilities: &[],
+        capabilities: &[runmat_types::CapabilityRequirement::UserInterface],
     },
     placement: PLACEMENT,
     link: LINK,
@@ -91,5 +93,5 @@ pub const TOC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     extensions: &[],
     integer_capabilities: &contract::TOC_INTEGER_CAPABILITIES,
     integer_audit: None,
-    suppress_auto_output: false,
+    suppress_auto_output: true,
 };

@@ -79,10 +79,17 @@ pub const TOC_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "More than one input argument is supplied.",
     message: "toc: too many input arguments",
 };
-const TOC_ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const TOC_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TOC.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:toc:TooManyOutputs"),
+    when: "More than one output is requested from toc.",
+    message: "toc: too many output arguments",
+};
+const TOC_ERRORS: [BuiltinErrorDescriptor; 4] = [
     TOC_ERROR_NO_MATCHING_TIC,
     TOC_ERROR_INVALID_HANDLE,
     TOC_ERROR_TOO_MANY_INPUTS,
+    TOC_ERROR_TOO_MANY_OUTPUTS,
 ];
 pub const TOC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TOC_SIGNATURES,

@@ -58,5 +58,25 @@ pub(super) fn toc(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
             }
         }
     }
-    finish_fixed(entry, request, default_double_scalar(), diagnostics)
+    let mut result = finish_fixed(entry, request, default_double_scalar(), diagnostics);
+    if request
+        .outputs
+        .requested
+        .known_count()
+        .is_some_and(|count| count > 0)
+    {
+        result
+            .effects
+            .0
+            .remove(&runmat_types::EffectKind::UserInterface);
+        result
+            .effects
+            .0
+            .remove(&runmat_types::EffectKind::HostCallback);
+        result
+            .capabilities
+            .0
+            .remove(&runmat_types::CapabilityRequirement::UserInterface);
+    }
+    result
 }

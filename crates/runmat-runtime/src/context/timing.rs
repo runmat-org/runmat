@@ -113,8 +113,10 @@ impl TimingSessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::timing::{tic::tic_builtin, toc::toc_builtin};
     use crate::context::{RuntimeContext, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;
+    use futures::executor::block_on;
     use runmat_execution::cancellation::CancellationSource;
     use runmat_execution::CancellationReason;
     use std::cell::Cell;
@@ -158,6 +160,50 @@ mod tests {
         fn sleep(&self, _: Duration) -> RuntimeServiceFuture<Result<(), crate::RuntimeError>> {
             Box::pin(std::future::pending())
         }
+    }
+
+    #[test]
+    fn unobserved_toc_prints_once_and_observed_toc_returns_only_seconds() {
+        let time = Rc::new(Cell::new(Duration::from_secs(3)));
+        let services =
+            RuntimeServicePorts::default().with_timing(Rc::new(TestTiming(time.clone())));
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(services);
+        crate::console::reset_thread_buffer();
+
+        let unobserved_token = block_on(tic_builtin(Some(runtime.clone()), Some(0))).unwrap();
+        assert!(matches!(
+            unobserved_token,
+            runmat_value::Value::Int(runmat_value::IntValue::U64(0))
+        ));
+        assert!(runtime.state().timing.borrow().starts.is_empty());
+        time.set(Duration::from_millis(3_250));
+        assert_eq!(
+            block_on(toc_builtin(Some(runtime.clone()), Some(0), Vec::new())).unwrap(),
+            0.25
+        );
+        let entries = crate::console::take_thread_buffer();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].stream, crate::console::ConsoleStream::Stdout);
+        assert_eq!(entries[0].text, "Elapsed time is 0.250000 seconds.\n");
+
+        assert_eq!(
+            block_on(toc_builtin(Some(runtime.clone()), Some(1), Vec::new())).unwrap(),
+            0.25
+        );
+        assert_eq!(
+            block_on(toc_builtin(Some(runtime.clone()), None, Vec::new())).unwrap(),
+            0.25
+        );
+        assert!(crate::console::take_thread_buffer().is_empty());
+
+        let token = block_on(tic_builtin(Some(runtime.clone()), Some(1))).unwrap();
+        time.set(Duration::from_secs(4));
+        assert_eq!(
+            block_on(toc_builtin(Some(runtime), Some(1), vec![token])).unwrap(),
+            0.75
+        );
+        assert!(crate::console::take_thread_buffer().is_empty());
     }
 
     #[test]

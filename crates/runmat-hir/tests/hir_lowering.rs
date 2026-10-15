@@ -443,6 +443,126 @@ fn bare_builtin_identifier_statement_preserves_requested_output_count() {
 }
 
 #[test]
+fn catalog_no_auto_output_is_unobserved_only_for_standalone_calls() {
+    let assembly = lower_semantic(
+        "tic\ntoc\nfprintf('x')\nwarning('x')\nplot(1)\nrand\nelapsed = toc;\nline = plot(1);\nnested = toc(tic);",
+    );
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let calls = function
+        .body
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let expr = match &statement.kind {
+                HirStmtKind::ExprStmt(expr, _) | HirStmtKind::Assign(_, expr, _) => expr,
+                _ => return None,
+            };
+            let HirExprKind::Call(call) = &expr.kind else {
+                return None;
+            };
+            let HirCallableRef::Builtin(id) = &call.callee else {
+                return None;
+            };
+            Some((id.0.as_str(), call.requested_outputs))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls,
+        vec![
+            ("tic", RequestedOutputCount::Zero),
+            ("toc", RequestedOutputCount::Zero),
+            ("fprintf", RequestedOutputCount::Zero),
+            ("warning", RequestedOutputCount::Zero),
+            ("plot", RequestedOutputCount::Zero),
+            ("rand", RequestedOutputCount::One),
+            ("toc", RequestedOutputCount::One),
+            ("plot", RequestedOutputCount::One),
+            ("toc", RequestedOutputCount::One),
+        ]
+    );
+    let outer = function
+        .body
+        .statements
+        .iter()
+        .find_map(|statement| {
+            let HirStmtKind::Assign(_, expr, _) = &statement.kind else {
+                return None;
+            };
+            let HirExprKind::Call(call) = &expr.kind else {
+                return None;
+            };
+            (call.args.len() == 1 && matches!(&call.args[0].kind, HirExprKind::Call(_)))
+                .then_some(call)
+        })
+        .expect("nested toc assignment");
+    let HirExprKind::Call(inner) = &outer.args[0].kind else {
+        panic!("inner tic call")
+    };
+    assert_eq!(inner.requested_outputs, RequestedOutputCount::One);
+
+    let shadowed = lower_semantic("toc\nfunction y = toc(); y = 9; end");
+    let entry = shadowed.modules[0].synthetic_entry_function.unwrap();
+    let function = shadowed
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::ExprStmt(expr, false) = &function.body.statements[0].kind else {
+        panic!("shadowed toc statement")
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("shadowed toc call")
+    };
+    assert!(matches!(call.callee, HirCallableRef::Function(_)));
+    assert_eq!(call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
+fn constructor_resolution_precedes_catalogued_statement_output_policy() {
+    for (source, name) in [
+        ("toc\nclassdef toc\nend", "toc"),
+        ("plot(1)\nclassdef plot\nend", "plot"),
+        ("gcf\nclassdef gcf\nend", "gcf"),
+    ] {
+        let result = lower_result(source);
+        let call = result
+            .hir_index
+            .calls
+            .iter()
+            .find(|call| call.name.display_name().as_deref() == Some(name))
+            .expect("constructor call");
+        assert!(matches!(call.kind, CallKind::Constructor(_)), "{source}");
+        assert_eq!(
+            call.requested_outputs,
+            RequestedOutputCount::One,
+            "{source}"
+        );
+    }
+
+    let source = "import pkg.plot\nplot(1)\nclassdef ShadowPlot\nend";
+    let ast = runmat_parser::parse(source).expect("parse imported constructor");
+    let aliases = HashMap::from([("pkg.plot".to_string(), "ShadowPlot".to_string())]);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_project_symbol_aliases(&aliases),
+    )
+    .expect("lower imported constructor");
+    let call = result
+        .hir_index
+        .calls
+        .iter()
+        .find(|call| call.name.display_name().as_deref() == Some("plot"))
+        .expect("imported constructor call");
+    assert!(matches!(call.kind, CallKind::Constructor(_)));
+    assert_eq!(call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn bare_builtin_identifier_after_external_visibility_uses_workspace_first_call() {
     let assembly = lower_semantic("run(\"setup.m\"); x = rand;");
     let expr = assembly

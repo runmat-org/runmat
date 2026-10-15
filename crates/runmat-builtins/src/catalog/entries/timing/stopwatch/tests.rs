@@ -63,3 +63,36 @@ fn stopwatch_facts_and_token_rejection() {
             .any(|d| d.code == "RM-CATALOG-TOC-TOKEN"));
     }
 }
+
+#[test]
+fn toc_console_effect_is_only_required_for_unobserved_result() {
+    let mut unobserved = request(Vec::new());
+    unobserved.outputs = OutputSelection::new(RequestedOutputCount::Zero);
+    let printed = inference::toc(&unobserved, &TOC_CATALOG_ENTRY);
+    assert!(printed
+        .effects
+        .0
+        .contains(&runmat_types::EffectKind::UserInterface));
+    assert!(printed
+        .effects
+        .0
+        .contains(&runmat_types::EffectKind::HostCallback));
+    assert!(printed
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::UserInterface));
+
+    let observed = inference::toc(&request(Vec::new()), &TOC_CATALOG_ENTRY);
+    assert!(!observed
+        .effects
+        .0
+        .contains(&runmat_types::EffectKind::UserInterface));
+    assert!(!observed
+        .effects
+        .0
+        .contains(&runmat_types::EffectKind::HostCallback));
+    assert!(!observed
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::UserInterface));
+}

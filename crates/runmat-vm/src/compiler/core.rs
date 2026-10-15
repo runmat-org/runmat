@@ -3076,8 +3076,9 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(left)?;
         let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        for stmt in right_temps {
-            self.compile_mir_stmt(stmt)?;
+        for (index, stmt) in right_temps.iter().enumerate() {
+            let next = right_temps.get(index + 1).map(|statement| &statement.kind);
+            self.compile_mir_stmt(stmt, next)?;
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
@@ -3104,8 +3105,9 @@ impl Compiler {
         let end = self.emit(Instr::Jump(usize::MAX));
         let right_pc = self.instructions.len();
         self.patch(lhs_false, Instr::JumpIfFalse(right_pc));
-        for stmt in right_temps {
-            self.compile_mir_stmt(stmt)?;
+        for (index, stmt) in right_temps.iter().enumerate() {
+            let next = right_temps.get(index + 1).map(|statement| &statement.kind);
+            self.compile_mir_stmt(stmt, next)?;
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));

@@ -2160,6 +2160,11 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
         elapsedDrain = toc();
     "#;
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    let stdout = stdout_text(&outcome);
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+    assert!(stdout.starts_with("Elapsed time is "), "{stdout:?}");
+    assert!(stdout.ends_with(" seconds.\n"), "{stdout:?}");
+    assert!(!stdout.contains("ans =") && !stdout.contains("timerVal ="));
     for name in [
         "elapsedParen",
         "elapsedBare",

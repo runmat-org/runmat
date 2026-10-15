@@ -927,36 +927,63 @@ impl LoweringCtx {
         Ok(None)
     }
 
-    fn requested_outputs_for_expr_stmt(&self, expr: &AstExpr) -> RequestedOutputCount {
+    fn requested_outputs_for_expr_stmt(
+        &self,
+        expr: &AstExpr,
+    ) -> Result<RequestedOutputCount, HirError> {
         let name = match expr {
             AstExpr::FuncCall(name, _, _) | AstExpr::Ident(name, _) => name,
-            _ => return RequestedOutputCount::One,
+            _ => return Ok(RequestedOutputCount::One),
         };
         if self.lookup_binding(name).is_none() {
-            if let Some(function) = self.resolve_scoped_function_name(name) {
-                if self
-                    .local_function_output_arities
-                    .get(&function)
-                    .copied()
-                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
-                {
-                    return RequestedOutputCount::Zero;
-                }
-            } else if let Some(function) = self.external_function_names.get(name).copied() {
-                if self
-                    .external_function_output_arities
-                    .get(&function)
-                    .copied()
-                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
-                {
-                    return RequestedOutputCount::Zero;
-                }
+            // Plain calls resolve constructors before scoped functions and builtins.
+            // A constructor's object result remains observed even when its name
+            // collides with a catalogued no-auto-output builtin.
+            if self
+                .resolve_imported_constructor_target(name, expr.span())?
+                .is_some()
+                || self.class_id_for_name(name).is_some()
+            {
+                return Ok(RequestedOutputCount::One);
             }
-            if runmat_builtins::builtin_declares_zero_outputs(name) {
-                return RequestedOutputCount::Zero;
+            if let Some(function) = self.resolve_scoped_function_name(name) {
+                return Ok(
+                    if self
+                        .local_function_output_arities
+                        .get(&function)
+                        .copied()
+                        .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                    {
+                        RequestedOutputCount::Zero
+                    } else {
+                        RequestedOutputCount::One
+                    },
+                );
+            }
+            if let Some(function) = self.external_function_names.get(name).copied() {
+                return Ok(
+                    if self
+                        .external_function_output_arities
+                        .get(&function)
+                        .copied()
+                        .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                    {
+                        RequestedOutputCount::Zero
+                    } else {
+                        RequestedOutputCount::One
+                    },
+                );
+            }
+            // A catalogued no-auto-output call is an unobserved statement
+            // invocation. Its own explicit console effect (if any) is still
+            // executed even when the source statement has a semicolon.
+            if runmat_builtins::builtin_declares_zero_outputs(name)
+                || runmat_builtins::suppresses_auto_output(name)
+            {
+                return Ok(RequestedOutputCount::Zero);
             }
         }
-        RequestedOutputCount::One
+        Ok(RequestedOutputCount::One)
     }
 
     fn binding_call_expr_kind(
@@ -2248,7 +2275,7 @@ impl LoweringCtx {
                 let requested_outputs = if *suppressed || loads_external_bindings {
                     RequestedOutputCount::Zero
                 } else {
-                    self.requested_outputs_for_expr_stmt(expr)
+                    self.requested_outputs_for_expr_stmt(expr)?
                 };
                 let stmt = HirStmtKind::ExprStmt(
                     self.lower_expr_semantic_requested_in_context(

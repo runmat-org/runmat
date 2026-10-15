@@ -41,7 +41,7 @@ pub(super) const TIC: BuiltinDocumentation = BuiltinDocumentation {
 pub(super) const TOC: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("toc"), slug: Some("toc"),
     summary: "Read elapsed seconds since a session-owned tic start.",
-    description: "`toc` returns elapsed wall-clock seconds since the latest `tic` or since an explicit opaque `uint64` token from this session.",
+    description: "`toc` returns elapsed wall-clock seconds since the latest `tic` or since an explicit opaque `uint64` token from this session. Called without an output destination, it prints the elapsed-time line instead of an implicit `ans` value.",
     keywords: &["toc", "timing", "profiling", "benchmark"], related: &["tic", "timeit", "cputime"],
     sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`toc()` reads the latest start without consuming it. `toc(token)` reads the start associated with a published token; repeated reads remain valid.",
@@ -52,7 +52,7 @@ pub(super) const TOC: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "What happens if I call `toc` before `tic`?", answer: "It raises `RunMat:toc:NoMatchingTic` when this session has no latest start." },
         BuiltinDocumentationFaq { question: "Does `toc` remove the matching `tic`?", answer: "No. Both forms are read operations, so repeated calls report elapsed time from the same start." },
         BuiltinDocumentationFaq { question: "Can I reuse a `tic` handle after calling `toc(t)`?", answer: "Yes, within the same session. The token remains valid until that session ends." },
-        BuiltinDocumentationFaq { question: "Does `toc` print output?", answer: "An uncaptured result is displayed by normal interpreter output rules; assignment or a terminating semicolon suppresses it." },
+        BuiltinDocumentationFaq { question: "Does `toc` print output?", answer: "A standalone `toc` or `toc;` prints an `Elapsed time is ... seconds.` line. Assigning its result returns a scalar double without that line; a semicolon on the standalone call does not suppress its explicit print." },
         BuiltinDocumentationFaq { question: "Is `toc` affected by GPU execution or fusion?", answer: "No. It reads the host monotonic timing service." },
         BuiltinDocumentationFaq { question: "How accurate is the reported time?", answer: "Resolution depends on the host monotonic clock and scheduler." },
     ],
