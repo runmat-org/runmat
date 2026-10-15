@@ -150,6 +150,17 @@ pub fn infer_binary(operator: OperatorKind, left: &ValueFact, right: &ValueFact)
                 })
             })
             .unwrap_or_else(|| numeric_result_kind(numeric_fact(left), numeric_fact(right)))
+    } else if operator == OperatorKind::ElementwiseMultiply
+        || (operator == OperatorKind::MatrixMultiply
+            && [left, right]
+                .iter()
+                .any(|operand| operand.shape.element_count() == Some(1)))
+    {
+        // Scalar matrix multiplication delegates to elementwise times. Share
+        // its floating class contract without asserting contraction arithmetic
+        // or extending integer, complex, or unproven-carrier inference.
+        real_floating_product_kind(left, right)
+            .unwrap_or_else(|| numeric_result_kind(numeric_fact(left), numeric_fact(right)))
     } else {
         numeric_result_kind(numeric_fact(left), numeric_fact(right))
     };
@@ -193,6 +204,23 @@ pub const fn floating_binary_result_class(
         }
         _ => None,
     }
+}
+
+fn real_floating_product_kind(left: &ValueFact, right: &ValueFact) -> Option<ValueKindFact> {
+    if !matches!(left.storage, StorageFact::Scalar | StorageFact::Dense)
+        || !matches!(right.storage, StorageFact::Scalar | StorageFact::Dense)
+    {
+        return None;
+    }
+    let left = left.numeric()?;
+    let right = right.numeric()?;
+    if left.domain != crate::NumericDomain::Real || right.domain != crate::NumericDomain::Real {
+        return None;
+    }
+    Some(ValueKindFact::Numeric(NumericFact {
+        class: floating_binary_result_class(left.class, right.class)?,
+        domain: crate::NumericDomain::Real,
+    }))
 }
 
 impl RealFloatingAddMode {
@@ -436,6 +464,83 @@ mod mixed_add_tests {
         assert!(!infer_binary(OperatorKind::Add, &single, &mismatch)
             .diagnostics
             .is_empty());
+    }
+
+    #[test]
+    fn mixed_real_products_share_class_contract_for_scalar_matrix_and_elementwise_times() {
+        let single = real(crate::NumericClass::Single, &[Some(2), Some(1)]);
+        let mut double_scalar = real(crate::NumericClass::Double, &[Some(1), Some(1)]);
+        double_scalar.storage = StorageFact::Scalar;
+        for operator in [
+            OperatorKind::MatrixMultiply,
+            OperatorKind::ElementwiseMultiply,
+        ] {
+            for (left, right) in [(&single, &double_scalar), (&double_scalar, &single)] {
+                let inferred = infer_binary(operator, left, right);
+                assert!(inferred.diagnostics.is_empty());
+                assert_eq!(inferred.fact.shape, single.shape);
+                assert_eq!(inferred.fact.storage, StorageFact::Dense);
+                assert_eq!(
+                    inferred.fact.numeric(),
+                    Some(NumericFact {
+                        class: crate::NumericClass::Single,
+                        domain: crate::NumericDomain::Real,
+                    })
+                );
+            }
+            for storage in [
+                StorageFact::Sparse,
+                StorageFact::Unknown,
+                StorageFact::Opaque,
+            ] {
+                let mut unproved = single.clone();
+                unproved.storage = storage;
+                assert!(infer_binary(operator, &unproved, &double_scalar)
+                    .fact
+                    .numeric()
+                    .is_none());
+            }
+            let mut complex = single.clone();
+            complex.kind = ValueKindFact::Numeric(NumericFact {
+                class: crate::NumericClass::Single,
+                domain: crate::NumericDomain::Complex,
+            });
+            assert!(infer_binary(operator, &complex, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+            let integer = real(crate::NumericClass::Int8, &[Some(2), Some(1)]);
+            assert!(infer_binary(operator, &integer, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+        }
+        let double_row = real(crate::NumericClass::Double, &[Some(1), Some(3)]);
+        assert!(
+            infer_binary(OperatorKind::MatrixMultiply, &single, &double_row)
+                .fact
+                .numeric()
+                .is_none()
+        );
+        let broadcast = infer_binary(OperatorKind::ElementwiseMultiply, &single, &double_row);
+        assert_eq!(
+            broadcast.fact.shape,
+            ShapeFact::from(vec![Some(2), Some(3)])
+        );
+        assert_eq!(
+            broadcast.fact.numeric().map(|numeric| numeric.class),
+            Some(crate::NumericClass::Single)
+        );
+        for operator in [
+            OperatorKind::Subtract,
+            OperatorKind::ElementwiseDivide,
+            OperatorKind::ElementwisePower,
+        ] {
+            assert!(infer_binary(operator, &single, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+        }
     }
 
     #[test]
