@@ -21,7 +21,7 @@ mod set_target;
 mod receiver;
 pub(crate) use receiver::{get_receiver_properties, set_receiver_properties};
 use set_target::PropertySetHandle;
-pub(crate) use set_target::{PropertyPresentation, PropertySetOutcome};
+pub(crate) use set_target::PropertySetOutcome;
 #[path = "properties/set_preflight.rs"]
 mod set_preflight;
 use set_preflight::{
@@ -3219,8 +3219,10 @@ fn get_reference_line_property(
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("label") => Ok(Value::String(line.label.clone().unwrap_or_default())),
-        Some("labelorientation") => Ok(Value::String(line.label_orientation)),
-        Some("displayname") => Ok(Value::String(line.display_name.unwrap_or_default())),
+        Some("labelorientation") => Ok(Value::String(line.label_orientation.clone())),
+        Some("displayname") => Ok(Value::String(
+            line.display_name.as_deref().unwrap_or_default().to_owned(),
+        )),
         Some("visible") => Ok(Value::String(
             if line.visible { "on" } else { "off" }.into(),
         )),

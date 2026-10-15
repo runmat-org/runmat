@@ -39,9 +39,7 @@ pub(crate) use axes_modes::{
 pub(crate) use colorbar::{
     set_colorbar_enabled_for_axes_for_property, set_colorbar_visible_for_property,
 };
-pub(crate) use colormap::{
-    set_colormap_for_axes_for_property, set_colormap_for_axes_with_length_for_property,
-};
+pub(crate) use colormap::set_colormap_for_axes_for_property;
 pub use mode_properties::FigureTarget;
 use property_mutation::PropertyLocation;
 pub(crate) use property_mutation::{
@@ -115,7 +113,7 @@ mod colormap;
 pub use colormap::set_colormap_with_length;
 pub use colormap::{
     colormap_length_for_axes, current_colormap_length, figure_colormap_snapshot,
-    set_colormap_for_axes, set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
+    set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
 };
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
@@ -145,10 +143,7 @@ pub use axes_modes::{
 };
 #[cfg(test)]
 pub use colorbar::colorbar_handle_for_axes;
-pub use colorbar::{
-    colorbar_handles_for_figure, ensure_colorbar_for_axes, set_colorbar_enabled_for_axes,
-    set_colorbar_visible, ColorBarHandleState,
-};
+pub use colorbar::{ensure_colorbar_for_axes, set_colorbar_enabled_for_axes, ColorBarHandleState};
 
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
 type AxisTickSnapshot = (Option<Vec<f64>>, Option<Vec<f64>>);

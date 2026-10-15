@@ -9,7 +9,7 @@ pub(crate) enum PropertySetOutcome {
 }
 
 pub(crate) enum PropertyPresentation {
-    CompatibilityAlias(FigureHandle, runmat_plot::plots::Figure),
+    CompatibilityAlias(FigureHandle, FigureOwner),
     Selected {
         selection: GraphicsPropertySelection,
         figure: FigureOwner,
@@ -30,7 +30,7 @@ impl PropertySetOutcome {
             .map_err(|error| map_figure_error(builtin, error))?
         {
             Some(selection) => PropertyPresentation::Selected { selection, figure },
-            None => PropertyPresentation::CompatibilityAlias(handle, figure.as_ref().clone()),
+            None => PropertyPresentation::CompatibilityAlias(handle, figure),
         };
         Ok(Self::Presentation(source))
     }
@@ -39,7 +39,7 @@ impl PropertySetOutcome {
         match self {
             Self::Complete => Ok(()),
             Self::Presentation(PropertyPresentation::CompatibilityAlias(handle, figure)) => {
-                present_figure_update(builtin, handle, figure).map(|_| ())
+                present_figure_update(builtin, handle, figure.as_ref().clone()).map(|_| ())
             }
             Self::Presentation(PropertyPresentation::Selected { .. }) => {
                 Err(receiver::property_unavailable(builtin))

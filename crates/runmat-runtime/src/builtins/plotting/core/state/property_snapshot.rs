@@ -115,7 +115,7 @@ fn figure_snapshot_from_registry(
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
     let mut axes = axes_handles_from_state(state, handle);
-    axes.extend(super::colorbar::handles_in_registry(&registry, handle));
+    axes.extend(super::colorbar::handles_in_registry(registry, handle));
     Ok(FigurePropertySnapshot {
         selection,
         handle,
