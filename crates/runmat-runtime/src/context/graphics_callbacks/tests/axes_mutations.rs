@@ -65,6 +65,9 @@ fn canonical_axes_controls_keep_authentic_callback_successors() {
                 figure
             };
             let base = selected();
+            // The explicit Figure argument is a declared RunMat extension;
+            // other forms keep the fixture's conservative MATLAB policy.
+            base.set_runmat_extensions_enabled(name == "gca" && exact);
             let queue = RuntimeGraphicsCallbackQueue::new_for_selected(
                 &base,
                 NonZeroUsize::new(1).unwrap(),

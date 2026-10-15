@@ -23,8 +23,8 @@ pub const PLOT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         effects: &[
             runmat_types::EffectKind::UserInterface,
             runmat_types::EffectKind::HostCallback,
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[runmat_types::CapabilityRequirement::UserInterface],
     },

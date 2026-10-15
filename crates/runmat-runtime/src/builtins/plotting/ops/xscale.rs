@@ -134,8 +134,10 @@ mod tests {
     #[test]
     fn xscale_descriptor_only_advertises_query_output() {
         let signatures = XSCALE_DESCRIPTOR.signatures;
-        assert_eq!(signatures[0].outputs.len(), 1);
-        assert!(signatures[1].outputs.is_empty());
-        assert!(signatures[2].outputs.is_empty());
+        assert_eq!(
+            signatures.iter().map(|signature| signature.outputs.len()).collect::<Vec<_>>(),
+            [1, 1, 0, 0],
+            "both current/explicit-axes queries return a value; neither setter advertises an output",
+        );
     }
 }
