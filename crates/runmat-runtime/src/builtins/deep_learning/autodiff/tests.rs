@@ -1,4 +1,4 @@
-use super::tape::{NodeValue, Tape, TapeActivation, TapeFuture};
+use super::tape::{NodeValue, Tape, TapeActivation, TapeFuture, TapePollAuthority};
 use super::*;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, StructArray};
 use std::collections::HashMap;
@@ -43,6 +43,63 @@ fn nested_tape_activation_restores_the_outer_graph() {
     push_node(Tensor::new(vec![3.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
     assert_eq!(outer.borrow().nodes.len(), 2);
     assert_eq!(inner.borrow().nodes.len(), 1);
+}
+
+#[test]
+fn selected_context_polls_and_drops_on_its_tape_without_leaking_to_siblings() {
+    let execution = Rc::new(crate::execution::RuntimeExecutionService::new());
+    let unrelated = crate::context::RuntimeContext::new(execution);
+    let outer = Rc::new(RefCell::new(Tape::new()));
+    let selected_tape = Rc::new(RefCell::new(Tape::new()));
+    let retired_tape = Rc::downgrade(&selected_tape);
+    let selected = unrelated
+        .clone()
+        .with_tape_poll_authority(TapePollAuthority::new(&selected_tape));
+    let dropped_on_selected_tape = Rc::new(std::cell::Cell::new(false));
+    struct DropWitness(Rc<std::cell::Cell<bool>>, Rc<RefCell<Tape>>);
+    impl Drop for DropWitness {
+        fn drop(&mut self) {
+            self.0
+                .set(active_tape().is_some_and(|active| Rc::ptr_eq(&active, &self.1)));
+        }
+    }
+    let _outer = TapeActivation::enter(outer.clone());
+    {
+        let _unrelated = unrelated.enter();
+        assert!(
+            !tape_is_active(),
+            "an unrelated context masks the caller tape"
+        );
+    }
+    let witness = DropWitness(dropped_on_selected_tape.clone(), selected_tape.clone());
+    let mut child = Box::pin(selected.scope(async move {
+        let _witness = witness;
+        assert!(tape_is_active());
+        push_node(Tensor::new(vec![2.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
+        futures::future::pending::<()>().await;
+    }));
+    let waker = futures::task::noop_waker();
+    let mut context = Context::from_waker(&waker);
+    assert!(child.as_mut().poll(&mut context).is_pending());
+    assert!(Rc::ptr_eq(&active_tape().unwrap(), &outer));
+    drop(child);
+    assert!(dropped_on_selected_tape.get());
+    assert!(Rc::ptr_eq(&active_tape().unwrap(), &outer));
+    assert_eq!(outer.borrow().nodes.len(), 0);
+    assert_eq!(selected_tape.borrow().nodes.len(), 1);
+    drop(selected_tape);
+    assert!(
+        retired_tape.upgrade().is_none(),
+        "retained context cannot own the graph"
+    );
+    {
+        let _expired = selected.enter();
+        assert!(
+            !tape_is_active(),
+            "an expired token must mask, never borrow, the outer tape"
+        );
+    }
+    assert!(Rc::ptr_eq(&active_tape().unwrap(), &outer));
 }
 
 #[test]

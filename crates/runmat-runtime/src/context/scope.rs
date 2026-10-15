@@ -111,6 +111,7 @@ pub struct RuntimeContextGuard {
     state_identity: *const super::RuntimeContextState,
     _display_format: runmat_value::DisplayFormatSelectionGuard,
     _command_profiling: runmat_execution::profiling::CommandProfilingSelectionGuard,
+    _tape: crate::builtins::deep_learning::autodiff::TapePollGuard,
 }
 
 impl RuntimeContextGuard {
@@ -121,11 +122,15 @@ impl RuntimeContextGuard {
         let command_profiling = runmat_execution::profiling::select_command_profiling(
             context.command_profiling().cloned(),
         );
+        let tape = crate::builtins::deep_learning::autodiff::TapePollGuard::select(
+            context.tape_poll_authority(),
+        );
         ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(context));
         Self {
             state_identity,
             _display_format: display_format,
             _command_profiling: command_profiling,
+            _tape: tape,
         }
     }
 }

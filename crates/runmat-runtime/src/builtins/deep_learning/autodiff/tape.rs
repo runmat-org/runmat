@@ -1,4 +1,5 @@
 use super::*;
+use std::rc::Weak;
 mod input;
 mod provenance;
 pub(in crate::builtins::deep_learning) use input::annotate_dlarray_value;
@@ -30,17 +31,52 @@ static NEXT_TAPE_ID: AtomicU64 = AtomicU64::new(1);
 runmat_thread_local::runmat_thread_local! {
     // Only installed for a callback future's poll or destruction. A suspended
     // callback never leaves its tape active for another execution on the thread.
-    static ACTIVE_TAPES: RefCell<Vec<Rc<RefCell<Tape>>>> = const { RefCell::new(Vec::new()) };
+    // A context without a tape masks an enclosing callback while it is active.
+    static ACTIVE_TAPES: RefCell<Vec<Option<Rc<RefCell<Tape>>>>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) fn active_tape() -> Option<Rc<RefCell<Tape>>> {
-    ACTIVE_TAPES.with(|slot| slot.borrow().last().cloned())
+    ACTIVE_TAPES.with(|slot| slot.borrow().last().cloned().flatten())
 }
 
-pub(super) struct TapeActivation(Rc<RefCell<Tape>>);
+/// Opaque, invocation-local authority to poll one callback against its tape.
+/// Retained callback contexts cannot keep a completed graph alive.
+#[derive(Clone)]
+pub(crate) struct TapePollAuthority(Weak<RefCell<Tape>>);
+
+impl TapePollAuthority {
+    pub(super) fn new(tape: &Rc<RefCell<Tape>>) -> Self {
+        Self(Rc::downgrade(tape))
+    }
+}
+
+pub(super) struct TapeActivation(Option<Rc<RefCell<Tape>>>);
+
+/// Selecting no tape is a no-op in the ordinary case. It masks a live outer
+/// tape only when another invocation is actually nested beneath that poll.
+pub(crate) struct TapePollGuard {
+    _activation: Option<TapeActivation>,
+}
+
+impl TapePollGuard {
+    pub(crate) fn select(authority: Option<&TapePollAuthority>) -> Self {
+        let selected = authority.and_then(|authority| authority.0.upgrade());
+        if selected.is_none() && active_tape().is_none() {
+            Self { _activation: None }
+        } else {
+            Self {
+                _activation: Some(TapeActivation::select_tape(selected)),
+            }
+        }
+    }
+}
 
 impl TapeActivation {
     pub(super) fn enter(tape: Rc<RefCell<Tape>>) -> Self {
+        Self::select_tape(Some(tape))
+    }
+
+    fn select_tape(tape: Option<Rc<RefCell<Tape>>>) -> Self {
         ACTIVE_TAPES.with(|slot| slot.borrow_mut().push(tape.clone()));
         Self(tape)
     }
@@ -50,7 +86,11 @@ impl Drop for TapeActivation {
     fn drop(&mut self) {
         ACTIVE_TAPES.with(|slot| {
             let popped = slot.borrow_mut().pop();
-            debug_assert!(popped.is_some_and(|tape| Rc::ptr_eq(&tape, &self.0)));
+            debug_assert!(popped.is_some_and(|tape| match (tape, &self.0) {
+                (Some(actual), Some(expected)) => Rc::ptr_eq(&actual, expected),
+                (None, None) => true,
+                _ => false,
+            }));
         });
     }
 }
@@ -224,11 +264,14 @@ pub(in crate::builtins::deep_learning) async fn with_tape_context(
     )
     .map_err(|error| error.into_runtime_error())?;
     let tape = Rc::new(RefCell::new(Tape::new()));
+    let selected_runtime = runtime
+        .cloned()
+        .map(|runtime| runtime.with_tape_poll_authority(TapePollAuthority::new(&tape)));
     TapeFuture {
         tape,
         future: Some(Box::pin(async move {
             let prepared = prepare_tape_inputs(args)?;
-            match runtime {
+            match selected_runtime.as_ref() {
                 Some(runtime) => {
                     crate::call_feval_async_with_outputs_in_context(
                         runtime,

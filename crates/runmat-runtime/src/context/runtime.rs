@@ -154,6 +154,9 @@ pub struct RuntimeContext {
     /// This is a negative comparison fact, not public completeness authority.
     command_device_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
     command_device_access: Option<runmat_accelerate_api::WgpuDeviceAccess>,
+    /// Poll-local differentiation authority for this exact invocation tree.
+    /// An unrelated context selects no tape even when entered beneath one.
+    tape_poll_authority: Option<crate::builtins::deep_learning::autodiff::TapePollAuthority>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
@@ -247,6 +250,7 @@ impl RuntimeContext {
             command_profiling: None,
             command_device_provider: None,
             command_device_access: None,
+            tape_poll_authority: None,
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
@@ -915,6 +919,10 @@ impl RuntimeContext {
         self.execution = Rc::clone(&parent.execution);
         self.cancellation = Rc::clone(&parent.cancellation);
         self.command_profiling = parent.command_profiling.clone();
+        // Differentiation belongs to the physical callback invocation. A
+        // retained target must neither reuse a completed tape nor lose the
+        // current one when the VM polls it as a separate continuation.
+        self.tape_poll_authority = parent.tape_poll_authority.clone();
         if self.services.same_device_route_owners(&parent.services) {
             self.command_device_provider = parent.command_device_provider;
             self.command_device_access = parent.command_device_access.clone();
@@ -1553,6 +1561,23 @@ impl RuntimeContext {
     /// through another by-value scope constructor or allocating a second box.
     pub fn scope_pinned<F: Future>(&self, future: std::pin::Pin<Box<F>>) -> ContextFuture<F> {
         ContextFuture::new(self.clone(), future)
+    }
+
+    /// Select the exact differentiation tape for polls of this invocation.
+    /// The tape remains private to autodiff; sibling continuations inherit it
+    /// through their captured context, not through a suspended thread-local.
+    pub(crate) fn with_tape_poll_authority(
+        mut self,
+        authority: crate::builtins::deep_learning::autodiff::TapePollAuthority,
+    ) -> Self {
+        self.tape_poll_authority = Some(authority);
+        self
+    }
+
+    pub(super) fn tape_poll_authority(
+        &self,
+    ) -> Option<&crate::builtins::deep_learning::autodiff::TapePollAuthority> {
+        self.tape_poll_authority.as_ref()
     }
 
     /// Carry this frame's lexical catch exception through every poll, never

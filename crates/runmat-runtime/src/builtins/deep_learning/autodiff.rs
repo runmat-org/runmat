@@ -28,6 +28,7 @@ use tape::{
 pub(super) use tape::{annotate_dlarray_value, dlarray_node_id, tape_is_active, with_tape_context};
 #[cfg(test)]
 pub(in crate::builtins::deep_learning) use tape::{test_tape_node_count, with_test_tape};
+pub(crate) use tape::{TapePollAuthority, TapePollGuard};
 mod value;
 pub(super) use value::{dlarray_format_and_labels, host_tensor_from_value};
 use value::{
