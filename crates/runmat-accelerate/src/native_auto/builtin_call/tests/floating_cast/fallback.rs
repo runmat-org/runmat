@@ -136,11 +136,11 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
     );
     let values = [1.25_f32, -0.0, 16_777_216.0, 3.5];
     let input = Value::Tensor(Tensor::from_f32(values.to_vec(), vec![1, 2, 2]).unwrap());
-    let output =
-        futures::executor::block_on(context.scope(async {
-            runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
-        }))
-        .unwrap();
+    let output = futures::executor::block_on(context.scope(async {
+        runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &[input])
+            .await
+    }))
+    .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
         panic!("fallback must restore resident output");
     };

@@ -70,11 +70,11 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
         1.0 + f64::from(f32::EPSILON) / 2.0,
     ];
     let input = Value::Tensor(Tensor::new(values.to_vec(), vec![1, 2, 2]).unwrap());
-    let output =
-        futures::executor::block_on(context.scope(async {
-            runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
-        }))
-        .unwrap();
+    let output = futures::executor::block_on(context.scope(async {
+        runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &[input])
+            .await
+    }))
+    .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
         panic!("selected cross-precision device route")
     };

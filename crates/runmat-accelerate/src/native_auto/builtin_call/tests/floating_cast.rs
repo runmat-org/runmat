@@ -53,11 +53,11 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
     let input = Value::Tensor(
         Tensor::from_f32(vec![1.25, -0.0, 16_777_216.0, 3.5], vec![1, 2, 2]).unwrap(),
     );
-    let output =
-        futures::executor::block_on(context.scope(async {
-            runmat_runtime::dispatcher::call_builtin_async("single", &[input]).await
-        }))
-        .unwrap();
+    let output = futures::executor::block_on(context.scope(async {
+        runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &[input])
+            .await
+    }))
+    .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
         panic!("actual resident output");
     };
@@ -144,7 +144,8 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
             },
         ];
         let result = futures::executor::block_on(context.scope(async {
-            runmat_runtime::dispatcher::call_builtin_async("single", &args).await
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &args)
+                .await
         }))
         .unwrap();
         let actual = match result.value() {
@@ -207,7 +208,8 @@ fn actual_double_host_like_keeps_domain_gather_without_plain_cast_feedback() {
         })
         .expect("resident single input");
     let output = futures::executor::block_on(context.scope(async {
-        runmat_runtime::dispatcher::call_builtin_async(
+        runmat_runtime::dispatcher::call_builtin_async_in_context(
+            &context,
             "double",
             &[
                 Value::GpuTensor(input.clone()),
