@@ -126,7 +126,9 @@ fn native_scalar_control(operation: Operation, precision: NumericPrecision) -> b
             (NumericPrecision::F32, ScalarLiteral::F32Bits(_))
                 | (NumericPrecision::F64, ScalarLiteral::F64Bits(_))
         ),
-        Operation::Sqrt | Operation::FloatingCast { .. } => false,
+        Operation::Sqrt
+        | Operation::FloatingCast { .. }
+        | Operation::ExactSingleBasePower { .. } => false,
     }
 }
 
@@ -190,7 +192,9 @@ impl WgpuProvider {
                         Operation::ScalarMax { .. } => {
                             crate::backend::wgpu::types::ScalarOpCode::Max
                         }
-                        Operation::Sqrt | Operation::FloatingCast { .. } => {
+                        Operation::Sqrt
+                        | Operation::FloatingCast { .. }
+                        | Operation::ExactSingleBasePower { .. } => {
                             unreachable!("matched scalar operation")
                         }
                     };
@@ -212,14 +216,28 @@ impl WgpuProvider {
                         0,
                     )
                 }
-                Operation::Sqrt => {
+                Operation::Sqrt | Operation::ExactSingleBasePower { .. } => {
+                    if !scalar_uniform_available(&self.adapter_limits) {
+                        return Ok(None);
+                    }
                     if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
                         return Ok(None);
                     }
-                    let shader = real_unary_shader(
-                        crate::backend::wgpu::types::UnaryOpCode::Sqrt,
-                        precision,
-                    );
+                    let shader = if let Operation::ExactSingleBasePower { control } =
+                        request.operation
+                    {
+                        if precision != NumericPrecision::F32 {
+                            return Ok(None);
+                        }
+                        let Some(operation) =
+                            runmat_accelerate_api::ExactSingleBasePower::for_control(control)
+                        else {
+                            return Ok(None);
+                        };
+                        crate::backend::wgpu::shaders::exact_power::shader(operation)
+                    } else {
+                        real_unary_shader(crate::backend::wgpu::types::UnaryOpCode::Sqrt, precision)
+                    };
                     let recipe = super::super::pipeline_recipe::PipelineRecipe::fusion(
                         &shader,
                         1,
@@ -256,7 +274,10 @@ impl WgpuProvider {
         let Ok(dispatches) = u32::try_from(elements.div_ceil(chunk_capacity)) else {
             return Ok(None);
         };
-        let uniform_allocations = if matches!(request.operation, Operation::Sqrt) {
+        let uniform_allocations = if matches!(
+            request.operation,
+            Operation::Sqrt | Operation::ExactSingleBasePower { .. }
+        ) {
             1
         } else {
             dispatches
@@ -328,7 +349,9 @@ impl WgpuProvider {
                     Operation::ScalarAdd { .. } => crate::backend::wgpu::types::ScalarOpCode::Add,
                     Operation::ScalarMul { .. } => crate::backend::wgpu::types::ScalarOpCode::Mul,
                     Operation::ScalarMax { .. } => crate::backend::wgpu::types::ScalarOpCode::Max,
-                    Operation::Sqrt | Operation::FloatingCast { .. } => {
+                    Operation::Sqrt
+                    | Operation::FloatingCast { .. }
+                    | Operation::ExactSingleBasePower { .. } => {
                         unreachable!("matched scalar operation")
                     }
                 };
@@ -341,6 +364,42 @@ impl WgpuProvider {
                             error
                         }
                     })
+            }
+            Operation::ExactSingleBasePower { control } => {
+                let operation = runmat_accelerate_api::ExactSingleBasePower::for_control(control)
+                    .ok_or_else(|| {
+                    ProviderExecutionError::from(anyhow!("uncertified POWER control"))
+                })?;
+                let entry = self.real_floating_entry(input)?;
+                let shader = crate::backend::wgpu::shaders::exact_power::shader(operation);
+                self.fused_elementwise_typed_exec_recorded(
+                    &shader,
+                    std::slice::from_ref(input),
+                    FusedElementwiseWork {
+                        output_shape: &entry.shape,
+                        len: entry.len,
+                        uniform_abi: Some(FusionUniformAbi::Simple),
+                        representation: FusedElementwiseRepresentation {
+                            input_precision: NumericPrecision::F32,
+                            output_precision: NumericPrecision::F32,
+                            output_storage: GpuTensorStorage::Real,
+                            logical_output: false,
+                        },
+                    },
+                    |_| Ok(()),
+                    SingleFusionEvidence::Legacy {
+                        observed: Some(&observed),
+                        prepared: None,
+                    },
+                )
+                .map_err(|cause| {
+                    let error = ProviderExecutionError::from(cause);
+                    if observed.borrow().effect {
+                        error.after_effect()
+                    } else {
+                        error
+                    }
+                })
             }
             Operation::Sqrt => self
                 .unary_op_exec_recorded(

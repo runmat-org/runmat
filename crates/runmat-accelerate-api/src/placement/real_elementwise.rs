@@ -15,6 +15,11 @@ pub use mixed_add::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderRealElementwiseOperation {
+    /// Exact Double scalar exponent on a real F32 base; source control bits
+    /// remain part of the recipe identity and cannot stand in for Single.
+    ExactSingleBasePower {
+        control: crate::PowerScalarControl,
+    },
     ScalarAdd {
         control: ScalarLiteral,
         mode: runmat_types::RealFloatingAddMode,
@@ -142,6 +147,15 @@ impl ProviderRealElementwiseRecipe {
     }
     pub fn identity(&self) -> anyhow::Result<runmat_execution::Digest> {
         let (operation, control, add_mode, target) = match self.request.operation {
+            ProviderRealElementwiseOperation::ExactSingleBasePower { control } => (
+                5,
+                Some(ScalarLiteral::F64Bits(match control {
+                    crate::PowerScalarControl::DoubleBits(bits) => bits,
+                    _ => unreachable!("certified Double control"),
+                })),
+                None,
+                None,
+            ),
             ProviderRealElementwiseOperation::ScalarAdd { control, mode } => (
                 0_u8,
                 Some(control),
@@ -319,6 +333,10 @@ fn native_request(request: &ProviderRealElementwiseRequest) -> bool {
         return false;
     }
     match request.operation {
+        ProviderRealElementwiseOperation::ExactSingleBasePower { control } => {
+            source.element_type == ProviderElementType::F32
+                && crate::ExactSingleBasePower::for_control(control).is_some()
+        }
         ProviderRealElementwiseOperation::FloatingCast { .. } => true,
         ProviderRealElementwiseOperation::Sqrt => true,
         ProviderRealElementwiseOperation::ScalarMul { control }
@@ -359,6 +377,7 @@ fn output_projection(
             }
         }
         ProviderRealElementwiseOperation::ScalarAdd { .. }
+        | ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
         | ProviderRealElementwiseOperation::ScalarMul { .. }
         | ProviderRealElementwiseOperation::ScalarMax { .. }
         | ProviderRealElementwiseOperation::Sqrt => {

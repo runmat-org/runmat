@@ -13,7 +13,21 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+#[derive(Clone, Copy)]
+enum ExactFault {
+    ReshapeError,
+    WrongReshapeOwner,
+    BorrowedReshapeAlias,
+    RetractCapability,
+}
+
 struct Recorder {
+    exact_scalar: AtomicBool,
+    exact_proposals: AtomicUsize,
+    exact_fault: Mutex<Option<ExactFault>>,
+    exact_output_probe: Mutex<Option<crate::test_support::RetirementProbe>>,
+    exact_reshape_probe: Mutex<Option<crate::test_support::RetirementProbe>>,
+    exact_source: Mutex<Option<crate::allocation::WeakGpuTensorHandle>>,
     owner: TestAllocationOwner,
     uploads: AtomicUsize,
     probes: AtomicUsize,
@@ -38,6 +52,101 @@ struct Recorder {
 }
 
 impl AccelProvider for Recorder {
+    fn execute_real_elementwise_recipe<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        recipe: &'a crate::ProviderRealElementwiseRecipe,
+    ) -> ProviderExecutionFuture<'a, crate::ProviderExecutedRealElementwise> {
+        Box::pin(async move {
+            let output = self.owner.allocate_zeroed(
+                input.shape().to_vec(),
+                NumericElementType::F32,
+                GpuTensorStorage::Real,
+            )?;
+            *self.exact_source.lock().unwrap() = Some(input.downgrade());
+            *self.exact_output_probe.lock().unwrap() = Some(output.probe);
+            if matches!(
+                *self.exact_fault.lock().unwrap(),
+                Some(ExactFault::RetractCapability)
+            ) {
+                self.admit.store(false, Ordering::SeqCst);
+            }
+            let physical = recipe.physical();
+            Ok(crate::ProviderExecutedRealElementwise {
+                output: output.handle,
+                observed: crate::ProviderRealElementwiseObserved {
+                    output_buffer_bytes: Some(physical.output_buffer_bytes),
+                    uniform_allocations: physical.uniform_allocations,
+                    uniform_buffer_bytes: physical.uniform_buffer_bytes,
+                    dispatches: physical.dispatches,
+                    queue_submissions: physical.queue_submissions,
+                },
+            })
+        })
+    }
+    fn reshape(
+        &self,
+        handle: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        match *self.exact_fault.lock().unwrap() {
+            Some(ExactFault::ReshapeError) => anyhow::bail!("exact reshape primary failure"),
+            Some(ExactFault::WrongReshapeOwner) => {
+                let output = TestAllocationOwner::new().allocate_zeroed(
+                    shape.to_vec(),
+                    NumericElementType::F32,
+                    GpuTensorStorage::Real,
+                )?;
+                *self.exact_reshape_probe.lock().unwrap() = Some(output.probe);
+                return Ok(output.handle);
+            }
+            Some(ExactFault::BorrowedReshapeAlias) => {
+                return Ok(self
+                    .exact_source
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .acquire()?)
+            }
+            _ => {}
+        }
+        let count = |shape: &[usize]| shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d));
+        anyhow::ensure!(
+            count(handle.shape()).is_some() && count(handle.shape()) == count(shape),
+            "reshape must preserve elements"
+        );
+        Ok(handle.with_view(handle.view().clone().with_shape(shape.to_vec()))?)
+    }
+    fn propose_real_elementwise(
+        &self,
+        request: &crate::ProviderRealElementwiseRequest,
+    ) -> crate::ProviderExecutionResult<Option<crate::ProviderRealElementwisePhysicalProposal>>
+    {
+        self.exact_proposals.fetch_add(1, Ordering::SeqCst);
+        if !self.exact_scalar.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let crate::ProviderRealElementwiseOperation::ExactSingleBasePower { control } =
+            request.operation
+        else {
+            return Ok(None);
+        };
+        if crate::ExactSingleBasePower::for_control(control).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(crate::ProviderRealElementwisePhysicalProposal {
+            output_route: crate::ProviderRealElementwiseOutputRoute::FreshAllocation,
+            output_buffer_bytes: request.source.checked_byte_len().unwrap(),
+            workgroup_size: 64,
+            chunk_capacity: 64,
+            uniform_allocations: 1,
+            uniform_buffer_bytes: 16,
+            dispatches: 1,
+            queue_submissions: 2,
+            pipeline_key: Some(71),
+        }))
+    }
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
@@ -231,6 +340,12 @@ fn provider_with_suspension(
     suspend_probe: bool,
 ) -> &'static Recorder {
     let provider = Box::leak(Box::new(Recorder {
+        exact_scalar: AtomicBool::new(false),
+        exact_proposals: AtomicUsize::new(0),
+        exact_fault: Mutex::new(None),
+        exact_output_probe: Mutex::new(None),
+        exact_reshape_probe: Mutex::new(None),
+        exact_source: Mutex::new(None),
         owner: TestAllocationOwner::new(),
         uploads: AtomicUsize::new(0),
         probes: AtomicUsize::new(0),

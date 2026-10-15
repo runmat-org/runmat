@@ -58,6 +58,7 @@ impl AccelProvider for Fixture {
                 target: ProviderPrecision::F32,
             } => (3, 16),
             ProviderRealElementwiseOperation::ScalarAdd { .. }
+            | ProviderRealElementwiseOperation::ExactSingleBasePower { .. }
             | ProviderRealElementwiseOperation::ScalarMul { .. }
             | ProviderRealElementwiseOperation::ScalarMax { .. }
             | ProviderRealElementwiseOperation::Sqrt => return Ok(None),

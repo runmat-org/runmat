@@ -13,6 +13,112 @@ fn resident(shape: &[u64], element_type: ProviderElementType) -> ProviderReprese
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn unavailable_exact_byte_geometry_does_not_fabricate_a_proposal_or_hide_typed_route() {
+    let mode = RealPowerArithmeticMode::MixedDoubleThenSingle {
+        single_operand: RealPowerOperand::Base,
+    };
+    let provider = provider_with_mode(false, true, mode);
+    provider.exact_scalar.store(true, Ordering::SeqCst);
+    let source = resident(&[u64::MAX / 2], ProviderElementType::F32);
+    assert!(source.checked_element_count().is_some());
+    assert!(source.checked_byte_len().is_none());
+    let plan = plan_resident_scalar_power(
+        provider,
+        source,
+        PowerScalarControl::DoubleBits(2.0_f64.to_bits()),
+        RealPowerOperand::Base,
+        &[1, 1],
+        ProviderOperationIdentity::new("test.power"),
+    )
+    .unwrap()
+    .unwrap();
+    // This recorder's existing typed admission is intentionally independent
+    // of byte geometry. The exact specialization must not override it.
+    assert_eq!(
+        plan.physical_recipe().route,
+        PowerPhysicalRoute::TypedDomain
+    );
+    assert_eq!(provider.exact_proposals.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn certified_family_is_capability_bound_and_does_not_admit_other_mixed_forms() {
+    let mode = RealPowerArithmeticMode::MixedDoubleThenSingle {
+        single_operand: RealPowerOperand::Base,
+    };
+    let provider = provider_with_mode(false, true, mode);
+    provider.exact_scalar.store(true, Ordering::SeqCst);
+    for shape in [&[2, 4, 5][..], &[1, 40], &[40, 1], &[1, 1]] {
+        for exponent in [0.0_f64, -0.0, 1.0, 2.0] {
+            let control = PowerScalarControl::DoubleBits(exponent.to_bits());
+            let plan = plan_resident_scalar_power(
+                provider,
+                resident(shape, ProviderElementType::F32),
+                control,
+                RealPowerOperand::Base,
+                &[1, 1],
+                ProviderOperationIdentity::new("test.power"),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(plan.control(), control);
+            assert_eq!(plan.mode(), mode);
+            assert_eq!(
+                plan.physical_recipe().route,
+                PowerPhysicalRoute::ExactSingleBase
+            );
+            assert_eq!(
+                plan.physical_recipe().scalar,
+                PowerScalarConstruction::EmbeddedExactControl
+            );
+            assert!(!plan.physical_recipe().widen_resident);
+            assert!(!plan.physical_recipe().single_publication);
+            assert!(plan.feasibility_query(PowerResultDomain::Complex).is_none());
+            let work = plan.physical_work(PowerResultDomain::Real).unwrap();
+            assert!(!work.paired_domain_probe);
+            assert!(work.widened_resident.is_none());
+            assert!(work.single_publication.is_none());
+            assert_eq!(work.scalar.residency, ProviderResidency::Host);
+            assert_eq!(work.output.element_type, ProviderElementType::F32);
+        }
+    }
+    let source = resident(&[2, 4, 5], ProviderElementType::F32);
+    for control in [
+        PowerScalarControl::SingleBits(2.0_f32.to_bits()),
+        PowerScalarControl::DoubleBits(3.0_f64.to_bits()),
+        PowerScalarControl::DoubleBits(2.0_f64.to_bits() + 1),
+    ] {
+        assert!(exact_single_base_request(&source, control, RealPowerOperand::Base, 160).is_none());
+    }
+    let control = PowerScalarControl::DoubleBits(2.0_f64.to_bits());
+    assert!(exact_single_base_request(&source, control, RealPowerOperand::Exponent, 160).is_none());
+    assert!(exact_single_base_request(
+        &resident(&[2, 4, 5], ProviderElementType::F64),
+        control,
+        RealPowerOperand::Base,
+        320
+    )
+    .is_none());
+    let mut strided = source.clone();
+    strided.layout = ProviderLayout::Strided;
+    assert!(exact_single_base_request(&strided, control, RealPowerOperand::Base, 160).is_none());
+    assert!(plan_resident_scalar_power(
+        provider,
+        source,
+        control,
+        RealPowerOperand::Base,
+        &[1, 2],
+        ProviderOperationIdentity::new("test.power")
+    )
+    .is_err());
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.probes.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.widenings.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.power_calls.load(Ordering::SeqCst), 0);
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn symbolic_mixed_recipe_matches_live_preparation_and_preserves_source_controls() {

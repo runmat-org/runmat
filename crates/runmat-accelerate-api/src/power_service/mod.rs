@@ -10,7 +10,10 @@ pub use prepare::{
     prepare_resident_scalar_power, prepare_resident_scalar_power_against_plan, PowerPhysicalRecipe,
     PowerPhysicalRoute, PowerScalarConstruction, PreparedResidentScalarPower,
 };
-pub use symbolic::{plan_resident_scalar_power, PowerSymbolicPhysicalWork, PowerSymbolicPlan};
+pub use symbolic::{
+    exact_single_base_request, plan_resident_scalar_power, PowerSymbolicPhysicalWork,
+    PowerSymbolicPlan,
+};
 pub use validate::PowerServiceError;
 
 #[cfg(test)]

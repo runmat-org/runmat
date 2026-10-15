@@ -28,6 +28,7 @@ impl StagedProvider {
         request: &ProviderRealElementwiseRequest,
     ) -> ProviderExecutionResult<Option<ProviderRealElementwisePhysicalProposal>> {
         let sqrt = match request.operation {
+            Operation::ExactSingleBasePower { .. } => return Ok(None),
             Operation::ScalarAdd { .. }
             | Operation::ScalarMul { .. }
             | Operation::ScalarMax { .. } => false,
@@ -93,6 +94,11 @@ impl StagedProvider {
         Box::pin(async move {
             let operation = recipe.request().operation;
             let sqrt = match operation {
+                Operation::ExactSingleBasePower { .. } => {
+                    return Err(ProviderExecutionError::from(anyhow!(
+                        "fixture has no exact POWER kernel"
+                    )))
+                }
                 Operation::ScalarAdd { .. }
                 | Operation::ScalarMul { .. }
                 | Operation::ScalarMax { .. } => false,
@@ -140,6 +146,9 @@ impl StagedProvider {
                 self.produce_class(
                     input.shape().to_vec(),
                     match operation {
+                        Operation::ExactSingleBasePower { .. } => {
+                            unreachable!("fixture declined exact POWER")
+                        }
                         Operation::Sqrt => StageHook::Sqrt,
                         Operation::ScalarAdd { .. } => StageHook::Add,
                         Operation::ScalarMul { .. } => StageHook::Mul,

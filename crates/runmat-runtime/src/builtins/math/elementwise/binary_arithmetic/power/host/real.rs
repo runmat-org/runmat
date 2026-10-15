@@ -54,11 +54,27 @@ pub(super) fn power_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> 
         }
         (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => {
             let mut output = RealPowerOutput::with_capacity(plan.len());
-            for (_, lhs_index, rhs_index) in plan.iter() {
-                output.push(power_real_pair_mixed(
-                    f64::from(lhs[lhs_index]),
-                    rhs[rhs_index],
-                ));
+            let exact = (rhs.len() == 1)
+                .then(|| {
+                    runmat_accelerate_api::ExactSingleBasePower::for_control(
+                        runmat_accelerate_api::PowerScalarControl::DoubleBits(rhs[0].to_bits()),
+                    )
+                })
+                .flatten();
+            if let Some(operation) = exact {
+                for (_, lhs_index, _) in plan.iter() {
+                    output.push((
+                        PowerResultDomain::Real,
+                        (operation.evaluate(lhs[lhs_index]), 0.0),
+                    ));
+                }
+            } else {
+                for (_, lhs_index, rhs_index) in plan.iter() {
+                    output.push(power_real_pair_mixed(
+                        f64::from(lhs[lhs_index]),
+                        rhs[rhs_index],
+                    ));
+                }
             }
             finish_real_power_f32(output, output_shape)
         }

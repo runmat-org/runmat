@@ -24,6 +24,137 @@ async fn owner() -> &'static WgpuProvider {
     provider
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires actual WGPU adapter; qualifies integer-word POWER, including FTZ boundaries"
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
+async fn exact_double_scalar_power_family_matches_independent_binary64_oracle() {
+    use runmat_accelerate_api::power_service::{
+        execute_resident_scalar_power, prepare_resident_scalar_power, PowerPhysicalRoute,
+    };
+    use runmat_accelerate_api::{
+        ExactSingleBasePower as Exact, PowerScalarControl, RealPowerArithmeticMode,
+        RealPowerOperand,
+    };
+    let provider = owner().await;
+    let mut bits = Vec::new();
+    // Every exponent field, both signs, and mantissa carry/normalization
+    // boundaries; includes NaNs, infinities and subnormals without float ops.
+    for exponent in 0..=255_u32 {
+        for fraction in [0, 1, 0x3fffff, 0x400000, 0x400001, 0x7ffffe, 0x7fffff] {
+            for sign in [0, 0x80000000] {
+                bits.push(sign | (exponent << 23) | fraction);
+            }
+        }
+    }
+    for center in [
+        0x19ffffff_u32,
+        0x1a000000,
+        0x1fffffff,
+        0x20000000,
+        0x5f7fffff,
+        0x5f800000,
+    ] {
+        for delta in 0..=64 {
+            bits.push(center - 32 + delta);
+        }
+    }
+    let mut state = 0x71c38e29_u32;
+    for _ in 0..4096 {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        bits.push(state);
+    }
+    let values = bits
+        .iter()
+        .map(|&bits| f32::from_bits(bits))
+        .collect::<Vec<_>>();
+    for shape in [
+        vec![values.len(), 1],
+        vec![1, values.len()],
+        vec![values.len() / 2, 1, 2],
+    ] {
+        let input = provider
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&values),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        for (exponent, operation) in [
+            (0.0_f64, Exact::Zero),
+            (-0.0, Exact::Zero),
+            (1.0, Exact::Identity),
+            (2.0, Exact::Square),
+        ] {
+            let control = PowerScalarControl::DoubleBits(exponent.to_bits());
+            for _ in 0..2 {
+                let prepared = prepare_resident_scalar_power(
+                    provider,
+                    &input,
+                    control,
+                    RealPowerOperand::Base,
+                    &[1, 1],
+                    runmat_accelerate_api::ProviderOperationIdentity::new(
+                        runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
+                    ),
+                )
+                .unwrap()
+                .expect("actual provider must propose certified route");
+                assert_eq!(prepared.control(), control);
+                assert_eq!(
+                    prepared.mode(),
+                    RealPowerArithmeticMode::MixedDoubleThenSingle {
+                        single_operand: RealPowerOperand::Base
+                    }
+                );
+                assert_eq!(
+                    prepared.physical_recipe().route,
+                    PowerPhysicalRoute::ExactSingleBase
+                );
+                assert!(
+                    !prepared
+                        .symbolic_plan()
+                        .physical_work(runmat_accelerate_api::PowerResultDomain::Real)
+                        .unwrap()
+                        .paired_domain_probe
+                );
+                let output = execute_resident_scalar_power(prepared).await.unwrap();
+                assert_eq!(output.handle.shape(), shape);
+                assert!(!output.handle.shares_allocation_with(&input));
+                let HostNumericDataOwned::F32(actual) = provider
+                    .download_numeric(&output.handle)
+                    .await
+                    .unwrap()
+                    .data
+                else {
+                    panic!("Single publication");
+                };
+                for ((&base, &actual), &base_bits) in values.iter().zip(&actual).zip(&bits) {
+                    let expected = operation.evaluate(base);
+                    if expected.is_nan() {
+                        assert!(actual.is_nan(), "{base_bits:08x}^{exponent}");
+                    } else {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "{base_bits:08x}^{exponent}"
+                        );
+                        // Independent platform powf oracle, not a second copy
+                        // of the shader's integer multiplication/packing.
+                        assert_eq!(
+                            expected.to_bits(),
+                            (f64::from(base).powf(exponent) as f32).to_bits(),
+                            "binary64 powf equivalence {base_bits:08x}^{exponent}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn scalar_recipe_requires_one_enabled_uniform_binding_before_effects() {

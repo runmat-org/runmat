@@ -15,6 +15,7 @@ pub(crate) enum HookProfile {
 }
 
 pub(crate) struct PowerWork {
+    physical_output_bytes: Option<u64>,
     #[cfg(feature = "wgpu")]
     pub(crate) elements: u64,
     pub(crate) temporary_bytes: u64,
@@ -49,6 +50,11 @@ pub(super) fn feasibility(
         Err((code, detail)) => return Some(ProviderFeasibility::rejected(code, detail)),
     };
     let mut accounted = query.clone();
+    if query.workload.real_power_scalar.is_some() {
+        // The certified route embeds its exact host control; no F64 buffer or
+        // upload is part of the physical provider request.
+        accounted.inputs.truncate(1);
+    }
     // Strided matrix views are read through validated shader strides. Their
     // underlying allocations require no materialization or extra dispatch.
     for input in &mut accounted.inputs {
@@ -78,6 +84,9 @@ pub(super) fn feasibility(
     }
     let result = match dense_feasibility(&admitted_snapshot, &accounted) {
         ProviderFeasibility::Supported { mut estimate } => {
+            if let Some(bytes) = work.physical_output_bytes {
+                estimate.output_bytes = Some(bytes);
+            }
             if work.unknown_peak && snapshot.max_allocation_bytes.is_some() {
                 return Some(ProviderFeasibility::rejected(
                     ProviderRejectionCode::UnknownResourceEstimate,
@@ -142,6 +151,9 @@ fn work(
         || query.outputs.len() > 1
     {
         return Err((Rejection::InvalidShape, "power.operand_roles.invalid"));
+    }
+    if query.workload.real_power_scalar.is_some() {
+        return exact_scalar_work(provider, query, domain);
     }
     let mode = query.workload.real_power_mode;
     let typed_single_on_double = {
@@ -345,6 +357,7 @@ fn work(
         }
     }
     let result = PowerWork {
+        physical_output_bytes: None,
         #[cfg(feature = "wgpu")]
         elements,
         temporary_bytes: 0,
@@ -398,6 +411,87 @@ fn work(
         return Ok(result);
     }
     Ok(result)
+}
+
+fn exact_scalar_work(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+    domain: PowerResultDomain,
+) -> Result<PowerWork, (ProviderRejectionCode, &'static str)> {
+    use ProviderRejectionCode as Reject;
+    let reject = (Reject::UnsupportedOperation, "power.exact_scalar.contract");
+    if domain != PowerResultDomain::Real
+        || query.workload.real_power_mode
+            != Some(RealPowerArithmeticMode::MixedDoubleThenSingle {
+                single_operand: RealPowerOperand::Base,
+            })
+        || query.inputs[1].element_type != ProviderElementType::F64
+        || query.inputs[1].storage != ProviderStorage::DenseReal
+        || query.inputs[1].residency != ProviderResidency::Host
+        || query.inputs[1].layout != ProviderLayout::ColumnMajorContiguous
+        || query.inputs[1].checked_element_count() != Some(1)
+    {
+        return Err(reject);
+    }
+    let source = &query.inputs[0];
+    let request = runmat_accelerate_api::power_service::exact_single_base_request(
+        source,
+        query.workload.real_power_scalar.ok_or(reject)?,
+        RealPowerOperand::Base,
+        source.checked_byte_len().ok_or(reject)?,
+    )
+    .ok_or(reject)?;
+    let physical = match provider.propose_real_elementwise(&request) {
+        Ok(Some(physical)) => physical,
+        Ok(None) => return Err(reject),
+        Err(error) if error.is_unsupported() => return Err(reject),
+        Err(_) => {
+            return Err((
+                Reject::ProviderUnavailable,
+                "power.exact_scalar.proposal_failed",
+            ))
+        }
+    };
+    let source_shape = source
+        .shape
+        .iter()
+        .map(|&n| usize::try_from(n).ok())
+        .collect::<Option<Vec<_>>>()
+        .ok_or(reject)?;
+    let scalar_shape = query.inputs[1]
+        .shape
+        .iter()
+        .map(|&n| usize::try_from(n).ok())
+        .collect::<Option<Vec<_>>>()
+        .ok_or(reject)?;
+    let shape = runmat_types::geometry::broadcast_concrete_shape(&source_shape, &scalar_shape)
+        .map_err(|_| reject)?;
+    let mut output = source.clone();
+    output.shape = shape.into_iter().map(|n| n as u64).collect();
+    if query
+        .outputs
+        .first()
+        .is_some_and(|declared| declared != &output)
+    {
+        return Err(reject);
+    }
+    let logical = output.checked_byte_len().ok_or(reject)?;
+    let temporary_bytes = physical
+        .output_buffer_bytes
+        .checked_sub(logical)
+        .and_then(|pad| pad.checked_add(physical.uniform_buffer_bytes))
+        .ok_or(reject)?;
+    Ok(PowerWork {
+        physical_output_bytes: Some(physical.output_buffer_bytes),
+        #[cfg(feature = "wgpu")]
+        elements: source.checked_element_count().ok_or(reject)?,
+        temporary_bytes,
+        unknown_peak: false,
+        #[cfg(feature = "wgpu")]
+        readback_bytes: 0,
+        dispatches: physical.queue_submissions,
+        output,
+    })
 }
 
 #[cfg(all(test, feature = "wgpu"))]

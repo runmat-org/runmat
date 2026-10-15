@@ -37,6 +37,45 @@ pub enum PowerScalarControl {
     DoubleBits(u64),
 }
 
+/// Certified algebraic cases of a Double exponent applied to a real Single
+/// base. This describes an implementation, not permission to narrow a control
+/// or to execute general mixed POWER in Single arithmetic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExactSingleBasePower {
+    Zero,
+    Identity,
+    Square,
+}
+
+impl ExactSingleBasePower {
+    pub fn for_control(control: PowerScalarControl) -> Option<Self> {
+        let PowerScalarControl::DoubleBits(bits) = control else {
+            return None;
+        };
+        match bits {
+            0 | 0x8000_0000_0000_0000 => Some(Self::Zero),
+            0x3ff0_0000_0000_0000 => Some(Self::Identity),
+            0x4000_0000_0000_0000 => Some(Self::Square),
+            _ => None,
+        }
+    }
+
+    /// Binary64 numerical policy before Single publication. Promoting any
+    /// finite binary32 base is exact; its square has at most 48 significand
+    /// bits and stays within binary64's exponent range. No binary64 rounding
+    /// occurs in this multiplication. NaNs precede exponent-zero semantics.
+    pub fn evaluate(self, base: f32) -> f32 {
+        if base.is_nan() {
+            return f32::NAN;
+        }
+        match self {
+            Self::Zero => 1.0,
+            Self::Identity => base,
+            Self::Square => (f64::from(base) * f64::from(base)) as f32,
+        }
+    }
+}
+
 impl PowerScalarControl {
     pub fn precision(self) -> crate::ProviderPrecision {
         match self {
@@ -108,6 +147,54 @@ impl PowerResultDomain {
 mod tests {
     use super::PowerResultDomain::{self, Complex, Real};
     use crate::NumericalDomainEvidence;
+
+    #[test]
+    fn certified_single_base_family_retains_double_control_and_exception_policy() {
+        use super::{ExactSingleBasePower as Exact, PowerScalarControl as Control};
+        for (value, expected) in [
+            (0.0_f64, Exact::Zero),
+            (-0.0, Exact::Zero),
+            (1.0, Exact::Identity),
+            (2.0, Exact::Square),
+        ] {
+            assert_eq!(
+                Exact::for_control(Control::DoubleBits(value.to_bits())),
+                Some(expected)
+            );
+            assert!(Exact::for_control(Control::SingleBits((value as f32).to_bits())).is_none());
+        }
+        for value in [
+            -2.0_f64,
+            -1.0,
+            0.5,
+            3.0,
+            f64::INFINITY,
+            f64::NAN,
+            f64::from_bits(2.0_f64.to_bits() + 1),
+        ] {
+            assert!(Exact::for_control(Control::DoubleBits(value.to_bits())).is_none());
+        }
+        for operation in [Exact::Zero, Exact::Identity, Exact::Square] {
+            assert!(operation.evaluate(f32::NAN).is_nan());
+        }
+        assert_eq!(
+            Exact::Identity.evaluate(-0.0).to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert_eq!(Exact::Identity.evaluate(f32::from_bits(1)).to_bits(), 1);
+        assert_eq!(Exact::Square.evaluate(-0.0).to_bits(), 0);
+        assert_eq!(Exact::Square.evaluate(f32::NEG_INFINITY), f32::INFINITY);
+        // Square straddles the half-min-subnormal tie. The binary64 product
+        // is exact, so this oracle does not duplicate the word shader.
+        assert_eq!(
+            Exact::Square.evaluate(f32::from_bits(0x1a000000)).to_bits(),
+            0
+        );
+        assert_eq!(
+            Exact::Square.evaluate(f32::from_bits(0x1a000001)).to_bits(),
+            1
+        );
+    }
 
     #[test]
     fn mixed_publication_is_single_for_either_operand_position() {

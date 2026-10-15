@@ -63,10 +63,13 @@ impl WgpuProvider {
         {
             return Ok(None);
         }
-        if !matches!(
-            planned.mode(),
-            runmat_accelerate_api::RealPowerArithmeticMode::NativeSingle
-        ) && !self.ieee_words_available(self.precision)
+        if planned.physical_recipe().route
+            != runmat_accelerate_api::power_service::PowerPhysicalRoute::ExactSingleBase
+            && !matches!(
+                planned.mode(),
+                runmat_accelerate_api::RealPowerArithmeticMode::NativeSingle
+            )
+            && !self.ieee_words_available(self.precision)
         {
             return Ok(None);
         }

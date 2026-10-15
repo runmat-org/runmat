@@ -13,12 +13,15 @@ use super::validate::PowerServiceError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerScalarConstruction {
+    /// Control remains in the authenticated program; no scalar buffer exists.
+    EmbeddedExactControl,
     ExactTypedUpload,
     ProviderFill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerPhysicalRoute {
+    ExactSingleBase,
     TypedDomain,
     LegacyProvenReal,
 }
@@ -32,7 +35,9 @@ pub struct PowerPhysicalRecipe {
     pub single_publication: bool,
 }
 
-/// Requested representations of the real provider intermediates. These are
+/// Requested representations of the real provider intermediates. Embedded
+/// exact controls remain Host representations and require no scalar buffer.
+/// These are
 /// not peak allocation bytes, dispatch counts, or performance estimates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PowerSymbolicPhysicalWork {
@@ -50,6 +55,7 @@ pub struct PowerSymbolicPhysicalWork {
 /// retained so an eventual live view must match before effects.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSymbolicPlan {
+    pub(crate) exact_proposal: Option<crate::ProviderRealElementwisePhysicalProposal>,
     pub(crate) resident: ProviderRepresentation,
     pub(crate) control: PowerScalarControl,
     pub(crate) resident_operand: RealPowerOperand,
@@ -86,6 +92,15 @@ impl PowerSymbolicPlan {
     }
 
     pub fn physical_recipe(&self) -> PowerPhysicalRecipe {
+        if self.route == PowerPhysicalRoute::ExactSingleBase {
+            return PowerPhysicalRecipe {
+                route: self.route,
+                mode: self.mode,
+                widen_resident: false,
+                scalar: PowerScalarConstruction::EmbeddedExactControl,
+                single_publication: false,
+            };
+        }
         let mixed = matches!(
             self.mode,
             RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
@@ -116,7 +131,10 @@ impl PowerSymbolicPlan {
     }
 
     pub fn feasibility_query(&self, domain: PowerResultDomain) -> Option<ProviderFeasibilityQuery> {
-        if self.route == PowerPhysicalRoute::LegacyProvenReal {
+        if self.route == PowerPhysicalRoute::LegacyProvenReal
+            || (self.route == PowerPhysicalRoute::ExactSingleBase
+                && domain != PowerResultDomain::Real)
+        {
             return None;
         }
         let mut query = self.query.clone();
@@ -128,6 +146,29 @@ impl PowerSymbolicPlan {
     /// caller must separately use `feasibility_query` for that domain; this
     /// geometry alone never asserts support or a numerical-domain proof.
     pub fn physical_work(&self, domain: PowerResultDomain) -> Option<PowerSymbolicPhysicalWork> {
+        if self.route == PowerPhysicalRoute::ExactSingleBase {
+            if domain != PowerResultDomain::Real {
+                return None;
+            }
+            let mut output = self.resident.clone();
+            output.shape = self
+                .output_shape
+                .iter()
+                .map(|&n| u64::try_from(n).ok())
+                .collect::<Option<_>>()?;
+            let output_reshape = output.shape != self.resident.shape;
+            return Some(PowerSymbolicPhysicalWork {
+                widened_resident: None,
+                // This route has no scalar allocation: the representation is
+                // the original host control, not a fabricated F32 intermediate.
+                scalar: self.query.inputs.get(1)?.clone(),
+                native_result: output.clone(),
+                single_publication: None,
+                output,
+                paired_domain_probe: false,
+                output_reshape,
+            });
+        }
         if self.route == PowerPhysicalRoute::LegacyProvenReal && domain != PowerResultDomain::Real {
             return None;
         }
@@ -146,6 +187,9 @@ impl PowerSymbolicPlan {
             )
         });
         let scalar = match recipe.scalar {
+            PowerScalarConstruction::EmbeddedExactControl => {
+                unreachable!("exact route returned above")
+            }
             PowerScalarConstruction::ExactTypedUpload => device_rep(
                 if recipe.single_publication {
                     ProviderElementType::F64
@@ -259,6 +303,7 @@ fn derive(
     resident_operand: RealPowerOperand,
     host_shape: &[usize],
     operation: ProviderOperationIdentity,
+    exact_proposal: Option<crate::ProviderRealElementwisePhysicalProposal>,
 ) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
     validate_scalar_shape(host_shape)?;
     if resident.residency != ProviderResidency::Device
@@ -298,6 +343,7 @@ fn derive(
         .ok_or_else(|| PowerServiceError::pre("unsupported POWER operand classes"))?;
     if matches!(mode, RealPowerArithmeticMode::MixedDoubleThenSingle { .. })
         && provider_precision != ProviderPrecision::F64
+        && exact_proposal.is_none()
     {
         return Ok(None);
     }
@@ -339,6 +385,7 @@ fn derive(
         outputs: Vec::new(),
         workload: ProviderWorkload {
             real_power_mode: Some(mode),
+            real_power_scalar: exact_proposal.as_ref().map(|_| control),
             ..ProviderWorkload::default()
         },
     };
@@ -346,7 +393,9 @@ fn derive(
         .operations
         .iter()
         .any(|candidate| candidate.identity == query.operation && candidate.family == query.family);
-    let route = if advertised {
+    let route = if exact_proposal.is_some() {
+        PowerPhysicalRoute::ExactSingleBase
+    } else if advertised {
         PowerPhysicalRoute::TypedDomain
     } else if resident_precision == control.precision()
         && !(resident_precision == ProviderPrecision::F32
@@ -367,6 +416,7 @@ fn derive(
         output_shape
     };
     Ok(Some(PowerSymbolicPlan {
+        exact_proposal,
         resident,
         control,
         resident_operand,
@@ -404,6 +454,17 @@ pub fn plan_resident_scalar_power(
     host_shape: &[usize],
     operation: ProviderOperationIdentity,
 ) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
+    validate_scalar_shape(host_shape)?;
+    // Unavailable byte geometry makes only this specialization unavailable.
+    // Do not fabricate a maximum extent, or suppress an independent existing
+    // typed/legacy route whose provider owns its own physical admission.
+    let exact_proposal = resident
+        .checked_byte_len()
+        .and_then(|bytes| exact_single_base_request(&resident, control, resident_operand, bytes))
+        .map(|request| provider.propose_real_elementwise(&request))
+        .transpose()
+        .map_err(PowerServiceError)?
+        .flatten();
     let Some(plan) = derive(
         provider.precision(),
         provider.capability_snapshot(),
@@ -412,11 +473,19 @@ pub fn plan_resident_scalar_power(
         resident_operand,
         host_shape,
         operation,
+        exact_proposal,
     )?
     else {
         return Ok(None);
     };
-    if plan.route == PowerPhysicalRoute::TypedDomain {
+    if plan.route == PowerPhysicalRoute::ExactSingleBase {
+        if !plan
+            .feasibility_query(PowerResultDomain::Real)
+            .is_some_and(|query| provider.query_feasibility(&query).is_supported())
+        {
+            return Ok(None);
+        }
+    } else if plan.route == PowerPhysicalRoute::TypedDomain {
         let supported = [PowerResultDomain::Real, PowerResultDomain::Complex].map(|domain| {
             plan.feasibility_query(domain)
                 .is_some_and(|query| provider.query_feasibility(&query).is_supported())
@@ -434,6 +503,30 @@ pub fn plan_resident_scalar_power(
         }
     }
     Ok(Some(plan))
+}
+
+/// Description only; ProviderRealElementwiseRecipe owns live execution rights.
+pub fn exact_single_base_request(
+    resident: &ProviderRepresentation,
+    control: PowerScalarControl,
+    role: RealPowerOperand,
+    source_buffer_bytes: u64,
+) -> Option<crate::ProviderRealElementwiseRequest> {
+    if role != RealPowerOperand::Base
+        || resident.element_type != ProviderElementType::F32
+        || resident.storage != ProviderStorage::DenseReal
+        || resident.residency != ProviderResidency::Device
+        || resident.layout != ProviderLayout::ColumnMajorContiguous
+        || resident.checked_element_count().is_none_or(|n| n == 0)
+        || crate::ExactSingleBasePower::for_control(control).is_none()
+    {
+        return None;
+    }
+    Some(crate::ProviderRealElementwiseRequest {
+        operation: crate::ProviderRealElementwiseOperation::ExactSingleBasePower { control },
+        source: resident.clone(),
+        source_buffer_bytes,
+    })
 }
 
 pub(super) fn legacy_real_proof(resident_operand: RealPowerOperand, control: f64) -> bool {

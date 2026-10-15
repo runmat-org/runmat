@@ -38,6 +38,7 @@ pub mod polyder;
 pub mod polyint;
 pub mod polyval;
 pub(crate) mod power;
+pub(crate) mod exact_power;
 pub(crate) mod real_max;
 pub mod qr_power_iter;
 pub mod reduction;

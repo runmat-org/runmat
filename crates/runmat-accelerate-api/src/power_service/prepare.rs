@@ -26,7 +26,7 @@ pub struct PreparedResidentScalarPower {
     pub(crate) output_shape: Vec<usize>,
     capability: ProviderCapabilitySnapshot,
     query: ProviderFeasibilityQuery,
-    symbolic: PowerSymbolicPlan,
+    pub(super) symbolic: PowerSymbolicPlan,
     protected: Vec<GpuTensorHandle>,
 }
 
@@ -184,6 +184,19 @@ impl PreparedResidentScalarPower {
             return Err(PowerServiceError::pre(
                 "prepared POWER provider capability changed",
             ));
+        }
+        if self.route == PowerPhysicalRoute::ExactSingleBase {
+            let current = plan_resident_scalar_power(
+                self.provider,
+                representation(resident)?,
+                self.control,
+                self.resident_operand,
+                &self.host_shape,
+                self.query.operation.clone(),
+            )?;
+            if current.as_ref() != Some(&self.symbolic) {
+                return Err(PowerServiceError::pre("certified POWER capability changed"));
+            }
         }
         if self.route == PowerPhysicalRoute::TypedDomain {
             let mut query = self.query.clone();

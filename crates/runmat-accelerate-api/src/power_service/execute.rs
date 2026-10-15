@@ -7,6 +7,7 @@ use crate::{
 
 use super::prepare::{PowerPhysicalRoute, PreparedResidentScalarPower};
 use super::validate::{publish_provenance, reject, storage, valid_output, PowerServiceError};
+mod exact;
 
 pub struct ExecutedResidentScalarPower {
     pub handle: GpuTensorHandle,
@@ -28,6 +29,9 @@ pub async fn execute_resident_scalar_power(
         .collect::<Vec<_>>();
     if prepared.route == PowerPhysicalRoute::LegacyProvenReal {
         return execute_legacy_real(&prepared).await;
+    }
+    if prepared.route == PowerPhysicalRoute::ExactSingleBase {
+        return exact::execute(&prepared).await;
     }
     let provider = prepared.provider;
     let resident = &prepared.resident;

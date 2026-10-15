@@ -1,5 +1,81 @@
 use super::*;
 
+#[test]
+fn certified_power_reshape_and_capability_failures_retire_only_private_outputs() {
+    for fault in [
+        None,
+        Some(ExactFault::ReshapeError),
+        Some(ExactFault::WrongReshapeOwner),
+        Some(ExactFault::BorrowedReshapeAlias),
+        Some(ExactFault::RetractCapability),
+    ] {
+        let provider = provider_with_mode(
+            false,
+            true,
+            RealPowerArithmeticMode::MixedDoubleThenSingle {
+                single_operand: RealPowerOperand::Base,
+            },
+        );
+        provider.exact_scalar.store(true, Ordering::SeqCst);
+        *provider.exact_fault.lock().unwrap() = fault;
+        let resident = provider
+            .owner
+            .allocate_zeroed(vec![2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let prepared = prepare_resident_scalar_power(
+            provider,
+            &resident.handle,
+            PowerScalarControl::DoubleBits(2.0_f64.to_bits()),
+            RealPowerOperand::Base,
+            &[1, 1],
+            ProviderOperationIdentity::new("test.power"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_ne!(
+            prepared.output_shape(),
+            resident.handle.shape(),
+            "fixture must exercise shape reconciliation"
+        );
+        let result = ready(execute_resident_scalar_power(prepared));
+        if fault.is_none() {
+            let output = result.unwrap();
+            assert_eq!(output.handle.shape(), [1, 2]);
+            assert_eq!(
+                provider
+                    .exact_output_probe
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .retirements(),
+                0
+            );
+            output.handle.release().unwrap();
+        } else {
+            let error = result.err().unwrap();
+            if matches!(fault, Some(ExactFault::ReshapeError)) {
+                assert!(error.to_string().contains("exact reshape primary failure"));
+            }
+        }
+        assert_eq!(
+            provider
+                .exact_output_probe
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .retirements(),
+            1
+        );
+        if let Some(probe) = provider.exact_reshape_probe.lock().unwrap().as_ref() {
+            assert_eq!(probe.retirements(), 1);
+        }
+        assert_eq!(resident.probe.retirements(), 0);
+        resident.handle.allocation_lease().validate_live().unwrap();
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn unsupported_probe_after_typed_upload_is_terminal() {
