@@ -1143,12 +1143,11 @@ impl Compiler {
                     } => true,
                     _ => false,
                 };
-                if !produces_no_value {
-                    if !matches!(next, Some(MirStmtKind::StatementOutput(output))
+                if !produces_no_value
+                    && !matches!(next, Some(MirStmtKind::StatementOutput(output))
                         if matches!(output.source, runmat_mir::MirStatementOutputSource::Expression))
-                    {
-                        self.emit(Instr::Pop);
-                    }
+                {
+                    self.emit(Instr::Pop);
                 }
                 Ok(())
             }
