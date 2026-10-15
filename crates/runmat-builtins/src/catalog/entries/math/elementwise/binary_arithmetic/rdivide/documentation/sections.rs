@@ -13,6 +13,7 @@ pub(super) const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "Double floating-point inputs produce double output. If either floating-point input is single, the result uses single or complex-single storage. Floating-point zero divisors follow IEEE-754 signed-infinity and NaN behavior; complex operands use the complex quotient.",
             "Matching fixed-width integer classes preserve that class. One integer operand may instead be paired with scalar double. Integer quotients round to nearest with half ties away from zero and saturate at the destination class bounds. Wide integer and scalar-double forms use the exact compatibility path rather than first rounding the integer through binary64.",
+            "A sparse numerator divided by a nonzero, non-NaN real scalar or a finite nonzero complex scalar keeps CSC storage, applying the numeric-class rules above and removing exact-zero stored results. Zero and NaN divisors require a full result because implicit zeros become NaN; other sparse combinations use a bounded full-result path. Explicit GPU residency still requires a representable provider output.",
         ],
     },
     BuiltinDocumentationSection {

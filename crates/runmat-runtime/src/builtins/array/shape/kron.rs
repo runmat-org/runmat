@@ -19,7 +19,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, SparseTensor,
+    Tensor, Value,
 };
 
 use crate::builtins::math::elementwise::integer_arithmetic::{
@@ -50,7 +51,7 @@ fn kron_type(args: &[Type], _context: &ResolveContext) -> Type {
     };
     match input {
         Type::Tensor { .. } => Type::tensor(),
-        Type::Logical { .. } => Type::logical(),
+        Type::Logical { .. } => Type::tensor(),
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
         Type::Cell { element_type, .. } => Type::Cell {
             element_type: element_type.clone(),
@@ -85,7 +86,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
+    notes: "Kronecker products allocate a fresh dense or CSC sparse result and terminate fusion graphs.",
 };
 
 const KRON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -183,7 +184,7 @@ enum KronInput {
 #[runtime_builtin(
     name = "kron",
     category = "array/shape",
-    summary = "Compute the Kronecker (tensor) product of two arrays.",
+    summary = "Compute a Kronecker product; sparse inputs yield a CSC sparse result.",
     keywords = "kron,kronecker product,tensor product,block matrix,gpu",
     accel = "custom",
     type_resolver(kron_type),
@@ -209,6 +210,16 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
         ));
     }
     validate_kron_integer_admission(&a, &b)?;
+    if (matches!(a, Value::SparseTensor(_)) || matches!(b, Value::SparseTensor(_)))
+        && [&a, &b].into_iter().any(|value| {
+            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        })
+    {
+        return Err(kron_error_with_message(
+            "kron: sparse output cannot preserve explicit gpuArray residency",
+            &KRON_ERROR_UNSUPPORTED_INPUT,
+        ));
+    }
     let source = preferred_kron_source(&a, &b);
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&a, &b) {
         if let Some(mut result) = try_kron_gpu_pair(left, right)? {
@@ -427,6 +438,7 @@ fn ensure_kron_shape_policy(value: &Value) -> crate::BuiltinResult<()> {
 fn is_integer_value(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
@@ -434,6 +446,7 @@ fn integer_value_class(value: &Value) -> Option<&'static str> {
     match value {
         Value::Int(value) => Some(value.class_name()),
         Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
+        Value::SparseTensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_integer_type(handle).map(|ty| match ty {
                 runmat_accelerate_api::IntegerElementType::I8 => "int8",
@@ -455,6 +468,11 @@ fn is_kron_scalar_double(value: &Value) -> bool {
         Value::Num(_) => true,
         Value::Tensor(tensor) => {
             tensor::is_scalar_tensor(tensor) && tensor.numeric_dtype() == NumericDType::F64
+        }
+        Value::SparseTensor(tensor) => {
+            tensor.rows == 1
+                && tensor.cols == 1
+                && tensor.numeric_dtype() == Some(NumericDType::F64)
         }
         Value::GpuTensor(handle) => {
             handle.shape().iter().product::<usize>() == 1
@@ -515,6 +533,9 @@ fn restore_kron_residency(
 }
 
 fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
+    if matches!(left, Value::SparseTensor(_)) || matches!(right, Value::SparseTensor(_)) {
+        return sparse::kron(&left, &right);
+    }
     if !contains_complex(&left) && !contains_complex(&right) {
         if let Some(result) = try_integer_kron(&left, &right)? {
             return Ok(result);
@@ -526,7 +547,10 @@ fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
 
 fn contains_complex(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(value, Value::SparseTensor(tensor) if tensor.is_complex())
 }
+
+mod sparse;
 
 enum KronIntegerOperand<'a> {
     Scalar(&'a IntValue),
@@ -773,10 +797,39 @@ fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
 }
 
 fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(values) = tensor.as_f32_slice() {
+        return ComplexTensor::from_f32(
+            values.iter().map(|&re| (re, 0.0)).collect(),
+            tensor.shape().to_vec(),
+        )
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
+    }
     let values = tensor::tensor_values_f64_cow(tensor);
     let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape().to_vec())
         .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
+}
+
+fn kron_uses_single(left: &Value, right: &Value) -> bool {
+    [left, right].into_iter().any(|value| match value {
+        Value::SparseTensor(tensor) => tensor.numeric_dtype() == Some(NumericDType::F32),
+        Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        _ => false,
+    })
+}
+
+fn kron_complex_uses_single(left: &ComplexTensor, right: &ComplexTensor) -> bool {
+    left.numeric_dtype() == NumericDType::F32 || right.numeric_dtype() == NumericDType::F32
+}
+
+fn kron_complex_product(a: (f64, f64), b: (f64, f64), single: bool) -> (f64, f64) {
+    if single {
+        let (ar, ai, br, bi) = (a.0 as f32, a.1 as f32, b.0 as f32, b.1 as f32);
+        ((ar * br - ai * bi) as f64, (ar * bi + ai * br) as f64)
+    } else {
+        (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
+    }
 }
 
 fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
@@ -848,9 +901,18 @@ fn kron_complex_tensor(
 ) -> crate::BuiltinResult<ComplexTensor> {
     let (shape_a, shape_b, shape_out) = aligned_shapes(a.shape(), b.shape())?;
     let total_out = checked_total(&shape_out, "kron")?;
+    let single = kron_complex_uses_single(a, b);
     if total_out == 0 {
-        return ComplexTensor::new(Vec::new(), shape_out)
-            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
+        return ComplexTensor::from_f64_values_with_dtype(
+            Vec::new(),
+            shape_out,
+            if single {
+                NumericDType::F32
+            } else {
+                NumericDType::F64
+            },
+        )
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -858,19 +920,27 @@ fn kron_complex_tensor(
     let mut coords_b = vec![0usize; shape_out.len()];
     let mut data = vec![(0.0f64, 0.0f64); total_out];
 
-    for (idx_a, &(ar, ai)) in a.materialize_f64().iter().enumerate() {
+    let left_values = a.materialize_f64();
+    let right_values = b.materialize_f64();
+    for (idx_a, &(ar, ai)) in left_values.iter().enumerate() {
         unravel_index(idx_a, &shape_a, &mut coords_a);
-        for (idx_b, &(br, bi)) in b.materialize_f64().iter().enumerate() {
+        for (idx_b, &(br, bi)) in right_values.iter().enumerate() {
             unravel_index(idx_b, &shape_b, &mut coords_b);
             let out_index = combine_indices(&coords_a, &coords_b, &shape_b, &strides_out)?;
-            let real = ar * br - ai * bi;
-            let imag = ar * bi + ai * br;
-            data[out_index] = (real, imag);
+            data[out_index] = kron_complex_product((ar, ai), (br, bi), single);
         }
     }
 
-    ComplexTensor::new(data, shape_out)
-        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
+    ComplexTensor::from_f64_values_with_dtype(
+        data,
+        shape_out,
+        if single {
+            NumericDType::F32
+        } else {
+            NumericDType::F64
+        },
+    )
+    .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> crate::BuiltinResult<AlignedShapes> {
@@ -977,12 +1047,138 @@ pub(crate) mod tests {
     use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     #[test]
-    fn kron_type_logical_returns_logical() {
+    fn kron_sparse_csc_products_preserve_structure_and_numeric_class() {
+        let left = SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![0, 1], vec![2.0, 3.0]).unwrap();
+        let right = Tensor::new(vec![0.0, 5.0], vec![2, 1]).unwrap();
+        let Value::SparseTensor(output) =
+            kron_builtin(Value::SparseTensor(left), Value::Tensor(right), Vec::new())
+                .expect("sparse kron")
+        else {
+            panic!("expected CSC result")
+        };
+        assert_eq!((output.rows, output.cols), (4, 2));
+        assert_eq!(&*output.col_ptrs, &[0, 1, 2]);
+        assert_eq!(&*output.row_indices, &[1, 3]);
+        assert_eq!(output.as_f32_slice(), Some(&[10.0, 15.0][..]));
+    }
+
+    #[test]
+    fn kron_sparse_integer_complex_and_logical_use_existing_classes() {
+        let integer = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .unwrap();
+        let Value::SparseTensor(scaled) =
+            kron_builtin(Value::SparseTensor(integer), Value::Num(2.0), Vec::new())
+                .expect("integer sparse kron")
+        else {
+            panic!("expected sparse integer")
+        };
+        assert_eq!(
+            scaled.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+
+        let complex =
+            SparseTensor::new_complex_f32(1, 2, vec![0, 1, 1], vec![0], vec![(1.0, 2.0)]).unwrap();
+        let Value::SparseTensor(product) =
+            kron_builtin(Value::SparseTensor(complex), Value::Num(2.0), Vec::new())
+                .expect("complex sparse kron")
+        else {
+            panic!("expected sparse complex")
+        };
+        assert_eq!(
+            product.as_complex_f32_slice().unwrap()[0],
+            runmat_value::ComplexElement(2.0, 4.0)
+        );
+
+        let logical = SparseTensor::new_logical(1, 2, vec![0, 1, 1], vec![0]).unwrap();
+        let Value::SparseTensor(product) =
+            kron_builtin(Value::SparseTensor(logical), Value::Num(3.0), Vec::new())
+                .expect("logical sparse kron")
+        else {
+            panic!("expected sparse double")
+        };
+        assert_eq!(product.as_f64_slice(), Some(&[3.0][..]));
+    }
+
+    #[test]
+    fn kron_integer_scalar_and_sparse_double_scalar_preserve_exact_class_both_orders() {
+        let sparse = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![2.0]).unwrap();
+        for (left, right) in [
+            (
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::SparseTensor(sparse.clone()),
+            ),
+            (
+                Value::SparseTensor(sparse.clone()),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ),
+        ] {
+            let Value::SparseTensor(output) =
+                kron_builtin(left, right, Vec::new()).expect("integer scalar sparse kron")
+            else {
+                panic!("expected sparse integer")
+            };
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX]))
+            );
+        }
+    }
+
+    #[test]
+    fn kron_elides_underflowed_products_from_csc_nnz() {
+        let sparse =
+            SparseTensor::new_f32(2, 1, vec![0, 1], vec![0], vec![f32::MIN_POSITIVE]).unwrap();
+        let Value::SparseTensor(output) = kron_builtin(
+            Value::SparseTensor(sparse),
+            Value::Tensor(Tensor::from_f32(vec![f32::MIN_POSITIVE], vec![1, 1]).unwrap()),
+            Vec::new(),
+        )
+        .expect("sparse underflow") else {
+            panic!("expected CSC")
+        };
+        assert_eq!(output.nnz(), 0);
+        assert_eq!(&*output.col_ptrs, &[0, 0]);
+    }
+
+    #[test]
+    fn kron_logical_pairs_agree_on_double_class_dense_and_sparse() {
+        let dense = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
+        let Value::Tensor(full) = kron_builtin(
+            Value::LogicalArray(dense.clone()),
+            Value::LogicalArray(dense.clone()),
+            Vec::new(),
+        )
+        .expect("dense logical product") else {
+            panic!("expected numeric tensor")
+        };
+        assert_eq!(full.numeric_dtype(), NumericDType::F64);
+        let sparse = SparseTensor::new_logical(2, 1, vec![0, 1], vec![0]).unwrap();
+        let Value::SparseTensor(csc) = kron_builtin(
+            Value::SparseTensor(sparse),
+            Value::LogicalArray(dense),
+            Vec::new(),
+        )
+        .expect("sparse logical product") else {
+            panic!("expected CSC")
+        };
+        assert_eq!(csc.numeric_dtype(), Some(NumericDType::F64));
+        assert_eq!(csc.nnz(), 1);
+    }
+
+    #[test]
+    fn kron_type_logical_uses_numeric_result() {
         let out = kron_type(
             &[Type::Logical { shape: None }, Type::Logical { shape: None }],
             &ResolveContext::new(Vec::new()),
         );
-        assert_eq!(out, Type::logical());
+        assert_eq!(out, Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1182,6 +1378,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn kron_complex_single_class_is_shared_by_dense_and_sparse_paths() {
+        let single = ComplexTensor::from_f32(vec![(1.5, -2.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let dense = kron_builtin(
+            Value::ComplexTensor(single),
+            Value::ComplexTensor(double.clone()),
+            Vec::new(),
+        )
+        .expect("mixed complex dense kron");
+        let Value::ComplexTensor(dense) = dense else {
+            panic!("expected complex dense tensor")
+        };
+        assert_eq!(dense.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            dense.as_f32_slice(),
+            Some(&[runmat_value::ComplexElement(5.0, -2.5)][..])
+        );
+
+        let sparse =
+            SparseTensor::new_complex_f32(1, 1, vec![0, 1], vec![0], vec![(1.5, -2.0)]).unwrap();
+        let Value::SparseTensor(sparse) = kron_builtin(
+            Value::SparseTensor(sparse),
+            Value::ComplexTensor(double),
+            Vec::new(),
+        )
+        .expect("mixed complex sparse kron") else {
+            panic!("expected complex sparse tensor")
+        };
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(sparse.as_complex_f32_slice(), dense.as_f32_slice());
+    }
+
+    #[test]
     fn kron_rejects_integer_and_complex_mixed_arithmetic() {
         let left = Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2])
             .expect("integer tensor");
@@ -1317,6 +1546,27 @@ pub(crate) mod tests {
                 Value::GpuTensor(_) => {}
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn kron_explicit_gpu_and_sparse_reject_before_gather_and_keep_source_alive() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let source = gpu_helpers::upload_tensor(provider, &tensor)
+                .unwrap()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap();
+            let sparse = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![3.0]).unwrap();
+            let error = kron_builtin(
+                Value::GpuTensor(source.clone()),
+                Value::SparseTensor(sparse),
+                Vec::new(),
+            )
+            .expect_err("explicit sparse output has no resident representation");
+            assert_eq!(error.identifier(), KRON_ERROR_UNSUPPORTED_INPUT.identifier);
+            let original = test_support::gather(Value::GpuTensor(source)).unwrap();
+            assert_eq!(original.materialize_f64(), vec![2.0]);
         });
     }
 

@@ -229,6 +229,45 @@ impl IntegerStorage {
         }
     }
 
+    /// Reserve native storage before appending exact same-class scalars.
+    pub fn try_reserve(
+        &mut self,
+        additional: usize,
+    ) -> Result<(), std::collections::TryReserveError> {
+        match self {
+            Self::I8(values) => values.try_reserve(additional),
+            Self::I16(values) => values.try_reserve(additional),
+            Self::I32(values) => values.try_reserve(additional),
+            Self::I64(values) => values.try_reserve(additional),
+            Self::U8(values) => values.try_reserve(additional),
+            Self::U16(values) => values.try_reserve(additional),
+            Self::U32(values) => values.try_reserve(additional),
+            Self::U64(values) => values.try_reserve(additional),
+        }
+    }
+
+    /// Append an exact scalar without an intermediate tagged-value array.
+    pub fn push_same_class(&mut self, value: IntValue) -> Result<(), String> {
+        match (self, value) {
+            (Self::I8(values), IntValue::I8(value)) => values.push(value),
+            (Self::I16(values), IntValue::I16(value)) => values.push(value),
+            (Self::I32(values), IntValue::I32(value)) => values.push(value),
+            (Self::I64(values), IntValue::I64(value)) => values.push(value),
+            (Self::U8(values), IntValue::U8(value)) => values.push(value),
+            (Self::U16(values), IntValue::U16(value)) => values.push(value),
+            (Self::U32(values), IntValue::U32(value)) => values.push(value),
+            (Self::U64(values), IntValue::U64(value)) => values.push(value),
+            (storage, value) => {
+                return Err(format!(
+                    "cannot append {} to {} integer storage",
+                    value.class_name(),
+                    storage.class_name(),
+                ))
+            }
+        }
+        Ok(())
+    }
+
     /// Stores a same-class exact scalar without floating-point conversion.
     pub fn set_value(&mut self, index: usize, value: IntValue) -> Result<(), String> {
         match (self, value) {

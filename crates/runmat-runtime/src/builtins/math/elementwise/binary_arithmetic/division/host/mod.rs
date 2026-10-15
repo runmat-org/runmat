@@ -9,6 +9,9 @@ use crate::BuiltinResult;
 use super::DivisionContext;
 
 pub(super) fn execute(context: DivisionContext, lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(lhs, Value::SparseTensor(_)) || matches!(rhs, Value::SparseTensor(_)) {
+        return sparse::execute(context, lhs, rhs);
+    }
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Div) {
         return Ok(result);
     }
@@ -85,6 +88,7 @@ fn scalar_divide_value(numerator: &Value, denominator: &Value) -> Option<Value> 
 
 mod complex;
 mod real;
+mod sparse;
 
 enum DivisionOperand {
     Real(Tensor),
