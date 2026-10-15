@@ -35,33 +35,6 @@ pub fn relative_link_target(
     relative
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relative_link_formatter_preserves_valid_topology_and_parent_target() {
-        for (entry, target, expected) in [
-            ("alias", "data", "data"),
-            (
-                "Frameworks/Foo/Current",
-                "Frameworks/Foo/Versions/A",
-                "Versions/A",
-            ),
-            ("a/b/alias", "a/c", "../c"),
-            ("Framework/alias", "Framework", "."),
-        ] {
-            assert_eq!(
-                relative_link_target(
-                    &NormalizedRelativePath::new(entry).unwrap(),
-                    &NormalizedRelativePath::new(target).unwrap()
-                ),
-                std::path::PathBuf::from(expected)
-            );
-        }
-    }
-}
-
 pub(crate) fn normalize_entry_path(
     value: &str,
     max_path_bytes: usize,
@@ -194,4 +167,31 @@ fn invalid<T>(path: &str, reason: &str) -> Result<T, ArchiveError> {
         path: path.to_string(),
         reason: reason.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_link_formatter_preserves_valid_topology_and_parent_target() {
+        for (entry, target, expected) in [
+            ("alias", "data", "data"),
+            (
+                "Frameworks/Foo/Current",
+                "Frameworks/Foo/Versions/A",
+                "Versions/A",
+            ),
+            ("a/b/alias", "a/c", "../c"),
+            ("Framework/alias", "Framework", "."),
+        ] {
+            assert_eq!(
+                relative_link_target(
+                    &NormalizedRelativePath::new(entry).unwrap(),
+                    &NormalizedRelativePath::new(target).unwrap()
+                ),
+                std::path::PathBuf::from(expected)
+            );
+        }
+    }
 }

@@ -116,7 +116,9 @@ pub(super) fn observe<'data, R: object::ReadRef<'data>>(
                     push(
                         &mut result,
                         NativeLoaderReferenceKind::ElfDynamic { tag },
-                        table.get(offset).map_err(invalid)?,
+                        table.get(offset).map_err(|()| {
+                            invalid("ELF loader reference has an invalid string offset")
+                        })?,
                     )?;
                 }
             }

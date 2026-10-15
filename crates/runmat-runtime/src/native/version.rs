@@ -129,7 +129,7 @@ pub const fn native_abi_layout() -> NativeAbiLayout {
 pub fn native_abi_layout_fingerprint() -> runmat_execution::Digest {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(probe) = super::try_native_abi_probe() {
-        return runmat_execution::Digest::sha256(&probe.canonical_bytes());
+        return runmat_execution::Digest::sha256(probe.canonical_bytes());
     }
     let layout = native_abi_layout();
     runmat_execution::Digest::sha256(format!(

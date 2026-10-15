@@ -219,7 +219,7 @@ impl NativeAbiProbe {
         for field in NativeAbiField::ALL {
             let (owner, width) = field.storage(u32::from(self.pointer_width / 8));
             let offset = self.offset(*field);
-            if offset % width != 0
+            if !offset.is_multiple_of(width)
                 || self.layout(owner).alignment < width
                 || offset
                     .checked_add(width)
@@ -249,7 +249,7 @@ impl NativeAbiProbe {
             contract_fingerprint: Digest::sha256(
                 &self.contract[..usize::from(self.contract_length)],
             ),
-            layout_fingerprint: Digest::sha256(&self.canonical_bytes()),
+            layout_fingerprint: Digest::sha256(self.canonical_bytes()),
         })
     }
 }
