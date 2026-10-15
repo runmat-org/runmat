@@ -180,6 +180,31 @@ fn checked_selection_cardinality(lengths: &[usize]) -> VmResult<usize> {
     Ok(count)
 }
 
+/// A numeric vector selector inherits a vector source's orientation. A
+/// non-vector source, or a matrix-shaped selector, keeps the selector shape.
+/// Colon and logical selection have separate shape rules.
+pub(crate) fn numeric_linear_output_shape(
+    source_shape: &[usize],
+    selector_shape: &[usize],
+    selected_len: usize,
+) -> Vec<usize> {
+    let vector = |shape: &[usize]| {
+        let rows = shape.first().copied().unwrap_or(1);
+        let cols = shape.get(1).copied().unwrap_or(1);
+        shape.iter().skip(2).all(|&extent| extent == 1) && (rows == 1 || cols == 1)
+    };
+    let source_is_non_scalar = source_shape.iter().any(|&extent| extent != 1);
+    if vector(source_shape) && source_is_non_scalar && vector(selector_shape) {
+        if source_shape.first().copied().unwrap_or(1) == 1 {
+            vec![1, selected_len]
+        } else {
+            vec![selected_len, 1]
+        }
+    } else {
+        selector_shape.to_vec()
+    }
+}
+
 fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
     let mut dims: Vec<(usize, usize, bool)> = selection_lengths
         .iter()
@@ -591,6 +616,7 @@ where
     let range_pos_by_dim = validate_expr_range_selector_plan(&spec)?;
     let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
     let mut linear_output_shape: Option<Vec<usize>> = None;
+    let mut linear_numeric_selector = false;
     let mut num_iter = 0usize;
     for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
         let is_colon = selector_mask_has_dim(spec.colon_mask, d);
@@ -694,6 +720,7 @@ where
                     Value::Tensor(idx_t) => {
                         if spec.dims == 1 {
                             linear_output_shape = Some(idx_t.shape().to_vec());
+                            linear_numeric_selector = true;
                         }
                         let vv = numeric_tensor_indices(idx_t, None)?;
                         selectors.push(ExprSel::Indices(vv));
@@ -802,10 +829,16 @@ where
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
             if let Some(shape) = linear_output_shape.clone() {
-                shape
+                if linear_numeric_selector {
+                    numeric_linear_output_shape(spec.shape, &shape, 0)
+                } else {
+                    shape
+                }
             } else if linear_selector_is_colon {
                 vec![0, 1]
-            } else if linear_selector_is_range || base_is_row_vector {
+            } else if linear_selector_is_range {
+                numeric_linear_output_shape(spec.shape, &[1, 0], 0)
+            } else if base_is_row_vector {
                 vec![1, 0]
             } else {
                 vec![0, 1]
@@ -876,12 +909,18 @@ where
 
     let output_shape = if spec.dims == 1 {
         if let Some(shape) = linear_output_shape {
-            shape
+            if linear_numeric_selector {
+                numeric_linear_output_shape(spec.shape, &shape, total_out)
+            } else {
+                shape
+            }
         } else if total_out <= 1 {
             vec![1, 1]
         } else if linear_selector_is_colon {
             vec![total_out, 1]
-        } else if linear_selector_is_range || base_is_row_vector {
+        } else if linear_selector_is_range {
+            numeric_linear_output_shape(spec.shape, &[1, total_out], total_out)
+        } else if base_is_row_vector {
             vec![1, total_out]
         } else {
             vec![total_out, 1]
@@ -943,15 +982,33 @@ fn assignment_result_shape(
 mod tests {
     use super::{
         build_assignment_plan, build_expr_index_plan, build_index_plan,
-        build_sparse_assignment_plan, checked_selection_cardinality, ExprPlanSpec,
+        build_sparse_assignment_plan, checked_selection_cardinality, numeric_linear_output_shape,
+        ExprPlanSpec,
     };
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
     use crate::indexing::EndExpr;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor, Value};
 
+    #[test]
+    fn numeric_linear_vector_result_uses_source_orientation_only_for_vector_pairs() {
+        for (source, selector, count, expected) in [
+            (vec![4, 1], vec![1, 2], 2, vec![2, 1]),
+            (vec![1, 4], vec![2, 1], 2, vec![1, 2]),
+            (vec![4, 1], vec![2, 2], 4, vec![2, 2]),
+            (vec![2, 2], vec![1, 2], 2, vec![1, 2]),
+            (vec![2, 2], vec![2], 2, vec![2]),
+            (vec![0, 1], vec![1, 0], 0, vec![0, 1]),
+        ] {
+            assert_eq!(
+                numeric_linear_output_shape(&source, &selector, count),
+                expected
+            );
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn expression_numeric_selector_preserves_rank_one_output_geometry() {
+    fn expression_numeric_selector_uses_vector_source_orientation() {
         let numeric = [Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![2]).unwrap(),
         )];
@@ -972,7 +1029,7 @@ mod tests {
         ))
         .expect("rank-one selector");
         assert_eq!(plan.indices, vec![1, 0]);
-        assert_eq!(plan.output_shape, vec![2]);
+        assert_eq!(plan.output_shape, vec![1, 2]);
     }
 
     #[test]
@@ -1168,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn expr_linear_range_on_column_vector_uses_range_shape() {
+    fn expr_linear_range_on_column_vector_uses_source_orientation() {
         futures::executor::block_on(async {
             let plan = build_expr_index_plan(
                 ExprPlanSpec {
@@ -1196,13 +1253,13 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plan.indices, vec![0, 1, 2, 3, 4, 5]);
-            assert_eq!(plan.output_shape, vec![1, 6]);
+            assert_eq!(plan.output_shape, vec![6, 1]);
             assert_eq!(plan.selection_lengths, vec![6]);
         })
     }
 
     #[test]
-    fn expr_empty_linear_range_uses_range_shape() {
+    fn expr_empty_linear_range_uses_source_orientation() {
         futures::executor::block_on(async {
             let plan = build_expr_index_plan(
                 ExprPlanSpec {
@@ -1230,7 +1287,7 @@ mod tests {
             .await
             .unwrap();
             assert!(plan.indices.is_empty());
-            assert_eq!(plan.output_shape, vec![1, 0]);
+            assert_eq!(plan.output_shape, vec![0, 1]);
             assert_eq!(plan.selection_lengths, vec![0]);
         })
     }
@@ -1501,7 +1558,7 @@ mod tests {
     }
 
     #[test]
-    fn expr_plan_linear_tensor_selector_preserves_tensor_shape() {
+    fn expr_plan_linear_numeric_vector_selector_uses_source_orientation() {
         futures::executor::block_on(async {
             let shape = vec![1, 10];
             let numeric = vec![Value::Tensor(
@@ -1529,6 +1586,7 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, vec![1, 2]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })

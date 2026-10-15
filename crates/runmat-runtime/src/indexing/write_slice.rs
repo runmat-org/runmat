@@ -137,22 +137,74 @@ mod empty_rhs;
 mod rhs_shape;
 use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
-pub enum ComplexRhsView {
+pub enum ComplexRhsView<'a> {
     Scalar((f64, f64)),
     Tensor {
         data: Vec<(f64, f64)>,
         shape: Vec<usize>,
         strides: Vec<usize>,
     },
+    RealTensor {
+        data: &'a Tensor,
+        shape: Vec<usize>,
+        strides: Vec<usize>,
+    },
 }
 
-pub fn build_complex_rhs_view(
-    rhs: &Value,
+impl ComplexRhsView<'_> {
+    fn tensor_geometry(&self) -> Option<(usize, &[usize], &[usize])> {
+        match self {
+            Self::Scalar(_) => None,
+            Self::Tensor {
+                data,
+                shape,
+                strides,
+            } => Some((data.len(), shape, strides)),
+            Self::RealTensor {
+                data,
+                shape,
+                strides,
+            } => Some((data.len(), shape, strides)),
+        }
+    }
+
+    fn tensor_value(&self, index: usize) -> (f64, f64) {
+        match self {
+            Self::Tensor { data, .. } => data[index],
+            Self::RealTensor { data, .. } => (tensor_value_f64(data, index), 0.0),
+            Self::Scalar(_) => unreachable!("scalar complex RHS has no tensor index"),
+        }
+    }
+}
+
+pub fn build_complex_rhs_view<'a>(
+    rhs: &'a Value,
     selection_lengths: &[usize],
-) -> Result<ComplexRhsView, RuntimeError> {
+) -> Result<ComplexRhsView<'a>, RuntimeError> {
     match rhs {
         Value::Complex(re, im) => Ok(ComplexRhsView::Scalar((*re, *im))),
         Value::Num(n) => Ok(ComplexRhsView::Scalar((*n, 0.0))),
+        Value::Int(n) => Ok(ComplexRhsView::Scalar((n.to_f64(), 0.0))),
+        Value::Bool(value) => Ok(ComplexRhsView::Scalar((
+            if *value { 1.0 } else { 0.0 },
+            0.0,
+        ))),
+        Value::Tensor(tensor) => {
+            let dims = selection_lengths.len();
+            let shape =
+                validated_assignment_rhs_shape(tensor.shape(), tensor.len(), selection_lengths)?;
+            let mut strides = vec![0usize; dims];
+            let mut stride = 1usize;
+            for dimension in 0..dims {
+                strides[dimension] = stride;
+                stride *= shape[dimension];
+            }
+            Ok(ComplexRhsView::RealTensor {
+                data: tensor,
+                shape,
+                strides,
+            })
+        }
         Value::ComplexTensor(rt) => {
             let dims = selection_lengths.len();
             let shape = validated_assignment_rhs_shape(rt.shape(), rt.len(), selection_lengths)?;
@@ -179,23 +231,21 @@ pub fn build_complex_rhs_view(
 }
 
 fn materialize_complex_rhs_view_for_plan(
-    rhs_view: &ComplexRhsView,
+    rhs_view: &ComplexRhsView<'_>,
     plan: &IndexPlan,
 ) -> Vec<(f64, f64)> {
     match rhs_view {
         ComplexRhsView::Scalar(value) => vec![*value; plan.indices.len()],
-        ComplexRhsView::Tensor { data, .. } if plan.dims == 1 => {
-            if data.len() == 1 {
-                vec![data[0]; plan.indices.len()]
+        _ if plan.dims == 1 => {
+            let (len, _, _) = rhs_view.tensor_geometry().expect("tensor RHS");
+            if len == 1 {
+                vec![rhs_view.tensor_value(0); plan.indices.len()]
             } else {
-                data.clone()
+                (0..len).map(|index| rhs_view.tensor_value(index)).collect()
             }
         }
-        ComplexRhsView::Tensor {
-            data,
-            shape,
-            strides,
-        } => {
+        _ => {
+            let (_, shape, strides) = rhs_view.tensor_geometry().expect("tensor RHS");
             let selection_lengths = if plan.selection_lengths.is_empty() {
                 &plan.output_shape
             } else {
@@ -212,7 +262,7 @@ fn materialize_complex_rhs_view_for_plan(
                     };
                     offset + coordinate * strides[dimension]
                 });
-                values.push(data[source]);
+                values.push(rhs_view.tensor_value(source));
                 for dimension in 0..plan.dims {
                     coordinates[dimension] += 1;
                     if coordinates[dimension] < selection_lengths[dimension].max(1) {
@@ -229,7 +279,7 @@ fn materialize_complex_rhs_view_for_plan(
 pub fn scatter_complex_with_plan(
     t: &mut ComplexTensor,
     plan: &IndexPlan,
-    rhs_view: &ComplexRhsView,
+    rhs_view: &ComplexRhsView<'_>,
 ) -> Result<(), RuntimeError> {
     let dims = plan.dims;
     let mut idx = vec![0usize; dims];
@@ -258,11 +308,8 @@ pub fn scatter_complex_with_plan(
                 t.set_f64_assignment_at(dst, val.0, val.1)
                     .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
-            ComplexRhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
+            _ => {
+                let (_, shape, strides) = rhs_view.tensor_geometry().expect("tensor RHS");
                 for d in 0..dims {
                     let rhs_len = shape[d];
                     let pos = if rhs_len == 1 { 0 } else { idx[d] };
@@ -278,7 +325,8 @@ pub fn scatter_complex_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                t.set_f64_assignment_at(dst, data[rlin].0, data[rlin].1)
+                let value = rhs_view.tensor_value(rlin);
+                t.set_f64_assignment_at(dst, value.0, value.1)
                     .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
         }
@@ -1453,6 +1501,33 @@ mod tests {
     }
 
     #[test]
+    fn real_tensor_rhs_fills_complex_slices_without_changing_target_class() {
+        let plan = IndexPlan::new(vec![1, 2], vec![2, 1], vec![2, 1], 2, vec![4, 2]);
+        let real_rhs = Value::Tensor(Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap());
+        let double = ComplexTensor::new(vec![(0.0, 1.0); 8], vec![4, 2]).unwrap();
+        let Value::ComplexTensor(double) =
+            block_on(assign_complex_with_plan(double, &plan, &real_rhs)).unwrap()
+        else {
+            panic!("complex double result");
+        };
+        assert_eq!(double.materialize_f64()[1..3], [(5.0, 0.0), (6.0, 0.0)]);
+
+        let single = ComplexTensor::from_f32(vec![(0.0, 1.0); 8], vec![4, 2]).unwrap();
+        let Value::ComplexTensor(single) =
+            block_on(assign_complex_with_plan(single, &plan, &real_rhs)).unwrap()
+        else {
+            panic!("complex single result");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64()[1..3], [(5.0, 0.0), (6.0, 0.0)]);
+
+        let invalid_rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+        let error = block_on(assign_complex_with_plan(single, &plan, &invalid_rhs))
+            .expect_err("real RHS shape must still match");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
     fn typed_slice_deletion_uses_exact_storage_when_f64_mirrors_are_unavailable() {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3]), vec![1, 3])
             .expect("tensor");
@@ -1673,13 +1748,30 @@ mod tests {
         ))
         .expect_err("nonempty nonscalar complex RHS");
         assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
-        let error = block_on(assign_complex_with_plan(
-            floating,
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            floating.clone(),
             &plan,
             &Value::Int(runmat_value::IntValue::U64(1)),
         ))
-        .expect_err("floating complex RHS class admission");
-        assert_eq!(error.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+        .expect("real integer scalar is a valid complex RHS") else {
+            panic!("complex target");
+        };
+        assert_eq!(output, floating);
+        let empty_real = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+        assert!(block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &empty_real
+        ))
+        .is_ok());
+        let incompatible_real = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_complex_with_plan(
+            floating,
+            &plan,
+            &incompatible_real,
+        ))
+        .expect_err("nonempty nonscalar real RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 
         let integer = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
@@ -2186,6 +2278,37 @@ mod tests {
             output.materialize_complex_f64().expect("complex values"),
             vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0)]
         );
+
+        let real_rhs = Value::Tensor(Tensor::new(vec![8.0, 9.0], vec![2, 1]).unwrap());
+        let plan = IndexPlan::new(vec![0, 1], vec![2, 1], vec![2, 1], 2, vec![2, 2]);
+        let Value::SparseTensor(output) = block_on(assign_sparse_with_plan(
+            SparseTensor::zeros_complex(2, 2),
+            &plan,
+            &real_rhs,
+        ))
+        .expect("real tensor updates complex sparse entries") else {
+            panic!("sparse complex result");
+        };
+        assert_eq!(
+            output.materialize_complex_f64().unwrap(),
+            vec![(8.0, 0.0), (9.0, 0.0)]
+        );
+
+        let empty_plan = IndexPlan::new(vec![], vec![0, 1], vec![0], 1, vec![2, 2]);
+        let empty_real = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+        let Value::SparseTensor(unchanged) = block_on(assign_sparse_with_plan(
+            output.clone(),
+            &empty_plan,
+            &empty_real,
+        ))
+        .expect("empty real RHS keeps complex sparse source") else {
+            panic!("sparse complex result");
+        };
+        assert_eq!(unchanged, output);
+        let invalid = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_sparse_with_plan(output, &empty_plan, &invalid))
+            .expect_err("incompatible real RHS rejected before sparse update");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]

@@ -63,7 +63,11 @@ pub async fn build_component_selectors(
                 let selector = match &materialized {
                     Value::Tensor(tensor) => SliceSelector::LinearIndices {
                         values: numeric_tensor_indices(tensor, Some(total_len))?,
-                        output_shape: tensor.shape().to_vec(),
+                        output_shape: crate::indexing::plan::numeric_linear_output_shape(
+                            base_shape,
+                            tensor.shape(),
+                            tensor.len(),
+                        ),
                     },
                     Value::LogicalArray(_) => {
                         let values = indices_from_value_linear(&materialized, total_len).await?;
@@ -359,7 +363,11 @@ pub async fn build_slice_selectors(
             let indices = numeric_tensor_indices(idx_t, Some(total_len))?;
             selectors.push(SliceSelector::LinearIndices {
                 values: indices,
-                output_shape: idx_t.shape().to_vec(),
+                output_shape: crate::indexing::plan::numeric_linear_output_shape(
+                    base_shape,
+                    idx_t.shape(),
+                    idx_t.len(),
+                ),
             });
         } else if let Value::LogicalArray(_) = &materialized {
             // MATLAB linear logical indexing always yields a column vector.

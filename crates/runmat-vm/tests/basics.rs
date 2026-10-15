@@ -46,6 +46,40 @@ fn character_array_slices_preserve_rows_columns_and_linear_order() {
     assert!(has_char(&[1, 2], &['a', 'x']));
 }
 
+#[test]
+fn linear_numeric_vector_indexing_preserves_vector_source_orientation() {
+    let source = "x = zeros(4,1); a = x(2:3); k = [2 3]; b = x(k); y = zeros(1,4); c = y([2;3]); x(2:3) = x(2:3) + [1;2]; ok = size(a,1)==2 && size(a,2)==1 && size(b,1)==2 && size(b,2)==1 && size(c,1)==1 && size(c,2)==2 && x(2)==1 && x(3)==2;";
+    let bytecode = compile_source(source).expect("compile vector orientation fixture");
+    let ok_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "ok").then_some(slot))
+        .expect("ok binding");
+    let vars = interpret(&bytecode).expect("execute vector orientation fixture");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected ok binding: {:?}",
+        vars.get(ok_slot)
+    );
+}
+
+#[test]
+fn real_numeric_tensor_rhs_assigns_into_complex_slice() {
+    let source = "w = complex(zeros(4,2)); w(2:3,1) = [5;6]; s = complex(single(zeros(2,1))); s(1:2) = single([3;4]); ok = real(w(2,1))==5 && real(w(3,1))==6 && imag(w(2,1))==0 && imag(w(3,1))==0 && real(s(1))==3 && real(s(2))==4 && imag(s(1))==0;";
+    let bytecode = compile_source(source).expect("compile complex RHS fixture");
+    let ok_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "ok").then_some(slot))
+        .expect("ok binding");
+    let vars = interpret(&bytecode).expect("execute complex RHS fixture");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected ok binding: {:?}",
+        vars.get(ok_slot)
+    );
+}
+
 fn matlab_single_quoted_path(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }

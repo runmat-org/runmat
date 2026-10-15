@@ -46,7 +46,8 @@ pub(super) fn validate_real_or_host_complex_rhs(
 
 fn validate_complex_float_rhs(rhs: &Value, plan: &IndexPlan) -> Result<(), RuntimeError> {
     match rhs {
-        Value::Num(_) | Value::Complex(_, _) => Ok(()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(()),
+        Value::Tensor(tensor) => validate_array_shape(tensor.shape(), tensor.len(), plan),
         Value::ComplexTensor(tensor) => validate_array_shape(tensor.shape(), tensor.len(), plan),
         _ => Err(mex(
             "InvalidSliceAssignmentRhs",

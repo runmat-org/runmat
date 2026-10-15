@@ -1073,8 +1073,8 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 mod tests {
     use super::{
         gather_string_slice, read_complex_slice_from_plan, read_gpu_slice_from_plan,
-        read_sparse_slice_from_plan, read_string_slice, read_tensor_slice_from_plan,
-        try_tensor_slice_2d_fast_path,
+        read_sparse_slice, read_sparse_slice_from_plan, read_string_slice,
+        read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
@@ -1083,6 +1083,27 @@ mod tests {
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
         NumericScalar, SparseTensor, StringArray, Tensor, Value,
     };
+
+    #[test]
+    fn sparse_linear_numeric_vector_selection_uses_source_orientation() {
+        let column =
+            SparseTensor::new(4, 1, vec![0, 2], vec![1, 2], vec![5.0, 6.0]).expect("column source");
+        let row = SparseTensor::new(1, 4, vec![0, 0, 1, 2, 2], vec![0, 0], vec![5.0, 6.0])
+            .expect("row source");
+        for (source, index_shape, expected) in [
+            (&column, vec![1, 2], vec![2, 1]),
+            (&row, vec![2, 1], vec![1, 2]),
+        ] {
+            let selector = Value::Tensor(Tensor::new(vec![2.0, 3.0], index_shape).unwrap());
+            let Value::SparseTensor(output) =
+                block_on(read_sparse_slice(source, 1, 0, 0, &[selector])).unwrap()
+            else {
+                panic!("sparse vector result");
+            };
+            assert_eq!(output.shape(), expected);
+            assert_eq!(output.nnz(), 2);
+        }
+    }
 
     #[test]
     fn tensor_slice_plan_preserves_exact_uint64_storage() {

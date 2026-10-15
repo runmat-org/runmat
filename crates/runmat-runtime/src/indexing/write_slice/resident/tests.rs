@@ -115,6 +115,14 @@ fn empty_resident_assignment_validates_rhs_without_transfer_or_retirement() {
         .owner
         .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
+    let complex = provider
+        .owner
+        .allocate_zeroed(
+            vec![1, 2],
+            NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        )
+        .unwrap();
     let logical = provider
         .owner
         .allocate_logical(vec![1, 0], vec![1, 2])
@@ -146,6 +154,24 @@ fn empty_resident_assignment_validates_rhs_without_transfer_or_retirement() {
                 .expect_err("incompatible RHS must reject before device work");
         assert_eq!(error.identifier(), Some(expected));
     }
+    let empty_real = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+    let Value::GpuTensor(output) = futures::executor::block_on(assign_gpu_slice_with_plan(
+        &complex.handle,
+        &plan,
+        &empty_real,
+    ))
+    .expect("real empty RHS is admitted for complex resident target") else {
+        panic!("resident complex result");
+    };
+    assert!(output.shares_allocation_with(&complex.handle));
+    let incompatible_real = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let error = futures::executor::block_on(assign_gpu_slice_with_plan(
+        &complex.handle,
+        &plan,
+        &incompatible_real,
+    ))
+    .expect_err("complex resident preflight rejects incompatible real RHS shape");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     let empty = Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
     let Value::GpuTensor(deleted) =
         futures::executor::block_on(delete_gpu_slice_with_plan(&input.handle, &plan, &empty))
@@ -174,6 +200,7 @@ fn empty_resident_assignment_validates_rhs_without_transfer_or_retirement() {
     }
     assert!(provider.temporaries.lock().unwrap().is_empty());
     assert_eq!(input.probe.retirements(), 0);
+    assert_eq!(complex.probe.retirements(), 0);
     assert_eq!(logical.probe.retirements(), 0);
 }
 impl AccelProvider for FailingProvider {
