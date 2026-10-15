@@ -19,8 +19,8 @@ use runmat_value::{StringArray, StructValue, Tensor, Value};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
 use crate::builtins::plotting::state::{
-    register_textscatter_handle, update_textscatter_figure, update_textscatter_handle_state,
-    FigureError, PlotRenderOptions, TextScatterHandleState, TextScatterMarkerColor,
+    register_textscatter_handle, FigureError, PlotRenderOptions, TextScatterHandleState,
+    TextScatterMarkerColor,
 };
 use crate::builtins::plotting::style::{
     parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -949,15 +949,35 @@ pub(crate) fn get_textscatter_property(
     }
 }
 
-pub(crate) fn apply_textscatter_property(
+fn property_state_error(
+    builtin: &'static str,
+    source: crate::builtins::plotting::state::FigureError,
+) -> RuntimeError {
+    let mut error = textscatter_error(builtin, source.to_string());
+    error.source = Some(Box::new(source));
+    error
+}
+
+pub(crate) fn apply_textscatter_property_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     handle: f64,
     state: &TextScatterHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot(handle) {
+    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot_for_property(
+        authority, handle,
+    ) {
         Ok(crate::builtins::plotting::state::PlotChildHandleState::TextScatter(current)) => current,
+        Err(err) if authority.is_selected() => return Err(property_state_error(builtin, err)),
+        _ if authority.is_selected() => {
+            return Err(property_state_error(
+                builtin,
+                crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+            ))
+        }
         _ => state.clone(),
     };
     let prop = canonical_key(key);
@@ -1052,9 +1072,11 @@ pub(crate) fn apply_textscatter_property(
             ));
         }
     }
-    refresh_textscatter_rendering(&mut next, builtin)?;
-    update_textscatter_handle_state(handle, next)
-        .map_err(|err| textscatter_error(builtin, err.to_string()))
+    refresh_textscatter_rendering_for_property(authority, &mut next, builtin)?;
+    crate::builtins::plotting::state::update_textscatter_handle_state_for_property(
+        authority, handle, next,
+    )
+    .map_err(|err| property_state_error(builtin, err))
 }
 
 fn add_marker_plot(
@@ -1092,7 +1114,9 @@ fn add_marker_plot(
     }
 }
 
-fn refresh_textscatter_rendering(
+fn refresh_textscatter_rendering_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     state: &mut TextScatterHandleState,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
@@ -1105,110 +1129,133 @@ fn refresh_textscatter_rendering(
         .as_ref()
         .map(NumericPlotData::materialize_f64)
         .unwrap_or_else(|| vec![0.0; state.text_data.len()]);
-    let location = state.clone();
-    update_textscatter_figure(&location, |figure| {
-        for (idx, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
-            if figure
-                .axes_text_annotation(state.axes_index, annotation_index)
-                .is_none()
-            {
-                return Err(crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle);
+    crate::builtins::plotting::state::update_textscatter_figure_for_property(
+        authority,
+        state.figure,
+        state.axes_index,
+        |figure| {
+            for (idx, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
+                if figure
+                    .axes_text_annotation(state.axes_index, annotation_index)
+                    .is_none()
+                {
+                    return Err(
+                        crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+                    );
+                }
+                let mut style = state.base_style.clone();
+                style.visible = state.visible && visible_mask[idx];
+                style.color = text_colors.get(idx).copied();
+                figure.set_axes_text_annotation_text(
+                    state.axes_index,
+                    annotation_index,
+                    truncated_label(&state.text_data[idx], state.max_text_length),
+                );
+                figure.set_axes_text_annotation_position(
+                    state.axes_index,
+                    annotation_index,
+                    Vec3::new(
+                        x_values[idx] as f32,
+                        y_values[idx] as f32,
+                        z_values[idx] as f32,
+                    ),
+                );
+                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
             }
-            let mut style = state.base_style.clone();
-            style.visible = state.visible && visible_mask[idx];
-            style.color = text_colors.get(idx).copied();
-            figure.set_axes_text_annotation_text(
-                state.axes_index,
-                annotation_index,
-                truncated_label(&state.text_data[idx], state.max_text_length),
+            let marker_colors = resolved_marker_colors(
+                state.text_data.len(),
+                &options_from_state(state),
+                &text_colors,
             );
-            figure.set_axes_text_annotation_position(
-                state.axes_index,
-                annotation_index,
-                Vec3::new(
-                    x_values[idx] as f32,
-                    y_values[idx] as f32,
-                    z_values[idx] as f32,
-                ),
-            );
-            figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
-        }
-        let marker_colors = resolved_marker_colors(
-            state.text_data.len(),
-            &options_from_state(state),
-            &text_colors,
-        );
-        if let Some(plot_index) = state.marker_plot_index {
-            if let Some(plot) = figure.get_plot_mut(plot_index) {
-                match plot {
-                    PlotElement::Scatter(scatter) => {
-                        if state.is_3d {
-                            scatter.set_visible(false);
-                            if should_show_markers_state(state) {
-                                let new_index = add_marker_plot(
-                                    figure,
-                                    state.axes_index,
-                                    state.is_3d,
-                                    &x_values,
-                                    &y_values,
-                                    Some(&z_values),
-                                    marker_colors,
-                                    state.marker_size,
-                                    state.visible,
-                                    builtin,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                                state.marker_plot_index = Some(new_index);
-                            }
-                        } else {
-                            scatter
-                                .update_numeric_data(state.x_data.clone(), state.y_data.clone())
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                            scatter.set_marker_size(state.marker_size as f32);
-                            scatter.set_visible(state.visible && should_show_markers_state(state));
-                            scatter.set_colors(marker_colors);
-                        }
-                    }
-                    PlotElement::Scatter3(scatter) => {
-                        if state.is_3d {
-                            scatter
-                                .update_numeric_data(
-                                    state.x_data.clone(),
-                                    state.y_data.clone(),
-                                    state
-                                        .z_data
-                                        .clone()
-                                        .ok_or(FigureError::InvalidPlotObjectHandle)?,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                            let mut updated = scatter
-                                .clone()
-                                .with_colors(marker_colors)
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?
-                                .with_point_size(state.marker_size as f32);
-                            updated.set_visible(state.visible && should_show_markers_state(state));
-                            *scatter = updated;
-                        } else {
-                            scatter.set_visible(false);
-                            if should_show_markers_state(state) {
-                                let new_index = add_marker_plot(
-                                    figure,
-                                    state.axes_index,
-                                    state.is_3d,
-                                    &x_values,
-                                    &y_values,
-                                    None,
-                                    marker_colors,
-                                    state.marker_size,
-                                    state.visible,
-                                    builtin,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                                state.marker_plot_index = Some(new_index);
+            if let Some(plot_index) = state.marker_plot_index {
+                if let Some(plot) = figure.get_plot_mut(plot_index) {
+                    match plot {
+                        PlotElement::Scatter(scatter) => {
+                            if state.is_3d {
+                                scatter.set_visible(false);
+                                if should_show_markers_state(state) {
+                                    let new_index = add_marker_plot(
+                                        figure,
+                                        state.axes_index,
+                                        state.is_3d,
+                                        &x_values,
+                                        &y_values,
+                                        Some(&z_values),
+                                        marker_colors,
+                                        state.marker_size,
+                                        state.visible,
+                                        builtin,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                    state.marker_plot_index = Some(new_index);
+                                }
+                            } else {
+                                scatter
+                                    .update_numeric_data(state.x_data.clone(), state.y_data.clone())
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                scatter.set_marker_size(state.marker_size as f32);
+                                scatter
+                                    .set_visible(state.visible && should_show_markers_state(state));
+                                scatter.set_colors(marker_colors);
                             }
                         }
+                        PlotElement::Scatter3(scatter) => {
+                            if state.is_3d {
+                                scatter
+                                    .update_numeric_data(
+                                        state.x_data.clone(),
+                                        state.y_data.clone(),
+                                        state
+                                            .z_data
+                                            .clone()
+                                            .ok_or(FigureError::InvalidPlotObjectHandle)?,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                let mut updated = scatter
+                                    .clone()
+                                    .with_colors(marker_colors)
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?
+                                    .with_point_size(state.marker_size as f32);
+                                updated
+                                    .set_visible(state.visible && should_show_markers_state(state));
+                                *scatter = updated;
+                            } else {
+                                scatter.set_visible(false);
+                                if should_show_markers_state(state) {
+                                    let new_index = add_marker_plot(
+                                        figure,
+                                        state.axes_index,
+                                        state.is_3d,
+                                        &x_values,
+                                        &y_values,
+                                        None,
+                                        marker_colors,
+                                        state.marker_size,
+                                        state.visible,
+                                        builtin,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                    state.marker_plot_index = Some(new_index);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                } else if should_show_markers_state(state) {
+                    let new_index = add_marker_plot(
+                        figure,
+                        state.axes_index,
+                        state.is_3d,
+                        &x_values,
+                        &y_values,
+                        if state.is_3d { Some(&z_values) } else { None },
+                        marker_colors,
+                        state.marker_size,
+                        state.visible,
+                        builtin,
+                    )
+                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                    state.marker_plot_index = Some(new_index);
                 }
             } else if should_show_markers_state(state) {
                 let new_index = add_marker_plot(
@@ -1226,25 +1273,10 @@ fn refresh_textscatter_rendering(
                 .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
                 state.marker_plot_index = Some(new_index);
             }
-        } else if should_show_markers_state(state) {
-            let new_index = add_marker_plot(
-                figure,
-                state.axes_index,
-                state.is_3d,
-                &x_values,
-                &y_values,
-                if state.is_3d { Some(&z_values) } else { None },
-                marker_colors,
-                state.marker_size,
-                state.visible,
-                builtin,
-            )
-            .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-            state.marker_plot_index = Some(new_index);
-        }
-        Ok(())
-    })
-    .map_err(|err| textscatter_error(builtin, err.to_string()))
+            Ok(())
+        },
+    )
+    .map_err(|err| property_state_error(builtin, err))
 }
 
 fn numeric_data_value(data: &NumericPlotData, builtin: &'static str) -> BuiltinResult<Value> {

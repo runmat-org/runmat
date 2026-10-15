@@ -31,7 +31,56 @@ use crate::{BuiltinResult, RuntimeError};
 pub(crate) mod callbacks;
 #[path = "state/mode_properties.rs"]
 pub(crate) mod mode_properties;
+#[path = "state/property_mutation.rs"]
+mod property_mutation;
+pub(crate) use axes_modes::{
+    set_hidden_line_removal_for_axes_for_property, set_y_direction_for_axes_for_property,
+};
+pub(crate) use colorbar::{
+    set_colorbar_enabled_for_axes_for_property, set_colorbar_visible_for_property,
+};
+pub(crate) use colormap::{
+    set_colormap_for_axes_for_property, set_colormap_for_axes_with_length_for_property,
+};
 pub use mode_properties::FigureTarget;
+use property_mutation::PropertyLocation;
+pub(crate) use property_mutation::{
+    axes_metadata_snapshot_for_property, axis_display_bounds_snapshot_for_axes_for_property,
+    data_aspect_ratio_snapshot_for_axes_for_property, plot_child_handle_snapshot_for_property,
+    select_axes_for_figure_for_property, select_current_figure_if_exists_for_property,
+    set_animated_line_maximum_num_points_for_property, set_axes_position_for_axes_for_property,
+    set_axes_style_for_axes_for_property, set_axes_units_for_axes_for_property,
+    set_axis_color_limits_preserving_selection_for_property, set_axis_equal_for_axes_for_property,
+    set_axis_manual_limits_for_axes_for_property, set_axis_tick_angles_for_axes_for_property,
+    set_axis_tick_formats_for_axes_for_property, set_axis_tick_labels_for_axes_for_property,
+    set_axis_ticks_for_axes_for_property, set_axis_z_limits_preserving_selection_for_property,
+    set_box_enabled_for_axes_for_property, set_color_limits_for_axes_for_property,
+    set_data_aspect_ratio_for_axes_for_property, set_figure_background_color_for_property,
+    set_figure_name_for_property, set_figure_number_title_for_property,
+    set_figure_position_for_property, set_figure_tag_for_property, set_figure_visible_for_property,
+    set_grid_enabled_for_axes_for_property, set_heatmap_color_limits_for_property,
+    set_heatmap_display_labels_for_property, set_histogram_handle_display_name_for_property,
+    set_legend_for_axes_for_property, set_log_modes_for_axes_for_property,
+    set_minor_grid_enabled_for_axes_for_property, set_sg_title_properties_for_figure_for_property,
+    set_text_annotation_properties_for_axes_for_property,
+    set_text_properties_for_axes_for_property, set_view_for_axes_for_property,
+    set_y_axis_location_for_axes_for_property, update_area_plot_for_property,
+    update_binscatter_handle_for_plot_for_property, update_errorbar_plot_for_property,
+    update_histogram2_handle_for_plot_for_property, update_histogram_handle_for_plot_for_property,
+    update_histogram_handle_metadata_for_plot_for_property,
+    update_histogram_plot_data_for_property, update_image_handle_for_plot_for_property,
+    update_image_plot_for_property, update_plot_element_for_property,
+    update_quiver_plot_for_property, update_stackedplot_figure_for_property,
+    update_stackedplot_handle_state_for_property, update_stem_plot_for_property,
+    update_text_annotation_position_source_for_property, update_textscatter_figure_for_property,
+    update_textscatter_handle_state_for_property, update_wordcloud_figure_for_property,
+    update_wordcloud_handle_state_for_property,
+};
+use property_mutation::{
+    with_annotation_target_mut_for_property, with_axes_target_mut_for_property,
+    with_figure_mut_for_property,
+};
+pub(crate) use property_mutation::{PropertyMutationError, PropertyMutationTarget};
 #[path = "state/callback_payload.rs"]
 mod callback_payload;
 pub(crate) use callback_payload::callback_payload_valid;
@@ -49,6 +98,7 @@ use scene_mutation::{
 #[cfg(test)]
 #[path = "state/scene_lease_tests.rs"]
 mod scene_lease_tests;
+pub(crate) use shared_figure::FigureOwner;
 use shared_figure::SharedFigure;
 #[path = "state/persistence_snapshot.rs"]
 pub(crate) mod persistence_snapshot;
@@ -79,6 +129,7 @@ mod interaction_exclusivity;
 pub use clear_axes::clear_axes_target;
 #[cfg(test)]
 pub use clear_axes::clear_current_axes;
+pub(crate) use graphics_receiver::graphics_receiver_class;
 use graphics_receiver::issue_graphics_receiver;
 pub use graphics_receiver::{
     axes_graphics_receiver, axes_graphics_receiver_for_scene, figure_graphics_receiver,
@@ -908,6 +959,19 @@ pub enum PlotChildHandleState {
     StackedPlot(StackedPlotHandleState),
 }
 
+#[path = "state/chart_identity.rs"]
+mod chart_identity;
+
+#[path = "state/property_selection.rs"]
+mod property_selection;
+pub(crate) use property_selection::{GraphicsPropertySelection, GraphicsPropertySnapshot};
+#[path = "state/property_snapshot.rs"]
+mod property_snapshot;
+pub(crate) use property_snapshot::{
+    axes_property_snapshot_alias, figure_property_snapshot_alias, AxesPropertySnapshot,
+    FigurePropertySnapshot,
+};
+
 impl PlotChildHandleState {
     pub fn figure_axes(&self) -> (FigureHandle, usize) {
         match self {
@@ -1165,34 +1229,7 @@ impl PlotChildHandleState {
     }
 
     pub fn type_name(&self) -> &'static str {
-        match self {
-            Self::ColorBar(_) => "colorbar",
-            Self::Histogram(_) => "histogram",
-            Self::Histogram2(_) => "histogram2",
-            Self::Line(_) | Self::Line3(_) => "line",
-            Self::AnimatedLine(_) => "animatedline",
-            Self::Scatter(_) | Self::Scatter3(_) => "scatter",
-            Self::Bar(_) => "bar",
-            Self::Stem(_) => "stem",
-            Self::ErrorBar(_) => "errorbar",
-            Self::Stairs(_) => "stairs",
-            Self::Quiver(_) => "quiver",
-            Self::Image(_) => "image",
-            Self::Heatmap(_) => "heatmap",
-            Self::Binscatter(_) => "binscatter",
-            Self::FunctionSurface(_) => "functionsurface",
-            Self::FunctionContour(_) => "functioncontour",
-            Self::Area(_) => "area",
-            Self::Surface(_) => "surface",
-            Self::Patch(_) => "patch",
-            Self::Contour(_) | Self::ContourFill(_) => "contour",
-            Self::ReferenceLine(_) => "constantline",
-            Self::Pie(_) => "pie",
-            Self::Text(_) => "text",
-            Self::TextScatter(_) => "textscatter",
-            Self::WordCloud(_) => "wordcloud",
-            Self::StackedPlot(_) => "stackedplot",
-        }
+        self.chart_identity().1
     }
 }
 
@@ -1511,11 +1548,12 @@ pub fn set_grid_enabled_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_grid_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_grid_enabled_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
 }
 
 pub fn set_minor_grid_enabled_for_axes(
@@ -1523,13 +1561,12 @@ pub fn set_minor_grid_enabled_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state
-            .figure
-            .set_axes_minor_grid_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_minor_grid_enabled_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
 }
 
 pub fn toggle_grid() -> bool {
@@ -1584,11 +1621,12 @@ pub fn set_box_enabled_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_box_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_box_enabled_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
 }
 
 pub fn set_axes_style_for_axes(
@@ -1596,11 +1634,12 @@ pub fn set_axes_style_for_axes(
     axes_index: usize,
     style: TextStyle,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_style(axes_index, style);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axes_style_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        style,
+    )
 }
 
 pub fn default_color_order() -> Vec<Vec4> {
@@ -1739,70 +1778,39 @@ pub fn set_sg_title_properties_for_figure(
     text: Option<String>,
     style: Option<TextStyle>,
 ) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_figure_mut(handle, |state| {
-        if let Some(text) = text {
-            state.figure.set_sg_title(text);
-        }
-        if let Some(style) = style {
-            state.figure.set_sg_title_style(style);
-        }
-        encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle)
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    set_sg_title_properties_for_figure_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        text,
+        style,
+    )
 }
 
 pub fn set_figure_name(handle: FigureHandle, name: String) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
-        state.figure.set_name(name);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_figure_name_for_property(&PropertyMutationTarget::alias(), handle, name)
 }
 
 pub fn set_figure_tag(handle: FigureHandle, tag: String) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
-        state.tag = tag;
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_figure_tag_for_property(&PropertyMutationTarget::alias(), handle, tag)
 }
 
 pub fn set_figure_number_title(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
-        state.figure.set_number_title(enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_figure_number_title_for_property(&PropertyMutationTarget::alias(), handle, enabled)
 }
 
 pub fn set_figure_visible(
     handle: FigureHandle,
     visible: bool,
 ) -> Result<(bool, Figure), FigureError> {
-    let ((was_visible, now_visible), figure_clone) = with_figure_mut(handle, |state| {
-        let was_visible = state.figure.visible;
-        state.figure.set_visible(visible);
-        (was_visible, state.figure.visible)
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok((!was_visible && now_visible, figure_clone))
+    set_figure_visible_for_property(&PropertyMutationTarget::alias(), handle, visible)
 }
 
 pub fn set_figure_position(handle: FigureHandle, position: [f64; 4]) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
-        state.figure.set_position(position);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_figure_position_for_property(&PropertyMutationTarget::alias(), handle, position)
 }
 
 pub fn set_figure_background_color(handle: FigureHandle, color: Vec4) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
-        state.figure.set_background_color(color);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_figure_background_color_for_property(&PropertyMutationTarget::alias(), handle, color)
 }
 
 pub fn set_text_properties_for_axes(
@@ -1812,33 +1820,14 @@ pub fn set_text_properties_for_axes(
     text: Option<String>,
     style: Option<TextStyle>,
 ) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        if let Some(text) = text {
-            match kind {
-                PlotObjectKind::Title => state.figure.set_axes_title(axes_index, text),
-                PlotObjectKind::Subtitle => state.figure.set_axes_subtitle(axes_index, text),
-                PlotObjectKind::XLabel => state.figure.set_axes_xlabel(axes_index, text),
-                PlotObjectKind::YLabel => state.figure.set_axes_ylabel(axes_index, text),
-                PlotObjectKind::ZLabel => state.figure.set_axes_zlabel(axes_index, text),
-                PlotObjectKind::Legend | PlotObjectKind::XAxis | PlotObjectKind::YAxis => {}
-                PlotObjectKind::SuperTitle => state.figure.set_sg_title(text),
-            }
-        }
-        if let Some(style) = style {
-            match kind {
-                PlotObjectKind::Title => state.figure.set_axes_title_style(axes_index, style),
-                PlotObjectKind::Subtitle => state.figure.set_axes_subtitle_style(axes_index, style),
-                PlotObjectKind::XLabel => state.figure.set_axes_xlabel_style(axes_index, style),
-                PlotObjectKind::YLabel => state.figure.set_axes_ylabel_style(axes_index, style),
-                PlotObjectKind::ZLabel => state.figure.set_axes_zlabel_style(axes_index, style),
-                PlotObjectKind::Legend | PlotObjectKind::XAxis | PlotObjectKind::YAxis => {}
-                PlotObjectKind::SuperTitle => state.figure.set_sg_title_style(style),
-            }
-        }
-        encode_plot_object_handle(handle, axes_index, kind)
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    set_text_properties_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        kind,
+        text,
+        style,
+    )
 }
 
 pub fn set_xlabel_for_axes(
@@ -1916,25 +1905,15 @@ pub fn set_text_annotation_properties_for_axes(
     position: Option<glam::Vec3>,
     style: Option<TextStyle>,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        if let Some(text) = text {
-            state
-                .figure
-                .set_axes_text_annotation_text(axes_index, annotation_index, text);
-        }
-        if let Some(position) = position {
-            state
-                .figure
-                .set_axes_text_annotation_position(axes_index, annotation_index, position);
-        }
-        if let Some(style) = style {
-            state
-                .figure
-                .set_axes_text_annotation_style(axes_index, annotation_index, style);
-        }
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_text_annotation_properties_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        annotation_index,
+        text,
+        position,
+        style,
+    )
 }
 
 pub fn toggle_box() -> bool {
@@ -1987,11 +1966,12 @@ pub fn set_axis_equal_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_axis_equal(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axis_equal_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
 }
 
 pub fn data_aspect_ratio_snapshot() -> ([f64; 3], String) {
@@ -2010,14 +1990,11 @@ pub fn data_aspect_ratio_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<([f64; 3], String), FigureError> {
-    let mut reg = registry();
-    let state = get_state_for_query(&mut reg, handle);
-    validate_axes_index(state, axes_index)?;
-    Ok(state
-        .figure
-        .axes_metadata(axes_index)
-        .map(|meta| (meta.data_aspect_ratio, meta.data_aspect_ratio_mode.clone()))
-        .unwrap_or(([1.0, 1.0, 1.0], "auto".into())))
+    data_aspect_ratio_snapshot_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+    )
 }
 
 pub fn set_data_aspect_ratio(ratio: [f64; 3], mode: &str) {
@@ -2041,19 +2018,13 @@ pub fn set_data_aspect_ratio_for_axes(
     ratio: [f64; 3],
     mode: &str,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = get_state_for_query(&mut reg, handle);
-        validate_axes_index(state, axes_index)?;
-        let state = get_state_mut(&mut reg, handle);
-        state
-            .figure
-            .set_axes_data_aspect_ratio(axes_index, ratio, mode.to_string());
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_data_aspect_ratio_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        ratio,
+        mode,
+    )
 }
 
 fn clone_touched_figures(
@@ -2224,17 +2195,13 @@ pub fn set_axis_manual_limits_for_axes(
     x: Option<(f64, f64)>,
     y: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
-    let updates = {
-        let mut reg = registry();
-        let state = reg
-            .figures
-            .get(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
-        set_axes_limits_with_links(&mut reg, handle, axes_index, x, y)?
-    };
-    notify_figure_updates(updates);
-    Ok(())
+    set_axis_manual_limits_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        x,
+        y,
+    )
 }
 
 fn axis_limits_for_link_axis(
@@ -2422,15 +2389,7 @@ pub fn set_axis_ticks_for_axes(
     x: Option<Vec<f64>>,
     y: Option<Vec<f64>>,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
-        state.figure.set_axes_ticks(axes_index, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axis_ticks_for_axes_for_property(&PropertyMutationTarget::alias(), handle, axes_index, x, y)
 }
 
 pub fn set_axis_tick_labels(x: Option<Vec<String>>, y: Option<Vec<String>>) {
@@ -2452,15 +2411,13 @@ pub fn set_axis_tick_labels_for_axes(
     x: Option<Vec<String>>,
     y: Option<Vec<String>>,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
-        state.figure.set_axes_tick_labels(axes_index, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axis_tick_labels_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        x,
+        y,
+    )
 }
 
 pub fn set_axis_tick_formats(x: Option<String>, y: Option<String>) {
@@ -2482,15 +2439,13 @@ pub fn set_axis_tick_formats_for_axes(
     x: Option<String>,
     y: Option<String>,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
-        state.figure.set_axes_tick_formats(axes_index, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axis_tick_formats_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        x,
+        y,
+    )
 }
 
 pub fn set_axis_tick_angles(x: Option<f64>, y: Option<f64>) {
@@ -2512,15 +2467,13 @@ pub fn set_axis_tick_angles_for_axes(
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
-        state.figure.set_axes_tick_label_rotations(axes_index, x, y);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axis_tick_angles_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        x,
+        y,
+    )
 }
 
 pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
@@ -2687,20 +2640,11 @@ pub fn axis_display_bounds_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<AxisDisplayBoundsSnapshot, FigureError> {
-    let mut reg = registry();
-    let state = reg
-        .figures
-        .get_mut(&handle)
-        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    let total_axes = axes_count(state);
-    if axes_index >= total_axes {
-        return Err(FigureError::InvalidSubplotIndex {
-            rows: state.figure.axes_rows.max(1),
-            cols: state.figure.axes_cols.max(1),
-            index: axes_index,
-        });
-    }
-    Ok(display_bounds_for_state_axes(state, axes_index))
+    axis_display_bounds_snapshot_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+    )
 }
 
 /// Query displayed limits when content supplies bounds, or explicit manual
@@ -2728,11 +2672,15 @@ pub fn axis_displayed_limits_snapshot_for_axes(
             LinkAxesAxis::X => meta.x_limits,
             LinkAxesAxis::Y => meta.y_limits,
         });
-    let displayed = display_bounds_for_state_axes(state, axes_index).map(|bounds| match axis {
+    let displayed = displayed_xy_limit(display_bounds_for_state_axes(state, axes_index), axis);
+    Ok(displayed.or(explicit))
+}
+
+fn displayed_xy_limit(bounds: AxisDisplayBoundsSnapshot, axis: LinkAxesAxis) -> Option<(f64, f64)> {
+    bounds.map(|bounds| match axis {
         LinkAxesAxis::X => (bounds.0, bounds.1),
         LinkAxesAxis::Y => (bounds.2, bounds.3),
-    });
-    Ok(displayed.or(explicit))
+    })
 }
 
 fn display_bounds_for_state_axes(
@@ -3425,20 +3373,12 @@ pub fn set_axis_z_limits_preserving_selection(
     axes_index: usize,
     limits: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
-    let figure = {
-        let mut reg = registry();
-        let state = reg
-            .figures
-            .get(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
-        let state = get_state_mut(&mut reg, handle);
-        state.figure.set_axes_z_limits(axes_index, limits);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.owned_clone()
-    };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
-    Ok(())
+    set_axis_z_limits_preserving_selection_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        limits,
+    )
 }
 
 pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
@@ -3459,11 +3399,12 @@ pub fn set_color_limits_for_axes(
     axes_index: usize,
     limits: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_color_limits(axes_index, limits);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_color_limits_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        limits,
+    )
 }
 
 pub fn set_axis_color_limits_preserving_selection(
@@ -3471,20 +3412,12 @@ pub fn set_axis_color_limits_preserving_selection(
     axes_index: usize,
     limits: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
-    let figure = {
-        let mut reg = registry();
-        let state = reg
-            .figures
-            .get(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
-        let state = get_state_mut(&mut reg, handle);
-        state.figure.set_axes_color_limits(axes_index, limits);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.owned_clone()
-    };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
-    Ok(())
+    set_axis_color_limits_preserving_selection_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        limits,
+    )
 }
 
 pub fn set_legend_for_axes(
@@ -3494,18 +3427,14 @@ pub fn set_legend_for_axes(
     labels: Option<&[String]>,
     style: Option<LegendStyle>,
 ) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_legend_enabled(axes_index, enabled);
-        if let Some(labels) = labels {
-            state.figure.set_labels_for_axes(axes_index, labels);
-        }
-        if let Some(style) = style {
-            state.figure.set_axes_legend_style(axes_index, style);
-        }
-        encode_plot_object_handle(handle, axes_index, PlotObjectKind::Legend)
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    set_legend_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+        labels,
+        style,
+    )
 }
 
 pub fn set_log_modes_for_axes(
@@ -3514,15 +3443,13 @@ pub fn set_log_modes_for_axes(
     x_log: bool,
     y_log: bool,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
-        state.figure.set_axes_log_modes(axes_index, x_log, y_log);
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_log_modes_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        x_log,
+        y_log,
+    )
 }
 
 pub fn set_y_axis_location_for_axes(
@@ -3530,11 +3457,12 @@ pub fn set_y_axis_location_for_axes(
     axes_index: usize,
     location: String,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_y_axis_location(axes_index, location);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_y_axis_location_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        location,
+    )
 }
 
 pub fn set_axes_position_for_axes(
@@ -3542,11 +3470,12 @@ pub fn set_axes_position_for_axes(
     axes_index: usize,
     position: [f64; 4],
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_position(axes_index, position);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axes_position_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        position,
+    )
 }
 
 pub fn set_axes_units_for_axes(
@@ -3554,11 +3483,12 @@ pub fn set_axes_units_for_axes(
     axes_index: usize,
     units: String,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_units(axes_index, units);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_axes_units_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        units,
+    )
 }
 
 pub fn set_view_for_axes(
@@ -3567,13 +3497,13 @@ pub fn set_view_for_axes(
     azimuth_deg: f32,
     elevation_deg: f32,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state
-            .figure
-            .set_axes_view(axes_index, azimuth_deg, elevation_deg);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_view_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        azimuth_deg,
+        elevation_deg,
+    )
 }
 
 pub fn legend_entries_snapshot(
@@ -3627,6 +3557,9 @@ pub struct FigureEventView<'a> {
     pub kind: FigureEventKind,
     pub revision: Option<u64>,
     pub figure: Option<&'a Figure>,
+    /// Exact sources are supplied only by an admitted lease-bearing operation.
+    pub receiver: Option<&'a GraphicsReceiverRef>,
+    pub scene: Option<&'a GraphicsSceneLease>,
 }
 
 type FigureObserver = dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync + 'static;
@@ -3958,17 +3891,7 @@ pub fn register_heatmap_handle(
 }
 
 pub fn set_heatmap_color_limits(handle: f64, limits: Tensor) -> Result<(), FigureError> {
-    if !handle.is_finite() || handle <= 0.0 {
-        return Err(FigureError::InvalidPlotObjectHandle);
-    }
-    let mut reg = registry();
-    match reg.plot_children.get_mut(&(handle.round() as u64)) {
-        Some(PlotChildHandleState::Heatmap(state)) => {
-            state.color_limits = Some(limits);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    set_heatmap_color_limits_for_property(&PropertyMutationTarget::alias(), handle, limits)
 }
 
 pub fn register_binscatter_handle(
@@ -4085,20 +4008,12 @@ pub fn update_binscatter_handle_for_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut BinscatterHandleState),
 ) -> Result<(), FigureError> {
-    let mut updater = Some(updater);
-    let mut reg = registry();
-    for state in reg.plot_children.values_mut() {
-        if let PlotChildHandleState::Binscatter(binscatter) = state {
-            if binscatter.figure == figure && binscatter.plot_index == plot_index {
-                let Some(updater) = updater.take() else {
-                    return Ok(());
-                };
-                updater(binscatter);
-                return Ok(());
-            }
-        }
-    }
-    Err(FigureError::InvalidPlotObjectHandle)
+    update_binscatter_handle_for_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn register_area_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
@@ -4190,17 +4105,14 @@ pub fn update_text_annotation_position_source(
     annotation_index: usize,
     position_source: runmat_plot::plots::NumericPlotData,
 ) {
-    let mut reg = registry();
-    for state in reg.plot_children.values_mut() {
-        if let PlotChildHandleState::Text(text) = state {
-            if text.figure == figure
-                && text.axes_index == axes_index
-                && text.annotation_index == annotation_index
-            {
-                text.position_source = Some(position_source.clone());
-            }
-        }
-    }
+    update_text_annotation_position_source_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        annotation_index,
+        position_source,
+    )
+    .expect("numeric alias has no selected admission gate");
 }
 
 pub fn register_textscatter_handle(state: TextScatterHandleState) -> f64 {
@@ -4216,33 +4128,19 @@ pub fn update_textscatter_handle_state(
     handle: f64,
     state: TextScatterHandleState,
 ) -> Result<(), FigureError> {
-    if !handle.is_finite() || handle <= 0.0 {
-        return Err(FigureError::InvalidPlotObjectHandle);
-    }
-    let mut reg = registry();
-    let id = handle.round() as u64;
-    match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::TextScatter(slot))
-            if slot.figure == state.figure && slot.axes_index == state.axes_index =>
-        {
-            *slot = state;
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_textscatter_handle_state_for_property(&PropertyMutationTarget::alias(), handle, state)
 }
 
 pub fn update_textscatter_figure(
     state: &TextScatterHandleState,
-    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+    apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
 ) -> Result<(), FigureError> {
-    let (result, figure_clone) =
-        with_axes_target_mut(state.figure, state.axes_index, |figure_state| {
-            apply(&mut figure_state.figure)
-        })?;
-    result?;
-    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    update_textscatter_figure_for_property(
+        &PropertyMutationTarget::alias(),
+        state.figure,
+        state.axes_index,
+        apply,
+    )
 }
 
 pub fn register_wordcloud_handle(state: WordCloudHandleState) -> f64 {
@@ -4258,33 +4156,19 @@ pub fn update_wordcloud_handle_state(
     handle: f64,
     state: WordCloudHandleState,
 ) -> Result<(), FigureError> {
-    if !handle.is_finite() || handle <= 0.0 {
-        return Err(FigureError::InvalidPlotObjectHandle);
-    }
-    let mut reg = registry();
-    let id = handle.round() as u64;
-    match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::WordCloud(slot))
-            if slot.figure == state.figure && slot.axes_index == state.axes_index =>
-        {
-            *slot = state;
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_wordcloud_handle_state_for_property(&PropertyMutationTarget::alias(), handle, state)
 }
 
 pub fn update_wordcloud_figure(
     state: &WordCloudHandleState,
-    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+    apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
 ) -> Result<(), FigureError> {
-    let (result, figure_clone) =
-        with_axes_target_mut(state.figure, state.axes_index, |figure_state| {
-            apply(&mut figure_state.figure)
-        })?;
-    result?;
-    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    update_wordcloud_figure_for_property(
+        &PropertyMutationTarget::alias(),
+        state.figure,
+        state.axes_index,
+        apply,
+    )
 }
 
 pub fn register_stackedplot_handle(state: StackedPlotHandleState) -> f64 {
@@ -4300,31 +4184,14 @@ pub fn update_stackedplot_handle_state(
     handle: f64,
     state: StackedPlotHandleState,
 ) -> Result<(), FigureError> {
-    if !handle.is_finite() || handle <= 0.0 {
-        return Err(FigureError::InvalidPlotObjectHandle);
-    }
-    let mut reg = registry();
-    let id = handle.round() as u64;
-    match reg.plot_children.get_mut(&id) {
-        Some(PlotChildHandleState::StackedPlot(slot)) if slot.figure == state.figure => {
-            *slot = state;
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_stackedplot_handle_state_for_property(&PropertyMutationTarget::alias(), handle, state)
 }
 
 pub fn update_stackedplot_figure(
     state: &StackedPlotHandleState,
-    mut apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
+    apply: impl FnMut(&mut Figure) -> Result<(), FigureError>,
 ) -> Result<(), FigureError> {
-    let axes_index = state.axes_indices.first().copied().unwrap_or(0);
-    let (result, figure_clone) = with_axes_target_mut(state.figure, axes_index, |figure_state| {
-        apply(&mut figure_state.figure)
-    })?;
-    result?;
-    notify_with_figure(state.figure, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    update_stackedplot_figure_for_property(&PropertyMutationTarget::alias(), state, apply)
 }
 
 pub fn render_stackedplot_chart<F>(
@@ -4396,14 +4263,7 @@ pub enum CopyParentTarget {
 }
 
 pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
-    if !handle.is_finite() || handle <= 0.0 {
-        return Err(FigureError::InvalidPlotObjectHandle);
-    }
-    let reg = registry();
-    reg.plot_children
-        .get(&(handle.round() as u64))
-        .cloned()
-        .ok_or(FigureError::InvalidPlotObjectHandle)
+    plot_child_handle_snapshot_for_property(&PropertyMutationTarget::alias(), handle)
 }
 
 /// A plot and its mutation revision captured under one registry guard.
@@ -4519,52 +4379,14 @@ pub fn set_heatmap_display_labels(
     x_labels: Option<Vec<String>>,
     y_labels: Option<Vec<String>>,
 ) -> Result<(), FigureError> {
-    let figure_clone = {
-        let mut reg = registry();
-        let (current_x_labels, current_y_labels) = {
-            let state = reg.plot_children.values_mut().find(|state| match state {
-                PlotChildHandleState::Heatmap(heatmap) => {
-                    heatmap.figure == figure
-                        && heatmap.axes_index == axes_index
-                        && heatmap.plot_index == plot_index
-                }
-                _ => false,
-            });
-            let PlotChildHandleState::Heatmap(heatmap) =
-                state.ok_or(FigureError::InvalidPlotObjectHandle)?
-            else {
-                return Err(FigureError::InvalidPlotObjectHandle);
-            };
-            if let Some(labels) = x_labels {
-                heatmap.x_labels = labels;
-            }
-            if let Some(labels) = y_labels {
-                heatmap.y_labels = labels;
-            }
-            (heatmap.x_labels.clone(), heatmap.y_labels.clone())
-        };
-
-        let state = get_state_mut(&mut reg, figure);
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
-        state.active_axes = axes_index;
-        state.figure.set_active_axes_index(axes_index);
-        state.figure.set_axes_tick_labels(
-            axes_index,
-            Some(current_x_labels),
-            Some(current_y_labels),
-        );
-        state.revision = state.revision.wrapping_add(1);
-        state.figure.clone()
-    };
-    notify_with_figure(figure, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_heatmap_display_labels_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        x_labels,
+        y_labels,
+    )
 }
 
 pub fn update_histogram_handle_for_plot(
@@ -4574,21 +4396,14 @@ pub fn update_histogram_handle_for_plot(
     normalization: String,
     raw_counts: Vec<f64>,
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Histogram(hist) => {
-            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
-        }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Histogram(hist) => {
-            hist.normalization = normalization;
-            hist.raw_counts = raw_counts;
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_histogram_handle_for_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        normalization,
+        raw_counts,
+    )
 }
 
 pub fn update_histogram2_handle_for_plot(
@@ -4597,20 +4412,13 @@ pub fn update_histogram2_handle_for_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut Histogram2HandleState),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Histogram2(hist) => {
-            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
-        }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Histogram2(hist) => {
-            updater(hist);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_histogram2_handle_for_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_image_handle_for_plot(
@@ -4619,22 +4427,13 @@ pub fn update_image_handle_for_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut ImageHandleState),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Image(image) => {
-            image.figure == figure
-                && image.axes_index == axes_index
-                && image.plot_index == plot_index
-        }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Image(image) => {
-            updater(image);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_image_handle_for_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn set_histogram_handle_display_name(
@@ -4643,20 +4442,13 @@ pub fn set_histogram_handle_display_name(
     plot_index: usize,
     display_name: Option<String>,
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Histogram(hist) => {
-            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
-        }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Histogram(hist) => {
-            hist.display_name = display_name;
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    set_histogram_handle_display_name_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        display_name,
+    )
 }
 
 pub fn update_histogram_handle_metadata_for_plot(
@@ -4665,20 +4457,13 @@ pub fn update_histogram_handle_metadata_for_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut HistogramHandleMetadata),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Histogram(hist) => {
-            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
-        }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Histogram(hist) => {
-            updater(&mut hist.metadata);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_histogram_handle_metadata_for_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure,
+        axes_index,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_errorbar_plot(
@@ -4686,20 +4471,12 @@ pub fn update_errorbar_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::ErrorBar),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::ErrorBar(errorbar) => {
-            updater(errorbar);
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_errorbar_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_histogram_plot_data(
@@ -4708,21 +4485,13 @@ pub fn update_histogram_plot_data(
     labels: Vec<String>,
     values: Vec<f64>,
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::Bar(bar) => {
-            bar.set_data(labels, values)
-                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_histogram_plot_data_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        labels,
+        values,
+    )
 }
 
 pub fn update_stem_plot(
@@ -4730,20 +4499,12 @@ pub fn update_stem_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::StemPlot),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::Stem(stem) => {
-            updater(stem);
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_stem_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_quiver_plot(
@@ -4751,20 +4512,12 @@ pub fn update_quiver_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::QuiverPlot),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::Quiver(quiver) => {
-            updater(quiver);
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_quiver_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_image_plot(
@@ -4772,20 +4525,12 @@ pub fn update_image_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::SurfacePlot),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::Surface(surface) if surface.image_mode => {
-            updater(surface);
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_image_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_area_plot(
@@ -4793,20 +4538,12 @@ pub fn update_area_plot(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::AreaPlot),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    match plot {
-        runmat_plot::plots::figure::PlotElement::Area(area) => {
-            updater(area);
-            state.revision = state.revision.wrapping_add(1);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+    update_area_plot_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 pub fn update_plot_element(
@@ -4814,15 +4551,12 @@ pub fn update_plot_element(
     plot_index: usize,
     updater: impl FnOnce(&mut runmat_plot::plots::figure::PlotElement),
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_mut(&mut reg, figure_handle);
-    let plot = state
-        .figure
-        .get_plot_mut(plot_index)
-        .ok_or(FigureError::InvalidPlotObjectHandle)?;
-    updater(plot);
-    state.revision = state.revision.wrapping_add(1);
-    Ok(())
+    update_plot_element_for_property(
+        &PropertyMutationTarget::alias(),
+        figure_handle,
+        plot_index,
+        updater,
+    )
 }
 
 /// Commit a property update only against the figure snapshot that supplied its
@@ -4848,11 +4582,17 @@ pub fn update_plot_element_if_current(
     }
     let state = reg
         .figures
-        .get_mut(&figure_handle)
+        .get(&figure_handle)
         .ok_or(FigureError::InvalidHandle(figure_handle.as_u32()))?;
     if state.revision != revision {
         return Err(FigureError::StalePlotSnapshot);
     }
+    state
+        .figure
+        .plots()
+        .nth(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let state = get_state_mut(&mut reg, figure_handle);
     let plot = state
         .figure
         .get_plot_mut(plot_index)
@@ -4961,14 +4701,17 @@ pub fn append_points_to_animated_line(
         };
 
         if became_3d {
-            for child in reg.plot_children.values_mut() {
-                if let PlotChildHandleState::AnimatedLine(animated) = child {
-                    if animated.figure == handle.figure && animated.plot_index == handle.plot_index
-                    {
-                        animated.is_3d = true;
+            reg.plot_children.for_each_mut_where(
+                |state| {
+                    matches!(state, PlotChildHandleState::AnimatedLine(chart)
+                    if chart.figure == handle.figure && chart.plot_index == handle.plot_index)
+                },
+                |state| {
+                    if let PlotChildHandleState::AnimatedLine(chart) = state {
+                        chart.is_3d = true;
                     }
-                }
-            }
+                },
+            );
         }
         (figure_clone, became_3d)
     };
@@ -4981,50 +4724,12 @@ pub fn set_animated_line_maximum_num_points(
     handle: &AnimatedLineHandleState,
     maximum_num_points: Option<usize>,
 ) -> Result<(), String> {
-    let figure_clone = {
-        let mut reg = registry();
-        let figure_clone = {
-            let state = get_state_mut(&mut reg, handle.figure);
-            let plot = state
-                .figure
-                .get_plot_mut(handle.plot_index)
-                .ok_or_else(|| "invalid animated line handle".to_string())?;
-            match plot {
-                PlotElement::Line(line) => {
-                    let (mut x, mut y) = line
-                        .host_xy_f64()
-                        .map_err(|err| format!("failed to read animated line: {err}"))?
-                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
-                    trim_oldest_xy(maximum_num_points, &mut x, &mut y);
-                    line.update_data(x, y)
-                        .map_err(|err| format!("failed to update animated line: {err}"))?;
-                }
-                PlotElement::Line3(line) => {
-                    let (mut x, mut y, mut z) = line
-                        .host_xyz_f64()
-                        .map_err(|err| format!("failed to read animated line: {err}"))?
-                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
-                    trim_oldest_xyz(maximum_num_points, &mut x, &mut y, &mut z);
-                    line.update_data(x, y, z)
-                        .map_err(|err| format!("failed to update animated line: {err}"))?;
-                }
-                _ => return Err("invalid animated line handle".to_string()),
-            }
-            state.revision = state.revision.wrapping_add(1);
-            state.figure.clone()
-        };
-
-        for child in reg.plot_children.values_mut() {
-            if let PlotChildHandleState::AnimatedLine(animated) = child {
-                if animated.figure == handle.figure && animated.plot_index == handle.plot_index {
-                    animated.maximum_num_points = maximum_num_points;
-                }
-            }
-        }
-        figure_clone
-    };
-    notify_with_figure(handle.figure, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    set_animated_line_maximum_num_points_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        maximum_num_points,
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn trim_oldest_xy(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>) {
@@ -5188,6 +4893,8 @@ fn notify_with_figure(handle: FigureHandle, figure: &Figure, kind: FigureEventKi
         kind,
         revision: current_figure_revision(handle),
         figure: Some(figure),
+        receiver: None,
+        scene: None,
     });
 }
 
@@ -5197,6 +4904,8 @@ fn notify_without_figure(handle: FigureHandle, kind: FigureEventKind) {
         kind,
         revision: current_figure_revision(handle),
         figure: None,
+        receiver: None,
+        scene: None,
     });
 }
 
@@ -5285,12 +4994,7 @@ pub fn current_figure_handle_if_exists() -> Option<FigureHandle> {
 }
 
 pub fn select_current_figure_if_exists(handle: FigureHandle) -> Result<(), FigureError> {
-    let mut reg = registry();
-    if !reg.figures.contains_key(&handle) {
-        return Err(FigureError::InvalidHandle(handle.as_u32()));
-    }
-    reg.current = handle;
-    Ok(())
+    select_current_figure_if_exists_for_property(&PropertyMutationTarget::alias(), handle)
 }
 
 pub fn current_axes_state() -> FigureAxesState {
@@ -5335,21 +5039,7 @@ pub fn axes_metadata_snapshot(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<runmat_plot::plots::AxesMetadata, FigureError> {
-    let mut reg = registry();
-    let state = get_state_for_query(&mut reg, handle);
-    let total_axes = axes_count(state);
-    if axes_index >= total_axes {
-        return Err(FigureError::InvalidSubplotIndex {
-            rows: state.figure.axes_rows.max(1),
-            cols: state.figure.axes_cols.max(1),
-            index: axes_index,
-        });
-    }
-    state
-        .figure
-        .axes_metadata(axes_index)
-        .cloned()
-        .ok_or(FigureError::InvalidAxesHandle)
+    axes_metadata_snapshot_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
 }
 
 pub fn axes_state_snapshot(
@@ -5383,10 +5073,13 @@ pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, Figur
 pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureError> {
     let mut reg = registry();
     let state = get_state_for_query(&mut reg, handle);
-    let total_axes = axes_count(state);
-    Ok((0..total_axes)
+    Ok(axes_handles_from_state(state, handle))
+}
+
+fn axes_handles_from_state(state: &FigureState, handle: FigureHandle) -> Vec<f64> {
+    (0..axes_count(state))
         .map(|idx| encode_axes_handle(handle, idx))
-        .collect())
+        .collect()
 }
 
 pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> Vec<f64> {
@@ -5406,25 +5099,7 @@ pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> V
 }
 
 pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = get_state_for_query(&mut reg, handle);
-    let total_axes = axes_count(state);
-    if axes_index >= total_axes {
-        return Err(FigureError::InvalidSubplotIndex {
-            rows: state.figure.axes_rows.max(1),
-            cols: state.figure.axes_cols.max(1),
-            index: axes_index,
-        });
-    }
-    reg.current = handle;
-    let state = get_state_mut(&mut reg, handle);
-    state.active_axes = axes_index;
-    state.figure.set_active_axes_index(axes_index);
-    state.revision = state.revision.wrapping_add(1);
-    let figure_clone = state.figure.clone();
-    drop(reg);
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
+    select_axes_for_figure_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
 }
 
 pub fn create_axes_for_figure(
@@ -5462,44 +5137,14 @@ fn with_axes_target_mut<R>(
     axes_index: usize,
     f: impl FnOnce(&mut FigureState) -> R,
 ) -> Result<(R, Figure), FigureError> {
-    let mut reg = registry();
-    // Invalid axes do not acquire a new scene lease or mutate Figure state.
-    let state = reg
-        .figures
-        .entry(handle)
-        .or_insert_with(|| FigureState::new(handle));
-    let total_axes = axes_count(state);
-    if axes_index >= total_axes {
-        return Err(FigureError::InvalidSubplotIndex {
-            rows: state.figure.axes_rows.max(1),
-            cols: state.figure.axes_cols.max(1),
-            index: axes_index,
-        });
-    }
-    let state = get_state_mut(&mut reg, handle);
-    state.active_axes = axes_index;
-    state.figure.set_active_axes_index(axes_index);
-    let result = f(state);
-    state.revision = state.revision.wrapping_add(1);
-    let figure = state.figure.owned_clone();
-    drop(reg);
-    Ok((result, figure))
+    with_axes_target_mut_for_property(&PropertyMutationTarget::alias(), handle, axes_index, f)
 }
 
 fn with_figure_mut<R>(
     handle: impl Into<FigureTarget>,
     f: impl FnOnce(&mut FigureState) -> R,
 ) -> Result<(R, Figure), FigureError> {
-    let target = handle.into();
-    let handle = target.coordinate();
-    let mut reg = registry();
-    target.validate(&reg)?;
-    let state = get_state_mut(&mut reg, handle);
-    let result = f(state);
-    state.revision = state.revision.wrapping_add(1);
-    let figure = state.figure.owned_clone();
-    drop(reg);
-    Ok((result, figure))
+    with_figure_mut_for_property(&PropertyMutationTarget::alias(), handle, f)
 }
 
 pub fn current_hold_enabled() -> bool {

@@ -100,6 +100,13 @@ pub async fn get_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> 
     )? {
         return Ok(value);
     }
+    if let Some(value) =
+        super::properties::get_receiver_properties(&handle_arg, property.as_deref(), BUILTIN_NAME)
+            .await
+            .map_err(map_get_error)?
+    {
+        return Ok(value);
+    }
     let handle = resolve_plot_handle(&handle_arg, BUILTIN_NAME).map_err(map_get_error)?;
     get_properties_async(handle, property.as_deref(), BUILTIN_NAME)
         .await

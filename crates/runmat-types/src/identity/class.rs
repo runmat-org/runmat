@@ -2,6 +2,9 @@ use super::{QualifiedName, SymbolName};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[path = "class/graphics.rs"]
+mod graphics;
+
 /// Canonical, portable identity of a runtime class.
 ///
 /// Class spellings enter the system through parsers, registries, or foreign
@@ -196,6 +199,7 @@ const fn assert_valid_static(name: &str) {
 }
 
 pub mod standard {
+    pub use super::graphics::*;
     use super::{ClassIdentity, StaticClassIdentity, StaticClassNamespace};
 
     pub const LANGUAGE_CORRECTION_NAMESPACE: StaticClassNamespace =

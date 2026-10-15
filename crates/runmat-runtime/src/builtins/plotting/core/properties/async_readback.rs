@@ -53,33 +53,79 @@ pub async fn get_properties_async(
     }
     let (child, plot, _) =
         plot_child_element_snapshot(*id).map_err(|err| map_figure_error(builtin, err))?;
+    get_child_properties_from_source(
+        &child,
+        Some(&plot),
+        property,
+        builtin,
+        PropertyReadSource::CompatibilityAlias,
+    )
+    .await
+}
+
+pub(super) async fn get_selected_child_properties(
+    selection: &super::super::state::GraphicsPropertySelection,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let snapshot = selection
+        .child_snapshot()
+        .map_err(|error| map_figure_error(builtin, error))?;
+    let plot = snapshot
+        .child
+        .plot_index()
+        .and_then(|index| snapshot.figure.plots().nth(index));
+    selection
+        .ensure_current()
+        .map_err(|error| map_figure_error(builtin, error))?;
+    let result = get_child_properties_from_source(
+        &snapshot.child,
+        plot,
+        property,
+        builtin,
+        PropertyReadSource::Selected(&snapshot),
+    )
+    .await?;
+    selection
+        .ensure_current()
+        .map_err(|error| map_figure_error(builtin, error))?;
+    Ok(result)
+}
+
+async fn get_child_properties_from_source(
+    child: &PlotChildHandleState,
+    plot: Option<&PlotElement>,
+    property: Option<&str>,
+    builtin: &'static str,
+    source: PropertyReadSource<'_>,
+) -> BuiltinResult<Value> {
     match (child, plot) {
-        (PlotChildHandleState::Line(state), PlotElement::Line(line)) => {
+        (PlotChildHandleState::Line(state), Some(PlotElement::Line(line))) => {
             if let SourcePropertyRead::Ready(value) =
-                line_property_without_data(&state, property, builtin, &line)?
+                line_property_without_data(state, property, builtin, line)?
             {
                 return Ok(value);
             }
-            let (x, y) = line_xy(&line, builtin).await?;
-            line_property_with_data(&state, property, builtin, line, x, y)
+            let (x, y) = line_xy(line, builtin).await?;
+            line_property_with_data(state, property, builtin, line, x, y)
         }
-        (PlotChildHandleState::Scatter(state), PlotElement::Scatter(scatter)) => {
+        (PlotChildHandleState::Scatter(state), Some(PlotElement::Scatter(scatter))) => {
             if let SourcePropertyRead::Ready(value) =
-                scatter_property_without_data(&state, property, builtin, &scatter)?
+                scatter_property_without_data(state, property, builtin, scatter)?
             {
                 return Ok(value);
             }
-            let (x, y) = scatter_xy(&scatter, builtin).await?;
-            scatter_property_with_data(&state, property, builtin, scatter, x, y)
+            let (x, y) = scatter_xy(scatter, builtin).await?;
+            scatter_property_with_data(state, property, builtin, scatter, x, y)
         }
-        (PlotChildHandleState::Line3(state), PlotElement::Line3(line))
+        (PlotChildHandleState::Line3(state), Some(PlotElement::Line3(line)))
             if line3_property_needs_data(property) =>
         {
-            let data = line3_xyz(&line, builtin).await?;
-            line3_property_with_data(&state, property, builtin, line, Some(data))
+            let data = line3_xyz(line, builtin).await?;
+            line3_property_with_data(state, property, builtin, line, Some(data))
         }
-        (PlotChildHandleState::Line3(state), PlotElement::Line3(line)) => {
-            line3_property_with_data(&state, property, builtin, line, None)
+        (PlotChildHandleState::Line3(state), Some(PlotElement::Line3(line))) => {
+            line3_property_with_data(state, property, builtin, line, None)
         }
         (
             PlotChildHandleState::Line(_)
@@ -90,7 +136,7 @@ pub async fn get_properties_async(
             builtin,
             format!("{builtin}: invalid plot handle"),
         )),
-        _ => get_properties(handle, property, builtin),
+        _ => get_plot_child_property(child, property, builtin, source),
     }
 }
 
@@ -110,6 +156,58 @@ pub async fn set_properties_async(
     ) {
         return set_properties(handle, args, builtin);
     }
+    let (child, plot, revision) =
+        plot_child_element_snapshot(*id).map_err(|err| map_figure_error(builtin, err))?;
+    let authority = super::super::state::PropertyMutationTarget::alias();
+    let guard = Some(PlotUpdateGuard {
+        child_handle: *id,
+        revision,
+    });
+    set_child_properties_from_source(&authority, *id, &child, Some(&plot), args, builtin, guard)
+        .await
+}
+
+pub(super) async fn set_selected_child_properties(
+    authority: &super::super::state::PropertyMutationTarget,
+    selection: &super::super::state::GraphicsPropertySelection,
+    id: u64,
+    args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let snapshot = selection
+        .child_snapshot()
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let plot = snapshot
+        .child
+        .plot_index()
+        .and_then(|index| snapshot.figure.plots().nth(index));
+    authority
+        .ensure_current()
+        .map_err(|err| map_figure_error(builtin, err))?;
+    set_child_properties_from_source(
+        authority,
+        id as f64,
+        &snapshot.child,
+        plot,
+        args,
+        builtin,
+        None,
+    )
+    .await?;
+    authority
+        .ensure_current()
+        .map_err(|err| map_figure_error(builtin, err))
+}
+
+async fn set_child_properties_from_source(
+    authority: &super::super::state::PropertyMutationTarget,
+    id: f64,
+    child: &PlotChildHandleState,
+    plot: Option<&PlotElement>,
+    args: &[Value],
+    builtin: &'static str,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(plotting_error(
             builtin,
@@ -120,44 +218,36 @@ pub async fn set_properties_async(
     for pair in args.chunks_exact(2) {
         pairs.push((property_name(&pair[0], builtin)?, &pair[1]));
     }
-    let (child, plot, revision) =
-        plot_child_element_snapshot(*id).map_err(|err| map_figure_error(builtin, err))?;
-    let guard = PlotUpdateGuard {
-        child_handle: *id,
-        revision,
-    };
     match (child, plot) {
-        (PlotChildHandleState::Line(state), PlotElement::Line(line)) => {
+        (PlotChildHandleState::Line(state), Some(PlotElement::Line(line))) => {
             let prepared = prepare_line_data_updates(&pairs, builtin)?;
             if prepared.is_empty() {
-                return apply_line_style_only(&state, &pairs, builtin, guard);
+                return apply_line_style_only(authority, state, &pairs, builtin, guard);
             }
-            let data = line_xy(&line, builtin).await?;
-            apply_line_properties_with_data(&state, &pairs, builtin, data, prepared, Some(guard))
-        }
-        (PlotChildHandleState::Scatter(state), PlotElement::Scatter(scatter)) => {
-            let prepared = prepare_scatter_data_updates(&pairs, builtin)?;
-            if prepared.is_empty() {
-                return apply_scatter_style_only(&state, &pairs, builtin, guard);
-            }
-            let data = scatter_xy(&scatter, builtin).await?;
-            apply_scatter_properties_with_data(
-                &state,
-                &pairs,
-                builtin,
-                scatter,
-                data,
-                prepared,
-                Some(guard),
+            let data = line_xy(line, builtin).await?;
+            apply_line_properties_with_data(
+                authority, state, &pairs, builtin, data, prepared, guard,
             )
         }
-        (PlotChildHandleState::Line3(state), PlotElement::Line3(line)) => {
+        (PlotChildHandleState::Scatter(state), Some(PlotElement::Scatter(scatter))) => {
+            let prepared = prepare_scatter_data_updates(&pairs, builtin)?;
+            if prepared.is_empty() {
+                return apply_scatter_style_only(authority, state, &pairs, builtin, guard);
+            }
+            let data = scatter_xy(scatter, builtin).await?;
+            apply_scatter_properties_with_data(
+                authority, state, &pairs, builtin, scatter, data, prepared, guard,
+            )
+        }
+        (PlotChildHandleState::Line3(state), Some(PlotElement::Line3(line))) => {
             let prepared = prepare_line3_data_updates(&pairs, builtin)?;
             if prepared.is_empty() {
-                return apply_line3_style_only(&state, &pairs, builtin, guard);
+                return apply_line3_style_only(authority, state, &pairs, builtin, guard);
             }
-            let data = line3_xyz(&line, builtin).await?;
-            apply_line3_properties_with_data(&state, &pairs, builtin, data, prepared, Some(guard))
+            let data = line3_xyz(line, builtin).await?;
+            apply_line3_properties_with_data(
+                authority, state, &pairs, builtin, data, prepared, guard,
+            )
         }
         (
             PlotChildHandleState::Line(_)
@@ -168,7 +258,13 @@ pub async fn set_properties_async(
             builtin,
             format!("{builtin}: invalid plot handle"),
         )),
-        _ => set_properties(handle, args, builtin),
+        _ => set_properties_for_target(
+            authority,
+            PropertySetHandle::PlotChild(id, child),
+            args,
+            builtin,
+        )?
+        .complete_compatibility(builtin),
     }
 }
 
