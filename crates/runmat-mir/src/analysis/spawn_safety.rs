@@ -64,6 +64,11 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
                 MirStmtKind::Expr(value) => {
                     scan_rvalue(body, value, &mut reads_captures);
                 }
+                MirStmtKind::StatementOutput(output) => {
+                    if let crate::MirStatementOutputSource::Local(local) = output.source {
+                        scan_operand(body, &crate::MirOperand::Local(local), &mut reads_captures);
+                    }
+                }
                 MirStmtKind::PlaceMutation(_) => {}
                 MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
             }
@@ -175,6 +180,7 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                         scan_rvalue(body, value, reads_captures);
                     }
                     crate::MirStmtKind::PlaceMutation(_)
+                    | crate::MirStmtKind::StatementOutput(_)
                     | crate::MirStmtKind::CaptureSequence { .. }
                     | crate::MirStmtKind::WorkspaceEffect { .. }
                     | crate::MirStmtKind::EnvironmentEffect(_) => {}
@@ -434,6 +440,7 @@ fn analyze_spawn_boundaries_with_capture_facts(
                 }
                 MirStmtKind::CaptureSequence { .. } => {}
                 MirStmtKind::PlaceMutation(_)
+                | MirStmtKind::StatementOutput(_)
                 | MirStmtKind::WorkspaceEffect { .. }
                 | MirStmtKind::EnvironmentEffect(_) => {}
             }

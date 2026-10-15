@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use runmat_hir::{HirAssembly, HirExprKind, HirPlace, HirStmtKind};
 use runmat_value::Value;
 
@@ -33,21 +31,6 @@ pub(crate) struct DisplayContext {
 pub(crate) struct ExecutionDisplayContext {
     pub context: DisplayContext,
     pub display_var_ids: Vec<usize>,
-}
-
-pub(crate) fn determine_display_label_from_context(
-    single_assign_var: Option<usize>,
-    id_to_name: &HashMap<usize, String>,
-    is_expression_stmt: bool,
-    single_stmt_non_assign: bool,
-) -> Option<String> {
-    if let Some(var_id) = single_assign_var {
-        id_to_name.get(&var_id).cloned()
-    } else if is_expression_stmt || single_stmt_non_assign {
-        Some("ans".to_string())
-    } else {
-        None
-    }
 }
 
 /// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
@@ -289,24 +272,8 @@ fn display_context(
 }
 
 fn expr_emit_disposition(expr: &runmat_hir::HirExpr, suppressed: bool) -> FinalStmtEmitDisposition {
-    if suppressed {
+    if suppressed || !expr.emits_statement_output() {
         return FinalStmtEmitDisposition::Suppressed;
-    }
-    match &expr.kind {
-        HirExprKind::Call(call) => {
-            if call.requested_outputs.known_count() == Some(0) {
-                return FinalStmtEmitDisposition::Suppressed;
-            }
-            if let runmat_hir::HirCallableRef::Builtin(builtin) = &call.callee {
-                if runmat_builtins::suppresses_auto_output(builtin.0.as_str()) {
-                    return FinalStmtEmitDisposition::Suppressed;
-                }
-            }
-        }
-        HirExprKind::CommandCall(_) => {
-            return FinalStmtEmitDisposition::Suppressed;
-        }
-        _ => {}
     }
     FinalStmtEmitDisposition::Inline
 }

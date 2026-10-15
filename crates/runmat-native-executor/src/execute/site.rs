@@ -379,6 +379,11 @@ fn execute_statement(
         return Ok(());
     }
     match statement {
+        MirStmtKind::StatementOutput(output) => {
+            if !super::call_suspension::take_completed_statement_output(state)? {
+                super::call_suspension::begin_statement_output(state, output)?;
+            }
+        }
         MirStmtKind::Expr(_) => {
             state.pending_assign = None;
             state.pending_plain_multi = None;

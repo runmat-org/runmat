@@ -201,6 +201,30 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     record_console_line(ConsoleStream::Stdout, text);
 }
 
+/// One statement-ordered value effect shared by bytecode and native execution.
+/// The selected provider's gather completes before any console publication.
+pub async fn emit_statement_value(
+    runtime: &crate::context::RuntimeContext,
+    label: Option<&str>,
+    value: &Value,
+) -> Result<(), crate::RuntimeError> {
+    if runtime.is_cancelled() {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:Cancelled",
+            "statement output was cancelled",
+        ));
+    }
+    let host_value = crate::dispatcher::gather_if_needed_async(value).await?;
+    if runtime.is_cancelled() {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:Cancelled",
+            "statement output was cancelled",
+        ));
+    }
+    record_value_output(label, &host_value);
+    Ok(())
+}
+
 pub fn take_last_value_output() -> Option<Value> {
     with_console_state(|state| state.last_value_output.take())
 }

@@ -615,6 +615,8 @@ impl Compiler {
         body.validate_expression_regions().map_err(|error| {
             CompileError::new(format!("invalid MIR expression region: {error}"))
         })?;
+        body.validate_statement_outputs()
+            .map_err(|error| CompileError::new(format!("invalid MIR statement output: {error}")))?;
         self.aggregate_proof = None;
 
         for registration in self.class_registrations.clone() {
@@ -648,7 +650,8 @@ impl Compiler {
             }
             for (position, stmt) in block.statements.iter().enumerate() {
                 self.record_resume_point(block.id, position)?;
-                self.compile_mir_stmt(stmt)?;
+                let next = block.statements.get(position + 1).map(|stmt| &stmt.kind);
+                self.compile_mir_stmt(stmt, next)?;
             }
             self.record_resume_point(block.id, block.statements.len())?;
             match &block.terminator.kind {
@@ -1114,7 +1117,11 @@ impl Compiler {
         Ok(true)
     }
 
-    fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
+    fn compile_mir_stmt(
+        &mut self,
+        stmt: &MirStmt,
+        next: Option<&MirStmtKind>,
+    ) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
             MirStmtKind::Assign { place, value } => {
@@ -1137,9 +1144,32 @@ impl Compiler {
                     _ => false,
                 };
                 if !produces_no_value {
-                    self.emit(Instr::Pop);
+                    if !matches!(next, Some(MirStmtKind::StatementOutput(output))
+                        if matches!(output.source, runmat_mir::MirStatementOutputSource::Expression))
+                    {
+                        self.emit(Instr::Pop);
+                    }
                 }
                 Ok(())
+            }
+            MirStmtKind::StatementOutput(output) => {
+                self.pending_place_mutation = None;
+                match output.source {
+                    runmat_mir::MirStatementOutputSource::Local(local) => {
+                        self.emit(Instr::EmitVar {
+                            var_index: self.mir_local_slot(local)?,
+                            label: self.statement_output_label(&output.label)?,
+                        });
+                        Ok(())
+                    }
+                    runmat_mir::MirStatementOutputSource::Expression => {
+                        self.emit(Instr::EmitStackTop {
+                            label: self.statement_output_label(&output.label)?,
+                        });
+                        self.emit(Instr::Pop);
+                        Ok(())
+                    }
+                }
             }
             MirStmtKind::WorkspaceEffect { effect, bindings } => {
                 self.pending_place_mutation = None;
@@ -1169,6 +1199,18 @@ impl Compiler {
                 self.compile_mir_sequence_capture(destination.0, source)
             }
         }
+    }
+
+    fn statement_output_label(
+        &self,
+        label: &runmat_mir::MirStatementOutputLabel,
+    ) -> Result<crate::bytecode::EmitLabel, CompileError> {
+        Ok(match label {
+            runmat_mir::MirStatementOutputLabel::Ans => crate::bytecode::EmitLabel::Ans,
+            runmat_mir::MirStatementOutputLabel::Binding(binding) => {
+                crate::bytecode::EmitLabel::Var(self.binding_slot(*binding)?)
+            }
+        })
     }
 
     fn compile_mir_sequence_capture(
@@ -1628,7 +1670,7 @@ impl Compiler {
                     span: *span,
                 },
             };
-            self.compile_mir_stmt(&statement)?;
+            self.compile_mir_stmt(&statement, None)?;
         }
         Ok(())
     }

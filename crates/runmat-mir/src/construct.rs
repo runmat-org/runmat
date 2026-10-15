@@ -75,6 +75,7 @@ pub enum MirConstructKind {
     SequenceAssign,
     CaptureSequence,
     Expr,
+    StatementOutput,
     PlaceMutation,
     WorkspaceEffect,
     EnvironmentEffect,
@@ -153,6 +154,7 @@ pub fn statement_construct_kind(statement: &crate::MirStmtKind) -> MirConstructK
         S::SequenceAssign { .. } => K::SequenceAssign,
         S::CaptureSequence { .. } => K::CaptureSequence,
         S::Expr(_) => K::Expr,
+        S::StatementOutput(_) => K::StatementOutput,
         S::PlaceMutation(_) => K::PlaceMutation,
         S::WorkspaceEffect { .. } => K::WorkspaceEffect,
         S::EnvironmentEffect(_) => K::EnvironmentEffect,
@@ -273,7 +275,8 @@ fn statement_rvalue(statement: &crate::MirStmtKind) -> Option<&crate::MirRvalue>
         | crate::MirStmtKind::MultiAssign { value, .. }
         | crate::MirStmtKind::SequenceAssign { value, .. }
         | crate::MirStmtKind::Expr(value) => Some(value),
-        crate::MirStmtKind::PlaceMutation(_)
+        crate::MirStmtKind::StatementOutput(_)
+        | crate::MirStmtKind::PlaceMutation(_)
         | crate::MirStmtKind::CaptureSequence { .. }
         | crate::MirStmtKind::WorkspaceEffect { .. }
         | crate::MirStmtKind::EnvironmentEffect(_) => None,
@@ -289,7 +292,7 @@ pub fn statement_declared_requirements(
     statement: &crate::MirStmtKind,
 ) -> (runmat_types::EffectSet, runmat_types::CapabilitySet) {
     use runmat_hir::WorkspaceEffect;
-    use runmat_types::{CapabilitySet, EffectKind, EffectSet};
+    use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 
     let mut effects = EffectSet::default();
     let mut capabilities = CapabilitySet::default();
@@ -315,6 +318,14 @@ pub fn statement_declared_requirements(
         crate::MirStmtKind::CaptureSequence { .. } => {
             effects.0.insert(EffectKind::Unknown);
         }
+        crate::MirStmtKind::StatementOutput(_) => {
+            effects.0.extend([
+                EffectKind::UserInterface,
+                EffectKind::MaySuspend,
+                EffectKind::MayThrow,
+            ]);
+            capabilities.0.insert(CapabilityRequirement::UserInterface);
+        }
         _ => {}
     }
     statement.visit_statement_expression_steps_dyn(&mut |steps| {
@@ -335,7 +346,7 @@ pub fn statement_construct_inventory(statement: &crate::MirStmtKind) -> Vec<MirC
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -381,6 +392,7 @@ impl MirConstructKind {
         Self::SequenceAssign,
         Self::CaptureSequence,
         Self::Expr,
+        Self::StatementOutput,
         Self::PlaceMutation,
         Self::WorkspaceEffect,
         Self::EnvironmentEffect,
@@ -429,6 +441,7 @@ impl MirConstructKind {
             | K::PlaceMutation
             | K::WorkspaceEffect
             | K::EnvironmentEffect
+            | K::StatementOutput
             | K::TryCatch => C::RuntimeSlowPath,
             K::SubscriptChain | K::Future | K::Spawn | K::ParFor | K::Spmd | K::Await => {
                 C::StructuredSuspendResume

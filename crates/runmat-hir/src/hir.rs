@@ -338,6 +338,20 @@ impl HirExpr {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    /// Whether an unsuppressed expression has a value for statement echo.
+    /// Builtin output policy belongs to the semantic call, not a CLI renderer.
+    pub fn emits_statement_output(&self) -> bool {
+        match &self.kind {
+            HirExprKind::Call(call) => {
+                call.requested_outputs.known_count() != Some(0)
+                    && !matches!(&call.callee, HirCallableRef::Builtin(builtin)
+                        if runmat_builtins::suppresses_auto_output(builtin.0.as_str()))
+            }
+            HirExprKind::CommandCall(_) => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

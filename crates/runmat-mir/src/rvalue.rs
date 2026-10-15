@@ -231,6 +231,7 @@ impl MirRvalue {
                             source.visit_direct_expression_steps_dyn(visitor);
                         }
                         crate::MirStmtKind::PlaceMutation(_)
+                        | crate::MirStmtKind::StatementOutput(_)
                         | crate::MirStmtKind::WorkspaceEffect { .. }
                         | crate::MirStmtKind::EnvironmentEffect(_) => {}
                     }
@@ -486,7 +487,9 @@ pub(crate) fn visit_stmt_operands(
         crate::MirStmtKind::PlaceMutation(mutation) => {
             visit_place_operands(&mutation.place, visitor)
         }
-        crate::MirStmtKind::WorkspaceEffect { .. } | crate::MirStmtKind::EnvironmentEffect(_) => {}
+        crate::MirStmtKind::StatementOutput(_)
+        | crate::MirStmtKind::WorkspaceEffect { .. }
+        | crate::MirStmtKind::EnvironmentEffect(_) => {}
     }
 }
 
@@ -523,7 +526,9 @@ fn visit_stmt_operands_mut(statement: &mut MirStmt, visitor: &mut dyn FnMut(&mut
         crate::MirStmtKind::PlaceMutation(mutation) => {
             visit_place_operands_mut(&mut mutation.place, visitor)
         }
-        crate::MirStmtKind::WorkspaceEffect { .. } | crate::MirStmtKind::EnvironmentEffect(_) => {}
+        crate::MirStmtKind::StatementOutput(_)
+        | crate::MirStmtKind::WorkspaceEffect { .. }
+        | crate::MirStmtKind::EnvironmentEffect(_) => {}
     }
 }
 

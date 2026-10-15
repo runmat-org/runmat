@@ -1,5 +1,6 @@
 use crate::{
-    MirOutputTarget, MirOutputTargetList, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
+    MirOutputTarget, MirOutputTargetList, MirPlace, MirPlaceMutation, MirRvalue,
+    MirStatementOutput, MirStatementOutputLabel, MirStatementOutputSource, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr,
@@ -20,7 +21,7 @@ pub(crate) fn lower_stmt_with_replacements(
     await_replacements: &HashMap<ExprId, crate::MirOperand>,
 ) -> Result<Vec<MirStmt>, HirError> {
     Ok(match &stmt.kind {
-        HirStmtKind::Assign(place, expr, _) => {
+        HirStmtKind::Assign(place, expr, suppressed) => {
             let mut stmts = Vec::new();
             let place = lower_place_with_replacements(ctx, place, &mut stmts, await_replacements)?;
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
@@ -33,12 +34,23 @@ pub(crate) fn lower_stmt_with_replacements(
                 });
             }
             stmts.push(MirStmt {
-                kind: MirStmtKind::Assign { place, value },
+                kind: MirStmtKind::Assign {
+                    place: place.clone(),
+                    value,
+                },
                 span: stmt.span,
             });
+            if !*suppressed {
+                if let Some(output) = output_for_place(ctx, &place) {
+                    stmts.push(MirStmt {
+                        kind: MirStmtKind::StatementOutput(output),
+                        span: stmt.span,
+                    });
+                }
+            }
             stmts
         }
-        HirStmtKind::MultiAssign(targets, expr, _) => {
+        HirStmtKind::MultiAssign(targets, expr, suppressed) => {
             let mut stmts = Vec::new();
             let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
@@ -82,14 +94,33 @@ pub(crate) fn lower_stmt_with_replacements(
             }
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
-                    targets: lowered_target_list,
+                    targets: lowered_target_list.clone(),
                     value,
                 },
                 span: stmt.span,
             });
+            if !*suppressed {
+                for target in &lowered_target_list.targets {
+                    let place = match target {
+                        MirOutputTarget::Place(place) => Some(place),
+                        MirOutputTarget::Sequence(target) => Some(target.base()),
+                        MirOutputTarget::Discard => None,
+                    };
+                    if let Some(output) = place.and_then(|place| output_for_place(ctx, place)) {
+                        stmts.push(MirStmt {
+                            kind: MirStmtKind::StatementOutput(output),
+                            span: stmt.span,
+                        });
+                    }
+                }
+            }
             stmts
         }
-        HirStmtKind::SequenceAssign { target, value, .. } => {
+        HirStmtKind::SequenceAssign {
+            target,
+            value,
+            suppressed,
+        } => {
             let mut stmts = Vec::new();
             let target = lower_sequence_target(ctx, target, &mut stmts, await_replacements)?;
             let value = lower_expr_with_replacements(ctx, value, &mut stmts, await_replacements)?;
@@ -97,16 +128,24 @@ pub(crate) fn lower_stmt_with_replacements(
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
                     targets: MirOutputTargetList {
-                        targets: vec![MirOutputTarget::Sequence(target)],
+                        targets: vec![MirOutputTarget::Sequence(target.clone())],
                         requested_outputs: RequestedOutputCount::DestinationSequenceCardinality,
                     },
                     value,
                 },
                 span: stmt.span,
             });
+            if !*suppressed {
+                if let Some(output) = output_for_place(ctx, target.base()) {
+                    stmts.push(MirStmt {
+                        kind: MirStmtKind::StatementOutput(output),
+                        span: stmt.span,
+                    });
+                }
+            }
             stmts
         }
-        HirStmtKind::ExprStmt(expr, _) => {
+        HirStmtKind::ExprStmt(expr, suppressed) => {
             let mut stmts = Vec::new();
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
@@ -114,6 +153,19 @@ pub(crate) fn lower_stmt_with_replacements(
                 kind: MirStmtKind::Expr(value),
                 span: stmt.span,
             });
+            if !*suppressed && expr.emits_statement_output() {
+                let label = match &expr.kind {
+                    HirExprKind::Binding(binding) => MirStatementOutputLabel::Binding(*binding),
+                    _ => MirStatementOutputLabel::Ans,
+                };
+                stmts.push(MirStmt {
+                    kind: MirStmtKind::StatementOutput(MirStatementOutput {
+                        source: MirStatementOutputSource::Expression,
+                        label,
+                    }),
+                    span: stmt.span,
+                });
+            }
             stmts
         }
         HirStmtKind::Global(bindings) => vec![MirStmt {
@@ -143,6 +195,20 @@ pub(crate) fn lower_stmt_with_replacements(
                 stmt.kind
             )))
         }
+    })
+}
+
+fn output_for_place(ctx: &MirLoweringContext, place: &MirPlace) -> Option<MirStatementOutput> {
+    let root = match place {
+        MirPlace::Local(local) => *local,
+        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
+            return output_for_place(ctx, base)
+        }
+        MirPlace::Binding(_) => return None,
+    };
+    Some(MirStatementOutput {
+        source: MirStatementOutputSource::Local(root),
+        label: MirStatementOutputLabel::Binding(ctx.binding_for_local(root)?),
     })
 }
 

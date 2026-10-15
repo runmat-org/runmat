@@ -288,6 +288,13 @@ fn transfer_statement(
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
         }
+        MirStmtKind::StatementOutput(_) => {
+            let facts = state.value_facts();
+            let (effects, capabilities) =
+                statement_contract_with_facts(statement, summaries, &facts);
+            state.effects.0.extend(effects.0);
+            state.capabilities.0.extend(capabilities.0);
+        }
         MirStmtKind::PlaceMutation(mutation) => *pending_mutation = Some(mutation.clone()),
         MirStmtKind::WorkspaceEffect { bindings, .. } => {
             state.effects.0.insert(EffectKind::WorkspaceWrite);

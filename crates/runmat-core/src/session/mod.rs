@@ -28,12 +28,11 @@ use crate::profiling::execution_profiling;
 use crate::source_pool::SourcePool;
 use crate::telemetry::{TelemetryPlatformInfo, TelemetrySink};
 use crate::workspace::{
-    determine_display_label_from_context, execution_display_context, format_type_info,
-    gather_gpu_preview_values, gpu_dtype_label, gpu_size_bytes, last_emit_var_index,
-    last_store_var_index, slice_value_for_preview, workspace_entry, FinalStmtEmitDisposition,
-    MaterializedVariable, WorkspaceEntry, WorkspaceExportMode, WorkspaceMaterializeOptions,
-    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSnapshot,
-    MATERIALIZE_DEFAULT_LIMIT,
+    execution_display_context, format_type_info, gather_gpu_preview_values, gpu_dtype_label,
+    gpu_size_bytes, last_emit_var_index, last_store_var_index, slice_value_for_preview,
+    workspace_entry, FinalStmtEmitDisposition, MaterializedVariable, WorkspaceEntry,
+    WorkspaceExportMode, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceResidency, WorkspaceSnapshot, MATERIALIZE_DEFAULT_LIMIT,
 };
 use crate::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,

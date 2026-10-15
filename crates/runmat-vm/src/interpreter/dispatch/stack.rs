@@ -6,20 +6,22 @@ use runmat_value::Value;
 use std::collections::HashMap;
 
 pub async fn emit_stack_top(
+    context: &ExecutionContext,
     stack: &[Value],
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
-    stack_ops::emit_stack_top(stack, label, var_names).await
+    stack_ops::emit_stack_top(&context.runtime, stack, label, var_names).await
 }
 
 pub async fn emit_var(
+    context: &ExecutionContext,
     vars: &[Value],
     var_index: usize,
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
-    stack_ops::emit_var(vars, var_index, label, var_names).await
+    stack_ops::emit_var(&context.runtime, vars, var_index, label, var_names).await
 }
 
 pub fn load_const(stack: &mut Vec<Value>, value: f64) {

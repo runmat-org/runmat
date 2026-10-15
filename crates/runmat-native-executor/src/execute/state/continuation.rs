@@ -28,6 +28,15 @@ impl HostState {
         for (root, value) in self.roots.iter_mut().zip(&self.locals) {
             root.value = *value;
         }
+        if let Some(value) = self.last_expression {
+            let slot = u32::try_from(self.roots.len())
+                .expect("native root cardinality is bounded by admitted frame state");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
         if let Some(sequence) = &self.sequence_assignment_register {
             for (slot, value) in sequence.root_references() {
                 self.roots.push(NativeRoot {

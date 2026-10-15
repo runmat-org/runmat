@@ -55,7 +55,9 @@ impl MirStmtKind {
             MirStmtKind::CaptureSequence { source, .. } => {
                 source.visit_direct_expression_regions_dyn(visitor)
             }
-            MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
+            MirStmtKind::StatementOutput(_)
+            | MirStmtKind::WorkspaceEffect { .. }
+            | MirStmtKind::EnvironmentEffect(_) => {}
             MirStmtKind::Assign {
                 place: target,
                 value,
@@ -140,6 +142,7 @@ impl MirStmtKind {
                 }
             }
             MirStmtKind::Expr(_)
+            | MirStmtKind::StatementOutput(_)
             | MirStmtKind::PlaceMutation(_)
             | MirStmtKind::WorkspaceEffect { .. }
             | MirStmtKind::EnvironmentEffect(_) => {}
@@ -201,7 +204,9 @@ impl MirStmt {
             }
             MirStmtKind::Expr(value) => value.visit_outer_operands_dyn(visitor),
             MirStmtKind::PlaceMutation(mutation) => visit_place(&mutation.place, visitor),
-            MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
+            MirStmtKind::StatementOutput(_)
+            | MirStmtKind::WorkspaceEffect { .. }
+            | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
 }
@@ -225,12 +230,34 @@ pub enum MirStmtKind {
         value: MirRvalue,
     },
     Expr(MirRvalue),
+    /// An ordered, source-level console effect after a successful statement.
+    StatementOutput(MirStatementOutput),
     PlaceMutation(MirPlaceMutation),
     WorkspaceEffect {
         effect: WorkspaceEffect,
         bindings: Vec<MirLocalId>,
     },
     EnvironmentEffect(EnvironmentEffect),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MirStatementOutput {
+    pub source: MirStatementOutputSource,
+    pub label: MirStatementOutputLabel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MirStatementOutputSource {
+    /// The immediately preceding expression statement's completed value.
+    Expression,
+    /// The complete binding after assignment, including indexed/member writes.
+    Local(MirLocalId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MirStatementOutputLabel {
+    Ans,
+    Binding(runmat_hir::BindingId),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

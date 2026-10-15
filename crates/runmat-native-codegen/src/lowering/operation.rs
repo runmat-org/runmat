@@ -279,6 +279,11 @@ fn statement_inputs(
         runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
             collect_place_inputs(&mutation.place, locals, &mut inputs)?;
         }
+        runmat_mir::MirStmtKind::StatementOutput(output) => {
+            if let runmat_mir::MirStatementOutputSource::Local(local) = output.source {
+                collect_operand(&runmat_mir::MirOperand::Local(local), locals, &mut inputs)?;
+            }
+        }
         runmat_mir::MirStmtKind::Expr(_)
         | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
         | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}

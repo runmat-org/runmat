@@ -272,6 +272,7 @@ fn derive_semantic_async_metadata(
                     MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::StatementOutput(_)
                     | MirStmtKind::EnvironmentEffect(_) => continue,
                 };
                 if matches!(value, MirRvalue::Spawn(_)) {
@@ -1162,6 +1163,7 @@ mod tests {
                     MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::StatementOutput(_)
                     | MirStmtKind::EnvironmentEffect(_) => continue,
                 };
                 if let MirRvalue::SubscriptChain(chain) = value {

@@ -12,6 +12,7 @@ pub(super) fn visit_outer_statement_sequences(
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => Some(value),
         MirStmtKind::CaptureSequence { .. }
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,

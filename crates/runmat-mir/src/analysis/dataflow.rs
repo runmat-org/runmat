@@ -551,6 +551,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                         ));
                     }
                 }
+                MirStmtKind::StatementOutput(_) => {}
                 MirStmtKind::EnvironmentEffect(_) => diagnostics.push(hir_diagnostic(
                     "RM-MIR0009",
                     "environment mutation invalidates dynamic lookup assumptions",
@@ -729,6 +730,7 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
             }
             MirStmtKind::CaptureSequence { .. } => {}
             MirStmtKind::Expr(_)
+            | MirStmtKind::StatementOutput(_)
             | MirStmtKind::PlaceMutation(_)
             | MirStmtKind::EnvironmentEffect(_) => {}
         }
@@ -866,6 +868,16 @@ fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<M
             mark_declared_storage(effect, bindings, state);
         }
         MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
+        MirStmtKind::StatementOutput(output) => {
+            if let crate::MirStatementOutputSource::Local(local) = output.source {
+                diagnose_operand_read(
+                    &crate::MirOperand::Local(local),
+                    state,
+                    stmt.span,
+                    diagnostics,
+                );
+            }
+        }
         MirStmtKind::PlaceMutation(_) | MirStmtKind::EnvironmentEffect(_) => {}
     }
 }

@@ -73,6 +73,7 @@ fn visit_statement(statement: &MirStmtKind, calls: &mut Vec<(ClassIdentity, Clas
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => visit_rvalue(value, calls),
         MirStmtKind::CaptureSequence { .. }
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {}

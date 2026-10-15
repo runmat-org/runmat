@@ -370,7 +370,7 @@ impl Walker<'_> {
                     self.edge(Some(from.into()), id, Certainty::Definite, reason, None);
                 }
             }
-            MirStmtKind::EnvironmentEffect(_) => {}
+            MirStmtKind::StatementOutput(_) | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
 

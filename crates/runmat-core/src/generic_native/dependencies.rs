@@ -224,7 +224,9 @@ fn visit_statement(statement: &MirStmt, out: &mut ReferencedFunctions) {
         }
         MirStmtKind::Expr(value) => visit_rvalue(value, out),
         MirStmtKind::PlaceMutation(mutation) => visit_place(&mutation.place, out),
-        MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
+        MirStmtKind::StatementOutput(_)
+        | MirStmtKind::WorkspaceEffect { .. }
+        | MirStmtKind::EnvironmentEffect(_) => {}
     }
 }
 

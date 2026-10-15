@@ -69,6 +69,7 @@ pub(crate) fn statement_contract(
             )
         }
         MirStmtKind::PlaceMutation(_) => (EffectSet::default(), CapabilitySet::default()),
+        MirStmtKind::StatementOutput(_) => crate::statement_declared_requirements(&statement.kind),
         MirStmtKind::WorkspaceEffect { .. } => (
             EffectSet([EffectKind::WorkspaceWrite].into_iter().collect()),
             CapabilitySet::default(),

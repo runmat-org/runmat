@@ -62,3 +62,23 @@ fn value_producing_expression_statement_still_discards_its_value() {
         );
     }
 }
+
+#[test]
+fn unsuppressed_expression_emits_at_its_own_mir_output_site() {
+    let bytecode = compile_source("7");
+    let ranges = bytecode
+        .statement_pc_ranges()
+        .expect("statement PC projection");
+    assert_eq!(ranges.len(), 2);
+    assert!(!bytecode.instructions[ranges[0].start..ranges[0].end]
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::EmitStackTop { .. } | Instr::Pop)));
+    assert!(matches!(
+        bytecode.instructions[ranges[1].start],
+        Instr::EmitStackTop { .. }
+    ));
+    assert!(matches!(
+        bytecode.instructions[ranges[1].start + 1],
+        Instr::Pop
+    ));
+}

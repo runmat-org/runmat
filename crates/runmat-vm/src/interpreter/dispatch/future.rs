@@ -615,9 +615,11 @@ async fn dispatch_arithmetic_family(
 
 async fn dispatch_output(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
     match meta.instr {
-        Instr::EmitStackTop { label } => emit_stack_top(state.stack, label, meta.var_names).await?,
+        Instr::EmitStackTop { label } => {
+            emit_stack_top(state.context, state.stack, label, meta.var_names).await?
+        }
         Instr::EmitVar { var_index, label } => {
-            emit_var(state.vars, *var_index, label, meta.var_names).await?
+            emit_var(state.context, state.vars, *var_index, label, meta.var_names).await?
         }
         _ => unreachable!("output route received another instruction"),
     }

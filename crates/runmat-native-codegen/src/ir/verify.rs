@@ -1226,6 +1226,7 @@ fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
             place_selector_arity_valid(&mutation.place)
         }
         runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+        | runmat_mir::MirStmtKind::StatementOutput(_)
         | runmat_mir::MirStmtKind::EnvironmentEffect(_) => true,
     }
 }
@@ -1260,6 +1261,7 @@ fn statement_contains_legacy_binding_place(statement: &runmat_mir::MirStmtKind) 
             place_contains_legacy_binding(&mutation.place)
         }
         runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+        | runmat_mir::MirStmtKind::StatementOutput(_)
         | runmat_mir::MirStmtKind::EnvironmentEffect(_) => false,
     }
 }
@@ -1370,6 +1372,7 @@ fn rvalue_output_locals(
         .into_iter()
         .collect()),
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => Err(NativeCodegenError::new(
             "native.ir.output_local_identity",
@@ -1399,7 +1402,9 @@ fn statement_output_locals(
         MirStmtKind::CaptureSequence { .. } => Vec::new(),
         MirStmtKind::PlaceMutation(mutation) => root_local(&mutation.place).into_iter().collect(),
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
-        MirStmtKind::Expr(_) | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
+        MirStmtKind::Expr(_)
+        | MirStmtKind::StatementOutput(_)
+        | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
     };
     let mut seen = BTreeSet::new();
     roots
@@ -1512,6 +1517,7 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
                     roots.extend(bindings.iter().copied());
                 }
                 runmat_mir::MirStmtKind::Expr(_)
+                | runmat_mir::MirStmtKind::StatementOutput(_)
                 | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
             }
             Ok(roots.len())

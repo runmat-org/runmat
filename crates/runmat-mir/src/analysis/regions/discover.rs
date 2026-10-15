@@ -264,6 +264,7 @@ fn statement_is_pure(
         MirStmtKind::CaptureSequence { .. } => false,
         MirStmtKind::Expr(_) => true,
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => false,
     };

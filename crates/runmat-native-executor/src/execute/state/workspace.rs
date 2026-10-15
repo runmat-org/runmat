@@ -275,6 +275,10 @@ impl HostState {
         self.last_expression = Some(value);
     }
 
+    pub(in crate::execute) fn expression_reference(&self) -> Option<NativeValueRef> {
+        self.last_expression
+    }
+
     pub fn expression_result(&self) -> NativeExecutorResult<Option<runmat_value::Value>> {
         self.last_expression
             .map(|value| self.arena.get(value).cloned())

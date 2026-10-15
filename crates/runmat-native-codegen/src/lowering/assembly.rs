@@ -463,6 +463,7 @@ fn verify_statement_operations(
                 | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
                 | runmat_mir::MirStmtKind::Expr(value) => Some(value),
                 runmat_mir::MirStmtKind::PlaceMutation(_)
+                | runmat_mir::MirStmtKind::StatementOutput(_)
                 | runmat_mir::MirStmtKind::CaptureSequence { .. }
                 | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
                 | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,

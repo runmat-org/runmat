@@ -111,6 +111,12 @@ impl MirLoweringContext {
             .ok_or_else(|| HirError::new("binding has no MIR local"))
     }
 
+    pub(crate) fn binding_for_local(&self, local: MirLocalId) -> Option<BindingId> {
+        self.binding_locals
+            .iter()
+            .find_map(|(binding, candidate)| (*candidate == local).then_some(*binding))
+    }
+
     pub(crate) fn locals_for_function(&mut self, function: &HirFunction) -> Vec<MirLocal> {
         let mut locals: Vec<_> = function
             .locals

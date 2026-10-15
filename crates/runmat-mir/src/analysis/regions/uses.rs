@@ -49,6 +49,11 @@ pub(crate) fn statement_uses_defs(statement: &MirStmt) -> (Locals, Locals) {
             source.visit_outer_operands(|operand| operand_uses(operand, &mut uses));
         }
         MirStmtKind::Expr(value) => rvalue_uses(value, &mut uses, &mut defs),
+        MirStmtKind::StatementOutput(output) => {
+            if let crate::MirStatementOutputSource::Local(local) = output.source {
+                uses.insert(local);
+            }
+        }
         MirStmtKind::PlaceMutation(mutation) => {
             place_read_uses(&mutation.place, &mut uses);
             if let Some(root) = place_root_local(&mutation.place) {

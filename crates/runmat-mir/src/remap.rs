@@ -349,7 +349,9 @@ fn remap_statement(statement: &mut MirStmt, remap: &RemapContext<'_>) -> Result<
         }
         MirStmtKind::Expr(value) => remap_rvalue(value, remap)?,
         MirStmtKind::PlaceMutation(mutation) => remap_place(&mut mutation.place, remap)?,
-        MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
+        MirStmtKind::StatementOutput(_)
+        | MirStmtKind::WorkspaceEffect { .. }
+        | MirStmtKind::EnvironmentEffect(_) => {}
     }
     Ok(())
 }

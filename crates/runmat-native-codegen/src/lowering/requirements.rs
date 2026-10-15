@@ -100,6 +100,7 @@ fn statement_value(statement: &runmat_mir::MirStmtKind) -> Option<&runmat_mir::M
         | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
         | runmat_mir::MirStmtKind::Expr(value) => Some(value),
         runmat_mir::MirStmtKind::PlaceMutation(_)
+        | runmat_mir::MirStmtKind::StatementOutput(_)
         | runmat_mir::MirStmtKind::CaptureSequence { .. }
         | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
         | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,

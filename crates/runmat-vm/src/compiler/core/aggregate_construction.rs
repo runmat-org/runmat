@@ -80,6 +80,7 @@ impl ProofIndex {
                     }
                     MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::Expr(_)
+                    | MirStmtKind::StatementOutput(_)
                     | MirStmtKind::EnvironmentEffect(_) => {}
                 }
             }

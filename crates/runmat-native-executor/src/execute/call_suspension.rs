@@ -21,6 +21,7 @@ mod rooted;
 mod roots_tests;
 mod sequence;
 mod sequence_read;
+mod statement_output;
 mod short_circuit_truth;
 mod subscript;
 mod terminator;
@@ -39,6 +40,7 @@ pub(super) use short_circuit_truth::{
     begin_short_circuit_truth, take_completed_short_circuit_truth, ShortCircuitTruthReady,
     ShortCircuitTruthStage,
 };
+pub(super) use statement_output::{begin_statement_output, take_completed_statement_output};
 pub(super) use subscript::take_completed_subscript_path;
 pub(super) use terminator::{
     begin_branch_truth, begin_for_capture, begin_for_next, begin_switch_equality,
@@ -71,6 +73,7 @@ pub(super) enum CallCompletion {
     PreparedReceiver(Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>),
     SequenceStage(Box<SequenceStage>),
     ShortCircuitTruth(ShortCircuitTruthReady),
+    StatementOutput,
     Terminator(Box<TerminatorCompletion>),
 }
 
@@ -105,6 +108,7 @@ pub(super) enum CompletedPayload {
         roots: Vec<NativeValueRef>,
     },
     ShortCircuitTruth(ShortCircuitTruthReady),
+    StatementOutput,
     Terminator(Box<TerminatorReady>),
 }
 
@@ -206,6 +210,7 @@ pub(super) fn completed_roots(state: &HostState) -> impl Iterator<Item = NativeV
             CompletedPayload::PreparedReceiver { receiver, .. } => vec![*receiver],
             CompletedPayload::SequenceStage { roots, .. } => roots.clone(),
             CompletedPayload::ShortCircuitTruth(_) => Vec::new(),
+            CompletedPayload::StatementOutput => Vec::new(),
             CompletedPayload::Terminator(stage) => stage.arena_roots(),
         })
 }
@@ -298,6 +303,7 @@ pub(super) async fn complete(
                 CallCompletion::ShortCircuitTruth(truth) => {
                     CompletedPayload::ShortCircuitTruth(truth)
                 }
+                CallCompletion::StatementOutput => CompletedPayload::StatementOutput,
                 CallCompletion::Terminator(stage) => {
                     CompletedPayload::Terminator(Box::new(stage.finish()?))
                 }

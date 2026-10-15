@@ -56,6 +56,7 @@ fn statement_rvalue(statement: &MirStmtKind) -> Option<&MirRvalue> {
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => Some(value),
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,

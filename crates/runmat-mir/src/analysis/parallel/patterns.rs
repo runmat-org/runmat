@@ -127,6 +127,7 @@ fn statement_preserves_slice_pattern(
             place_preserves_slice_pattern(&mutation.place, context, access, writes)
         }
         MirStmtKind::WorkspaceEffect { bindings, .. } => !bindings.contains(&context.local),
+        MirStmtKind::StatementOutput(_) => false,
         MirStmtKind::EnvironmentEffect(_) => true,
     }
 }

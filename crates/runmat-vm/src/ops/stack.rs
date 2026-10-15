@@ -5,7 +5,7 @@ use crate::interpreter::stack::{pop2, pop_value};
 use crate::runtime::workspace::{
     admit_workspace_slot_write, ensure_workspace_slot_name, workspace_slot_value,
 };
-use runmat_runtime::{dispatcher::gather_if_needed_async, RuntimeError};
+use runmat_runtime::RuntimeError;
 use runmat_value::{CharArray, Value};
 use std::collections::HashMap;
 
@@ -23,19 +23,21 @@ fn resolve_emit_label_text(
 }
 
 pub async fn emit_stack_top(
+    runtime: &runmat_runtime::context::RuntimeContext,
     stack: &[Value],
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
     if let Some(value) = stack.last() {
         let label_text = resolve_emit_label_text(label, var_names);
-        let host_value = gather_if_needed_async(value).await?;
-        runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
+        runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), value)
+            .await?;
     }
     Ok(())
 }
 
 pub async fn emit_var(
+    runtime: &runmat_runtime::context::RuntimeContext,
     vars: &[Value],
     var_index: usize,
     label: &EmitLabel,
@@ -43,8 +45,8 @@ pub async fn emit_var(
 ) -> Result<(), RuntimeError> {
     if let Some(value) = vars.get(var_index) {
         let label_text = resolve_emit_label_text(label, var_names);
-        let host_value = gather_if_needed_async(value).await?;
-        runmat_runtime::console::record_value_output(label_text.as_deref(), &host_value);
+        runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), value)
+            .await?;
     }
     Ok(())
 }

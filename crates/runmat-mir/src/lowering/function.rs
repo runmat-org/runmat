@@ -130,11 +130,13 @@ fn lower_function_with_context(
     let temp_locals = ctx.take_temp_locals();
     locals.extend(temp_locals);
 
-    Ok(MirBody {
+    let body = MirBody {
         function: function.id,
         abi: function.abi.clone(),
         locals,
         blocks: lowered.blocks,
         catch_scopes: lowered.catch_scopes,
-    })
+    };
+    body.validate_statement_outputs().map_err(HirError::new)?;
+    Ok(body)
 }

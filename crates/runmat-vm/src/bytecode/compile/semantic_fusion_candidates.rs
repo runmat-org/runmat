@@ -31,6 +31,7 @@ pub(super) fn derive_semantic_fusion_candidate_groups(
                     MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::StatementOutput(_)
                     | MirStmtKind::EnvironmentEffect(_) => {
                         finish_semantic_candidate_group(
                             &mut groups,

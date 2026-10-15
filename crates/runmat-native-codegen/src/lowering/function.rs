@@ -23,6 +23,13 @@ pub(super) fn lower_function(
         )
         .at_function(function)
     })?;
+    body.validate_statement_outputs().map_err(|error| {
+        NativeCodegenError::new(
+            "native.lowering.statement_output",
+            format!("invalid MIR statement output: {error}"),
+        )
+        .at_function(function)
+    })?;
     let local_count = body.locals.len();
     let _ = u32::try_from(local_count).map_err(|_| {
         NativeCodegenError::new(
@@ -419,6 +426,12 @@ fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueRes
             NativeRvalueResult::Expression
         }
         MirStmtKind::Expr(_) => NativeRvalueResult::Discard,
+        MirStmtKind::StatementOutput(_) => {
+            return Err(NativeCodegenError::new(
+                "native.lowering.rvalue_role",
+                "statement output has no Native IR rvalue role",
+            ))
+        }
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
@@ -459,6 +472,7 @@ fn statement_rvalue_outputs(
             Some((value, outputs))
         }
         MirStmtKind::SequenceAssign { value, .. } => Some((value, Vec::new())),
+        MirStmtKind::StatementOutput(_) => None,
         MirStmtKind::Expr(value) => Some((
             value,
             expression_produces_value(value)
@@ -509,6 +523,7 @@ fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {
             .collect(),
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
         MirStmtKind::Expr(_)
+        | MirStmtKind::StatementOutput(_)
         | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
     };
