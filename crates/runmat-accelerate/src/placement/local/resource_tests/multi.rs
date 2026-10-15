@@ -476,7 +476,10 @@ fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_i
                 reject: Some(7),
                 queries: AtomicUsize::new(0),
             };
-            let capture = Rc::new(Capture::default());
+            let capture = Rc::new(Capture {
+                graph_observations: true,
+                ..Default::default()
+            });
             let demand = CandidateResourceDemand {
                 cpu_millicores: 1_000,
                 retained_bytes: ResourceByteBound::Known(retained),
@@ -499,13 +502,14 @@ fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_i
                 implementation,
             )
             .unwrap();
-            assert!(matches!(
-                outcome,
-                LocalPlacementOutcome::ProviderRejected {
-                    feedback: Some(_),
-                    ..
-                }
-            ));
+            let LocalPlacementOutcome::ProviderRejected {
+                feedback: Some(feedback),
+                ..
+            } = outcome
+            else {
+                panic!("actual session must return its host rejection observation right");
+            };
+            assert!(feedback.is_current());
             assert_eq!(
                 provider.queries.load(Ordering::SeqCst),
                 usize::from(matches!(implementation, LocalProviderAdmission::Available))
@@ -529,6 +533,21 @@ fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_i
             );
             assert!(!identities.contains(&requests[0].signature.runtime_facts));
             identities.push(requests[0].signature.runtime_facts);
+            let selected_signature = requests[0].signature.clone();
+            let selected_candidate = candidates[0].descriptor.identity.clone();
+            drop(requests);
+            feedback.observe(13, true);
+            let profile = capture.session.profile_snapshot();
+            assert_eq!(profile.feedback.len(), 1);
+            assert_eq!(profile.feedback[0].samples, 1);
+            assert_eq!(profile.feedback[0].failures, 0);
+            assert_eq!(profile.feedback[0].total_elapsed_ns, 13);
+            assert_eq!(profile.feedback[0].signature, selected_signature);
+            assert_eq!(profile.feedback[0].candidate, selected_candidate);
+            assert_eq!(
+                profile.feedback[0].kind,
+                ExecutionCandidateKind::SharedRuntime
+            );
         }
     }
 }
