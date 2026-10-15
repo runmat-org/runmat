@@ -196,21 +196,24 @@ impl AccelProvider for Provider {
     fn scalar_max(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         self.output(input, &vec![scalar; input.shape().iter().product()], true)
     }
-    fn fill_like(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        scalar: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         self.fills.fetch_add(1, Ordering::SeqCst);
         if matches!(self.mode, Mode::UnsupportedFill) {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "fill unavailable before allocation",
-            ));
+            return Ok(None);
         }
         let shape = if matches!(self.mode, Mode::WrongFill) {
             vec![1, 1]
         } else {
             input.shape().to_vec()
         };
-        Ok(self
-            .allocate(vec![scalar; shape.iter().product()], shape)
-            .handle)
+        Ok(Some(
+            self.allocate(vec![scalar; shape.iter().product()], shape)
+                .handle,
+        ))
     }
     fn repmat(
         &self,

@@ -63,9 +63,12 @@ pub(in super::super) async fn reduce_mean_vecdim_nd_gpu(
             output_shape[dim] = 1;
         }
         checked_elements(&output_shape)?;
-        let output = provider.fill(&output_shape, f64::NAN).map_err(|error| {
-            mean_reduction_error(runmat_accelerate_api::ProviderExecutionError::from(error))
-        })?;
+        let output = provider
+            .fill(&output_shape, f64::NAN)
+            .map_err(mean_reduction_error)?;
+        let Some(output) = output else {
+            return Err(MeanProviderFailure::Unsupported);
+        };
         return admission::admit_include_reduction(
             provider,
             handle,

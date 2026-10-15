@@ -247,8 +247,8 @@ fn logical_gpu_output(
             )
         })?;
     let result = match provider.logical_fill(shape, fill) {
-        Ok(result) => result,
-        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+        Ok(Some(result)) => result,
+        Ok(None) => {
             let len = if shape.contains(&0) {
                 0
             } else {
@@ -271,12 +271,12 @@ fn logical_gpu_output(
             })?
         }
         Err(cause) => {
-            return Err(
+            return Err(crate::runtime_error::with_provider_execution_source(
                 build_runtime_error(format!("{name}: logical fill failed: {cause}"))
                     .with_builtin(name)
-                    .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                     .build(),
-            )
+                cause.with_unproven_effects(),
+            ))
         }
     };
     // Logical intent is certified by the producing allocation owner, never

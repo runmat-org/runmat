@@ -296,18 +296,27 @@ impl AccelProvider for Recorder {
             Ok(allocation.handle)
         })
     }
-    fn fill_like(&self, input: &GpuTensorHandle, value: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.fills.fetch_add(1, Ordering::SeqCst);
-        self.last_double_bits
-            .store(value.to_bits(), Ordering::SeqCst);
-        Ok(self
-            .owner
-            .allocate_zeroed(
-                input.shape().to_vec(),
-                NumericElementType::F64,
-                GpuTensorStorage::Real,
-            )?
-            .handle)
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        value: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = (|| {
+            self.fills.fetch_add(1, Ordering::SeqCst);
+            self.last_double_bits
+                .store(value.to_bits(), Ordering::SeqCst);
+            Ok(self
+                .owner
+                .allocate_zeroed(
+                    input.shape().to_vec(),
+                    NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                )?
+                .handle)
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn unary_single<'a>(
         &'a self,

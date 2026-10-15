@@ -150,20 +150,29 @@ impl AccelProvider for NumericProvider {
         };
         Ok(self.make(host.shape.to_vec(), data.to_vec(), "upload_f32")?)
     }
-    fn fill_like(&self, input: &GpuTensorHandle, control: f64) -> anyhow::Result<GpuTensorHandle> {
-        anyhow::ensure!(
-            input.device_id() == self.device_id()
-                && input.physical().element_type() == NumericElementType::F32
-                && input.physical().storage() == GpuTensorStorage::Real,
-            "native F32 real prototype required"
-        );
-        let elements = self.values(input).len(); // Checks the retained payload and live lease.
-        let single = control as f32;
-        anyhow::ensure!(
-            f64::from(single).to_bits() == control.to_bits(),
-            "fixture requires exactly representable Single fill control"
-        );
-        self.make(input.shape().to_vec(), vec![single; elements], "fill_like")
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        control: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = (|| {
+            anyhow::ensure!(
+                input.device_id() == self.device_id()
+                    && input.physical().element_type() == NumericElementType::F32
+                    && input.physical().storage() == GpuTensorStorage::Real,
+                "native F32 real prototype required"
+            );
+            let elements = self.values(input).len(); // Checks the retained payload and live lease.
+            let single = control as f32;
+            anyhow::ensure!(
+                f64::from(single).to_bits() == control.to_bits(),
+                "fixture requires exactly representable Single fill control"
+            );
+            self.make(input.shape().to_vec(), vec![single; elements], "fill_like")
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("staged session must not gather")

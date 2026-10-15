@@ -182,7 +182,8 @@ async fn execute_legacy_real(
         let _guard = ResidencyRestoreGuard::new(resident);
         let output = provider
             .fill_like(resident, prepared.control.value())
-            .map_err(|error| PowerServiceError::unproven(ProviderExecutionError::from(error)))?;
+            .map_err(PowerServiceError::unproven)?
+            .ok_or_else(|| PowerServiceError::pre("legacy POWER scalar constructor unavailable"))?;
         if !valid_output(
             &output,
             provider,
@@ -285,11 +286,18 @@ fn prepare_scalar(
     let output = provider
         .fill_like(native, control.value())
         .map_err(|error| {
-            let carrier = ProviderExecutionError::from(error);
             if prior_effect {
-                PowerServiceError::after(carrier)
+                PowerServiceError::after(error)
             } else {
-                PowerServiceError::unproven(carrier)
+                PowerServiceError::unproven(error)
+            }
+        })?
+        .ok_or_else(|| {
+            let error = anyhow::anyhow!("POWER scalar constructor unavailable");
+            if prior_effect {
+                PowerServiceError::after(error)
+            } else {
+                PowerServiceError::unproven(error)
             }
         })?;
     let precision = if mixed {

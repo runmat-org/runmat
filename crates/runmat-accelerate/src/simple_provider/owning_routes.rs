@@ -177,7 +177,10 @@ fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let single_filled = provider.fill_like(&single, 2.0).unwrap();
+    let single_filled = provider
+        .fill_like(&single, 2.0)
+        .unwrap()
+        .expect("admitted optional constructor");
     assert_eq!(
         block_on(provider.download_numeric(&single_filled))
             .unwrap()
@@ -191,13 +194,22 @@ fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
             shape: &[1, 2],
         })
         .unwrap();
-    let filled = provider.fill_like(&real, 3.0).unwrap();
-    let ones = provider.ones_like(&real).unwrap();
+    let filled = provider
+        .fill_like(&real, 3.0)
+        .unwrap()
+        .expect("admitted optional constructor");
+    let ones = provider
+        .ones_like(&real)
+        .unwrap()
+        .expect("admitted optional constructor");
     assert_eq!(
         block_on(provider.download(&ones)).unwrap().data,
         vec![1.0; 2]
     );
-    let single_ones = provider.ones_like(&single).unwrap();
+    let single_ones = provider
+        .ones_like(&single)
+        .unwrap()
+        .expect("admitted optional constructor");
     assert_eq!(
         block_on(provider.download_numeric(&single_ones))
             .unwrap()
@@ -265,7 +277,10 @@ fn floating_cast_preserves_interleaved_components_and_negative_zero_fill() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let filled = provider.fill_like(&real, -0.0).unwrap();
+    let filled = provider
+        .fill_like(&real, -0.0)
+        .unwrap()
+        .expect("admitted optional constructor");
     let HostNumericDataOwned::F64(values) =
         block_on(provider.download_numeric(&filled)).unwrap().data
     else {
@@ -345,7 +360,10 @@ fn typed_zero_constructors_preserve_class_storage_shape_and_owner() {
             .unwrap();
         assert!(foreign.zeros_like(&input, &[2, 2]).is_err());
         for shape in [vec![2, 1, 3], vec![usize::MAX, usize::MAX, 0]] {
-            let output = provider.zeros_like(&input, &shape).unwrap();
+            let output = provider
+                .zeros_like(&input, &shape)
+                .unwrap()
+                .expect("admitted optional constructor");
             assert_eq!(output.shape(), shape);
             assert_eq!(
                 output.physical().element_type(),
@@ -381,13 +399,19 @@ fn typed_zero_constructors_preserve_class_storage_shape_and_owner() {
         }
     }
     for value in [false, true] {
-        let logical = provider.logical_fill(&[1, 3], value).unwrap();
+        let logical = provider
+            .logical_fill(&[1, 3], value)
+            .unwrap()
+            .expect("admitted optional constructor");
         assert!(logical.view().is_logical());
         assert_eq!(
             block_on(provider.download(&logical)).unwrap().data,
             vec![if value { 1.0 } else { 0.0 }; 3]
         );
-        let zeros = provider.zeros_like(&logical, &[2, 2]).unwrap();
+        let zeros = provider
+            .zeros_like(&logical, &[2, 2])
+            .unwrap()
+            .expect("admitted optional constructor");
         assert!(zeros.view().is_logical());
         assert_eq!(
             block_on(provider.download(&zeros)).unwrap().data,
@@ -396,6 +420,7 @@ fn typed_zero_constructors_preserve_class_storage_shape_and_owner() {
         assert!(provider
             .logical_fill(&[usize::MAX, usize::MAX, 0], value)
             .unwrap()
+            .expect("admitted optional constructor")
             .view()
             .is_logical());
     }

@@ -359,15 +359,23 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
     let results = [
         Defaults.zeros(&[2, 3]),
         Defaults.scalar_add(&input, 1.0),
-        Defaults.fill(&[2, 3], 0.0),
-        Defaults.fill(&[2, 3], 1.0),
-        Defaults.fill_like(&input, 0.0),
         provider.gradient_dim(&input, 0, 1.0),
         provider.gradient_dim_with_coordinates(&input, 0, &input),
         provider.cumtrapz_dim(&input, 0, ProviderTrapezoidSpacing::Scalar(1.0)),
         provider.not_nan_mask(&input),
         Defaults.gather_linear(&input, &[0], &[1, 1]),
     ];
+    for result in [
+        Defaults.fill(&[2, 3], 0.0),
+        Defaults.fill(&[2, 3], 1.0),
+        Defaults.fill_like(&input, 0.0),
+        Defaults.ones_like(&input),
+        Defaults.zeros_like(&input, &[2, 3]),
+        Defaults.logical_fill(&[2, 3], true),
+        Defaults.ones(&[2, 3]),
+    ] {
+        assert!(result.unwrap().is_none());
+    }
     assert!(provider.permute(&input, &[1, 0]).unwrap().is_none());
     assert!(provider
         .map_nan_to_zero(&input)
@@ -397,7 +405,7 @@ fn reshape_preserves_alias_and_does_not_misclassify_invalid_shape() {
 }
 
 #[test]
-fn fill_defaults_fallback_only_for_typed_unsupported() {
+fn fill_defaults_never_probe_raw_primitives_or_upload() {
     for like in [false, true] {
         for mode in [
             FillMode::Unsupported,
@@ -408,27 +416,16 @@ fn fill_defaults_fallback_only_for_typed_unsupported() {
             let input = provider.allocation(&[2, 3]);
             if like {
                 // Generic arithmetic cannot establish prototype-class preservation.
-                assert!(is_unsupported_provider_operation(
-                    &provider.fill_like(&input, 2.0).unwrap_err()
-                ));
+                assert!(provider.fill_like(&input, 2.0).unwrap().is_none());
                 assert_eq!(*provider.uploads.lock().unwrap(), 0);
                 assert!(provider.temporaries.lock().unwrap().is_empty());
                 input.allocation_lease().validate_live().unwrap();
                 continue;
             }
             let result = provider.fill(&[2, 3], 2.0);
-            if matches!(mode, FillMode::Unsupported) {
-                assert_eq!(result.unwrap().shape(), &[2, 3]);
-                assert_eq!(*provider.uploads.lock().unwrap(), 1);
-            } else {
-                let error = result.unwrap_err();
-                assert!(!is_unsupported_provider_operation(&error));
-                assert_eq!(
-                    error.downcast_ref::<std::io::Error>().unwrap().kind(),
-                    std::io::ErrorKind::BrokenPipe
-                );
-                assert_eq!(*provider.uploads.lock().unwrap(), 0);
-            }
+            assert!(result.unwrap().is_none());
+            assert_eq!(*provider.uploads.lock().unwrap(), 0);
+            assert!(provider.temporaries.lock().unwrap().is_empty());
             for temporary in provider.temporaries.lock().unwrap().iter() {
                 assert_eq!(temporary.retirements(), 1);
             }

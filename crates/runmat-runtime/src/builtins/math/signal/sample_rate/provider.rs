@@ -326,7 +326,8 @@ pub(super) fn upsample_gpu(
     };
     let allocation = provider.zeros_like(handle, &output_shape);
     let output = match allocation {
-        Ok(output) => output,
+        Ok(Some(output)) => output,
+        Ok(None) => return Ok(None),
         Err(source) => {
             let error = sample_error_with_detail(
                 builtin,
@@ -335,7 +336,7 @@ pub(super) fn upsample_gpu(
             );
             return Err(crate::runtime_error::with_provider_execution_source(
                 error,
-                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects(),
+                source.with_unproven_effects(),
             ));
         }
     };

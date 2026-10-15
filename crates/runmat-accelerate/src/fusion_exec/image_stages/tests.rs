@@ -134,8 +134,39 @@ impl StagedProvider {
         hook: StageHook,
         element: NumericElementType,
     ) -> anyhow::Result<GpuTensorHandle> {
+        let call = self.begin_stage(hook);
+        self.produce_class_at(shape, element, call)
+    }
+
+    fn begin_stage(&self, hook: StageHook) -> usize {
         self.trace.lock().unwrap().push(hook);
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        self.calls.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn produce_optional(
+        &self,
+        shape: Vec<usize>,
+        hook: StageHook,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let call = self.begin_stage(hook);
+        // This is the optional hook's deliberate availability injection, before
+        // allocation, borrowed-resource mutation, or any production attempt.
+        if self.fail_at == Some(call) {
+            return Ok(None);
+        }
+        self.produce_class_at(shape, NumericElementType::F32, call)
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
+    }
+
+    fn produce_class_at(
+        &self,
+        shape: Vec<usize>,
+        element: NumericElementType,
+        call: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
         if let Some((at, probe)) = self.invalidate_on_call.lock().unwrap().clone() {
             if call == at {
                 probe.mark_unavailable();
@@ -577,24 +608,35 @@ impl AccelProvider for StagedProvider {
         Ok(self.produce_class(host.shape.to_vec(), StageHook::Upload, class)?)
     }
 
-    fn fill_like(&self, input: &GpuTensorHandle, control: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.controls
-            .lock()
-            .unwrap()
-            .push(match input.physical().element_type() {
-                NumericElementType::F32 => runmat_accelerate_api::PowerScalarControl::SingleBits(
-                    (control as f32).to_bits(),
-                ),
-                NumericElementType::F64 => {
-                    runmat_accelerate_api::PowerScalarControl::DoubleBits(control.to_bits())
-                }
-                _ => anyhow::bail!("POWER fill requires floating input"),
-            });
-        self.produce_class(
-            input.shape().to_vec(),
-            StageHook::Upload,
-            input.physical().element_type(),
-        )
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        control: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = (|| {
+            self.controls
+                .lock()
+                .unwrap()
+                .push(match input.physical().element_type() {
+                    NumericElementType::F32 => {
+                        runmat_accelerate_api::PowerScalarControl::SingleBits(
+                            (control as f32).to_bits(),
+                        )
+                    }
+                    NumericElementType::F64 => {
+                        runmat_accelerate_api::PowerScalarControl::DoubleBits(control.to_bits())
+                    }
+                    _ => anyhow::bail!("POWER fill requires floating input"),
+                });
+            self.produce_class(
+                input.shape().to_vec(),
+                StageHook::Upload,
+                input.physical().element_type(),
+            )
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 
     fn classify_real_power<'a>(
@@ -633,20 +675,14 @@ impl AccelProvider for StagedProvider {
         dims: &'a [usize],
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let result: anyhow::Result<GpuTensorHandle> = async move {
-                if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
-                    std::future::pending::<()>().await;
-                }
-                let mut shape = input.shape().to_vec();
-                for &dimension in dims {
-                    shape[dimension] = 1;
-                }
-                self.produce(shape, StageHook::Nd(dims.to_vec()))
+            if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
+                std::future::pending::<()>().await;
             }
-            .await;
-            result.map(Some).map_err(|source| {
-                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
-            })
+            let mut shape = input.shape().to_vec();
+            for &dimension in dims {
+                shape[dimension] = 1;
+            }
+            self.produce_optional(shape, StageHook::Nd(dims.to_vec()))
         })
     }
 
@@ -656,18 +692,12 @@ impl AccelProvider for StagedProvider {
         dim: usize,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let result: anyhow::Result<GpuTensorHandle> = async move {
-                if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
-                    std::future::pending::<()>().await;
-                }
-                let mut shape = input.shape().to_vec();
-                shape[dim] = 1;
-                self.produce(shape, StageHook::Dim(dim))
+            if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
+                std::future::pending::<()>().await;
             }
-            .await;
-            result.map(Some).map_err(|source| {
-                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
-            })
+            let mut shape = input.shape().to_vec();
+            shape[dim] = 1;
+            self.produce_optional(shape, StageHook::Dim(dim))
         })
     }
 

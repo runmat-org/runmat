@@ -4,7 +4,7 @@
 mod provider;
 use provider::{nan_gpu, nan_like_gpu};
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NAN_COLUMN_SIZE_VECTOR_EXTENSION, NAN_ERROR_CLASS_CONFLICT,
     NAN_ERROR_INTEGER_LIKE_PROTOTYPE, NAN_ERROR_LIKE_DUPLICATE, NAN_ERROR_LIKE_EXPECTED_PROTOTYPE,
@@ -16,7 +16,6 @@ use runmat_value::{ComplexTensor, NumericDType, SparseTensor, Tensor, Value};
 use crate::build_runtime_error;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, normalize_constructor_shape,
-    validate_constructor_gpu_output,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,

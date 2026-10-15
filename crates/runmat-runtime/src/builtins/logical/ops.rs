@@ -370,9 +370,9 @@ async fn try_gpu_cast(
         return Ok(None);
     }
     let zeros = match provider.zeros_like(input, input.shape()) {
-        Ok(zeros) => zeros,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(logical_provider_error(error.into())),
+        Ok(Some(zeros)) => zeros,
+        Ok(None) => return Ok(None),
+        Err(error) => return Err(logical_provider_error(error.with_unproven_effects())),
     };
     if zeros.shape() != input.shape()
         || zeros.device_id() != input.device_id()

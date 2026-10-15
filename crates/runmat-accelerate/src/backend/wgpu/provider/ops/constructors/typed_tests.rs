@@ -21,7 +21,8 @@ fn actual_wgpu_fill_like_retains_negative_zero_sign() {
         .expect("native prototype");
     let filled = provider
         .fill_like(&prototype, -0.0)
-        .expect("negative zero fill");
+        .expect("negative zero fill")
+        .expect("admitted optional constructor");
     assert_eq!(filled.shape(), [2]);
     assert!(!filled.shares_allocation_with(&prototype));
     let gathered = block_on(provider.download_numeric(&filled)).unwrap();
@@ -72,7 +73,10 @@ fn actual_wgpu_typed_zeros_and_logical_fill_preserve_producer_facts() {
             })
             .unwrap();
         for shape in [vec![2, 1, 3], vec![usize::MAX, usize::MAX, 0]] {
-            let output = provider.zeros_like(&input, &shape).unwrap();
+            let output = provider
+                .zeros_like(&input, &shape)
+                .unwrap()
+                .expect("admitted optional constructor");
             assert_eq!(output.shape(), shape);
             assert_eq!(
                 output.physical().element_type(),
@@ -98,13 +102,19 @@ fn actual_wgpu_typed_zeros_and_logical_fill_preserve_producer_facts() {
         }
     }
     for value in [false, true] {
-        let input = provider.logical_fill(&[1, 3], value).unwrap();
+        let input = provider
+            .logical_fill(&[1, 3], value)
+            .unwrap()
+            .expect("admitted optional constructor");
         assert!(input.view().is_logical());
         assert_eq!(
             block_on(provider.download(&input)).unwrap().data,
             vec![if value { 1.0 } else { 0.0 }; 3]
         );
-        let output = provider.zeros_like(&input, &[2, 2]).unwrap();
+        let output = provider
+            .zeros_like(&input, &[2, 2])
+            .unwrap()
+            .expect("admitted optional constructor");
         assert!(output.view().is_logical());
         assert_eq!(
             block_on(provider.download(&output)).unwrap().data,
@@ -112,7 +122,8 @@ fn actual_wgpu_typed_zeros_and_logical_fill_preserve_producer_facts() {
         );
         let empty = provider
             .logical_fill(&[usize::MAX, usize::MAX, 0], value)
-            .unwrap();
+            .unwrap()
+            .expect("admitted optional constructor");
         assert!(empty.view().is_logical());
         assert_eq!(
             block_on(provider.download(&empty)).unwrap().data,
@@ -139,7 +150,10 @@ fn actual_wgpu_f64_zero_prototype_preserves_complex_storage() {
             storage: GpuTensorStorage::ComplexInterleaved,
         })
         .unwrap();
-    let output = provider.zeros_like(&input, &[3, 1]).unwrap();
+    let output = provider
+        .zeros_like(&input, &[3, 1])
+        .unwrap()
+        .expect("admitted optional constructor");
     assert_eq!(
         output.physical().element_type(),
         runmat_accelerate_api::NumericElementType::F64

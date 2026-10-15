@@ -2355,11 +2355,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         }
     }
 
-    /// Allocate a one-initialised tensor with the provided shape on the device.
-    fn ones(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "ones not supported by provider",
-        ))
+    /// Optional constructor. None certifies no attempt before any provider
+    /// effects; every Err retains its cause and is terminal, never a miss.
+    fn ones(&self, _shape: &[usize]) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
 
     /// Allocate zeros with the requested shape and the prototype's exact class/storage.
@@ -2368,13 +2367,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _prototype: &GpuTensorHandle,
         _shape: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation("zeros_like"))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
 
     /// Allocate a constant logical tensor through the provider's logical producer authority.
-    fn logical_fill(&self, _shape: &[usize], _value: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation("logical_fill"))
+    fn logical_fill(
+        &self,
+        _shape: &[usize],
+        _value: bool,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
 
     /// Allocate an exact native-integer zero buffer using the element class of
@@ -2390,32 +2393,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
         ))
     }
 
-    /// Allocate a tensor filled with a constant value on the device.
-    fn fill(&self, shape: &[usize], value: f64) -> anyhow::Result<GpuTensorHandle> {
-        if value == 0.0 {
-            return self.zeros(shape);
-        }
-        match self.zeros(shape) {
-            Ok(base) => match self.scalar_add(&base, value) {
-                Ok(output) => return Ok(output),
-                Err(error) if is_unsupported_provider_operation(&error) => {}
-                Err(error) => return Err(error),
-            },
-            Err(error) if is_unsupported_provider_operation(&error) => {}
-            Err(error) => return Err(error),
-        }
-        let len = if shape.contains(&0) {
-            0
-        } else {
-            shape
-                .iter()
-                .try_fold(1usize, |n, dim| n.checked_mul(*dim))
-                .ok_or_else(|| anyhow::anyhow!("fill: shape overflow"))?
-        };
-        self.upload(&HostTensorView {
-            data: &vec![value; len],
-            shape,
-        })
+    /// Optional constant constructor, with the same pure-None contract as ones.
+    /// A provider owns its concrete algorithm; the default does not try raw
+    /// zeros/scalar_add and cannot infer no attempt from their errors.
+    fn fill(
+        &self,
+        _shape: &[usize],
+        _value: f64,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
 
     /// Allocate a tensor filled with a constant value, matching a prototype's residency.
@@ -2423,19 +2409,21 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         prototype: &GpuTensorHandle,
         value: f64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        if value == 0.0 {
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Positive zero has an exact typed constructor. Negative zero is not
+        // a zero-buffer identity: leave its sign-preserving adaptation to an
+        // actual implementation or the caller's certified-absence fallback.
+        if value.to_bits() == 0.0f64.to_bits() {
             return self.zeros_like(prototype, prototype.shape());
         }
-        // Generic scalar arithmetic does not prove preservation of every
-        // prototype class (notably logical, integer and non-native floats).
-        Err(unsupported_provider_operation(
-            "nonzero class-preserving fill_like requires provider support",
-        ))
+        Ok(None)
     }
 
     /// Allocate a one-initialised tensor matching the prototype tensor.
-    fn ones_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn ones_like(
+        &self,
+        prototype: &GpuTensorHandle,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
         self.fill_like(prototype, 1.0)
     }
 
@@ -5745,6 +5733,7 @@ mod tests {
     fn generic_fill_preserves_operational_failure_without_upload_retry() {
         struct FailedFill {
             fail_allocation: bool,
+            unsupported_after_allocation: bool,
         }
         impl AccelProvider for FailedFill {
             fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -5768,20 +5757,52 @@ mod tests {
                 ))
             }
             fn scalar_add(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+                if self.unsupported_after_allocation {
+                    return Err(unsupported_provider_operation(
+                        "legacy add refused after allocation",
+                    ));
+                }
                 Err(std::io::Error::other("execution failed").into())
             }
+            fn fill(
+                &self,
+                shape: &[usize],
+                value: f64,
+            ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+                let base = self.zeros(shape).map_err(|source| {
+                    ProviderExecutionError::from(source).with_unproven_effects()
+                })?;
+                self.scalar_add(&base, value)
+                    .map(Some)
+                    .map_err(|source| ProviderExecutionError::from(source).after_effect())
+            }
         }
-        for fail_allocation in [true, false] {
-            let error = FailedFill { fail_allocation }
-                .fill(&[1, 2], 3.0)
-                .unwrap_err();
-            assert!(error.downcast_ref::<std::io::Error>().is_some());
-            assert!(!is_unsupported_provider_operation(&error));
+        for (fail_allocation, unsupported_after_allocation) in
+            [(true, false), (false, false), (false, true)]
+        {
+            let error = FailedFill {
+                fail_allocation,
+                unsupported_after_allocation,
+            }
+            .fill(&[1, 2], 3.0)
+            .unwrap_err();
+            assert!(!error.is_unsupported());
+            assert_eq!(error.is_after_effect(), !fail_allocation);
+            let mut source: &(dyn std::error::Error + 'static) = &error;
+            while !(source.is::<std::io::Error>() || source.is::<UnsupportedProviderOperation>()) {
+                source = source
+                    .source()
+                    .expect("exact legacy constructor cause retained");
+            }
+            assert_eq!(
+                source.is::<UnsupportedProviderOperation>(),
+                unsupported_after_allocation
+            );
         }
     }
 
     #[test]
-    fn typed_constant_constructors_default_to_explicit_unsupported() {
+    fn optional_constant_constructors_default_to_no_attempt() {
         let provider = DefaultNumericAdapterProvider;
         let prototype = crate::test_support::handle(
             404,
@@ -5789,21 +5810,66 @@ mod tests {
             NumericElementType::F32,
             GpuTensorStorage::Real,
         );
-        assert!(is_unsupported_provider_operation(
-            &provider.zeros_like(&prototype, &[2, 3]).unwrap_err()
-        ));
-        assert!(is_unsupported_provider_operation(
-            &provider.logical_fill(&[2, 3], true).unwrap_err()
-        ));
-        assert!(is_unsupported_provider_operation(
-            &provider.fill_like(&prototype, 2.0).unwrap_err()
-        ));
-        assert!(is_unsupported_provider_operation(
-            &provider.ones_like(&prototype).unwrap_err()
-        ));
-        assert!(is_unsupported_provider_operation(
-            &provider.ones(&[2, 3]).unwrap_err()
-        ));
+        for result in [
+            provider.zeros_like(&prototype, &[2, 3]),
+            provider.logical_fill(&[2, 3], true),
+            provider.fill_like(&prototype, 2.0),
+            provider.ones_like(&prototype),
+            provider.ones(&[2, 3]),
+            provider.fill(&[2, 3], f64::NAN),
+        ] {
+            assert!(result.unwrap().is_none());
+        }
+        struct ZeroOnly {
+            owner: crate::test_support::TestAllocationOwner,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        impl AccelProvider for ZeroOnly {
+            fn device_id(&self) -> u32 {
+                self.owner.device_id()
+            }
+            fn device_info(&self) -> String {
+                "typed zero-only constructor".into()
+            }
+            fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                panic!("typed zero delegation must not upload")
+            }
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                panic!("typed zero delegation must not download")
+            }
+            fn zeros_like(
+                &self,
+                _: &GpuTensorHandle,
+                shape: &[usize],
+            ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.owner
+                    .allocate_zeroed(
+                        shape.to_vec(),
+                        NumericElementType::F32,
+                        GpuTensorStorage::Real,
+                    )
+                    .map(|output| Some(output.handle))
+                    .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+            }
+        }
+        let provider = ZeroOnly {
+            owner: crate::test_support::TestAllocationOwner::new(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let input = provider
+            .owner
+            .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let output = provider.fill_like(&input.handle, 0.0).unwrap().unwrap();
+        assert_eq!(output.shape(), input.handle.shape());
+        assert_eq!(output.physical().element_type(), NumericElementType::F32);
+        assert!(!output.shares_allocation_with(&input.handle));
+        assert!(provider.fill_like(&input.handle, -0.0).unwrap().is_none());
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(input.probe.retirements(), 0);
+        // The defaults above still establish pure absence for every hook.
+        let provider = DefaultNumericAdapterProvider;
         assert!(provider.flip(&prototype, &[0]).unwrap().is_none());
         assert!(resolve_ready(provider.reduce_mean(&prototype))
             .unwrap()

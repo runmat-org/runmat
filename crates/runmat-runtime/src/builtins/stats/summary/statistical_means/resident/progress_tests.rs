@@ -197,9 +197,18 @@ impl AccelProvider for Provider {
         self.real(input.shape()).map_err(Into::into)
     }
 
-    fn zeros_like(&self, _: &GpuTensorHandle, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.real(shape)
+    fn zeros_like(
+        &self,
+        _: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.real(shape)
+        };
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 
     fn elem_ge<'a>(

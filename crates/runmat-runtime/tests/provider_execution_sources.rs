@@ -123,8 +123,15 @@ impl AccelProvider for Provider {
     fn scalar_max(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.fail()
     }
-    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.fail()
+    fn fill_like(
+        &self,
+        _: &GpuTensorHandle,
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.fail();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn unary_cos<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.fail() })
@@ -289,8 +296,15 @@ impl AccelProvider for UnsupportedExtrema {
     fn scalar_max(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.reject()
     }
-    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.reject()
+    fn fill_like(
+        &self,
+        _: &GpuTensorHandle,
+        _: f64,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<GpuTensorHandle> = self.reject();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 

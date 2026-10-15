@@ -8,6 +8,9 @@ use runmat_accelerate_api::{
     HostNumericTensorOwned, NumericElementType,
 };
 use runmat_value::Value;
+#[path = "resident_constant/floating.rs"]
+mod floating;
+pub(super) use floating::floating_constant;
 
 #[derive(Clone, Copy)]
 pub(super) enum Constant {
@@ -38,6 +41,19 @@ fn count(shape: &[usize]) -> BuiltinResult<usize> {
         .ok_or_else(|| "constant constructor: dimensions overflow".into())
 }
 
+fn provider_failure(
+    name: &str,
+    detail: &str,
+    cause: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        build_runtime_error(format!("{name}: {detail}: {cause}"))
+            .with_builtin(name)
+            .build(),
+        cause.with_unproven_effects(),
+    )
+}
+
 pub(super) fn logical(
     provider: &'static dyn AccelProvider,
     shape: &[usize],
@@ -47,8 +63,8 @@ pub(super) fn logical(
 ) -> BuiltinResult<GpuTensorHandle> {
     let len = count(shape)?;
     let output = match provider.logical_fill(shape, one) {
-        Ok(output) => output,
-        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+        Ok(Some(output)) => output,
+        Ok(None) => {
             let data = vec![u8::from(one); len];
             runmat_accelerate_api::upload_logical_protecting(
                 provider,
@@ -62,14 +78,7 @@ pub(super) fn logical(
                     .build()
             })?
         }
-        Err(cause) => {
-            return Err(
-                build_runtime_error(format!("{name}: logical allocation failed: {cause}"))
-                    .with_builtin(name)
-                    .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-                    .build(),
-            )
-        }
+        Err(cause) => return Err(provider_failure(name, "logical allocation failed", cause)),
     };
     validate_constructor_gpu_output_protecting(
         name,
@@ -116,29 +125,17 @@ pub(super) fn like(
             Constant::One => None,
         };
         let direct = match attempt {
-            Some(Ok(output)) => Some(output),
-            Some(Err(cause))
-                if runmat_accelerate_api::is_unsupported_provider_operation(&cause) =>
-            {
+            Some(Ok(Some(output))) => Some(output),
+            Some(Ok(None)) => {
                 if constant.bit()
                     && storage == GpuTensorStorage::Real
                     && integer.is_none()
                     && precision == Some(provider.precision())
                 {
                     match provider.fill(shape, 1.0) {
-                        Ok(output) => Some(output),
-                        Err(cause)
-                            if runmat_accelerate_api::is_unsupported_provider_operation(&cause) =>
-                        {
-                            None
-                        }
+                        Ok(output) => output,
                         Err(cause) => {
-                            return Err(build_runtime_error(format!(
-                                "{name}: provider fill failed: {cause}"
-                            ))
-                            .with_builtin(name)
-                            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-                            .build())
+                            return Err(provider_failure(name, "provider fill failed", cause))
                         }
                     }
                 } else {
@@ -146,12 +143,7 @@ pub(super) fn like(
                 }
             }
             Some(Err(cause)) => {
-                return Err(build_runtime_error(format!(
-                    "{name}: provider allocation failed: {cause}"
-                ))
-                .with_builtin(name)
-                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-                .build())
+                return Err(provider_failure(name, "provider allocation failed", cause))
             }
             None => None,
         };
