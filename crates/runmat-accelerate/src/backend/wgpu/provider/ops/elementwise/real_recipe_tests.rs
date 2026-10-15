@@ -315,7 +315,10 @@ async fn native_class_mul_max_share_ordinary_scalar_physical_execution() {
                 Operation::ScalarMax { .. } => Operation::ScalarMax {
                     control: ScalarLiteral::F64Bits(3.0_f64.to_bits()),
                 },
-                Operation::ScalarAdd { .. } | Operation::Sqrt | Operation::FloatingCast { .. } => {
+                Operation::ScalarAdd { .. }
+                | Operation::Sqrt
+                | Operation::FloatingCast { .. }
+                | Operation::ExactSingleBasePower { .. } => {
                     unreachable!("test scalar case")
                 }
             },

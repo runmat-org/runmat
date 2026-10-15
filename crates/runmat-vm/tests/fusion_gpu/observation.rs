@@ -1,6 +1,42 @@
 //! Production-runner placement observation witnesses using the deterministic provider.
 use super::*;
 
+fn capturing_fusion_placement(
+    session: Rc<runmat_accelerate::placement::PlacementSession>,
+) -> Rc<typed_reduction_placement::CapturingPlacement> {
+    Rc::new(typed_reduction_placement::CapturingPlacement {
+        session,
+        reduction_selection: Default::default(),
+        delivered: Default::default(),
+        invalidate_selected_provider: Default::default(),
+        revoked_before_publication: Default::default(),
+    })
+}
+
+fn assert_one_cpu_full_call(capture: &typed_reduction_placement::CapturingPlacement) {
+    let feedback = capture.delivered.lock().unwrap();
+    let cpu = feedback
+        .iter()
+        .filter(|feedback| feedback.candidate == "cpu.shared.fusion.elementwise")
+        .collect::<Vec<_>>();
+    assert_eq!(cpu.len(), 1, "one exact completed CPU FullCall receipt");
+    assert!(cpu[0].succeeded);
+    assert!(cpu[0].total_elapsed_ns > 0);
+    assert!(matches!(
+        cpu[0].signature.revision.authority,
+        runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+    ));
+    assert!(
+        capture
+            .session
+            .profile_snapshot()
+            .feedback
+            .iter()
+            .all(|series| series.signature != cpu[0].signature),
+        "session-only FullCall identity must not be profile exported"
+    );
+}
+
 fn fusion_test_runtime(
     placement: Rc<runmat_accelerate::placement::PlacementSession>,
 ) -> runmat_runtime::context::RuntimeContext {
@@ -256,12 +292,12 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
             "#,
         );
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let capture = capturing_fusion_placement(placement.clone());
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ))
         .with_service_ports(
-            runmat_runtime::context::RuntimeServicePorts::default()
-                .with_placement(placement.clone()),
+            runmat_runtime::context::RuntimeServicePorts::default().with_placement(capture.clone()),
         );
         let mut vars = vec![Value::Num(0.0); bytecode.var_count];
         block_on(runmat_vm::interpret_with_vars_in_context(
@@ -269,14 +305,7 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
         ))
         .expect("shared-runtime selection");
         assert_fusion_numeric_output(&bytecode, &vars, &[0.25, 0.5]);
-        let profile = placement.profile_snapshot();
-        let cpu = profile
-            .feedback
-            .iter()
-            .find(|series| series.candidate == "cpu.shared.fusion.elementwise")
-            .expect("completed CPU-region feedback");
-        assert_eq!(cpu.samples, 1);
-        assert_eq!(cpu.failures, 0);
+        assert_one_cpu_full_call(&capture);
 
         let report = runmat_accelerate::placement_report();
         let cpu_traces = report
@@ -318,6 +347,66 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
                 )
             }));
         }
+    });
+}
+
+#[test]
+fn compiled_general_private_chain_completes_on_shared_cpu_with_one_receipt() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        runmat_accelerate::placement::reset();
+        let bytecode = compile_semantic("x = [0.25, 0.5]; y = exp(-x).*sin(4*x)+tanh(x).*tanh(x);");
+        let (_, groups) = bytecode
+            .reconciled_runtime_fusion_graph()
+            .expect("checked private chain");
+        assert_eq!(groups.iter().filter(|group| group.kind == FusionKind::ElementwiseChain && group.nodes.len() >= 8).count(), 1);
+        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let capture = capturing_fusion_placement(placement.clone());
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default().with_placement(capture.clone()),
+        );
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
+            runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone()),
+        )
+        .expect("ordinary VM shared CPU general chain");
+        let Value::Tensor(output) = &completion.values[fusion_var_index(&bytecode, "y")] else {
+            panic!("shared CPU output must remain a host tensor");
+        };
+        assert_eq!(output.shape(), [1, 2]);
+        for (actual, x) in output.materialize_f64().iter().zip([0.25f64, 0.5]) {
+            let expected = (-x).exp() * (4.0 * x).sin() + x.tanh() * x.tanh();
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        block_on(runtime.scope(async {}));
+        assert_one_cpu_full_call(&capture);
+        let report = runmat_accelerate::placement_report();
+        let traces = report
+            .traces
+            .iter()
+            .filter(|trace| trace.operation == "fusion.elementwise")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            traces.len(),
+            1,
+            "one completed chain, not singleton fallback execution"
+        );
+        let trace = traces[0];
+        assert!(trace.events.iter().any(|event| event.kind
+            == runmat_accelerate::placement::PlacementEventKind::Complete
+            && event.variant
+                == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+            && event.duration_ns.is_some()));
+        assert!(!trace.events.iter().any(|event| matches!(
+            event.kind,
+            runmat_accelerate::placement::PlacementEventKind::Fallback
+                | runmat_accelerate::placement::PlacementEventKind::Upload
+                | runmat_accelerate::placement::PlacementEventKind::Queue
+        )));
     });
 }
 
@@ -392,9 +481,22 @@ struct CancelOnCpuFusionSelection {
     placement: Rc<runmat_accelerate::placement::PlacementSession>,
     cancellation: runmat_execution::cancellation::CancellationSource,
     selected: std::cell::Cell<bool>,
+    vm_full_call: bool,
+    observed: std::cell::RefCell<Vec<runmat_execution::PlacementFeedback>>,
 }
 
 impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelection {
+    fn whole_work_vm_fusion_region_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        region: runmat_runtime::context::VmFusionRegionRegistration,
+        liveness: std::sync::Weak<()>,
+    ) -> Option<runmat_runtime::context::VmFusionSessionRegistration> {
+        if !self.vm_full_call {
+            return None;
+        }
+        runmat_runtime::context::RuntimePlacementService::whole_work_vm_fusion_region_session_revision(self.placement.as_ref(), program, region, liveness)
+    }
     fn plan(
         &self,
         request: runmat_execution::PlacementPlanRequest,
@@ -419,6 +521,9 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
                     && selection.candidate == "cpu.shared.fusion.elementwise"
             })
         {
+            if self.vm_full_call {
+                assert!(matches!(decision.signature.revision.authority, runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)), "cancel the actual installed FullCall route");
+            }
             self.selected.set(true);
             self.cancellation
                 .cancel(runmat_execution::CancellationReason::User);
@@ -427,6 +532,7 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
     }
 
     fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError> {
+        self.observed.borrow_mut().push(feedback.clone());
         runmat_runtime::context::RuntimePlacementService::observe(self.placement.as_ref(), feedback)
     }
 
@@ -440,15 +546,21 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
 
 #[test]
 fn fusion_cpu_region_cancellation_records_failure_not_completion() {
-    cancellation_after_cpu_fusion_selection(false);
+    cancellation_after_cpu_fusion_selection(false, false);
 }
 
 #[test]
 fn rejected_provider_cpu_region_cancellation_records_failure_not_completion() {
-    cancellation_after_cpu_fusion_selection(true);
+    cancellation_after_cpu_fusion_selection(true, false);
 }
 
-fn cancellation_after_cpu_fusion_selection(reject_provider: bool) {
+#[test]
+fn installed_full_call_cpu_cancellation_retires_without_positive_receipt() {
+    cancellation_after_cpu_fusion_selection(false, true);
+    cancellation_after_cpu_fusion_selection(true, true);
+}
+
+fn cancellation_after_cpu_fusion_selection(reject_provider: bool, vm_full_call: bool) {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
@@ -470,6 +582,8 @@ fn cancellation_after_cpu_fusion_selection(reject_provider: bool) {
             placement: placement.clone(),
             cancellation: cancellation.clone(),
             selected: std::cell::Cell::new(false),
+            vm_full_call,
+            observed: Default::default(),
         });
         let runtime = runmat_runtime::context::RuntimeContext::with_cancellation(
             Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
@@ -488,7 +602,15 @@ fn cancellation_after_cpu_fusion_selection(reject_provider: bool) {
             "real planner must select CPU fusion"
         );
         assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
-        assert_cpu_region_failed_without_success(&placement);
+        if vm_full_call {
+            assert!(
+                service.observed.borrow().is_empty(),
+                "unfinished VM FullCall must not manufacture a receipt"
+            );
+            assert!(placement.profile_snapshot().feedback.is_empty());
+        } else {
+            assert_cpu_region_failed_without_success(&placement);
+        }
         assert_cpu_fusion_was_selected_without_completion(if reject_provider {
             "provider_operation_unsupported"
         } else {

@@ -11,6 +11,10 @@ mod numeric_upload_error_tests;
 #[path = "trait_impl/validated_fusion_tests.rs"]
 mod validated_fusion_tests;
 
+#[path = "trait_impl/fusion_observation.rs"]
+mod fusion_observation;
+use fusion_observation::ElementwiseKernelObservation;
+
 fn numeric_upload_failure(
     error: anyhow::Error,
     buffer_created: bool,
@@ -3046,17 +3050,24 @@ impl AccelProvider for WgpuProvider {
                     super::pipeline_recipe::FusionPipelineLayout::Single,
                 )
                 .await?;
-            self.fused_elementwise_validated_with_telemetry_exec(
-                shader,
-                inputs,
-                output_shape,
-                len,
-                &frame,
-                &validated,
-            )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
+            let observed = ElementwiseKernelObservation::begin(len);
+            let output = self
+                .fused_elementwise_validated_with_telemetry_exec(
+                    shader,
+                    inputs,
+                    output_shape,
+                    len,
+                    &frame,
+                    &validated,
+                )
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            if let Some(observed) = observed {
+                observed.submitted(self.device_id_exec());
+            }
+            Ok(output)
         })
     }
 
@@ -3081,12 +3092,19 @@ impl AccelProvider for WgpuProvider {
                     super::pipeline_recipe::FusionPipelineLayout::Multiple(output_classes.len()),
                 )
                 .await?;
-            self.fused_elementwise_multi_validated_with_telemetry_exec(
-                shader, inputs, &frame, &validated,
-            )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
+            let observed = ElementwiseKernelObservation::begin(len);
+            let outputs = self
+                .fused_elementwise_multi_validated_with_telemetry_exec(
+                    shader, inputs, &frame, &validated,
+                )
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            if let Some(observed) = observed {
+                observed.submitted(self.device_id_exec());
+            }
+            Ok(outputs)
         })
     }
 

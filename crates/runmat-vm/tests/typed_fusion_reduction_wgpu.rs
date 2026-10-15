@@ -26,6 +26,23 @@ use typed_reduction_graph::{
 };
 use typed_reduction_placement::CapturingPlacement;
 
+#[path = "support/typed_elementwise_call.rs"]
+mod typed_elementwise_call;
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; unavailable hardware fails when explicitly run"]
+fn actual_vm_general_chain_and_decoded_function_complete_with_receipts() {
+    runmat_gc::gc_test_context(|| {
+        register_wgpu_provider(WgpuProviderOptions::default())
+            .expect("actual WGPU adapter required");
+        for decoded_function in [false, true] {
+            block_on(typed_elementwise_call::assert_general_chain_full_call(
+                decoded_function,
+            ));
+        }
+    });
+}
+
 fn assert_actual_folded_full_call(bytecode: &runmat_vm::Bytecode, expected: &[f64]) {
     assert_actual_folded_full_call_shape(bytecode, &[1, 128], expected);
 }

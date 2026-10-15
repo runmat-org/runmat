@@ -102,19 +102,12 @@ impl<'a> ExactResultGuard<'a> {
         self.owned[1] = Some(output);
     }
     fn fail(mut self, primary: PowerServiceError) -> PowerServiceError {
-        exact_failure(
-            primary,
-            std::mem::replace(&mut self.owned, [None, None]),
-            self.borrowed,
-        )
+        exact_failure(primary, std::mem::take(&mut self.owned), self.borrowed)
     }
     fn transfer(mut self) -> Result<GpuTensorHandle, PowerServiceError> {
         let current = usize::from(self.owned[1].is_some());
         let output = self.owned[current].take().expect("owned POWER output");
-        let cleanup = retire_exact(
-            std::mem::replace(&mut self.owned, [None, None]),
-            self.borrowed,
-        );
+        let cleanup = retire_exact(std::mem::take(&mut self.owned), self.borrowed);
         if cleanup.is_empty() {
             Ok(output)
         } else {
@@ -133,10 +126,7 @@ impl Drop for ExactResultGuard<'_> {
     fn drop(&mut self) {
         // No await follows acquisition of this guard; ordinary errors drain
         // it explicitly above. Unwind still relinquishes only owned leases.
-        let _ = retire_exact(
-            std::mem::replace(&mut self.owned, [None, None]),
-            self.borrowed,
-        );
+        let _ = retire_exact(std::mem::take(&mut self.owned), self.borrowed);
     }
 }
 

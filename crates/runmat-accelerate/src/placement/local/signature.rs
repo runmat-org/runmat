@@ -294,6 +294,7 @@ mod tests {
                 outputs: vec![],
                 workload: ProviderWorkload {
                     real_power_mode: None,
+                    real_power_scalar: None,
                     preparation_route: None,
                     matmul: None,
                     typed_reduction: None,

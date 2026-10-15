@@ -192,6 +192,15 @@ pub(crate) fn plan_local(
     request: LocalPlacementRequest<'_>,
     policy: PlacementPolicy,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    plan_local_vm(provider, request, policy, None)
+}
+
+pub(crate) fn plan_local_vm(
+    provider: &dyn AccelProvider,
+    request: LocalPlacementRequest<'_>,
+    policy: PlacementPolicy,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let LocalPlacementRequest {
         operation,
         semantic_identity,
@@ -220,7 +229,7 @@ pub(crate) fn plan_local(
             semantic_identity,
             observation_contract,
             prepared_authority,
-            vm_right: None,
+            vm_right,
             family,
             cpu,
             cpu_admission: multi::LocalCpuAdmission::Legacy,

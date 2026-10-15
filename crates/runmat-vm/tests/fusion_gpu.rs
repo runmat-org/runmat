@@ -3,6 +3,9 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+#[path = "support/typed_reduction_placement.rs"]
+mod typed_reduction_placement;
+
 #[path = "fusion_gpu/persistent.rs"]
 mod persistent;
 

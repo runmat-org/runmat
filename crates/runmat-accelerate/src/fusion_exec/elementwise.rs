@@ -15,7 +15,8 @@ mod effect_tests;
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
-) -> ExecutionResult<FusionExecutionOutcome<HashMap<ValueId, Value>>> {
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
     let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -201,7 +202,7 @@ async fn execute_elementwise_outputs(
         serde_json::to_vec(&(program.cache_identity()?, &shader, scalar_work_units))
             .map_err(anyhow::Error::from)?,
     );
-    let selection = select_fusion_provider_with_contract(
+    let selection = select_fusion_provider_with_contract_vm(
         request,
         &bindings,
         provider,
@@ -215,6 +216,7 @@ async fn execute_elementwise_outputs(
             ),
             shader_requirements: Some(shader_requirements),
         },
+        vm_right,
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
@@ -498,8 +500,7 @@ async fn execute_elementwise_outputs(
         timer.mark("cleanup");
         timer.finish();
 
-        selection.submitted();
-        Ok(FusionExecutionOutcome::Executed(outputs))
+        Ok(FusionExecutionOutcome::Executed((outputs, selection)))
         }
         .await;
         result.map_err(|error| effects.classify(error))
@@ -539,6 +540,29 @@ pub async fn execute_elementwise(
 pub async fn execute_elementwise_placed(
     request: FusionExecutionRequest<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseExecutionResult>> {
+    Ok(
+        match execute_elementwise_placed_inner(request, None).await? {
+            FusionExecutionOutcome::Executed(output) => {
+                FusionExecutionOutcome::Executed(output.result)
+            }
+            FusionExecutionOutcome::SharedRuntime(observation) => {
+                FusionExecutionOutcome::SharedRuntime(observation)
+            }
+        },
+    )
+}
+
+pub async fn execute_elementwise_placed_vm(
+    request: FusionExecutionRequest<'_>,
+    right: runmat_runtime::context::VmFusionCompletionRight,
+) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
+    execute_elementwise_placed_inner(request, Some(right)).await
+}
+
+async fn execute_elementwise_placed_inner(
+    request: FusionExecutionRequest<'_>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
     let final_output = request
         .plan
         .output
@@ -549,12 +573,24 @@ pub async fn execute_elementwise_placed(
             output_ids.push(store.value_id);
         }
     }
-    let mut outputs = match execute_elementwise_outputs(&request, &output_ids).await? {
-        FusionExecutionOutcome::Executed(outputs) => outputs,
-        FusionExecutionOutcome::SharedRuntime(observation) => {
-            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
-        }
-    };
+    let (mut outputs, selection) =
+        match execute_elementwise_outputs(&request, &output_ids, right.as_ref()).await? {
+            FusionExecutionOutcome::Executed(outputs) => outputs,
+            FusionExecutionOutcome::SharedRuntime(observation) => {
+                let observation = if let Some(right) = right {
+                    let bindings = AdmittedBindings::new(&request)
+                        .and_then(|bindings| bindings.canonical_bindings(request.runtime.as_ref()));
+                    observation.with_vm_host_route(
+                        right,
+                        request.runtime.as_ref(),
+                        bindings.as_deref(),
+                    )
+                } else {
+                    observation
+                };
+                return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+            }
+        };
     let final_value = outputs
         .remove(&final_output)
         .ok_or_else(|| anyhow!("fusion: final output materialization missing"))?;
@@ -577,10 +613,19 @@ pub async fn execute_elementwise_placed(
                 .ok_or_else(|| anyhow!("fusion store output materialization missing"))
         })
         .collect::<Result<Vec<_>>>()?;
+    let completion = if let Some(right) = right {
+        selection.into_vm_completion(right)
+    } else {
+        selection.submitted();
+        None
+    };
     Ok(FusionExecutionOutcome::Executed(
-        ElementwiseExecutionResult {
-            final_value,
-            materialized_stores,
+        ElementwiseVmExecutionResult {
+            result: ElementwiseExecutionResult {
+                final_value,
+                materialized_stores,
+            },
+            completion,
         },
     ))
 }

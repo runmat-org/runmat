@@ -36,6 +36,20 @@ use typed_reduction_placement::CapturingPlacement;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
+#[path = "support/typed_elementwise_call.rs"]
+mod typed_elementwise_call;
+
+#[wasm_bindgen_test::wasm_bindgen_test(async)]
+async fn browser_general_chain_and_decoded_function_complete_with_receipts() {
+    runmat_runtime::builtins::wasm_registry::register_all();
+    register_wgpu_provider_async(WgpuProviderOptions::default())
+        .await
+        .expect("actual browser WebGPU adapter required");
+    for decoded_function in [false, true] {
+        typed_elementwise_call::assert_general_chain_full_call(decoded_function).await;
+    }
+}
+
 struct BrowserCase {
     source: &'static str,
     function: Option<&'static str>,

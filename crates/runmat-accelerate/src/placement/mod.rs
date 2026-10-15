@@ -62,7 +62,7 @@ pub(crate) use provider_cost::wgpu_cost_estimate_with_geometry;
 pub use fusion::fusion_operation_token;
 pub(crate) use fusion::{FusionLeafIndexWork, FusionPlacementObserver};
 pub(crate) use local::{
-    plan_local, plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest,
+    plan_local, plan_local_multi, plan_local_vm, LocalCpuAdmission, LocalMultiPlacementRequest,
     LocalPhysicalCandidate, LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest,
     TotalCandidateObservationContract,
 };

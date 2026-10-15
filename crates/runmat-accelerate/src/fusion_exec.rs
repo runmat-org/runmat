@@ -7,7 +7,7 @@ use crate::fusion::{
 use crate::fusion_residency;
 use crate::graph::{ShapeInfo, ValueId};
 use crate::placement::{
-    dense_output_representation, fusion_operation_token, plan_local, FusionPlacementObserver,
+    dense_output_representation, fusion_operation_token, FusionPlacementObserver,
     LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest, PlacementCorrelationId,
     PlacementPolicy, PlacementVariant,
 };
@@ -55,7 +55,9 @@ mod explained_output;
 mod image_stages;
 #[cfg(test)]
 mod ownership_tests;
-pub use elementwise::{execute_elementwise, execute_elementwise_placed};
+pub use elementwise::{
+    execute_elementwise, execute_elementwise_placed, execute_elementwise_placed_vm,
+};
 pub use observation::{FusionCpuObservation, FusionExecutionOutcome, FusionProviderCompletion};
 
 struct PreparedInput {
@@ -138,6 +140,11 @@ fn unbound_constant_values(plan: &FusionGroupPlan) -> impl Iterator<Item = &Valu
 pub struct ElementwiseExecutionResult {
     pub final_value: Value,
     pub materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
+}
+
+pub struct ElementwiseVmExecutionResult {
+    pub result: ElementwiseExecutionResult,
+    pub completion: Option<FusionProviderCompletion>,
 }
 
 #[inline]
@@ -330,6 +337,16 @@ fn select_fusion_provider_with_contract(
     provider: &dyn AccelProvider,
     contract: FusionProviderContract<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
+    select_fusion_provider_with_contract_vm(request, bindings, provider, contract, None)
+}
+
+fn select_fusion_provider_with_contract_vm(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    contract: FusionProviderContract<'_>,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
         outputs,
         semantic_identity,
@@ -454,13 +471,16 @@ fn select_fusion_provider_with_contract(
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };
-    match plan_local(
+    match crate::placement::plan_local_vm(
         provider,
         LocalPlacementRequest {
             operation,
             semantic_identity,
-            observation_contract:
-                crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup,
+            observation_contract: if vm_right.is_some() {
+                crate::placement::TotalCandidateObservationContract::FullCall
+            } else {
+                crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
+            },
             prepared_authority: None,
             family: ProviderOperationFamily::Fusion,
             provider_kind: ExecutionCandidateKind::ProviderFusion,
@@ -468,6 +488,7 @@ fn select_fusion_provider_with_contract(
             outputs,
             workload: ProviderWorkload {
                 real_power_mode: None,
+                real_power_scalar: None,
                 preparation_route: None,
                 matmul: matmul.as_ref().map(|contract| contract.workload.clone()),
                 typed_reduction: None,
@@ -504,6 +525,7 @@ fn select_fusion_provider_with_contract(
             runtime: request.runtime.as_ref(),
         },
         PlacementPolicy::default(),
+        vm_right,
     )
     .map_err(|error| ProviderExecutionError::from_source(*error))?
     {
@@ -527,14 +549,28 @@ fn select_fusion_provider_with_contract(
                 "complete_cost",
                 provider_cost.checked_total_ns(),
             );
-            Ok(FusionExecutionOutcome::Executed(
+            let mut ticket = if vm_right.is_some() {
+                FusionPlacementSelection::new_vm(
+                    observer,
+                    feedback.map(|feedback| *feedback),
+                    provider,
+                    provider_observation.then_some(provider_query.as_ref()),
+                )
+            } else {
                 FusionPlacementSelection::new(
                     observer,
                     feedback.map(|feedback| *feedback),
                     provider,
                     provider_observation.then_some(provider_query.as_ref()),
-                ),
-            ))
+                )
+            };
+            if vm_right.is_some() {
+                ticket.require_vm_provider_execution(
+                    provider.device_id(),
+                    provider_query.operation.clone(),
+                );
+            }
+            Ok(FusionExecutionOutcome::Executed(ticket))
         }
         LocalPlacementOutcome::Selected {
             cpu_cost, feedback, ..

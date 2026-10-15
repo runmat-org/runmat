@@ -293,24 +293,26 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 if !has_barrier {
                     let _consumed_fusion = crate::runtime::gc::ManagedRoots::new(&*stack)
                         .map_err(RuntimeError::new)?;
-                    let right = if plan.group.kind.is_reduction() {
-                        fusion_installation.as_ref().and_then(|installation| {
-                            fusion_plan.as_ref().and_then(|active| {
-                                installation.right_for(active, &plan, &context.runtime)
+                    let right =
+                        if plan.group.kind.is_reduction() || plan.group.kind.is_elementwise() {
+                            fusion_installation.as_ref().and_then(|installation| {
+                                fusion_plan.as_ref().and_then(|active| {
+                                    installation.right_for(active, &plan, &context.runtime)
+                                })
                             })
-                        })
-                    } else {
-                        None
-                    };
-                    let publication_pc = if plan.group.kind.is_reduction() {
-                        fusion_installation.as_ref().and_then(|installation| {
-                            fusion_plan
-                                .as_ref()
-                                .and_then(|active| installation.publication_pc_for(active, &plan))
-                        })
-                    } else {
-                        None
-                    };
+                        } else {
+                            None
+                        };
+                    let publication_pc =
+                        if plan.group.kind.is_reduction() || plan.group.kind.is_elementwise() {
+                            fusion_installation.as_ref().and_then(|installation| {
+                                fusion_plan.as_ref().and_then(|active| {
+                                    installation.publication_pc_for(active, &plan)
+                                })
+                            })
+                        } else {
+                            None
+                        };
                     let fusion_future = boxed_fusion_execution(
                         &plan,
                         graph,

@@ -25,6 +25,8 @@ use typed_reduction_placement::CapturingPlacement;
 mod cpu_placement;
 #[path = "publication_lifecycle_tests/cpu_publication_tests.rs"]
 mod cpu_publication_tests;
+#[path = "publication_lifecycle_tests/elementwise_publication_tests.rs"]
+mod elementwise_publication_tests;
 #[path = "publication_lifecycle_tests/graph.rs"]
 mod graph;
 
@@ -40,13 +42,17 @@ fn actual_provider_scope() -> runmat_accelerate_api::ThreadProviderGuard {
 }
 
 fn compile_source(source: &str) -> crate::bytecode::Bytecode {
+    let bytecode = compile_source_raw(source);
+    graph::assert_compiled_add_min(&bytecode);
+    bytecode
+}
+
+fn compile_source_raw(source: &str) -> crate::bytecode::Bytecode {
     let ast = runmat_parser::parse(source).expect("parse actual folded source");
     let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("HIR");
     let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("MIR");
-    let bytecode = crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
-        .expect("compile actual folded source");
-    graph::assert_compiled_add_min(&bytecode);
-    bytecode
+    crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+        .expect("compile actual folded source")
 }
 
 fn placement() -> (Rc<PlacementSession>, Rc<CapturingPlacement>) {

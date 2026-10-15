@@ -593,13 +593,38 @@ pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
-    match execute_elementwise_placed(request).await {
+    execute_fusion_elementwise_vm(request, stack_guard, None).await
+}
+
+async fn execute_fusion_elementwise_vm(
+    request: FusionExecutionRequest<'_>,
+    stack_guard: StackSliceGuard<'_>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    let execution = if let Some(right) = right {
+        runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right).await
+    } else {
+        execute_elementwise_placed(request)
+            .await
+            .map(|outcome| match outcome {
+                FusionExecutionOutcome::Executed(result) => FusionExecutionOutcome::Executed(
+                    runmat_accelerate::fusion_exec::ElementwiseVmExecutionResult {
+                        result,
+                        completion: None,
+                    },
+                ),
+                FusionExecutionOutcome::SharedRuntime(observation) => {
+                    FusionExecutionOutcome::SharedRuntime(observation)
+                }
+            })
+    };
+    match execution {
         Ok(FusionExecutionOutcome::Executed(result)) => {
             stack_guard.commit();
             Ok(FusionExecutionOutcome::Executed(FusionVmResult {
-                final_value: result.final_value,
-                ordered_stores: result.materialized_stores,
-                completion: None,
+                final_value: result.result.final_value,
+                ordered_stores: result.result.materialized_stores,
+                completion: result.completion,
             }))
         }
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
@@ -768,7 +793,7 @@ pub async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise(request, stack_guard).await
+        execute_fusion_elementwise_vm(request, stack_guard, right).await
     } else if plan.group.kind.is_reduction() {
         execute_fusion_reduction(plan, request, stack_guard, right).await
     } else {

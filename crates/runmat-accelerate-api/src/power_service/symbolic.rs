@@ -296,8 +296,7 @@ fn broadcast_u64(a: &[u64], b: &[u64]) -> Result<Vec<u64>, PowerServiceError> {
 }
 
 fn derive(
-    provider_precision: ProviderPrecision,
-    capability: ProviderCapabilitySnapshot,
+    provider: &dyn AccelProvider,
     resident: ProviderRepresentation,
     control: PowerScalarControl,
     resident_operand: RealPowerOperand,
@@ -305,6 +304,8 @@ fn derive(
     operation: ProviderOperationIdentity,
     exact_proposal: Option<crate::ProviderRealElementwisePhysicalProposal>,
 ) -> Result<Option<PowerSymbolicPlan>, PowerServiceError> {
+    let provider_precision = provider.precision();
+    let capability = provider.capability_snapshot();
     validate_scalar_shape(host_shape)?;
     if resident.residency != ProviderResidency::Device
         || resident.storage != ProviderStorage::DenseReal
@@ -466,8 +467,7 @@ pub fn plan_resident_scalar_power(
         .map_err(PowerServiceError)?
         .flatten();
     let Some(plan) = derive(
-        provider.precision(),
-        provider.capability_snapshot(),
+        provider,
         resident,
         control,
         resident_operand,
