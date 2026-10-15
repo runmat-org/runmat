@@ -4,8 +4,8 @@ use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::shape::value_numel;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
+pub use runmat_builtins::RESHAPE_DESCRIPTOR;
 use runmat_builtins::*;
-pub use runmat_builtins::{RESHAPE_DESCRIPTOR, RESHAPE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 

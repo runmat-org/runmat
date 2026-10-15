@@ -2,8 +2,8 @@
 
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
+pub use runmat_builtins::SQUEEZE_DESCRIPTOR;
 use runmat_builtins::*;
-pub use runmat_builtins::{SQUEEZE_DESCRIPTOR, SQUEEZE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 

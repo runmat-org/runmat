@@ -12,8 +12,8 @@ use crate::builtins::array::shape::permute::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
+pub use runmat_builtins::IPERMUTE_DESCRIPTOR;
 use runmat_builtins::*;
-pub use runmat_builtins::{IPERMUTE_DESCRIPTOR, IPERMUTE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -120,6 +120,7 @@ fn inverse_permutation(order: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use futures::executor::block_on;
+    use runmat_builtins::IPERMUTE_ERROR_INVALID_ORDER;
 
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ipermute_builtin(value, order))

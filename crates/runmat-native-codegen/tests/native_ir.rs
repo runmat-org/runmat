@@ -422,16 +422,40 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn relocatable_object_embeds_canonical_bounded_runtime_data() {
-    let assembly = lower(&function(vec![assignment(1)]));
+    let mut mir = function(vec![assignment(1)]);
+    mir.functions.get_mut(&FunctionId(0)).unwrap().source = ProgramSourceId(0);
+    let assembly = lower(&mir);
+    let native_ir = assembly.canonical_bytes().unwrap();
+    let text = "value = 1;";
+    let source_map = runmat_execution::ExecutableSourceMapV2::new(vec![
+        runmat_execution::ExecutableSourceRecordV2 {
+            source_id: ProgramSourceId(0),
+            owner_identity: "native-object-data-fixture".into(),
+            relative_path: "main.m".into(),
+            content_revision: Digest::sha256(text),
+            display_name: "main.m".into(),
+            text: text.into(),
+        },
+    ])
+    .unwrap();
+    let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
+        &assembly,
+        Digest::sha256(&native_ir),
+        None,
+        source_map,
+        runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+        Vec::new(),
+    )
+    .unwrap();
     let data = vec![
         NativeObjectData {
             symbol: "runmat_aot_program".into(),
-            bytes: b"program".to_vec(),
+            bytes: program.canonical_bytes().unwrap(),
             alignment: 1,
         },
         NativeObjectData {
             symbol: "runmat_aot_native_ir".into(),
-            bytes: b"native-ir".to_vec(),
+            bytes: native_ir,
             alignment: 8,
         },
         NativeObjectData {
@@ -1982,5 +2006,8 @@ fn frozen_native_ir_five_is_rejected_before_target_or_instruction_admission() {
     .unwrap_err();
     assert_eq!(error.code, "native.ir.schema_version");
     assert!(error.message.contains("version 5"));
-    assert!(error.message.contains("expected 6"));
+    assert!(error.message.contains(&format!(
+        "expected {}",
+        runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
+    )));
 }
