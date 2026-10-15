@@ -34,6 +34,13 @@ struct Provider {
     unpublished: Mutex<Vec<WeakAllocationLease>>,
 }
 impl Provider {
+    fn select(&'static self) -> ThreadProviderGuard {
+        // SAFETY: fixtures leak this facade and allocate a unique namespace;
+        // owner addressability must not depend on the ambient default provider.
+        unsafe { runmat_accelerate_api::register_device_provider(self) };
+        ThreadProviderGuard::set(Some(self))
+    }
+
     fn result(
         &self,
         input: &GpuTensorHandle,
@@ -175,7 +182,7 @@ fn structural_no_attempt_fallback_and_terminal_failures_preserve_borrowed_explic
                 permutations: AtomicUsize::new(0),
                 unpublished: Mutex::new(Vec::new()),
             }));
-            let _selected = ThreadProviderGuard::set(Some(provider));
+            let _selected = provider.select();
             let input = if mode == Mode::LazyAlias {
                 provider
                     .view_owner

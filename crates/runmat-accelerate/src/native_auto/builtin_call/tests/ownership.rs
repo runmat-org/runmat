@@ -111,13 +111,17 @@ impl AccelProvider for CounterProvider {
     }
 }
 fn provider(fail_on: Option<u64>) -> &'static CounterProvider {
-    Box::leak(Box::new(CounterProvider {
+    let provider = Box::leak(Box::new(CounterProvider {
         next: AtomicU64::new(1),
         fail_on,
         allocations: Mutex::new(vec![]),
         owner: TestAllocationOwner::new(),
         alias_on: Mutex::new(None),
-    }))
+    }));
+    // SAFETY: this leaked facade owns a fresh test allocation namespace and
+    // remains addressable for every retained borrowed handle in the fixture.
+    unsafe { runmat_accelerate_api::register_device_provider(provider) };
+    provider
 }
 
 #[test]

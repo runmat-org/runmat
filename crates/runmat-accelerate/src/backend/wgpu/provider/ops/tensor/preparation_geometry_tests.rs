@@ -5,6 +5,42 @@ use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumer
 #[ignore = "requires actual WGPU device; execute explicitly for lazy-view permutation"]
 fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatch() {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    // A buffer can retain a native class without this provider owning a
+    // qualified reduction kernel for it. Optional absence must be pre-effect.
+    let alternate = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: if provider.precision == NumericPrecision::F32 {
+                HostNumericDataView::F64(&[1.0, 2.0])
+            } else {
+                HostNumericDataView::F32(&[1.0, 2.0])
+            },
+            shape: &[2, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let before = provider.telemetry_snapshot();
+    assert!(
+        futures::executor::block_on(provider.reduce_mean(&alternate))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        futures::executor::block_on(provider.reduce_mean_dim(&alternate, 0))
+            .unwrap()
+            .is_none()
+    );
+    if provider.precision == NumericPrecision::F32 {
+        assert!(
+            futures::executor::block_on(provider.reduce_mean_nd(&alternate, &[0]))
+                .unwrap()
+                .is_none()
+        );
+    }
+    for axes in [&[][..], &[2][..]] {
+        assert!(futures::executor::block_on(provider.reduce_mean_nd(&alternate, axes)).is_err());
+    }
+    assert!(futures::executor::block_on(provider.reduce_mean_dim(&alternate, 2)).is_err());
+    assert_eq!(provider.telemetry_snapshot(), before);
     let shape = [u32::MAX as usize, u32::MAX as usize, 2, 0];
     let empty = provider
         .upload_numeric_exec(&HostNumericTensorView {

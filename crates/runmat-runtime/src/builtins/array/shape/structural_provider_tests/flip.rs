@@ -24,7 +24,7 @@ fn flip_and_completed_rotation_do_not_replay_errors_or_completed_permutations() 
                 permutations: AtomicUsize::new(0),
                 unpublished: Mutex::new(Vec::new()),
             }));
-            let _selected = ThreadProviderGuard::set(Some(provider));
+            let _selected = provider.select();
             let input = provider
                 .inner
                 .upload(&HostTensorView {
@@ -40,14 +40,18 @@ fn flip_and_completed_rotation_do_not_replay_errors_or_completed_permutations() 
                     &[Value::GpuTensor(input.clone())],
                 ))
             } else {
-                block_on(flip::flip_gpu_with("flip", input.clone(), &[1]))
+                block_on(flip::flip_gpu_with("flip", input.clone(), &[1])).and_then(|value| {
+                    crate::execution::RootedValue::new(value)
+                        .map_err(|cause| cause.into_runtime_error())
+                })
             };
             if matches!(mode, Mode::NoAttempt | Mode::CompletedFlipNone) {
-                let Value::GpuTensor(output) = result.unwrap() else {
+                let result = result.unwrap();
+                let Value::GpuTensor(output) = result.value() else {
                     panic!("resident result");
                 };
-                assert!(runmat_accelerate_api::handle_is_explicit(&output));
-                let host = block_on(provider.inner.download(&output)).unwrap();
+                assert!(runmat_accelerate_api::handle_is_explicit(output));
+                let host = block_on(provider.inner.download(output)).unwrap();
                 assert_eq!(
                     host.data,
                     if rotation {

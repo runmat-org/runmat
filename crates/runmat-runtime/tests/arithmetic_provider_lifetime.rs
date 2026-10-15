@@ -45,8 +45,26 @@ impl AccelProvider for Provider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        // Retain the real owner's native integer admission while replacing
-        // only execution with pending/failing lifetime-test stages below.
+        // This facade owns the deliberately pending native-integer division
+        // stage; the inner provider supplies storage, not that execution hook.
+        use runmat_accelerate_api::{ProviderElementType, ProviderLayout, ProviderStorage};
+        if query.operation
+            == runmat_accelerate_api::ProviderOperationIdentity::new(
+                runmat_builtins::RDIVIDE_CATALOG_ENTRY.identity.name,
+            )
+            && query.inputs.len() == 2
+            && query.outputs.len() == 1
+            && query.inputs.iter().chain(&query.outputs).all(|value| {
+                value.element_type == ProviderElementType::U64
+                    && value.storage == ProviderStorage::DenseReal
+                    && value.layout == ProviderLayout::ColumnMajorContiguous
+            })
+            && ((query.inputs[0].shape == [1, 2] && query.inputs[1].shape == [1, 1])
+                || (query.inputs[0].shape == [1, 1] && query.inputs[1].shape == [1, 2]))
+            && query.outputs[0].shape == [1, 2]
+        {
+            return runmat_accelerate_api::ProviderFeasibility::supported(Default::default());
+        }
         self.inner.query_feasibility(query)
     }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -324,7 +342,8 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         let mut execution = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
             name, &args, 1,
         ));
-        assert!(execution.as_mut().now_or_never().is_none(), "{name}");
+        let polled = execution.as_mut().now_or_never();
+        assert!(polled.is_none(), "{name}: {polled:?}");
         drop(execution);
         provider.assert_retired(1);
         assert_eq!(resident.wire_descriptor(), descriptor);
