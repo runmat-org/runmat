@@ -54,11 +54,11 @@ fn storage_facts_distinguish_unknown_representation_single_and_placement() {
         infer_catalog_call(&PLUS_CATALOG_ENTRY, &call).outputs[0].storage,
         StorageFact::Opaque
     );
-    assert_eq!(
-        infer_catalog_call(&PLUS_CATALOG_ENTRY, &request(vec![single.clone(), single])).outputs[0]
-            .storage,
-        StorageFact::Unknown
-    );
+    let inferred = infer_catalog_call(&PLUS_CATALOG_ENTRY, &request(vec![single.clone(), single]));
+    // Known floating carriers stay materialized even when automatic placement
+    // cannot promise a host or device result.
+    assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
 }
 
 #[test]
