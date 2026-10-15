@@ -3,6 +3,8 @@ use crate::{ObjectDescriptor, ObjectNamespace};
 use runmat_execution::host::*;
 use runmat_types::{CapabilitySet, EffectKind, EffectSet};
 use std::collections::BTreeMap;
+#[path = "tests/product.rs"]
+mod product;
 
 fn id(name: &str) -> ComponentId {
     ComponentId::new(name).unwrap()
@@ -12,12 +14,28 @@ fn fixture() -> (
     TargetPackRequirements,
     BTreeMap<ComponentId, Vec<u8>>,
 ) {
-    let abi = NativeAbiBinding {
-        schema_version: 1,
-        encoded_version: 1,
-        contract_fingerprint: Digest::sha256(b"contract"),
-        layout_fingerprint: Digest::sha256(b"target probe"),
-    };
+    // Synthetic portable metadata only: this is not an actual target-built
+    // runtime probe, provider qualification, or executable admission.
+    let probe = NativeAbiProbe::from_target_layout(
+        NativeProbeTarget {
+            architecture: NativeArchitecture::Aarch64,
+            operating_system: NativeOperatingSystem::Linux,
+            environment: NativeEnvironment::Gnu,
+            endianness: NativeEndianness::Little,
+            pointer_width: 64,
+        },
+        NativeProbeContract {
+            schema_version: 1,
+            encoded_version: 1,
+            preimage: b"fixture contract",
+        },
+        [NativeProbeTypeLayout {
+            size: 64,
+            alignment: 8,
+        }; NativeAbiType::ALL.len()],
+        [0, 8, 0, 0, 0, 8, 0, 4, 8, 12, 16, 20, 0, 4, 8, 12],
+    );
+    let abi = probe.binding().unwrap();
     let target = SelectedNativeTarget {
         schema_version: SELECTED_NATIVE_TARGET_SCHEMA_VERSION,
         target: NativeTargetIdentity::new(
@@ -36,6 +54,7 @@ fn fixture() -> (
     let mut components = Vec::new();
     for (name, kind, dependencies) in [
         ("a", TargetPackComponentKind::StaticArchive, vec![id("b")]),
+        ("abi-probe", TargetPackComponentKind::NativeAbiProbe, vec![]),
         ("b", TargetPackComponentKind::StaticArchive, vec![id("a")]),
         ("clock", TargetPackComponentKind::StaticArchive, vec![]),
         (
@@ -52,7 +71,11 @@ fn fixture() -> (
         ("sysroot", TargetPackComponentKind::Sysroot, vec![]),
         ("unused", TargetPackComponentKind::StaticArchive, vec![]),
     ] {
-        let bytes = name.as_bytes().to_vec();
+        let bytes = if name == "abi-probe" {
+            probe.canonical_bytes().to_vec()
+        } else {
+            name.as_bytes().to_vec()
+        };
         let object = ObjectDescriptor::new(
             ObjectNamespace::ProgramArtifact,
             name,
@@ -80,6 +103,7 @@ fn fixture() -> (
         schema_version: TARGET_PACK_SCHEMA_VERSION,
         target: target.clone(),
         abi: abi.clone(),
+        abi_probe_component: id("abi-probe"),
         runtime: Digest::sha256(b"runtime semantics"),
         catalog: Digest::sha256(b"catalog"),
         numerical: numerical.clone(),
@@ -158,7 +182,14 @@ fn canonical_pack_identity_reachability_cycles_link_order_and_exact_bytes() {
     );
     assert_eq!(
         selected.components(),
-        &[id("a"), id("b"), id("linker"), id("runtime"), id("sysroot")]
+        &[
+            id("a"),
+            id("abi-probe"),
+            id("b"),
+            id("linker"),
+            id("runtime"),
+            id("sysroot")
+        ]
     );
     let ordered = selected
         .link_inputs()
@@ -178,6 +209,7 @@ fn canonical_pack_identity_reachability_cycles_link_order_and_exact_bytes() {
             .component_bytes(&id("runtime")),
         Some(&b"runtime"[..])
     );
+    product::check_selected_binding(&manifest, &required, &selected, &retained);
     retained.get_mut(&id("a")).unwrap().push(0);
     assert!(manifest
         .verify_selected_bytes(&selected, &retained)
@@ -204,14 +236,32 @@ fn canonical_pack_identity_reachability_cycles_link_order_and_exact_bytes() {
     let mut unknown = manifest.clone();
     unknown.schema_version += 1;
     assert!(unknown.canonical_bytes().is_err());
+
+    product::check_probe_rejection();
 }
 
 #[test]
 fn profiles_require_explicit_reached_services_and_reject_ambient_or_unknown_inputs() {
-    let (mut manifest, mut required, _) = fixture();
+    let (mut manifest, mut required, contents) = fixture();
     required.effects.0.insert(EffectKind::Clock);
     let selected = manifest.select(&required, None).unwrap();
     assert!(selected.components().contains(&id("clock")));
+    let retained = selected
+        .components()
+        .iter()
+        .map(|id| (id.clone(), contents[id].clone()))
+        .collect();
+    let binding = manifest
+        .verify_selected_bytes(&selected, &retained)
+        .unwrap()
+        .selected_product_binding()
+        .unwrap();
+    assert_eq!(binding.services.len(), 1);
+    assert_eq!(
+        binding.services[0].kind,
+        TargetPackServiceKind::Effect(EffectKind::Clock)
+    );
+    assert_eq!(binding.services[0].implementation, Digest::sha256(b"clock"));
     manifest.services[0].behavior = TargetPackServiceBehavior::HostedAmbient;
     assert!(manifest.select(&required, None).is_err());
     required.profile = TargetPackProfile::HostedNative;

@@ -5,6 +5,8 @@ mod codec;
 mod components;
 mod manifest;
 mod profile;
+mod probe;
+mod product;
 
 pub use codec::{TargetPackId, VerifiedTargetPackContents};
 pub use components::{

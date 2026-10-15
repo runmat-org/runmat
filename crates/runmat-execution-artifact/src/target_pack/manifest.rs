@@ -2,26 +2,14 @@ use super::*;
 use runmat_execution::host::{
     NativeAbiBinding, NativeNumericalPolicy, NativeOptimization, SelectedNativeTarget,
 };
-use runmat_types::{CapabilitySet, EffectKind};
+use runmat_types::CapabilitySet;
 use serde::{Deserialize, Serialize};
 
-pub const TARGET_PACK_SCHEMA_VERSION: u16 = 1;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetPackServiceBehavior {
-    HostedAmbient,
-    DeterministicDeclared,
-}
-
-/// Concrete effects retain canonical IDs. Hosted dispatch is a separate
-/// runtime service, not an implementation or authorization of every effect.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "effect", rename_all = "snake_case")]
-pub enum TargetPackServiceKind {
-    Effect(EffectKind),
-    HostedDynamicDispatch,
-}
+pub const TARGET_PACK_SCHEMA_VERSION: u16 = 2;
+pub use runmat_execution::host::{
+    NativeDeploymentServiceBehavior as TargetPackServiceBehavior,
+    NativeDeploymentServiceKind as TargetPackServiceKind,
+};
 
 /// The typed service ID is policy; the component label only locates bytes.
 /// Behavior is an implementation declaration, not a replay qualification.
@@ -40,6 +28,7 @@ pub struct TargetPackManifest {
     pub schema_version: u16,
     pub target: SelectedNativeTarget,
     pub abi: NativeAbiBinding,
+    pub abi_probe_component: ComponentId,
     pub runtime: Digest,
     pub catalog: Digest,
     pub numerical: NativeNumericalPolicy,
@@ -71,6 +60,16 @@ impl TargetPackManifest {
         nonzero(self.platform_service_abi)?;
         self.numerical.validate().map_err(contract)?;
         let index = components::index(&self.components)?;
+        if !index.get(&self.abi_probe_component).is_some_and(|entry| {
+            entry.kind == TargetPackComponentKind::NativeAbiProbe
+                && entry.object.digest == self.abi.layout_fingerprint
+                && entry.object.encoded_length
+                    == runmat_execution::host::NATIVE_ABI_PROBE_BYTES as u64
+        }) {
+            return Err(invalid(
+                "target pack ABI probe descriptor is missing or mismatched",
+            ));
+        }
         if !index
             .get(&self.numerical_backend_component)
             .is_some_and(|entry| {
@@ -175,22 +174,16 @@ impl TargetPackManifest {
         }
         for service in &self.services {
             nonzero(service.abi)?;
-            if matches!(service.kind, TargetPackServiceKind::Effect(effect) if !requires_service(effect))
-                || !index.get(&service.component).is_some_and(|entry| {
-                    matches!(
-                        entry.kind,
-                        TargetPackComponentKind::NativeObject
-                            | TargetPackComponentKind::StaticArchive
-                    )
-                })
-            {
+            service.kind.validate().map_err(contract)?;
+            if !index.get(&service.component).is_some_and(|entry| {
+                matches!(
+                    entry.kind,
+                    TargetPackComponentKind::NativeObject | TargetPackComponentKind::StaticArchive
+                )
+            }) {
                 return Err(invalid("target pack effect service is invalid or missing"));
             }
         }
         Ok(())
     }
-}
-
-pub(super) fn requires_service(effect: EffectKind) -> bool {
-    !matches!(effect, EffectKind::MayThrow | EffectKind::Unknown)
 }
