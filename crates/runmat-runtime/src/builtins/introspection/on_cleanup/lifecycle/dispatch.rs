@@ -213,11 +213,12 @@ pub(crate) fn start_queued(
     let task_runtime = runtime
         .clone()
         .with_cleanup_command_origin(entry.queued_command_origin());
+    let callback_runtime = task_runtime.clone();
     let inner = task_runtime.clone().scope(async move {
         if !task_entry.begin_running() {
             return Ok(CleanupCallbackOutcome::Skipped);
         }
-        crate::call_feval_async_with_outputs(callback, &[], 0)
+        crate::call_feval_async_with_outputs_in_context(&callback_runtime, callback, &[], 0)
             .await
             .map(|_| CleanupCallbackOutcome::Completed)
     });
