@@ -25,6 +25,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ));
+    runtime.set_runmat_extensions_enabled(true);
     let calls = Arc::new(Mutex::new(0));
     let observed = calls.clone();
     let origin = runmat_execution::FunctionBindingOrigin {

@@ -593,11 +593,13 @@ mod tests {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
         let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let observed = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             profiled_callback_invoker(Arc::clone(&observed)),
         ));
+        drop(registration);
         let create = CommandProfilingRoot::new();
         let created_context = runtime.clone().with_command_profiling(create.receipt());
         let cleanup = {
@@ -629,11 +631,13 @@ mod tests {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
         let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let observed = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             profiled_callback_invoker(Arc::clone(&observed)),
         ));
+        drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
             block_on(on_cleanup_builtin(
@@ -675,7 +679,9 @@ mod tests {
         let (runtime, supervisor, _host) =
             synchronous_retirement_runtime(SynchronousSubmitRetirement::Accept);
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
             block_on(on_cleanup_builtin(
@@ -702,7 +708,9 @@ mod tests {
         let (runtime, supervisor, _host) =
             synchronous_retirement_runtime(SynchronousSubmitRetirement::Reject);
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
             block_on(on_cleanup_builtin(
@@ -732,11 +740,13 @@ mod tests {
         let (runtime, supervisor, _host) =
             synchronous_retirement_runtime(SynchronousSubmitRetirement::PollReadyThenReject);
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
+        drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
             block_on(on_cleanup_builtin(
@@ -772,7 +782,9 @@ mod tests {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
         let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
             block_on(on_cleanup_builtin(
@@ -786,6 +798,7 @@ mod tests {
         let registry = runtime.cleanup_registry().expect("host registry");
         let entry = registry.find(handle.target).expect("registered cleanup");
         let counter = Arc::new(Mutex::new(0usize));
+        let registration = runtime.enter();
         let _invoker = crate::user_functions::install_local_semantic_function_invoker(Rc::new({
             let entry = Rc::clone(&entry);
             let counter = Arc::clone(&counter);
@@ -806,6 +819,7 @@ mod tests {
                 })
             }
         }));
+        drop(registration);
         let command = CommandProfilingRoot::new();
         let selected = runtime.clone().with_command_profiling(command.receipt());
         let error = {
@@ -1134,11 +1148,13 @@ mod tests {
         let _host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor)
             .expect("browser lifecycle host");
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let registration = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
+        drop(registration);
         runtime
             .clone()
             .scope(async {

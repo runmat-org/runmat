@@ -1439,6 +1439,9 @@ mod tests {
 
     fn exact_memoized_runtime() -> crate::context::RuntimeContext {
         let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        // This receiver is a RunMat extension; select the fixture's policy
+        // on its explicit runtime rather than the ambient test context.
+        runtime.set_runmat_extensions_enabled(true);
         {
             let _scope = runtime.enter();
             super::ensure_memoized_function_class_registered();

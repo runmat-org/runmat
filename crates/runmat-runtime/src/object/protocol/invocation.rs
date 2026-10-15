@@ -39,13 +39,13 @@ pub fn invoke_resolved_object_protocol_in_context<'runtime, 'resolution>(
     )
 }
 
-async fn invoke_resolved_object_protocol_with_context(
-    runtime: Option<&RuntimeContext>,
-    resolution: &ProtocolResolution,
+fn invoke_resolved_object_protocol_with_context<'runtime, 'resolution>(
+    runtime: Option<&'runtime RuntimeContext>,
+    resolution: &'resolution ProtocolResolution,
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'resolution> {
     let work = invoke_resolved_object_protocol_in_scope(
         runtime,
         resolution,
@@ -53,7 +53,7 @@ async fn invoke_resolved_object_protocol_with_context(
         path,
         requested_outputs,
     );
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn invoke_resolved_object_protocol_in_scope(
@@ -95,15 +95,15 @@ pub fn invoke_resolved_object_assignment_in_context<'runtime, 'method>(
     invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values)
 }
 
-async fn invoke_resolved_object_assignment_with_context(
-    runtime: Option<&RuntimeContext>,
-    method: &ResolvedObjectMethod,
+fn invoke_resolved_object_assignment_with_context<'runtime, 'method>(
+    runtime: Option<&'runtime RuntimeContext>,
+    method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> Result<RootedValue, RuntimeError> {
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
     let work = invoke_resolved_object_assignment_in_scope(runtime, method, base, path, values);
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn invoke_resolved_object_assignment_in_scope(
@@ -151,15 +151,15 @@ pub fn invoke_resolved_object_method_in_context<'runtime, 'method>(
     invoke_resolved_object_method_with_context(Some(runtime), method, arguments, requested_outputs)
 }
 
-async fn invoke_resolved_object_method_with_context(
-    runtime: Option<&RuntimeContext>,
-    method: &ResolvedObjectMethod,
+fn invoke_resolved_object_method_with_context<'runtime, 'method>(
+    runtime: Option<&'runtime RuntimeContext>,
+    method: &'method ResolvedObjectMethod,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'method> {
     let work =
         invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs);
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn invoke_resolved_object_method_in_scope(
@@ -239,16 +239,16 @@ pub fn invoke_object_end_in_context<'runtime, 'access>(
     )
 }
 
-async fn invoke_object_end_with_context(
-    runtime: Option<&RuntimeContext>,
+fn invoke_object_end_with_context<'runtime, 'access>(
+    runtime: Option<&'runtime RuntimeContext>,
     receiver: Value,
     component_index: usize,
     component_count: usize,
-    access: &super::ObjectAccessContext,
-) -> Result<Option<RootedValue>, RuntimeError> {
+    access: &'access super::ObjectAccessContext,
+) -> impl Future<Output = Result<Option<RootedValue>, RuntimeError>> + use<'runtime, 'access> {
     let work =
         invoke_object_end_in_scope(runtime, receiver, component_index, component_count, access);
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn invoke_object_end_in_scope(

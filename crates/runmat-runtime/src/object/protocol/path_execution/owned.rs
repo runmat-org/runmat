@@ -34,20 +34,20 @@ where
     execute_owned_subsref_with_context(Some(runtime), base, path, read_first, caller_function_name)
 }
 
-pub async fn execute_owned_subsref_with_context<Read, ReadFuture>(
-    runtime: Option<&crate::context::RuntimeContext>,
+pub fn execute_owned_subsref_with_context<'runtime, 'name, Read, ReadFuture>(
+    runtime: Option<&'runtime crate::context::RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
     read_first: Read,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'name, Read, ReadFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let work =
         execute_owned_subsref_in_scope(runtime, base, path, read_first, caller_function_name);
-    super::super::context::scope(runtime, work).await
+    super::super::context::scope(runtime, work)
 }
 
 async fn execute_owned_subsref_in_scope<Read, ReadFuture>(
@@ -140,15 +140,16 @@ where
     )
 }
 
-pub async fn execute_owned_subsasgn_with_context<Read, ReadFuture, Write, WriteFuture>(
-    runtime: Option<&crate::context::RuntimeContext>,
+pub fn execute_owned_subsasgn_with_context<'runtime, 'name, Read, ReadFuture, Write, WriteFuture>(
+    runtime: Option<&'runtime crate::context::RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     read_first: Read,
     write_first: Write,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValue, RuntimeError>
+    caller_function_name: Option<&'name str>,
+) -> impl Future<Output = Result<RootedValue, RuntimeError>>
+       + use<'runtime, 'name, Read, ReadFuture, Write, WriteFuture>
 where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
@@ -164,7 +165,7 @@ where
         write_first,
         caller_function_name,
     );
-    super::super::context::scope(runtime, work).await
+    super::super::context::scope(runtime, work)
 }
 
 async fn execute_owned_subsasgn_in_scope<Read, ReadFuture, Write, WriteFuture>(

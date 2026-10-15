@@ -72,6 +72,7 @@ impl FsProvider for CountingGeometryFs {
 
 #[test]
 fn invalid_path_classes_and_shapes_have_zero_filesystem_reads() {
+    let _provider_lock = runmat_filesystem::provider_override_lock();
     let provider = Arc::new(CountingGeometryFs::default());
     runmat_filesystem::with_provider_override(provider.clone(), || {
         let invalid = [

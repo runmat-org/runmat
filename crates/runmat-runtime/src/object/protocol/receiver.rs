@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use runmat_gc_api::{Trace, Tracer};
 use runmat_value::Value;
 
@@ -25,31 +27,31 @@ impl Trace for PreparedSubscriptReceiver {
     }
 }
 
-pub async fn prepare_subscript_receiver(
+pub fn prepare_subscript_receiver(
     root: Value,
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
-) -> Result<PreparedSubscriptReceiver, RuntimeError> {
-    prepare_subscript_receiver_with_context(None, root, materialized_prefix, access).await
+) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> {
+    prepare_subscript_receiver_with_context(None, root, materialized_prefix, access)
 }
 
-pub async fn prepare_subscript_receiver_in_context(
-    runtime: &crate::context::RuntimeContext,
+pub fn prepare_subscript_receiver_in_context<'runtime>(
+    runtime: &'runtime crate::context::RuntimeContext,
     root: Value,
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
-) -> Result<PreparedSubscriptReceiver, RuntimeError> {
-    prepare_subscript_receiver_with_context(Some(runtime), root, materialized_prefix, access).await
+) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> + use<'runtime> {
+    prepare_subscript_receiver_with_context(Some(runtime), root, materialized_prefix, access)
 }
 
-async fn prepare_subscript_receiver_with_context(
-    runtime: Option<&crate::context::RuntimeContext>,
+fn prepare_subscript_receiver_with_context<'runtime>(
+    runtime: Option<&'runtime crate::context::RuntimeContext>,
     root: Value,
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
-) -> Result<PreparedSubscriptReceiver, RuntimeError> {
+) -> impl Future<Output = Result<PreparedSubscriptReceiver, RuntimeError>> + use<'runtime> {
     let work = prepare_subscript_receiver_in_scope(runtime, root, materialized_prefix, access);
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn prepare_subscript_receiver_in_scope(
@@ -79,32 +81,31 @@ async fn prepare_subscript_receiver_in_scope(
     Ok(PreparedSubscriptReceiver { receiver, end })
 }
 
-pub async fn resolve_subscript_end(
-    prepared: &PreparedSubscriptReceiver,
+pub fn resolve_subscript_end<'prepared>(
+    prepared: &'prepared PreparedSubscriptReceiver,
     component_index: usize,
     component_count: usize,
-) -> Result<RootedValue, RuntimeError> {
-    resolve_subscript_end_with_context(None, prepared, component_index, component_count).await
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'prepared> {
+    resolve_subscript_end_with_context(None, prepared, component_index, component_count)
 }
 
-pub async fn resolve_subscript_end_in_context(
-    runtime: &crate::context::RuntimeContext,
-    prepared: &PreparedSubscriptReceiver,
+pub fn resolve_subscript_end_in_context<'runtime, 'prepared>(
+    runtime: &'runtime crate::context::RuntimeContext,
+    prepared: &'prepared PreparedSubscriptReceiver,
     component_index: usize,
     component_count: usize,
-) -> Result<RootedValue, RuntimeError> {
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'prepared> {
     resolve_subscript_end_with_context(Some(runtime), prepared, component_index, component_count)
-        .await
 }
 
-async fn resolve_subscript_end_with_context(
-    runtime: Option<&crate::context::RuntimeContext>,
-    prepared: &PreparedSubscriptReceiver,
+fn resolve_subscript_end_with_context<'runtime, 'prepared>(
+    runtime: Option<&'runtime crate::context::RuntimeContext>,
+    prepared: &'prepared PreparedSubscriptReceiver,
     component_index: usize,
     component_count: usize,
-) -> Result<RootedValue, RuntimeError> {
+) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'prepared> {
     let work = resolve_subscript_end_in_scope(runtime, prepared, component_index, component_count);
-    super::context::scope(runtime, work).await
+    super::context::scope(runtime, work)
 }
 
 async fn resolve_subscript_end_in_scope(
