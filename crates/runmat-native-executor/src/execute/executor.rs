@@ -94,6 +94,7 @@ impl NativeExecutor {
         options: NativeExecutorOptions,
     ) -> NativeExecutorResult<Self> {
         assembly.verify()?;
+        assembly.target.require_host_executable()?;
         let ir_functions = assembly
             .functions
             .iter()

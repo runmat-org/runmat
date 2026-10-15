@@ -15,11 +15,15 @@ mod source;
 mod validation;
 mod value;
 mod version;
+#[cfg(not(target_arch = "wasm32"))]
+mod probe;
 
 pub use call::*;
 pub use control::*;
 pub use frame::*;
 pub use host::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use probe::*;
 pub use root::*;
 pub use site::*;
 pub use source::*;

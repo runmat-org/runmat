@@ -198,6 +198,31 @@ impl NativeCompilationInput {
         Vec<runmat_native_codegen::aot::NativeObjectData>,
         runmat_native_codegen::NativeCodegenError,
     > {
+        self.aot_object_data_for_product(assembly, options, None)
+    }
+
+    pub fn aot_object_data_for_selected(
+        &self,
+        assembly: &runmat_native_codegen::NativeAssembly,
+        options: AotObjectDataOptions,
+        selected: &runmat_native_codegen::aot::SelectedNativeProduct<'_>,
+    ) -> Result<
+        Vec<runmat_native_codegen::aot::NativeObjectData>,
+        runmat_native_codegen::NativeCodegenError,
+    > {
+        selected.validate_assembly(assembly)?;
+        self.aot_object_data_for_product(assembly, options, Some(selected))
+    }
+
+    fn aot_object_data_for_product(
+        &self,
+        assembly: &runmat_native_codegen::NativeAssembly,
+        options: AotObjectDataOptions,
+        selected: Option<&runmat_native_codegen::aot::SelectedNativeProduct<'_>>,
+    ) -> Result<
+        Vec<runmat_native_codegen::aot::NativeObjectData>,
+        runmat_native_codegen::NativeCodegenError,
+    > {
         self.validate_entrypoint().map_err(|error| {
             runmat_native_codegen::NativeCodegenError::new(
                 "native.object.entrypoint_binding",
@@ -220,15 +245,20 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded Native IR: {error}"),
             )
         })?;
-        let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
+        let mut program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             assembly,
             runmat_execution::Digest::sha256(&native_ir),
             options.foreign_policy,
             self.source_map.clone(),
             options.runtime_binding_mode,
             options.builtin_bindings,
-        )?
-        .canonical_bytes()?;
+        )?;
+        if let Some(selected) = selected {
+            // Same verified selection as the object producer; no decoder or
+            // absent-field fallback is allowed to infer this commitment.
+            program.product = selected.product().clone();
+        }
+        let program = program.canonical_bytes()?;
         let ordered_resume_points = self
             .interpreter_resume_points
             .iter()

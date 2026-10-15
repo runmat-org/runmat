@@ -2,11 +2,16 @@
 mod launcher;
 #[cfg(feature = "compiler")]
 mod object;
+// Object v12 and launcher v8 require explicit product mode. Older manifests,
+// including the former pure-v6 migration, cannot infer a host-unselected grant.
 mod product;
+mod selected;
+pub use selected::{validate_native_product, SelectedNativeProduct};
 
 #[cfg(feature = "compiler")]
 pub use object::{
-    emit_relocatable_object, emit_relocatable_object_for_runtime, emit_relocatable_object_with_data,
+    emit_relocatable_object, emit_relocatable_object_for_runtime,
+    emit_relocatable_object_with_data, emit_selected_relocatable_object,
 };
 pub use product::{
     embedded_blob, native_object_format_for_target, AotBuiltinBinding, AotProgramFunction,

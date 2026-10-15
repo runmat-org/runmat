@@ -4,7 +4,17 @@ use super::ExecutableForm;
 use crate::{ArtifactError, ArtifactResult};
 pub use runmat_execution::host::NativeTargetIdentity;
 
-pub const PROGRAM_TARGET_SCHEMA_VERSION: u16 = 2;
+pub const PROGRAM_TARGET_SCHEMA_VERSION: u16 = 3;
+
+/// Explicit product domain. Missing deployment metadata is not a host grant.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProgramProductMode {
+    Portable,
+    Native {
+        product: runmat_execution::host::NativeProductMode,
+    },
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,6 +30,7 @@ pub struct ProgramTarget {
     pub profile: String,
     pub cohort: ProgramTargetCohort,
     pub native: Option<NativeTargetIdentity>,
+    pub product: ProgramProductMode,
 }
 
 impl ProgramTarget {
@@ -29,15 +40,29 @@ impl ProgramTarget {
             profile: profile.into(),
             cohort: ProgramTargetCohort::Portable,
             native: None,
+            product: ProgramProductMode::Portable,
         }
     }
 
     pub fn native(profile: impl Into<String>, target: NativeTargetIdentity) -> Self {
+        Self::native_product(
+            profile,
+            target,
+            runmat_execution::host::NativeProductMode::HostUnselected,
+        )
+    }
+
+    pub fn native_product(
+        profile: impl Into<String>,
+        target: NativeTargetIdentity,
+        product: runmat_execution::host::NativeProductMode,
+    ) -> Self {
         Self {
             schema_version: PROGRAM_TARGET_SCHEMA_VERSION,
             profile: profile.into(),
             cohort: ProgramTargetCohort::Native,
             native: Some(target),
+            product: ProgramProductMode::Native { product },
         }
     }
 
@@ -48,14 +73,35 @@ impl ProgramTarget {
                 "program artifact target is not canonical".into(),
             ));
         }
-        match (self.cohort, self.native.as_ref()) {
-            (ProgramTargetCohort::Portable, None) => Ok(()),
-            (ProgramTargetCohort::Native, Some(native)) => native
-                .validate()
-                .map_err(|error| ArtifactError::Invalid(error.to_string())),
+        match (self.cohort, self.native.as_ref(), &self.product) {
+            (ProgramTargetCohort::Portable, None, ProgramProductMode::Portable) => Ok(()),
+            (ProgramTargetCohort::Native, Some(native), ProgramProductMode::Native { product }) => {
+                native
+                    .validate()
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                product
+                    .validate()
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                if product
+                    .selected()
+                    .is_some_and(|binding| &binding.target.target != native)
+                {
+                    return Err(ArtifactError::Invalid(
+                        "selected product differs from recipe target".into(),
+                    ));
+                }
+                Ok(())
+            }
             _ => Err(ArtifactError::Invalid(
                 "program target cohort has inconsistent native identity".into(),
             )),
+        }
+    }
+
+    pub fn native_product_mode(&self) -> Option<&runmat_execution::host::NativeProductMode> {
+        match &self.product {
+            ProgramProductMode::Portable => None,
+            ProgramProductMode::Native { product } => Some(product),
         }
     }
 
@@ -111,6 +157,18 @@ impl ProgramTarget {
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> ArtifactResult<Self> {
+        #[derive(Deserialize)]
+        struct Admission {
+            schema_version: u16,
+        }
+        let admission: Admission = serde_json::from_slice(bytes)
+            .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+        if admission.schema_version != PROGRAM_TARGET_SCHEMA_VERSION {
+            return Err(ArtifactError::Invalid(format!(
+                "program target schema actual {}, expected {}",
+                admission.schema_version, PROGRAM_TARGET_SCHEMA_VERSION
+            )));
+        }
         let target: Self = serde_json::from_slice(bytes)
             .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
         target.validate()?;
@@ -178,5 +236,27 @@ mod tests {
         let mut native_without_identity = ProgramTarget::native("native-test", native());
         native_without_identity.native = None;
         assert!(native_without_identity.validate().is_err());
+
+        let mut inconsistent_product = ProgramTarget::portable("portable-test");
+        inconsistent_product.product = ProgramProductMode::Native {
+            product: runmat_execution::host::NativeProductMode::HostUnselected,
+        };
+        assert!(inconsistent_product.validate().is_err());
+
+        for mut value in [
+            ProgramTarget::portable("portable-test"),
+            ProgramTarget::native("native-test", native()),
+        ]
+        .map(|target| serde_json::to_value(target).unwrap())
+        {
+            value.as_object_mut().unwrap().remove("product");
+            assert!(
+                serde_json::from_value::<ProgramTarget>(value).is_err(),
+                "a missing product mode cannot select a host route"
+            );
+        }
+        let old = ProgramTarget::from_canonical_bytes(br#"{"schema_version":2,"profile":"old"}"#)
+            .unwrap_err();
+        assert!(old.to_string().contains("schema actual 2, expected 3"));
     }
 }

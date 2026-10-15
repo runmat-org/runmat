@@ -3,15 +3,10 @@ use runmat_execution::host::{
     NativeAbiBinding, NativeNumericalPolicy, NativeOptimization, SelectedNativeTarget,
 };
 use runmat_types::{CapabilitySet, EffectKind, EffectSet};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetPackProfile {
-    HostedNative,
-    DeterministicDeployed,
-}
+pub use runmat_execution::host::NativeDeploymentProfile as TargetPackProfile;
 
 /// Supplied by the selected compiler/runtime contracts, not recovered from a
 /// pack's self-description. This is link admission, not executable admission.
@@ -51,7 +46,7 @@ pub struct ExternalNumericalAdmission {
     pub evidence: Digest,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TargetPackSelection {
     pub(super) pack: TargetPackId,
     pub(super) profile: TargetPackProfile,
@@ -61,6 +56,7 @@ pub struct TargetPackSelection {
     pub(super) link_inputs: Vec<NativeLinkInput>,
     pub(super) reached_capabilities: CapabilitySet,
     pub(super) authorized_runtime_capabilities: CapabilitySet,
+    pub(super) reached_effects: EffectSet,
 }
 impl TargetPackSelection {
     pub fn pack(&self) -> TargetPackId {
@@ -91,6 +87,13 @@ impl TargetPackSelection {
     /// Retaining this record does not itself implement that enforcement.
     pub fn authorized_runtime_capabilities(&self) -> &CapabilitySet {
         &self.authorized_runtime_capabilities
+    }
+    pub fn reached_effects(&self) -> &EffectSet {
+        &self.reached_effects
+    }
+    pub fn fingerprint(&self) -> Digest {
+        Digest::sha256_serialized(&("runmat-target-pack-selection-v2", self))
+            .expect("selected target pack serializes")
     }
 }
 
@@ -149,6 +152,7 @@ impl TargetPackManifest {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
+        build_roots.insert(self.abi_probe_component.clone());
         for input in [&self.build_inputs.linker, &self.build_inputs.sysroot] {
             match input {
                 NativeBuildInput::ContentAddressed { component } => {
@@ -165,7 +169,7 @@ impl TargetPackManifest {
             }
         }
         let mut reached = BTreeSet::new();
-        loop {
+        let reached_effects = loop {
             components::retain(&index, roots.iter().cloned(), &mut reached)?;
             let before = roots.len();
             let effects = required
@@ -186,13 +190,11 @@ impl TargetPackManifest {
                     "deterministic target pack cannot admit unknown effects",
                 ));
             }
-            for kind in effects.into_iter().filter_map(|effect| match effect {
-                EffectKind::Unknown => Some(TargetPackServiceKind::HostedDynamicDispatch),
-                effect if manifest::requires_service(effect) => {
-                    Some(TargetPackServiceKind::Effect(effect))
-                }
-                _ => None,
-            }) {
+            for kind in effects
+                .iter()
+                .copied()
+                .filter_map(TargetPackServiceKind::for_effect)
+            {
                 let service = self
                     .services
                     .iter()
@@ -211,9 +213,9 @@ impl TargetPackManifest {
                 roots.insert(service.component.clone());
             }
             if roots.len() == before {
-                break;
+                break EffectSet(effects);
             }
-        }
+        };
         for id in &reached {
             if !matches!(
                 index[id].kind,
@@ -266,6 +268,7 @@ impl TargetPackManifest {
             link_inputs,
             reached_capabilities: required.reached_capabilities.clone(),
             authorized_runtime_capabilities: required.authorized_runtime_capabilities.clone(),
+            reached_effects,
         })
     }
 }

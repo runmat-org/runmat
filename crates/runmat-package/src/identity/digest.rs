@@ -25,6 +25,13 @@ pub struct ContentDigest {
 }
 
 impl ContentDigest {
+    /// Preserve an already computed SHA-256 digest without rehashing it.
+    pub const fn from_sha256(bytes: [u8; 32]) -> Self {
+        Self {
+            algorithm: DigestAlgorithm::Sha256,
+            bytes,
+        }
+    }
     pub fn sha256(bytes: impl AsRef<[u8]>) -> Self {
         let digest = Sha256::digest(bytes.as_ref());
         let mut result = [0_u8; 32];

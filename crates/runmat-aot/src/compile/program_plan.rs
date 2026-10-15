@@ -9,7 +9,7 @@ use crate::{
 
 use super::CompilationPolicy;
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 4;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +22,7 @@ pub struct RuntimeFamilyRetention {
 #[serde(deny_unknown_fields)]
 pub struct ProgramLinkPlan {
     pub schema_version: u16,
+    pub product: runmat_execution::host::NativeProductMode,
     pub policy: CompilationPolicy,
     pub program_graph_digest: String,
     pub program_source_digest: String,
@@ -103,6 +104,7 @@ pub fn build_program_link_plan_with_interop(
     );
     Ok(ProgramLinkPlan {
         schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+        product: runtime.manifest.product.clone(),
         policy,
         program_graph_digest: unit.revision().program_revision.graph_digest().to_string(),
         program_source_digest: unit.revision().program_revision.source_digest().to_string(),
@@ -370,6 +372,7 @@ mod tests {
         let retained = BTreeSet::from([runmat_types::ProgramFunctionId(7)]);
         let plan = ProgramLinkPlan {
             schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+            product: runmat_execution::host::NativeProductMode::HostUnselected,
             policy: CompilationPolicy::NativeSpecialized,
             program_graph_digest: "graph".into(),
             program_source_digest: "sources".into(),

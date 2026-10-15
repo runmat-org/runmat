@@ -6,14 +6,18 @@
 mod compatibility;
 mod target;
 mod native_abi;
+mod native_deployment;
+mod native_probe;
 mod native_policy;
 mod selected_target;
 
 pub use native_abi::NativeAbiBinding;
+pub use native_deployment::*;
 pub use native_policy::{
     NativeNumericalBehavior, NativeNumericalPolicy, NativeOptimization,
     NATIVE_NUMERICAL_POLICY_SCHEMA_VERSION,
 };
+pub use native_probe::*;
 pub use selected_target::{
     NativeCpuBaseline, NativeEndianness, NativeEnvironment, SelectedNativeTarget,
     SELECTED_NATIVE_TARGET_SCHEMA_VERSION,
