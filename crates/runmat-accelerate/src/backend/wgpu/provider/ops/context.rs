@@ -33,14 +33,13 @@ impl WgpuProvider {
     pub(crate) fn export_wgpu_buffer_exec(
         &self,
         handle: &GpuTensorHandle,
-    ) -> Option<WgpuBufferRef> {
-        let mut entry = self
-            .get_entry_for_bitwise_move(handle, "WGPU export")
-            .ok()?;
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<WgpuBufferRef>> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let mut entry = self.get_entry_for_bitwise_move(handle, "WGPU export")?;
         if entry.integer_type().is_some()
             || entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
         {
-            return None;
+            return Ok(None);
         }
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
             // Validate the full view before any device dispatch. This local
@@ -48,10 +47,24 @@ impl WgpuProvider {
             if entry.shape.as_slice() != [info.base_cols, info.base_rows]
                 || info.base_rows.checked_mul(info.base_cols) != Some(entry.len)
             {
-                return None;
+                return Err(anyhow::anyhow!("WGPU export: malformed transpose view").into());
             }
             entry.shape = vec![info.base_rows, info.base_cols];
-            entry = self.permute_buffer_exec(&entry, &[1, 0]).ok()?;
+            let allocated = std::cell::Cell::new(false);
+            let result =
+                self.permute_buffer_optional_exec(&entry, &[1, 0], &allocated, &|_| Ok(()));
+            entry = match result {
+                Ok(Some(entry)) => entry,
+                Ok(None) => return Ok(None),
+                Err(error) => {
+                    let error = ProviderExecutionError::from(error);
+                    return Err(if allocated.get() {
+                        error.after_effect()
+                    } else {
+                        error
+                    });
+                }
+            };
             let materialized = self
                 .register_storage_move_buffer(
                     entry.buffer.clone(),
@@ -60,15 +73,18 @@ impl WgpuProvider {
                     entry.len,
                     entry.allocated_bytes,
                 )
-                .ok()?;
+                .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
             return WgpuBufferRef::from_owned_buffer(
                 entry.buffer,
                 materialized,
                 self.access.clone(),
             )
-            .ok();
+            .map(Some)
+            .map_err(|error| ProviderExecutionError::from(error).after_effect());
         }
-        WgpuBufferRef::from_owned_buffer(entry.buffer, handle.clone(), self.access.clone()).ok()
+        WgpuBufferRef::from_owned_buffer(entry.buffer, handle.clone(), self.access.clone())
+            .map(Some)
+            .map_err(ProviderExecutionError::from)
     }
 
     pub(crate) fn provider_precision_exec(&self) -> ProviderPrecision {

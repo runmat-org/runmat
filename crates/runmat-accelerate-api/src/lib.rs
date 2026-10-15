@@ -244,12 +244,20 @@ pub fn export_context(kind: AccelContextKind) -> Option<AccelContextHandle> {
 }
 
 /// Request a provider-owned WGPU buffer for zero-copy consumers. Returns `None`
-/// when the active provider does not expose buffers or does not support the
-/// supplied handle.
+/// when the exact owner does not expose this physical rendering form, before
+/// allocation or dispatch. Operational failures retain their original cause.
 #[cfg(feature = "wgpu")]
-pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+pub fn export_wgpu_buffer(
+    handle: &GpuTensorHandle,
+) -> ProviderExecutionResult<Option<WgpuBufferRef>> {
     observe_execution_device_effect(ExecutionDeviceEffect::RawWgpuExport);
-    provider_for_handle(handle).and_then(|p| p.export_wgpu_buffer(handle))
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(ProviderExecutionError::from_source)?;
+    let owner = provider_for_handle(handle)
+        .ok_or_else(|| anyhow::anyhow!("no provider owns WGPU export input"))?;
+    owner.export_wgpu_buffer(handle)
 }
 
 /// Floating precision is an immutable physical allocation fact.
@@ -2228,10 +2236,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
 
     /// Export a provider-owned WGPU buffer for zero-copy integrations.
+    /// None certifies no allocation, materialization or dispatch was attempted.
+    /// Every operational failure is an error, never a capability miss.
     #[cfg(feature = "wgpu")]
-    fn export_wgpu_buffer(&self, _handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+    fn export_wgpu_buffer(
+        &self,
+        _handle: &GpuTensorHandle,
+    ) -> ProviderExecutionResult<Option<WgpuBufferRef>> {
         let _ = _handle;
-        None
+        Ok(None)
     }
 
     /// Gather logical elements from `source` at the provided zero-based linear `indices`,

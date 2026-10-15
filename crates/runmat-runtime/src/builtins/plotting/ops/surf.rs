@@ -352,6 +352,9 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             {
                 Ok(surface) => surface,
                 Err(err) => {
+                    if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                        return Err(err);
+                    }
                     warn!("surf GPU path unavailable: {err}");
                     let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
                         .await
@@ -362,6 +365,9 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 }
             },
             Err(err) => {
+                if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                    return Err(err);
+                }
                 warn!("surf GPU bounds unavailable: {err}");
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
                     .await
@@ -495,6 +501,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     alpha: f32,
     flatten_z: bool,
 ) -> BuiltinResult<SurfacePlot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     if x_axis.is_empty() || y_axis.is_empty() {
         return Err(plotting_error(
             name,
@@ -504,7 +511,8 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
 
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
 
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
+    let z_ref = gpu_exports
+        .export(z, name)?
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
     let x_len = x_axis.len();
@@ -554,7 +562,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
 
     let x_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match x_axis {
         AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
             })?;
             if exported.len as usize != x_len {
@@ -584,7 +592,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
 
     let y_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match y_axis {
         AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
             })?;
             if exported.len as usize != y_len {

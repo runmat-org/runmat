@@ -579,7 +579,11 @@ impl HistWeightsInput {
         }
     }
 
-    fn to_gpu_weights(&self, sample_len: usize) -> BuiltinResult<HistogramGpuWeights> {
+    fn to_gpu_weights(
+        &self,
+        sample_len: usize,
+        gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
+    ) -> BuiltinResult<HistogramGpuWeights> {
         match self {
             HistWeightsInput::None => Ok(HistogramGpuWeights::Uniform {
                 total_weight: sample_len as f32,
@@ -613,7 +617,8 @@ impl HistWeightsInput {
                 }
             }
             HistWeightsInput::Gpu(handle) => {
-                let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
+                let exported = gpu_exports
+                    .export(handle, BUILTIN_NAME)?
                     .ok_or_else(|| hist_internal("unable to export GPU weights"))?;
                 match exported.precision {
                     ProviderPrecision::F32 => Ok(HistogramGpuWeights::GpuF32 {
@@ -706,6 +711,9 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
                 {
                     Ok(chart) => Some(chart),
                     Err(err) => {
+                        if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                            return Err(err);
+                        }
                         warn!("hist GPU path unavailable: {err}");
                         None
                     }
@@ -1647,8 +1655,30 @@ async fn build_histogram_gpu_chart_async(
     style: &BarStyle,
     weights: &HistWeightsInput,
 ) -> BuiltinResult<HistComputation> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    let sample_count_u32 = u32::try_from(sample_len)
+        .map_err(|_| hist_err("hist: sample count exceeds supported range"))?;
+    if super::gpu_helpers::GpuBufferExports::element_count(values, BUILTIN_NAME)? != sample_len {
+        return Err(hist_err(
+            "hist: GPU sample shape does not match its admitted length",
+        ));
+    }
+    if !weights.gpu_fast_path_eligible(values) {
+        return Err(hist_err(
+            "hist: GPU weights require the samples' exact provider and a supported native class",
+        ));
+    }
+    if let HistWeightsInput::Gpu(input) = weights {
+        let count = super::gpu_helpers::GpuBufferExports::element_count(input, BUILTIN_NAME)?;
+        if count != sample_len {
+            return Err(hist_err(format!(
+                "hist: weights must contain {sample_len} elements (got {count})"
+            )));
+        }
+    }
     let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let exported = runmat_accelerate_api::export_wgpu_buffer(values)
+    let exported = gpu_exports
+        .export(values, BUILTIN_NAME)?
         .ok_or_else(|| hist_internal("unable to export GPU data"))?;
     if exported.len == 0 {
         let total_hint = weights
@@ -1657,9 +1687,7 @@ async fn build_histogram_gpu_chart_async(
         return build_empty_histogram_chart(bin_options, normalization, sample_len, total_hint);
     }
 
-    let sample_count_u32 = u32::try_from(exported.len)
-        .map_err(|_| hist_err("hist: sample count exceeds supported range"))?;
-    let gpu_weights = weights.to_gpu_weights(sample_len)?;
+    let gpu_weights = weights.to_gpu_weights(sample_len, &mut gpu_exports)?;
     let (min_value_f32, max_value_f32) = axis_bounds_async(values, "hist").await?;
     let stats = HistDataStats {
         min: Some(min_value_f32 as f64),
@@ -1981,7 +2009,13 @@ pub(crate) mod tests {
         let weights =
             HistWeightsInput::from_value(Value::Tensor(tensor), 3).expect("single weights");
 
-        match weights.to_gpu_weights(3).expect("GPU weights") {
+        match weights
+            .to_gpu_weights(
+                3,
+                &mut super::super::gpu_helpers::GpuBufferExports::default(),
+            )
+            .expect("GPU weights")
+        {
             HistogramGpuWeights::HostF32 { data, total_weight } => {
                 assert_eq!(data, vec![1.0_f32, 2.0, 3.0]);
                 assert_eq!(total_weight, 6.0);

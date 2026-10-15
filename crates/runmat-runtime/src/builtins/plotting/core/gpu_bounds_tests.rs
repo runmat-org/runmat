@@ -16,6 +16,12 @@ enum Mode {
     PendingDownload,
     ErrorDownload,
     RejectLogicalView,
+    #[cfg(feature = "wgpu")]
+    ExportNone,
+    #[cfg(feature = "wgpu")]
+    ExportError,
+    #[cfg(feature = "wgpu")]
+    ExportAfterEffect,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -23,6 +29,29 @@ struct Provider {
     produced: Mutex<Vec<runmat_accelerate_api::GpuTensorWireDescriptor>>,
 }
 impl AccelProvider for Provider {
+    #[cfg(feature = "wgpu")]
+    fn export_wgpu_buffer(
+        &self,
+        _: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<runmat_accelerate_api::WgpuBufferRef>>
+    {
+        let mode = self.mode.lock().unwrap().clone();
+        match mode {
+            Mode::ExportError | Mode::ExportAfterEffect => {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "injected export failure",
+                    ),
+                );
+                Err(if matches!(mode, Mode::ExportAfterEffect) {
+                    error.after_effect()
+                } else {
+                    error
+                })
+            }
+            _ => Ok(None),
+        }
+    }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
@@ -145,6 +174,25 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
     let _current = ThreadProviderGuard::set(Some(provider));
     let x = upload(provider);
     let y = upload(provider);
+    #[cfg(feature = "wgpu")]
+    for mode in [Mode::ExportNone, Mode::ExportError, Mode::ExportAfterEffect] {
+        *provider.mode.lock().unwrap() = mode.clone();
+        let mut exports = super::super::GpuBufferExports::default();
+        let result = exports.export(&x, "plot");
+        if matches!(mode, Mode::ExportNone) {
+            assert!(result.unwrap().is_none());
+        } else {
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("operational export failure was swallowed"),
+            };
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert!(error.to_string().contains("injected export failure"));
+        }
+        assert!(provider.produced.lock().unwrap().is_empty());
+        assert!(block_on(provider.inner.download(&x)).is_ok());
+        assert!(block_on(provider.inner.download(&y)).is_ok());
+    }
     for mode in [Mode::PendingMax, Mode::ErrorMax, Mode::Alias(y.clone())] {
         *provider.mode.lock().unwrap() = mode.clone();
         provider.produced.lock().unwrap().clear();
@@ -241,7 +289,39 @@ fn plot_input_clones_retain_exact_export_allocation_until_last_drop() {
         } else {
             input
         };
-        let exported = runmat_accelerate_api::export_wgpu_buffer(&input).unwrap();
+        let exported = runmat_accelerate_api::export_wgpu_buffer(&input)
+            .unwrap()
+            .unwrap();
+        if transpose {
+            use runmat_accelerate_api::{
+                GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+            };
+            let integer = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::U64(&[9_007_199_254_740_993]),
+                    shape: &[1, 1],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            let mut exports = super::super::GpuBufferExports::default();
+            let materialized = exports.export(&input, "plot").unwrap().unwrap();
+            assert!(!materialized.owning_handle().shares_allocation_with(&input));
+            let repeated = exports.export(&input, "plot").unwrap().unwrap();
+            assert!(
+                materialized
+                    .owning_handle()
+                    .shares_allocation_with(repeated.owning_handle()),
+                "nested consumers retain one actual materialization"
+            );
+            let error = match exports.export(&integer, "plot") {
+                Err(error) => error,
+                Ok(_) => panic!("absence after materialization authorized host replay"),
+            };
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            input.allocation_lease().validate_live().unwrap();
+            integer.allocation_lease().validate_live().unwrap();
+            drop((materialized, repeated, integer));
+        }
         assert_eq!(
             exported.owning_handle().shares_allocation_with(&input),
             !transpose

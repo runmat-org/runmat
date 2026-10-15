@@ -9,6 +9,24 @@ use crate::{gather_if_needed_async, value_contains_gpu, BuiltinResult};
 
 use super::plotting_error;
 
+/// Preserve the original runtime/provider cause after a completed preparation
+/// stage. This is not an availability classifier and cannot authorize replay.
+pub(crate) fn preparation_after_effect(
+    error: crate::RuntimeError,
+    name: &'static str,
+) -> crate::RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        plotting_error(name, format!("{name}: GPU preparation failed: {error}")),
+        runmat_accelerate_api::ProviderExecutionError::from_source(error).after_effect(),
+    )
+}
+
+#[cfg(feature = "wgpu")]
+#[path = "gpu_exports.rs"]
+mod exports;
+#[cfg(feature = "wgpu")]
+pub(crate) use exports::GpuBufferExports;
+
 #[path = "gpu_bounds.rs"]
 mod bounds;
 
@@ -108,7 +126,9 @@ pub async fn gpu_xy_bounds_async(
 ) -> BuiltinResult<BoundingBox> {
     let protected = [x, y];
     let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
-    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
@@ -124,8 +144,12 @@ pub async fn gpu_xyz_bounds_async(
 ) -> BuiltinResult<BoundingBox> {
     let protected = [x, y, z];
     let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
-    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context).await?;
-    let (min_z, max_z) = bounds::axis_bounds_protecting(z, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
+    let (min_z, max_z) = bounds::axis_bounds_protecting(z, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),

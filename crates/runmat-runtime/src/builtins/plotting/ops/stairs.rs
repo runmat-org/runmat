@@ -528,10 +528,12 @@ async fn build_stairs_gpu_plot(
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
 ) -> BuiltinResult<Option<StairsPlot>> {
-    let (Some(x_ref), Some(y_ref)) = (
-        runmat_accelerate_api::export_wgpu_buffer(x),
-        runmat_accelerate_api::export_wgpu_buffer(y),
-    ) else {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    if runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(y) {
+        return Ok(None);
+    }
+    let (Some(x_ref), Some(y_ref)) = (gpu_exports.export(x, name)?, gpu_exports.export(y, name)?)
+    else {
         return Ok(None);
     };
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;

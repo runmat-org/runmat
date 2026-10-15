@@ -746,6 +746,9 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
                     }
                     Ok(_) => {}
                     Err(err) => {
+                        if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                            return Err(err);
+                        }
                         warn!("{} GPU path unavailable: {err}", config.builtin_name);
                     }
                 }
@@ -857,8 +860,10 @@ fn build_bar_gpu_series(
     style: &BarStyle,
     config: BarRenderConfig,
 ) -> BuiltinResult<Vec<BarChart>> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let context = super::gpu_helpers::ensure_shared_wgpu_context(config.builtin_name)?;
-    let exported = runmat_accelerate_api::export_wgpu_buffer(values)
+    let exported = gpu_exports
+        .export(values, config.builtin_name)?
         .ok_or_else(|| config.internal("unable to export GPU values"))?;
     let x_count = x_tensor.as_ref().map(numeric_tensor_len);
     let shape = BarMatrixShape::from_handle(values, x_count, config)?;

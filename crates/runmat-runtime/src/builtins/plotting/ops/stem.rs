@@ -583,15 +583,16 @@ async fn build_stem_gpu_plot(
     parsed: &ParsedStemStyle,
     label: &str,
 ) -> crate::BuiltinResult<Option<StemPlot>> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     // Only unavailable zero-copy rendering support permits host preparation.
     // Once admitted, invalid metadata, reduction and vertex failures propagate.
     let Ok(context) = super::gpu_helpers::ensure_shared_wgpu_context(name) else {
         return Ok(None);
     };
-    let Some(x_ref) = runmat_accelerate_api::export_wgpu_buffer(x) else {
+    let Some(x_ref) = gpu_exports.export(x, name)? else {
         return Ok(None);
     };
-    let Some(y_ref) = runmat_accelerate_api::export_wgpu_buffer(y) else {
+    let Some(y_ref) = gpu_exports.export(y, name)? else {
         return Ok(None);
     };
     if x_ref.len != y_ref.len {

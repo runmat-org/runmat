@@ -536,6 +536,9 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
             match build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style) {
                 Ok(plot) => Some(plot),
                 Err(err) => {
+                    if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                        return Err(err);
+                    }
                     warn!("scatter GPU path unavailable: {err}");
                     None
                 }
@@ -921,6 +924,51 @@ fn build_scatter_gpu_plot(
     y: &GpuTensorHandle,
     style: &ScatterResolvedStyle,
 ) -> BuiltinResult<ScatterPlot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    let count = super::gpu_helpers::GpuBufferExports::element_count;
+    let point_count = count(x, BUILTIN_NAME)?;
+    if point_count == 0 {
+        return Err(scatter_err("scatter: empty input tensor"));
+    }
+    u32::try_from(point_count)
+        .map_err(|_| scatter_err("scatter: point count exceeds supported range"))?;
+    if count(y, BUILTIN_NAME)? != point_count {
+        return Err(scatter_err(
+            "scatter: X and Y inputs must have identical lengths",
+        ));
+    }
+    if runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(y) {
+        return Err(scatter_err(
+            "scatter: X and Y gpuArrays must have matching precision",
+        ));
+    }
+    if let Some(input) = &style.gpu_sizes {
+        if count(input, BUILTIN_NAME)? != point_count {
+            return Err(scatter_err(format!(
+                "scatter: marker size array must have {point_count} elements"
+            )));
+        }
+        if runmat_accelerate_api::handle_precision(input) != Some(ProviderPrecision::F32) {
+            return Err(scatter_err(
+                "scatter: GPU marker sizes must be single-precision (cast before plotting)",
+            ));
+        }
+    }
+    if let Some(color) = &style.gpu_colors {
+        let expected = point_count
+            .checked_mul(color.components.stride() as usize)
+            .ok_or_else(|| scatter_err("scatter: color element count overflow"))?;
+        if count(&color.handle, BUILTIN_NAME)? != expected {
+            return Err(scatter_err(format!(
+                "scatter: color array must contain {expected} elements"
+            )));
+        }
+        if runmat_accelerate_api::handle_precision(&color.handle) != Some(ProviderPrecision::F32) {
+            return Err(scatter_err(
+                "scatter: GPU color arrays must be single-precision (cast before plotting)",
+            ));
+        }
+    }
     if runmat_accelerate_api::handle_integer_type(x).is_some()
         || runmat_accelerate_api::handle_integer_type(y).is_some()
     {
@@ -930,9 +978,11 @@ fn build_scatter_gpu_plot(
     }
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
+    let x_ref = gpu_exports
+        .export(x, BUILTIN_NAME)?
         .ok_or_else(|| scatter_err("scatter: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
+    let y_ref = gpu_exports
+        .export(y, BUILTIN_NAME)?
         .ok_or_else(|| scatter_err("scatter: unable to export GPU Y data"))?;
 
     if x_ref.len == 0 {
@@ -954,9 +1004,9 @@ fn build_scatter_gpu_plot(
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
     let lod_stride = scatter_lod_stride(len_u32);
 
-    let size_buffer = build_size_buffer(style, point_count)?;
+    let size_buffer = build_size_buffer(style, point_count, &mut gpu_exports)?;
     let has_sizes = size_buffer.has_data();
-    let color_buffer = build_color_buffer(style, point_count)?;
+    let color_buffer = build_color_buffer(style, point_count, &mut gpu_exports)?;
     let has_colors = color_buffer.has_data();
 
     let inputs = Scatter2GpuInputs {
@@ -1031,9 +1081,11 @@ fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> BuiltinResult<B
 fn build_size_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
+    gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
 ) -> BuiltinResult<ScatterAttributeBuffer> {
     if let Some(handle) = style.gpu_sizes.as_ref() {
-        let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
+        let exported = gpu_exports
+            .export(handle, BUILTIN_NAME)?
             .ok_or_else(|| scatter_err("scatter: unable to export GPU marker sizes"))?;
         if exported.len != point_count {
             return Err(scatter_err(format!(
@@ -1063,9 +1115,11 @@ fn build_size_buffer(
 fn build_color_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
+    gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
 ) -> BuiltinResult<ScatterColorBuffer> {
     if let Some(gpu_color) = style.gpu_colors.as_ref() {
-        let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
+        let exported = gpu_exports
+            .export(&gpu_color.handle, BUILTIN_NAME)?
             .ok_or_else(|| scatter_err("scatter: unable to export GPU color data"))?;
         let expected = point_count * gpu_color.components.stride() as usize;
         if exported.len != expected {

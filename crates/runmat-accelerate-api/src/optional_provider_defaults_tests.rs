@@ -28,6 +28,11 @@ fn transpose_default_is_typed_unsupported_and_preserves_input_ownership() {
     assert!(ready_default(Defaults.unary_conj(&input.handle))
         .unwrap()
         .is_none());
+    #[cfg(feature = "wgpu")]
+    assert!(Defaults
+        .export_wgpu_buffer(&input.handle)
+        .unwrap()
+        .is_none());
     assert!(error
         .downcast_ref::<UnsupportedProviderOperation>()
         .is_some());

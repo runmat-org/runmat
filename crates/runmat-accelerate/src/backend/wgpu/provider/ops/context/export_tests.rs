@@ -20,9 +20,11 @@ async fn browser_logical_export_materializes_its_own_buffer_without_host_transfe
     let before = provider.telemetry_snapshot();
     let source = provider
         .export_wgpu_buffer_exec(&input)
+        .unwrap()
         .expect("source export");
     let materialized = provider
         .export_wgpu_buffer_exec(&transposed)
+        .unwrap()
         .expect("materialized export");
     assert_eq!(materialized.shape, vec![3, 2]);
     assert_eq!(materialized.len, 6);
@@ -107,9 +109,30 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     let logical = runmat_accelerate_api::handle_is_logical(&transposed);
     let class = runmat_accelerate_api::handle_class_identity(&transposed);
     let provenance = runmat_accelerate_api::handle_provenance(&transposed);
+    // Unsupported physical rendering forms are pure absence, not an
+    // operational failure or an implicit integer-to-float export.
+    let integer = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::U64(&[9_007_199_254_740_993]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let retained = provider.allocations.retained_bytes();
+    let integer_before = provider.telemetry_snapshot();
+    assert!(provider
+        .export_wgpu_buffer_exec(&integer)
+        .unwrap()
+        .is_none());
+    let integer_after = provider.telemetry_snapshot();
+    assert_eq!(integer_before.upload_bytes, integer_after.upload_bytes);
+    assert_eq!(integer_before.download_bytes, integer_after.download_bytes);
+    assert_eq!(provider.allocations.retained_bytes(), retained);
+    integer.allocation_lease().validate_live().unwrap();
+    drop(integer);
     let before = provider.telemetry_snapshot();
     let registered = provider.allocations.retained_bytes();
-    let contiguous = provider.export_wgpu_buffer_exec(&input).unwrap();
+    let contiguous = provider.export_wgpu_buffer_exec(&input).unwrap().unwrap();
     assert!(provider
         .access
         .with_shared(|permit| std::ptr::eq(
@@ -117,7 +140,10 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
             provider.get_entry_raw(&input).unwrap().buffer.as_ref()
         ))
         .unwrap());
-    let exported = provider.export_wgpu_buffer_exec(&transposed).unwrap();
+    let exported = provider
+        .export_wgpu_buffer_exec(&transposed)
+        .unwrap()
+        .unwrap();
     assert_eq!(exported.shape, vec![3, 2]);
     assert_eq!(exported.len, 6);
     assert_eq!(exported.element_size, 4);

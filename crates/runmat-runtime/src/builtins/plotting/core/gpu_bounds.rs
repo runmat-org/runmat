@@ -114,7 +114,11 @@ pub(super) async fn axis_bounds_protecting(
         )
     })?;
     let maximum = owned.admit(maximum, &expected, context)?;
-    let minimum = value_to_scalar_async(Value::GpuTensor(minimum), context).await?;
-    let maximum = value_to_scalar_async(Value::GpuTensor(maximum), context).await?;
+    let minimum = value_to_scalar_async(Value::GpuTensor(minimum), context)
+        .await
+        .map_err(|error| super::preparation_after_effect(error, context))?;
+    let maximum = value_to_scalar_async(Value::GpuTensor(maximum), context)
+        .await
+        .map_err(|error| super::preparation_after_effect(error, context))?;
     Ok((minimum as f32, maximum as f32))
 }

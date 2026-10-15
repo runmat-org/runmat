@@ -1223,6 +1223,9 @@ impl ContourCall {
                     return Ok(());
                 }
                 Err(err) => {
+                    if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
+                        return Err(err);
+                    }
                     warn!("{name} GPU path unavailable: {err}");
                 }
             }
@@ -1828,8 +1831,10 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
     y_bounds: (f32, f32),
     z_bounds: (f32, f32),
 ) -> BuiltinResult<ContourPlot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
+    let z_ref = gpu_exports
+        .export(z, name)?
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
     let (min_z, max_z) = z_bounds;
@@ -1854,7 +1859,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
     let mut x_f32_storage: Vec<f32> = Vec::new();
     let x_axis_data = match x_axis {
         AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
             })?;
             if exported.len as usize != x_axis.len() {
@@ -1883,7 +1888,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
     let mut y_f32_storage: Vec<f32> = Vec::new();
     let y_axis_data = match y_axis {
         AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
             })?;
             if exported.len as usize != y_axis.len() {
@@ -2041,8 +2046,10 @@ pub(crate) fn build_contour_fill_gpu_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
 ) -> BuiltinResult<ContourFillPlot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
+    let z_ref = gpu_exports
+        .export(z, name)?
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
     let (min_z, max_z) = axis_bounds(z, name)?;
     let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;

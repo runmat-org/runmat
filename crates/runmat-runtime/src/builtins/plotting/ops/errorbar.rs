@@ -803,16 +803,32 @@ async fn build_errorbar_gpu_plot(
     parsed: &ParsedErrorBarStyle,
     label: &str,
 ) -> crate::BuiltinResult<Option<ErrorBar>> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    let precision = runmat_accelerate_api::handle_precision(x);
+    if [y, y_neg, y_pos]
+        .into_iter()
+        .chain(x_neg)
+        .chain(x_pos)
+        .any(|input| runmat_accelerate_api::handle_precision(input) != precision)
+    {
+        return Ok(None);
+    }
     let (Some(x_ref), Some(y_ref), Some(yn_ref), Some(yp_ref)) = (
-        runmat_accelerate_api::export_wgpu_buffer(x),
-        runmat_accelerate_api::export_wgpu_buffer(y),
-        runmat_accelerate_api::export_wgpu_buffer(y_neg),
-        runmat_accelerate_api::export_wgpu_buffer(y_pos),
+        gpu_exports.export(x, name)?,
+        gpu_exports.export(y, name)?,
+        gpu_exports.export(y_neg, name)?,
+        gpu_exports.export(y_pos, name)?,
     ) else {
         return Ok(None);
     };
-    let xn_ref = x_neg.and_then(runmat_accelerate_api::export_wgpu_buffer);
-    let xp_ref = x_pos.and_then(runmat_accelerate_api::export_wgpu_buffer);
+    let xn_ref = x_neg
+        .map(|input| gpu_exports.export(input, name))
+        .transpose()?
+        .flatten();
+    let xp_ref = x_pos
+        .map(|input| gpu_exports.export(input, name))
+        .transpose()?
+        .flatten();
     if (x_neg.is_some() && xn_ref.is_none()) || (x_pos.is_some() && xp_ref.is_none()) {
         return Ok(None);
     }

@@ -631,7 +631,10 @@ impl AccelProvider for WgpuProvider {
     }
 
     #[cfg(feature = "wgpu")]
-    fn export_wgpu_buffer(&self, handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+    fn export_wgpu_buffer(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<WgpuBufferRef>> {
         self.export_wgpu_buffer_exec(handle)
     }
 

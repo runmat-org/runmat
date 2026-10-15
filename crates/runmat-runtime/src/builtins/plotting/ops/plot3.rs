@@ -445,10 +445,15 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .take()
             .unwrap_or_else(|| format!("Series {}", series_idx + 1));
         if let Some((xg, yg, zg)) = plan.data.gpu_handles() {
-            if let Ok(plot) = build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await
-            {
-                plots.push(plot);
-                continue;
+            match build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await {
+                Ok(plot) => {
+                    plots.push(plot);
+                    continue;
+                }
+                Err(err) if err.gpu_gather_retry == crate::GpuGatherRetry::Never => {
+                    return Err(err)
+                }
+                Err(_) => {}
             }
         }
         let (x, y, z) = plan
@@ -681,6 +686,7 @@ async fn build_line3_gpu_plot_async(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     if runmat_accelerate_api::handle_integer_type(x).is_some()
         || runmat_accelerate_api::handle_integer_type(y).is_some()
         || runmat_accelerate_api::handle_integer_type(z).is_some()
@@ -691,11 +697,14 @@ async fn build_line3_gpu_plot_async(
         ));
     }
     let _ = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
+    let x_ref = gpu_exports
+        .export(x, BUILTIN_NAME)?
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
+    let y_ref = gpu_exports
+        .export(y, BUILTIN_NAME)?
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
+    let z_ref = gpu_exports
+        .export(z, BUILTIN_NAME)?
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
     if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
         return Err(plotting_error(

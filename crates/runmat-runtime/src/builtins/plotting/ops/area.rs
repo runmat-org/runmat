@@ -689,7 +689,8 @@ async fn build_area_gpu_plots(
     y: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedAreaStyle,
 ) -> crate::BuiltinResult<Option<Vec<AreaPlot>>> {
-    let Some(y_ref) = runmat_accelerate_api::export_wgpu_buffer(y) else {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    let Some(y_ref) = gpu_exports.export(y, BUILTIN_NAME)? else {
         return Ok(None);
     };
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
@@ -699,7 +700,7 @@ async fn build_area_gpu_plots(
     );
     let (x_axis, x_source, x_bounds) = match x {
         NumericInput::Gpu(handle) => {
-            let x_ref = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
+            let x_ref = gpu_exports.export(handle, BUILTIN_NAME)?.ok_or_else(|| {
                 area_error_with_detail(&AREA_ERROR_INTERNAL, "unable to export GPU X data")
             })?;
             if x_ref.len != rows {

@@ -132,8 +132,12 @@ fn exported_resident_line_retains_borrowed_allocations_until_coordinate_publicat
         .expect("upload y");
     let x_wire = x.wire_descriptor();
     let y_wire = y.wire_descriptor();
-    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x).expect("owned x export");
-    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y).expect("owned y export");
+    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x)
+        .unwrap()
+        .expect("owned x export");
+    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y)
+        .unwrap()
+        .expect("owned y export");
     let scalar = ScalarType::from_is_f64(x_export.precision == ProviderPrecision::F64);
     let (child, _, _) = plot_child_element_snapshot(handle).expect("line snapshot");
     let PlotChildHandleState::Line(state) = child else {

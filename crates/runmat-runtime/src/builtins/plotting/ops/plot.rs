@@ -1,12 +1,11 @@
 //! MATLAB-compatible `plot` builtin.
 
 use log::trace;
-use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::NumericPlotData;
-use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
+use runmat_plot::plots::{LinePlot, LineStyle};
 use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
@@ -179,15 +178,15 @@ async fn plot_builtin_with_runtime(
 
         if !requires_cpu {
             if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
-                match build_line_gpu_plot_async(x_gpu, y_gpu, &label, &appearance).await {
-                    Ok(line_plot) => {
+                match build_line_gpu_plot_async(x_gpu, y_gpu, &label, &appearance).await? {
+                    Some(line_plot) => {
                         trace!("plot: series={} used GPU path", series_idx + 1);
                         plots.push(line_plot);
                         continue;
                     }
-                    Err(err) => {
+                    None => {
                         trace!(
-                            "plot: series={} GPU path unavailable: {err}",
+                            "plot: series={} GPU path unavailable before preparation",
                             series_idx + 1
                         );
                     }
@@ -454,12 +453,15 @@ fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance, point
     }
 }
 
+#[path = "plot/gpu_line.rs"]
+mod gpu_line;
+
 async fn build_line_gpu_plot_async(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> BuiltinResult<LinePlot> {
+) -> BuiltinResult<Option<LinePlot>> {
     build_line_gpu_plot_async_for_builtin(BUILTIN_NAME, x, y, label, appearance).await
 }
 
@@ -469,163 +471,8 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
     y: &GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> BuiltinResult<LinePlot> {
-    if runmat_accelerate_api::handle_integer_type(x).is_some()
-        || runmat_accelerate_api::handle_integer_type(y).is_some()
-    {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: integer gpuArray source requires exact host property retention"),
-        ));
-    }
-    let api_provider_present = runmat_accelerate_api::provider().is_some();
-    let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
-    let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
-    let shared_ctx_present = runmat_plot::shared_wgpu_context().is_some();
-    trace!(
-        "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
-        x.device_id(),
-        x.buffer_id(),
-        x.shape(),
-        y.device_id(),
-        y.buffer_id(),
-        y.shape(),
-        shared_ctx_present,
-        api_provider_present,
-        api_provider_for_x_present,
-        api_provider_for_y_present
-    );
-    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(builtin)?;
-
-    let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
-        Some(buf) => {
-            trace!(
-                "plot-gpu: export_wgpu_buffer(X) ok len={} element_size={} precision={:?}",
-                buf.len,
-                buf.element_size,
-                buf.precision
-            );
-            buf
-        }
-        None => {
-            trace!(
-                "plot-gpu: export_wgpu_buffer(X) FAILED (api_provider_present={} api_provider_for_x_present={} x_device_id={})",
-                api_provider_present, api_provider_for_x_present, x.device_id()
-            );
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: unable to export GPU X data"),
-            ));
-        }
-    };
-    let y_ref = match runmat_accelerate_api::export_wgpu_buffer(y) {
-        Some(buf) => {
-            trace!(
-                "plot-gpu: export_wgpu_buffer(Y) ok len={} element_size={} precision={:?}",
-                buf.len,
-                buf.element_size,
-                buf.precision
-            );
-            buf
-        }
-        None => {
-            trace!(
-                "plot-gpu: export_wgpu_buffer(Y) FAILED (api_provider_present={} api_provider_for_y_present={} y_device_id={})",
-                api_provider_present, api_provider_for_y_present, y.device_id()
-            );
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: unable to export GPU Y data"),
-            ));
-        }
-    };
-
-    if x_ref.len < 2 {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: inputs must contain at least two elements"),
-        ));
-    }
-    if x_ref.len != y_ref.len {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: X and Y inputs must have identical lengths"),
-        ));
-    }
-    if x_ref.precision != y_ref.precision {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: X and Y gpuArrays must have matching precision"),
-        ));
-    }
-    let len_u32 = u32::try_from(x_ref.len).map_err(|_| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: point count exceeds supported range"),
-        )
-    })?;
-    let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
-
-    let inputs = runmat_plot::gpu::line::LineGpuInputs {
-        x_buffer: x_ref.clone().into(),
-        y_buffer: y_ref.clone().into(),
-        len: len_u32,
-        scalar,
-    };
-    let marker_meta = marker_metadata_from_appearance(appearance);
-
-    let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
-        let marker_params = runmat_plot::gpu::line::LineGpuParams {
-            color: marker.face_color,
-            half_width_px: 0.0,
-            viewport_width_px: 1.0,
-            viewport_height_px: 1.0,
-            x_min: 0.0,
-            x_span: 1.0,
-            y_min: 0.0,
-            y_span: 1.0,
-            line_style: LineStyle::Solid,
-            marker_size: marker.size.max(1.0),
-        };
-        Some(
-            context
-                .access
-                .with_shared(|emission| {
-                    runmat_plot::gpu::line::pack_marker_vertices_from_xy(
-                        emission,
-                        &inputs,
-                        &marker_params,
-                    )
-                })
-                .map_err(|error| error.to_string())
-                .and_then(|result| result)
-                .map_err(|e| {
-                    plotting_error(
-                        builtin,
-                        format!("{builtin}: failed to build marker vertices: {e}"),
-                    )
-                })?,
-        )
-    } else {
-        None
-    };
-
-    let bounds = super::gpu_helpers::gpu_xy_bounds_async(x, y, builtin).await?;
-    let gpu_style = LineGpuStyle {
-        color: appearance.color,
-        line_width: appearance.line_width,
-        line_style: appearance.line_style,
-        marker: marker_meta.clone(),
-        handle_visibility: appearance.handle_visibility.clone(),
-    };
-    let mut plot = LinePlot::from_gpu_xy(inputs, gpu_style, bounds, marker_gpu_vertices);
-    plot = plot
-        .with_label(label)
-        .with_handle_visibility(appearance.handle_visibility.clone());
-    if let Some(visible) = appearance.visible {
-        plot.set_visible(visible);
-    }
-    Ok(plot)
+) -> BuiltinResult<Option<LinePlot>> {
+    gpu_line::prepare(builtin, x, y, label, appearance).await
 }
 
 #[derive(Debug)]

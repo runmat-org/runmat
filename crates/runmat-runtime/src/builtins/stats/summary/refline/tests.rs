@@ -288,8 +288,12 @@ fn refline_least_squares_reads_gpu_scatter_source_data() {
         crate::builtins::common::gpu_helpers::upload_tensor(provider, &y_tensor).expect("gpu y");
     let x = Value::GpuTensor(x_handle.clone());
     let y = Value::GpuTensor(y_handle.clone());
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(&x_handle).expect("export x");
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(&y_handle).expect("export y");
+    let x_ref = runmat_accelerate_api::export_wgpu_buffer(&x_handle)
+        .unwrap()
+        .expect("export x");
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(&y_handle)
+        .unwrap()
+        .expect("export y");
     let dummy_vertices = context
         .access
         .with_shared(|emission| {

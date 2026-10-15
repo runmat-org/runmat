@@ -80,8 +80,12 @@ fn scatter_exported_source_preserves_exact_values_and_borrowed_leases() {
         .expect("y");
     let x_wire = x.wire_descriptor();
     let y_wire = y.wire_descriptor();
-    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x).expect("owned x export");
-    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y).expect("owned y export");
+    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x)
+        .unwrap()
+        .expect("owned x export");
+    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y)
+        .unwrap()
+        .expect("owned y export");
     let scalar = ScalarType::from_is_f64(x_export.precision == ProviderPrecision::F64);
     let x_buffer = GpuInputBuffer::from(x_export);
     let y_buffer = GpuInputBuffer::from(y_export);
@@ -194,9 +198,15 @@ fn line3_exported_source_preserves_exact_values_and_borrowed_leases() {
         y.wire_descriptor(),
         z.wire_descriptor(),
     ];
-    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x).expect("owned x export");
-    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y).expect("owned y export");
-    let z_export = runmat_accelerate_api::export_wgpu_buffer(&z).expect("owned z export");
+    let x_export = runmat_accelerate_api::export_wgpu_buffer(&x)
+        .unwrap()
+        .expect("owned x export");
+    let y_export = runmat_accelerate_api::export_wgpu_buffer(&y)
+        .unwrap()
+        .expect("owned y export");
+    let z_export = runmat_accelerate_api::export_wgpu_buffer(&z)
+        .unwrap()
+        .expect("owned z export");
     let scalar = ScalarType::from_is_f64(x_export.precision == ProviderPrecision::F64);
     let x_buffer = GpuInputBuffer::from(x_export);
     let y_buffer = GpuInputBuffer::from(y_export);

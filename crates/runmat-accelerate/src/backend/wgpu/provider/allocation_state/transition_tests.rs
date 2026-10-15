@@ -74,7 +74,7 @@ fn views_and_exports_share_one_lease_and_facade_drop_does_not_invalidate_them() 
     assert_ne!(input.view_identity(), alias.view_identity());
     assert!(input.shares_allocation_with(&alias));
     assert_eq!(provider.allocations.record_count().unwrap(), 1);
-    let export = provider.export_wgpu_buffer(&input).unwrap();
+    let export = provider.export_wgpu_buffer(&input).unwrap().unwrap();
     let wire = alias.wire_descriptor();
     let imported = provider.acquire_live(&wire).unwrap();
     assert!(alias.shares_allocation_with(&imported));

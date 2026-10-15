@@ -499,8 +499,9 @@ pub(crate) fn build_truecolor_image_surface_gpu(
     cols: usize,
     channels: u32,
 ) -> crate::BuiltinResult<SurfacePlot> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let image_ref = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
+    let image_ref = gpu_exports.export(handle, BUILTIN_NAME)?.ok_or_else(|| {
         crate::builtins::plotting::plotting_error(
             BUILTIN_NAME,
             "image: unable to export truecolor GPU image",
@@ -691,8 +692,12 @@ pub(crate) async fn build_indexed_image_surface(
                         .with_color_mapping(color_mapping)
                         .with_color_limits(effective_limits));
                 }
+                Err(err) if err.gpu_gather_retry == crate::GpuGatherRetry::Never => {
+                    return Err(err)
+                }
                 Err(err) => warn!("image GPU path unavailable: {err}"),
             },
+            Err(err) if err.gpu_gather_retry == crate::GpuGatherRetry::Never => return Err(err),
             Err(err) => warn!("image GPU bounds unavailable: {err}"),
         }
     }
