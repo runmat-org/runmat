@@ -69,6 +69,10 @@ fn represented_binary_arithmetic_matches_host_without_early_narrowing() {
                         assert_ne!(expected, f64::from((a as f32) * (b as f32)));
                     }
                     let program = resolve(&source, &inputs, ProviderPrecision::F64);
+                    // A mixed operation widens one operand and rounds its
+                    // result. Both placement candidates consume that recipe.
+                    assert_eq!(program.scalar_work_units(&source, 2).unwrap(), 6);
+                    assert_eq!(program.host_scalar_work_units(&source).unwrap(), 6);
                     let checked =
                         TypedProducer::emit_checked_program(&source, &program, ScalarType::F64, 2)
                             .unwrap()
@@ -121,6 +125,8 @@ fn represented_binary_arithmetic_matches_host_without_early_narrowing() {
                         PrecisionPolicy::AllowDoubleToSingle,
                     ))
                     .unwrap();
+                    assert_eq!(opted.scalar_work_units(&source, 2).unwrap(), 2);
+                    assert_eq!(opted.host_scalar_work_units(&source).unwrap(), 2);
                     let projected =
                         TypedProducer::emit_checked_program(&source, &opted, ScalarType::F32, 2)
                             .unwrap()

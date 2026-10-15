@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_runtime::builtins::common::spec::FusionMathHelper;
-use runmat_types::NumericClass;
+use runmat_types::{rules::RealFloatingRecipe, NumericClass, ScalarOperation};
 
 use super::{semantics::ResolvedProgram, FusionGroupPlan, FusionOp};
 
@@ -24,40 +24,66 @@ impl ResolvedProgram {
                     .element_count()
                     .and_then(|n| u64::try_from(n).ok())
                     .ok_or_else(|| anyhow!("host work requires a bounded output shape"))?;
-                let precision = match self.floating_class(output)? {
-                    NumericClass::Single => ProviderPrecision::F32,
-                    NumericClass::Double => ProviderPrecision::F64,
-                    _ => return Err(anyhow!("host work requires a floating class")),
-                };
-                let helpers = self
-                    .declaration(output)
-                    .and_then(|declaration| declaration.semantics)
-                    .map_or(&[][..], |semantics| semantics.helpers);
                 elements
-                    .checked_mul(operation_units(precision, helpers))
+                    .checked_mul(self.operation_work_units(operation)?)
                     .ok_or_else(|| anyhow!("host scalar work overflows"))
             }),
         )
     }
 
     pub(crate) fn scalar_work_units(&self, plan: &FusionGroupPlan, elements: u64) -> Result<u64> {
-        let operations = plan.operations.iter().map(|operation| {
-            let output = match operation {
-                FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
-            }
-            .ok_or_else(|| anyhow!("fusion work requires a resolved output"))?;
-            let precision = match self.floating_class(output)? {
-                NumericClass::Single => ProviderPrecision::F32,
-                NumericClass::Double => ProviderPrecision::F64,
-                _ => return Err(anyhow!("fusion work requires a floating class")),
-            };
-            let helpers = self
-                .declaration(output)
-                .and_then(|declaration| declaration.semantics)
-                .map_or(&[][..], |semantics| semantics.helpers);
-            Ok(operation_units(precision, helpers))
-        });
+        let operations = plan
+            .operations
+            .iter()
+            .map(|operation| self.operation_work_units(operation));
         total_work(elements, operations)
+    }
+
+    /// Consume semantic facts, not GPU implementation admission: a valid host
+    /// candidate must remain priceable when no shader can execute its recipe.
+    fn operation_work_units(&self, operation: &FusionOp) -> Result<u64> {
+        let (inputs, output) = match operation {
+            FusionOp::Primitive { inputs, output, .. }
+            | FusionOp::Builtin { inputs, output, .. } => (inputs, output),
+        };
+        let output = output.ok_or_else(|| anyhow!("fusion work requires a resolved output"))?;
+        let result_class = self.floating_class(output)?;
+        let semantics = self.declaration(output).and_then(|entry| entry.semantics);
+        let operator = match operation {
+            FusionOp::Primitive { op, .. } => Some(op.operator_kind()),
+            FusionOp::Builtin { .. } => match semantics.and_then(|entry| entry.scalar_operation) {
+                Some(ScalarOperation::Operator(operator)) => Some(operator),
+                _ => None,
+            },
+        };
+        let recipe = match (operator, inputs.as_slice()) {
+            (Some(operator), [left, right]) => {
+                RealFloatingRecipe::for_facts(operator, self.fact(*left)?, self.fact(*right)?)
+            }
+            _ => None,
+        };
+        let mut computation_class = result_class;
+        let mut conversions = 0;
+        if let Some(recipe) = recipe {
+            if recipe.result_class() != result_class {
+                return Err(anyhow!(
+                    "arithmetic work recipe disagrees with result class"
+                ));
+            }
+            computation_class = recipe.computation_class();
+            for &input in inputs {
+                conversions += u64::from(self.floating_class(input)? != computation_class);
+            }
+            conversions += u64::from(computation_class != result_class);
+        }
+        let precision = match computation_class {
+            NumericClass::Single => ProviderPrecision::F32,
+            NumericClass::Double => ProviderPrecision::F64,
+            _ => return Err(anyhow!("fusion work requires a floating computation class")),
+        };
+        operation_units(precision, semantics.map_or(&[], |entry| entry.helpers))
+            .checked_add(conversions)
+            .ok_or_else(|| anyhow!("arithmetic conversion work overflows"))
     }
 }
 

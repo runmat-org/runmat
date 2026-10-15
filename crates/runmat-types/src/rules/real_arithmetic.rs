@@ -140,7 +140,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 next.evaluate(actual, 1.0).unwrap(),
-                f64::from(((single * double) as f32 - 1.0) as f32)
+                f64::from((f64::from((single * double) as f32) - 1.0) as f32)
             );
         }
         assert!(RealFloatingRecipe::for_classes(
