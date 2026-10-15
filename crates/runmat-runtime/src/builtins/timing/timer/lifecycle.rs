@@ -5,7 +5,6 @@ use crate::context::LocalTaskCommandOrigin;
 use crate::context::RuntimeLocalTaskOutcome;
 use crate::context::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
 use runmat_async::RuntimeErrorOwner;
-use std::rc::Rc;
 use std::time::Duration;
 
 mod schedule;
