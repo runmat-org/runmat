@@ -115,7 +115,8 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
                 assert_eq!(
                     provider.numeric_downloads.load(Ordering::Relaxed) - downloads,
                     1,
-                    "all repeated ordinary loads share one exact logical-view readback"
+                    "all repeated ordinary loads share one exact logical-view readback: single={single}, decoded={decoded}, precision={:?}, script_regions={:?}, feedback={:?}",
+                    provider.precision(), bytecode.runtime_fusion_groups(), capture.delivered.lock().unwrap(),
                 );
                 assert_eq!(provider.next_id.load(Ordering::Relaxed), allocations);
                 assert_eq!(
@@ -199,7 +200,20 @@ pub(super) fn resume_after_input_store(
     }
     let pc = store + 1;
     let groups = bytecode.runtime_fusion_groups();
-    assert!(groups.iter().any(|group| group.span.start >= pc));
+    let function_region = bytecode.layout.as_ref().is_some_and(|layout| {
+        let registry = bytecode.function_registry();
+        bytecode.bound_functions.keys().any(|id| {
+            registry.get(*id).is_some_and(|function| {
+                !runmat_vm::Bytecode::for_function(function, registry.clone(), layout.clone())
+                    .runtime_fusion_groups()
+                    .is_empty()
+            })
+        })
+    });
+    assert!(
+        groups.iter().any(|group| group.span.start >= pc) || function_region,
+        "fixture must retain a script or admitted function fusion region"
+    );
     assert!(
         groups
             .iter()

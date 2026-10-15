@@ -98,6 +98,13 @@ impl AccelProvider for FailingProvider {
     fn query_feasibility(&self, _: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         ProviderFeasibility::supported(Default::default())
     }
+    fn supports_shader_requirements(&self, requirements: ProviderShaderRequirements) -> bool {
+        // The injected F64 dispatch lane models IEEE-word shader support.
+        // Actual providers negotiate this separately from preferred precision.
+        requirements == ProviderShaderRequirements::Basic
+            || (self.precision == ProviderPrecision::F64
+                && requirements == ProviderShaderRequirements::F64IeeeWords)
+    }
     fn supports_fused_elementwise_abi(
         &self,
         _: runmat_accelerate_api::ProviderFusedElementwiseAbi,
@@ -384,7 +391,12 @@ fn f64_owner_uses_explicit_single_data_abi_without_narrowing_double_data() {
                 }));
             let error = match result {
                 Err(error) => error,
-                _ => panic!("selected fixture dispatch must fail"),
+                _ => panic!(
+                    "selected fixture dispatch must fail: case={case}, capable={capable}, uploads={}, typed={}, legacy={}",
+                    provider.uploads.load(Ordering::SeqCst),
+                    provider.typed_dispatches.load(Ordering::SeqCst),
+                    provider.dispatches.load(Ordering::SeqCst),
+                ),
             };
             assert_original_unsupported(&error);
             let typed = capable && case != 2 && case != 3;

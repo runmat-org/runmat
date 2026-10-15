@@ -152,7 +152,7 @@ fn captured_double_scalar_narrowing_requires_the_admitted_precision_policy() {
     for policy in [PrecisionPolicy::Exact, PrecisionPolicy::AllowDoubleToSingle] {
         let program = futures::executor::block_on(ResolvedProgram::resolve_with_policy(
             &source,
-            &[&input],
+            std::slice::from_ref(&input),
             ProviderPrecision::F32,
             policy,
         ))

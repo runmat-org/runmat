@@ -1,4 +1,5 @@
 use super::*;
+#[path = "tests/projection.rs"]
 mod projection;
 use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
 use crate::fusion_exec::{
@@ -312,7 +313,7 @@ fn sealed_reduction_power_rejects_changed_constant_control_before_emission() {
             )
             .unwrap();
         let shader = generated.source();
-        assert!(shader.contains("control1_bits: u32 = 0x00000000u"));
+        assert!(shader.contains("let control1 = bitcast<f32>(0x00000000u);"));
         let mut changed = source.clone();
         changed.const_values.insert(
             1,

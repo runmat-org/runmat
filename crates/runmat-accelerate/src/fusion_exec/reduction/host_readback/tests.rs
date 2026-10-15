@@ -14,7 +14,12 @@ use std::task::{Context, Poll};
 
 struct DownloadOwner {
     allocations: TestAllocationOwner,
-    probes: Mutex<Vec<RetirementProbe>>,
+    probes: Mutex<
+        Vec<(
+            runmat_accelerate_api::allocation::AllocationIdentity,
+            RetirementProbe,
+        )>,
+    >,
     downloads: AtomicUsize,
     workspace: AtomicUsize,
     pending_second: AtomicBool,
@@ -42,7 +47,10 @@ impl DownloadOwner {
             .allocations
             .allocate_zeroed(vec![1, 1], NumericElementType::F32, GpuTensorStorage::Real)
             .unwrap();
-        self.probes.lock().unwrap().push(allocation.probe);
+        self.probes
+            .lock()
+            .unwrap()
+            .push((allocation.handle.allocation_identity(), allocation.probe));
         allocation
             .handle
             .with_provenance(GpuHandleProvenance::Automatic)
@@ -84,11 +92,15 @@ impl AccelProvider for DownloadOwner {
                 })
                 .await;
             }
-            let words =
-                self.probes.lock().unwrap()[ordinal].with_data(handle, |data| match data {
-                    HostNumericDataView::F32(words) => words.to_vec(),
-                    _ => panic!("fixture allocation must retain its F32 native words"),
-                })?;
+            let probes = self.probes.lock().unwrap();
+            let (_, probe) = probes
+                .iter()
+                .find(|(identity, _)| *identity == handle.allocation_identity())
+                .ok_or_else(|| anyhow::anyhow!("fixture download has no owning allocation"))?;
+            let words = probe.with_data(handle, |data| match data {
+                HostNumericDataView::F32(words) => words.to_vec(),
+                _ => panic!("fixture allocation must retain its F32 native words"),
+            })?;
             Ok(HostNumericTensorOwned {
                 data: HostNumericDataOwned::F32(words),
                 shape: handle.shape().to_vec(),
@@ -209,7 +221,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
         drop(prepared);
         owner.downloads.store(0, Ordering::SeqCst);
         let retiring = owner.resident();
-        let retirement = owner.probes.lock().unwrap().last().unwrap().clone();
+        let retirement = owner.probes.lock().unwrap().last().unwrap().1.clone();
         let retiring_stack = [Value::GpuTensor(retiring.clone())];
         let prepared = block_on(
             CpuReadbackPlan {
@@ -268,7 +280,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
         owner.downloads.store(0, Ordering::SeqCst);
         let mut pending = Box::pin(plan.prepare(&stack));
         assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
-        owner.probes.lock().unwrap()[0].mark_unavailable();
+        owner.probes.lock().unwrap()[0].1.mark_unavailable();
         owner.release_second.store(true, Ordering::SeqCst);
         assert!(matches!(
             block_on(pending),
