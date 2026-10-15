@@ -33,6 +33,12 @@ fn actual_vm_folded_double_sum_keeps_f64_storage_and_full_call_feedback() {
             "selected device must enable both SHADER_F64 and SHADER_INT64"
         );
 
+        for decoded_function in [false, true] {
+            block_on(typed_elementwise_call::assert_original_sum_full_call(
+                decoded_function,
+            ));
+        }
+
         // The first source element exceeds F32's exact-integer range. Its
         // 128-row Double sum has low bits that an F32 output cannot retain.
         let bytecode = test_helpers::compile_source(

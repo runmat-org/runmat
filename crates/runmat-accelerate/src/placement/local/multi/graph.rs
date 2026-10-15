@@ -196,6 +196,7 @@ mod tests {
                                 workgroup_bytes: 128,
                                 uniform_bytes: 0,
                                 producer_scalar_work_units: 8,
+                                terminal_scalar_work_units: 0,
                             },
                             inputs: vec![],
                             output,

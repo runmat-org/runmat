@@ -146,7 +146,7 @@ fn altered_checked_selection_workload_refuses_before_provider_query() {
                 input_adaptation: None,
                 outputs: vec![typed.output.clone()],
                 workload: ProviderWorkload {
-                    scalar_work_units: Some(typed.work.producer_scalar_work_units),
+                    scalar_work_units: typed.work.checked_total_scalar_work_units(),
                     typed_reduction: Some(typed),
                     ..Default::default()
                 },
@@ -206,7 +206,7 @@ fn unchanged_checked_typed_selection_reaches_same_physical_query() {
             input_adaptation: None,
             outputs: vec![typed.output.clone()],
             workload: ProviderWorkload {
-                scalar_work_units: Some(selection.work().producer_scalar_work_units),
+                scalar_work_units: selection.work().checked_total_scalar_work_units(),
                 typed_reduction: Some(typed.clone()),
                 ..Default::default()
             },
@@ -254,7 +254,7 @@ fn try_plan_resident(
             input_adaptation: None,
             outputs: vec![typed.output.clone()],
             workload: ProviderWorkload {
-                scalar_work_units: Some(selection.work().producer_scalar_work_units),
+                scalar_work_units: selection.work().checked_total_scalar_work_units(),
                 typed_reduction: Some(typed),
                 ..Default::default()
             },

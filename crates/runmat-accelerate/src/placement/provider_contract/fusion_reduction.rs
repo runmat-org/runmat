@@ -82,7 +82,8 @@ fn analyze(
         || !input_preparation
         || query.outputs.len() != 1
         || query.inputs != selected.inputs
-        || query.workload.scalar_work_units != Some(selected.work.producer_scalar_work_units)
+        || selected.work.checked_total_scalar_work_units().is_none()
+        || query.workload.scalar_work_units != selected.work.checked_total_scalar_work_units()
         || query.outputs[0] != selected.output
         || selected.output.residency != ProviderResidency::Device
         || selected.output.storage != ProviderStorage::DenseReal
@@ -163,7 +164,7 @@ mod tests {
                 ..input(ProviderElementType::F64)
             }],
             workload: ProviderWorkload {
-                scalar_work_units: Some(8),
+                scalar_work_units: Some(14),
                 typed_reduction: Some(ProviderTypedReductionWorkload {
                     recipe_identity: Digest::sha256(b"recipe"),
                     selection_identity: Digest::sha256(b"selected"),
@@ -175,6 +176,7 @@ mod tests {
                         workgroup_bytes: 128,
                         uniform_bytes: 0,
                         producer_scalar_work_units: 8,
+                        terminal_scalar_work_units: 6,
                     },
                     inputs: vec![
                         input(ProviderElementType::F32),
@@ -196,6 +198,12 @@ mod tests {
                     && estimate.transient_bytes == Some(80)
                     && estimate.dispatches == Some(2)
         ));
+        query.workload.scalar_work_units = Some(8);
+        assert!(matches!(
+            validate(true, &query),
+            Some(ProviderFeasibility::Rejected { .. })
+        ));
+        query.workload.scalar_work_units = Some(14);
         #[cfg(feature = "wgpu")]
         {
             let ProviderObservationCapability::Supported(overhead) = observation_capability(&query)

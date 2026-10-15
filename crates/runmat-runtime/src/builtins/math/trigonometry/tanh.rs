@@ -60,7 +60,17 @@ fn tanh_error_with_detail(
     builder.build()
 }
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration::total_real_unary_math(
+        runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::TANH_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        runmat_types::ScalarUnaryMath::Tanh,
+    );
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh",
+    semantics = FUSION_SEMANTICS,
     host_resources = crate::builtins::math::host_resources::real_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -71,7 +81,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("tanh({input})"))
+            crate::builtins::common::spec::unary_math_expression(
+                runmat_types::ScalarUnaryMath::Tanh,
+                ctx.scalar_ty,
+                input,
+            )
         },
     }),
     reduction: None,

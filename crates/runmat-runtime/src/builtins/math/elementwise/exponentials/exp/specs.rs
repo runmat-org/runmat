@@ -22,8 +22,18 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may evaluate real floating exp directly; complex values and unsupported hooks use an owner-preserving host fallback.",
 };
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration::total_real_unary_math(
+        runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::EXP_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        runmat_types::ScalarUnaryMath::Exp,
+    );
+
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::elementwise::exponentials::exp",
+    semantics = FUSION_SEMANTICS,
     host_resources = crate::builtins::math::host_resources::real_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -34,7 +44,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |context: &FusionExprContext| {
             let input = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("exp({input})"))
+            crate::builtins::common::spec::unary_math_expression(
+                runmat_types::ScalarUnaryMath::Exp,
+                context.scalar_ty,
+                input,
+            )
         },
     }),
     reduction: None,

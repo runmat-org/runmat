@@ -79,22 +79,8 @@ impl TypedProducer {
             }
             let class = program.floating_class(id)?;
             if controls.contains(&id) {
-                let bits = plan
-                    .operations
-                    .iter()
-                    .find_map(|operation| {
-                        let (_, output) = operands(operation);
-                        let receipt = program.power_arithmetic(output?)?;
-                        (receipt.exponent_id == id)
-                            .then_some(receipt.exponent_scalar?)
-                            .and_then(|control| match control {
-                                runmat_accelerate_api::PowerScalarControl::DoubleBits(bits) => {
-                                    Some(bits)
-                                }
-                                _ => None,
-                            })
-                    })
-                    .or_else(|| program.exact_product_control_bits(id))
+                let bits = program
+                    .embedded_scalar_control_bits(id)
                     .ok_or_else(|| anyhow!("certified control lost its original Double bits"))?;
                 nodes.push(ScalarNode::Literal {
                     id,
@@ -173,7 +159,17 @@ impl TypedProducer {
         let mut exact_power = false;
         let mut exact_product = false;
         let mut implementations = Vec::new();
-        let capture_words = !word_expressions.is_empty();
+        let capture_words = buffer_type == ScalarType::F32
+            && checked.wire().nodes.iter().any(|node| {
+                checked.exact_product(node.id()).is_some()
+                    || matches!(
+                        node,
+                        ScalarNode::Apply {
+                            operation: ScalarOperation::Operator(OperatorKind::ElementwisePower),
+                            ..
+                        }
+                    )
+            });
         let metadata_controls = checked.metadata_control_ids();
         for node in &checked.wire().nodes {
             match node {
@@ -186,6 +182,15 @@ impl TypedProducer {
                 // Source text cannot promise NaN payload preservation merely
                 // because the portable receipt retains its exact bits. The
                 // established WGSL constant path remains in charge for now.
+                ScalarNode::Literal {
+                    id,
+                    value: ScalarLiteral::F32Bits(bits),
+                } if buffer_type == ScalarType::F32 && capture_words => {
+                    let name = format!("control{id}_bits");
+                    body.push_str(&format!("    let {name}: u32 = 0x{bits:08x}u;\n"));
+                    expressions.insert(*id, format!("bitcast<f32>({name})"));
+                    word_expressions.insert(*id, name);
+                }
                 ScalarNode::Literal { id, .. } => {
                     if buffer_type != ScalarType::F32 || !metadata_controls.contains(id) {
                         return Ok(None);
@@ -286,6 +291,12 @@ impl TypedProducer {
                         (ScalarOperation::Operator(operator), _) => {
                             crate::fusion::scalar_operator_expr(*operator, &arguments)
                                 .ok_or_else(|| anyhow!("scalar operation lacks WGSL lowering"))?
+                        }
+                        (ScalarOperation::UnaryMath(operation), [input]) => {
+                            runmat_runtime::builtins::common::spec::unary_math_expression(
+                                *operation, scalar, input,
+                            )
+                            .map_err(|error| anyhow!("unary math expression failed: {error:?}"))?
                         }
                         (
                             ScalarOperation::Cast(NumericClass::Single | NumericClass::Double),
@@ -455,7 +466,10 @@ pub(super) fn resolved_operation(
         if matches!(identity, ScalarOperation::Cast(target) if target != class) {
             return Err(anyhow!("captured scalar cast result class mismatch"));
         }
-        if matches!(identity, ScalarOperation::Operator(_)) {
+        if matches!(
+            identity,
+            ScalarOperation::Operator(_) | ScalarOperation::UnaryMath(_)
+        ) {
             for input in inputs {
                 if program.floating_class(*input)? != class {
                     return Err(anyhow!("captured scalar operand class mismatch"));

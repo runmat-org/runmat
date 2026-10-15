@@ -23,6 +23,15 @@ pub struct SelectedReductionWork {
     pub workgroup_bytes: u64,
     pub uniform_bytes: u64,
     pub producer_scalar_work_units: u64,
+    /// Checked terminal tree/forwarding prior, separate from the scalar producer.
+    pub terminal_scalar_work_units: u64,
+}
+
+impl SelectedReductionWork {
+    pub fn checked_total_scalar_work_units(self) -> Option<u64> {
+        self.producer_scalar_work_units
+            .checked_add(self.terminal_scalar_work_units)
+    }
 }
 
 /// Borrowing the immutable recipe prevents a different recipe from being
@@ -75,9 +84,17 @@ impl<'a> ReductionSelection<'a> {
             workgroup_bytes: w.workgroup_bytes,
             uniform_bytes: w.uniform_bytes,
             producer_scalar_work_units: w.producer_scalar_work_units,
+            terminal_scalar_work_units: recipe
+                .terminal_work_prior(strategy)?
+                .checked_units()
+                .ok_or_else(|| anyhow::anyhow!("terminal reduction work overflow"))?,
         };
+        ensure!(
+            work.checked_total_scalar_work_units().is_some(),
+            "complete reduction work overflow"
+        );
         let identity = Digest::sha256(serde_json::to_vec(&(
-            "typed-reduction-selection-v1",
+            "typed-reduction-selection-v2",
             recipe.identity(),
             strategy,
             work,

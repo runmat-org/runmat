@@ -19,6 +19,7 @@ fn selected_typed_reduction_queue_reports_passes_and_exact_partial_scratch() {
                 workgroup_bytes: 128,
                 uniform_bytes: 8,
                 producer_scalar_work_units: 100,
+                terminal_scalar_work_units: 30,
             },
         );
         trace.complete(Some(PlacementVariant::ProviderFusion), None);

@@ -534,7 +534,8 @@ fn select_fusion_provider_with_implementation(
         // Non-scalar legacy domains retain their existing element prior.
         Some(element_count)
     };
-    if host_available && host_units.is_none() {
+    let host_execution_ns = host_units.and_then(|units| units.checked_mul(100));
+    if host_available && host_execution_ns.is_none() {
         // Ordinary execution remains valid without a comparative cost proof.
         // The caller retains any admitted private-readback continuation. Do
         // not publish a fabricated estimate or timing feedback for this route.
@@ -547,7 +548,7 @@ fn select_fusion_provider_with_implementation(
         components: ExecutionCostComponents {
             // With no host admission this descriptor is excluded from the
             // candidate graph; its carrier is required by the local API.
-            execution_ns: host_units.map_or(0, |units| units.saturating_mul(100).max(100)),
+            execution_ns: host_execution_ns.map_or(0, |ns| ns.max(100)),
             ..ExecutionCostComponents::default()
         },
         scratch_bytes: Some(0),
@@ -570,7 +571,10 @@ fn select_fusion_provider_with_implementation(
             compile_or_prepare_ns: 20_000,
             allocation_ns: 5_000,
             queue_ns: 10_000,
-            execution_ns: execution_units.saturating_mul(10).max(100),
+            execution_ns: execution_units
+                .checked_mul(10)
+                .ok_or_else(|| anyhow!("provider fusion execution prior overflows"))?
+                .max(100),
             ..ExecutionCostComponents::default()
         },
         scratch_bytes: Some(0),
@@ -578,7 +582,7 @@ fn select_fusion_provider_with_implementation(
         source: EstimateSource::StaticPrior,
     };
     let cpu_admission = match host {
-        _ if host_units.is_none() => crate::placement::LocalCpuAdmission::Unavailable,
+        _ if host_execution_ns.is_none() => crate::placement::LocalCpuAdmission::Unavailable,
         host_readback::CpuHostPlacement::Legacy => crate::placement::LocalCpuAdmission::Legacy,
         host_readback::CpuHostPlacement::Unavailable => {
             crate::placement::LocalCpuAdmission::Unavailable

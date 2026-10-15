@@ -39,6 +39,9 @@ fn actual_vm_general_chain_and_decoded_function_complete_with_receipts() {
             block_on(typed_elementwise_call::assert_general_chain_full_call(
                 decoded_function,
             ));
+            block_on(typed_elementwise_call::assert_original_chain_full_call(
+                decoded_function,
+            ));
         }
     });
 }

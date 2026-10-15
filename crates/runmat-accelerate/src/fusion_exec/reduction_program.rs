@@ -19,6 +19,8 @@ use runmat_value::Value;
 mod inputs;
 #[path = "reduction_program/physical.rs"]
 mod physical;
+#[path = "reduction_program/host_work.rs"]
+mod host_work;
 
 /// A physical data operand retains its exact original carrier and view. Layout
 /// strides must later be obtained from the provider's existing operand-layout
@@ -41,9 +43,10 @@ pub struct ResolvedReductionProgram<'a> {
     execution_precision: ProviderPrecision,
     producer_transport: ScalarTransport,
     producer_implementations: Vec<EmittedScalarImplementation>,
-    exact_product_controls: Vec<(ValueId, u64)>,
+    embedded_controls: Vec<(ValueId, u64)>,
     owner_precision: ProviderPrecision,
     producer_work_units: u64,
+    host_total_work_units: Option<u64>,
     checked_scalar: Option<ScalarProgram>,
     host_bindings: Option<Vec<runmat_builtins::BuiltinBindingIdentity>>,
     host_producer_shapes: Option<Vec<Vec<usize>>>,
@@ -90,7 +93,7 @@ impl<'a> ResolvedReductionProgram<'a> {
         request: &FusionExecutionRequest<'_>,
     ) -> anyhow::Result<()> {
         use runmat_runtime::builtins::common::spec::FusionScalarControl;
-        for &(id, bits) in &self.exact_product_controls {
+        for &(id, bits) in &self.embedded_controls {
             let value = request
                 .plan
                 .inputs
@@ -115,6 +118,11 @@ impl<'a> ResolvedReductionProgram<'a> {
     }
     pub fn producer_work_units(&self) -> u64 {
         self.producer_work_units
+    }
+    /// Original-class CPU producer plus terminal work. Missing price does not
+    /// revoke an independently admitted ordinary host execution route.
+    pub fn host_total_work_units(&self) -> Option<u64> {
+        self.host_total_work_units
     }
     pub fn checked_scalar(&self) -> Option<&ScalarProgram> {
         self.checked_scalar.as_ref()
@@ -203,6 +211,14 @@ async fn resolve<'a>(
         return Ok(None);
     };
     let values: Vec<_> = mapped.data.iter().map(|input| input.value).collect();
+    let host_total_work_units = host_work::derive(
+        &mapped,
+        &values,
+        precision,
+        &snapshots,
+        prepared.as_ref(),
+        declaration.operation,
+    );
     let resolved = if static_only {
         ResolvedProgram::resolve_static_captured(&mapped.producer, &values, precision, &snapshots)
     } else {
@@ -288,16 +304,19 @@ async fn resolve<'a>(
             mapped.root,
         ));
     }
-    let exact_product_controls = mapped
+    let embedded_controls = mapped
         .data
         .iter()
         .filter(|input| controls.contains(&input.value_id))
-        .filter_map(|input| {
+        .map(|input| {
             program
-                .exact_product_control_bits(input.value_id)
+                .embedded_scalar_control_bits(input.value_id)
                 .map(|bits| (input.value_id, bits))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("omitted reduction scalar control lost original words")
+                })
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let expression = producer
         .expression(mapped.root)
         .map_err(ProviderExecutionError::from)?
@@ -314,7 +333,7 @@ async fn resolve<'a>(
         .collect();
     let semantic = Digest::sha256(
         serde_json::to_vec(&(
-            "typed-reduction-program-v2",
+            "typed-reduction-program-v3",
             program.cache_identity()?,
             declaration.revision,
             &contract,
@@ -326,6 +345,7 @@ async fn resolve<'a>(
             checked_scalar.as_ref().map(ScalarProgram::identity),
             producer_transport,
             &producer_implementations,
+            host_total_work_units,
         ))
         .map_err(ProviderExecutionError::from_source)?,
     );
@@ -410,9 +430,10 @@ async fn resolve<'a>(
         execution_precision: producer_precision,
         producer_transport,
         producer_implementations,
-        exact_product_controls,
+        embedded_controls,
         owner_precision: precision,
         producer_work_units,
+        host_total_work_units,
         checked_scalar,
         host_bindings,
         host_producer_shapes,

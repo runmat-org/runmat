@@ -69,7 +69,7 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
         builtin: runmat_builtins::ATANH_CATALOG_ENTRY.identity,
         variant: "default",
     },
-    revision: 1,
+    revision: 2,
     admit: Some(admit_fusion),
     admit_static: None,
     required_real_unary: Some((
@@ -78,7 +78,9 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
     )),
     required_arithmetic: None,
     helpers: &[],
-    scalar_operation: None,
+    scalar_operation: Some(runmat_types::ScalarOperation::UnaryMath(
+        runmat_types::ScalarUnaryMath::Atanh,
+    )),
 };
 
 fn admit_fusion(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
@@ -103,7 +105,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
             let [input] = ctx.inputs else {
                 return Err(FusionError::MissingInput(0));
             };
-            Ok(format!("atanh({input})"))
+            crate::builtins::common::spec::unary_math_expression(runmat_types::ScalarUnaryMath::Atanh, ctx.scalar_ty, input)
         },
     }),
     reduction: None,

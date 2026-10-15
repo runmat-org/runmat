@@ -1,6 +1,50 @@
 use super::*;
 
 #[test]
+fn unary_math_wire_preserves_class_and_rejects_old_or_malformed_programs() {
+    for class in [NumericClass::Single, NumericClass::Double] {
+        let program = ScalarProgram::new(
+            source(),
+            SCALAR_PROGRAM_REVISION,
+            vec![
+                ScalarNode::Input { id: 0, class },
+                ScalarNode::Apply {
+                    id: 1,
+                    source_index: 0,
+                    class,
+                    operation: ScalarOperation::UnaryMath(runmat_types::ScalarUnaryMath::Sin),
+                    operands: vec![0],
+                },
+            ],
+            1,
+        )
+        .unwrap();
+        let encoded = serde_json::to_vec(program.wire()).unwrap();
+        let decoded = ScalarProgram::from_wire(serde_json::from_slice(&encoded).unwrap()).unwrap();
+        assert_eq!(decoded.identity(), program.identity());
+        let mut old = program.wire().clone();
+        old.semantic_revision = 4;
+        assert!(ScalarProgram::from_wire(old).is_err());
+        let mut wrong = program.wire().clone();
+        let ScalarNode::Apply { class: output, .. } = &mut wrong.nodes[1] else {
+            unreachable!()
+        };
+        *output = if class == NumericClass::Single {
+            NumericClass::Double
+        } else {
+            NumericClass::Single
+        };
+        assert!(ScalarProgram::from_wire(wrong).is_err());
+        let mut arity = program.wire().clone();
+        let ScalarNode::Apply { operands, .. } = &mut arity.nodes[1] else {
+            unreachable!()
+        };
+        operands.push(0);
+        assert!(ScalarProgram::from_wire(arity).is_err());
+    }
+}
+
+#[test]
 fn exact_product_control_preserves_original_words_and_omits_no_data_use() {
     use runmat_types::{OperatorKind, RealFloatingRecipe};
     for scalar in [4.0_f64, -4.0, 0.0, -0.0, f64::from(f32::from_bits(1))] {

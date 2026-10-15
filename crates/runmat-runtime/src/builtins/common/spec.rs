@@ -1,6 +1,8 @@
 use std::fmt;
 
 mod admission;
+mod unary_math;
+pub use unary_math::unary_math_expression;
 mod canonical;
 mod host_resources;
 pub use host_resources::{

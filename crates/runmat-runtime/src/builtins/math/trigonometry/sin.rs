@@ -68,7 +68,17 @@ fn sin_error_with_detail(
     builder.build()
 }
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration::total_real_unary_math(
+        runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::SIN_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        runmat_types::ScalarUnaryMath::Sin,
+    );
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin",
+    semantics = FUSION_SEMANTICS,
     host_resources = crate::builtins::math::host_resources::real_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -82,7 +92,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
                 return Err(FusionError::Message("unary fusion requires exactly one data operand"));
             }
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("sin({input})"))
+            crate::builtins::common::spec::unary_math_expression(runmat_types::ScalarUnaryMath::Sin, ctx.scalar_ty, input)
         },
     }),
     reduction: None,

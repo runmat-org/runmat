@@ -2,6 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NumericClass, OperatorKind, RealFloatingRecipe};
 
+/// Numerical instructions, not builtin names or binding authority. Domain
+/// admission and original binding selection remain with canonical owners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ScalarUnaryMath {
+    Exp,
+    Sin,
+    Cos,
+    Tan,
+    Sinh,
+    Cosh,
+    Tanh,
+    Atan,
+    Asinh,
+    Acosh,
+    Atanh,
+}
+
 /// Closed scalar operation identity for a proved pure fusion slice.
 ///
 /// This is not a second builtin registry: the selected canonical binding or
@@ -13,6 +30,7 @@ pub enum ScalarOperation {
     /// Canonical real arithmetic with explicit computation and result classes.
     /// Operand order and one result conversion belong to the original Apply.
     RealArithmetic(RealFloatingRecipe),
+    UnaryMath(ScalarUnaryMath),
     Cast(NumericClass),
 }
 
@@ -30,6 +48,7 @@ impl ScalarOperation {
                 _ => None,
             },
             Self::RealArithmetic(_) => Some(2),
+            Self::UnaryMath(_) => Some(1),
             Self::Cast(NumericClass::Single | NumericClass::Double) => Some(1),
             Self::Cast(_) => None,
         }

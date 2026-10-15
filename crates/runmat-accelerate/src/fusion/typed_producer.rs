@@ -106,6 +106,8 @@ impl TypedProducer {
         // aliases a produced SSA value; None still emits every operation.
         let indices = producer_indices(plan, &leaves, roots.unwrap_or_default())?;
         let selected = roots.map(|_| indices);
+        let capture_words = buffer_type == ScalarType::F32
+            && Self::requires_binary32_word_transport(plan, program, roots)?;
         let constant_body = constants::seed(
             plan,
             program,
@@ -113,6 +115,8 @@ impl TypedProducer {
             &mut expressions,
             selected.as_ref(),
             roots,
+            &mut word_expressions,
+            capture_words,
         )?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
@@ -174,7 +178,6 @@ impl TypedProducer {
         let mut exact_power = false;
         let mut exact_product = false;
         let mut implementations = Vec::new();
-        let capture_words = !word_expressions.is_empty();
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()

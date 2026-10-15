@@ -2,10 +2,7 @@
 //! producer's strides, shader source, or scheduling decision.
 use super::{types::width, *};
 use anyhow::{anyhow, ensure, Result};
-use runmat_types::{
-    FusionReductionCount, FusionReductionEmpty, FusionReductionOperation, FusionReductionTies,
-    NumericClass, ReductionNaN,
-};
+use runmat_types::NumericClass;
 
 pub(super) fn elements(shape: &[usize]) -> Result<u64> {
     if shape.contains(&0) {
@@ -152,79 +149,14 @@ fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
                 },
         "reduction owner classes differ from physical representation"
     );
-    let rank = contract.input_shape.len();
-    let mut reduced = vec![false; rank];
-    let mut seen = vec![false; rank];
-    for &axis in &contract.axes {
-        ensure!(axis < rank && !seen[axis], "invalid reduction owner axis");
-        seen[axis] = true;
-        if !contract.identity {
-            reduced[axis] = true;
-        }
-    }
-    let expected_shape = contract
-        .input_shape
-        .iter()
-        .enumerate()
-        .map(|(axis, &extent)| if reduced[axis] { 1 } else { extent })
-        .collect::<Vec<_>>();
-    ensure!(
-        contract.output_shape == expected_shape
-            || (elements(&expected_shape)? == 1 && contract.output_shape == [1, 1]),
-        "reduction owner output shape differs from selected axes"
-    );
-    let reduce_shape = contract
-        .input_shape
-        .iter()
-        .zip(&reduced)
-        .filter_map(|(&extent, &selected)| selected.then_some(extent))
-        .collect::<Vec<_>>();
-    let slice_shape = contract
-        .input_shape
-        .iter()
-        .zip(&reduced)
-        .filter_map(|(&extent, &selected)| (!selected).then_some(extent))
-        .collect::<Vec<_>>();
-    let reduced_elements = elements(&reduce_shape)?;
-    let slices = elements(&slice_shape)?;
+    let (reduced_elements, slices) = contract
+        .checked_work_geometry()
+        .ok_or_else(|| anyhow!("invalid reduction owner geometry or arithmetic policy"))?;
     ensure!(
         reduced_elements == u64::from(d.geometry.reduce_elements)
             && slices == u64::from(d.geometry.slices),
         "reduction owner axes differ from physical dispatch"
     );
-    let valid_policy = match contract.operation {
-        FusionReductionOperation::Sum => {
-            contract.accumulator_class == NumericClass::Double
-                && contract.count == FusionReductionCount::None
-                && contract.empty == FusionReductionEmpty::PositiveZero
-                && contract.ties == FusionReductionTies::NotApplicable
-        }
-        FusionReductionOperation::Mean => {
-            contract.accumulator_class == NumericClass::Double
-                && contract.count
-                    == match contract.nan_mode {
-                        ReductionNaN::Include => FusionReductionCount::SliceLength,
-                        ReductionNaN::Omit => FusionReductionCount::NonNan,
-                    }
-                && contract.empty == FusionReductionEmpty::NaN
-                && contract.ties == FusionReductionTies::NotApplicable
-        }
-        FusionReductionOperation::Minimum => {
-            contract.accumulator_class == contract.input_class
-                && contract.output_class == contract.input_class
-                && contract.count == FusionReductionCount::None
-                && contract.empty == FusionReductionEmpty::NaN
-                && contract.ties == FusionReductionTies::FirstWithNegativeZero
-        }
-        FusionReductionOperation::Maximum => {
-            contract.accumulator_class == contract.input_class
-                && contract.output_class == contract.input_class
-                && contract.count == FusionReductionCount::None
-                && contract.empty == FusionReductionEmpty::NaN
-                && contract.ties == FusionReductionTies::FirstWithPositiveZero
-        }
-    };
-    ensure!(valid_policy, "invalid reduction owner arithmetic policy");
     Ok(())
 }
 

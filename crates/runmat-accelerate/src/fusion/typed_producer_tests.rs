@@ -7,6 +7,8 @@ use runmat_value::Value;
 
 #[path = "typed_producer_primitive_tests.rs"]
 mod primitive_tests;
+#[path = "typed_producer_unary_tests.rs"]
+mod unary_tests;
 
 fn plan(operations: Vec<FusionOp>, output: ValueId) -> FusionGroupPlan {
     FusionGroupPlan {

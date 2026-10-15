@@ -216,3 +216,24 @@ pub struct FusionSemanticDeclaration {
     /// numerical and domain policies have an independently checked lowering.
     pub scalar_operation: Option<runmat_types::ScalarOperation>,
 }
+
+impl FusionSemanticDeclaration {
+    /// Only total real-domain, class-preserving unary instructions use this
+    /// convenience constructor. Promoting operations retain explicit domain
+    /// admission declarations instead of inheriting this absence of checks.
+    pub const fn total_real_unary_math(
+        binding: BuiltinBindingIdentity,
+        operation: runmat_types::ScalarUnaryMath,
+    ) -> Self {
+        Self {
+            binding,
+            revision: 1,
+            admit: None,
+            admit_static: None,
+            required_real_unary: None,
+            required_arithmetic: None,
+            helpers: &[],
+            scalar_operation: Some(runmat_types::ScalarOperation::UnaryMath(operation)),
+        }
+    }
+}

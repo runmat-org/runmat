@@ -167,6 +167,56 @@ fn emitted_work_tracks_actual_slice_not_all_semantic_receipts() {
 }
 
 #[test]
+fn captured_single_literals_seed_words_without_invocation_buffers() {
+    for computed in [false, true] {
+        let mut source = source(None, false);
+        source.inputs.clear();
+        source.const_values.insert(
+            0,
+            Value::Tensor(Tensor::from_f32(vec![f32::from_bits(1)], vec![1, 1]).unwrap()),
+        );
+        source.const_values.insert(1, Value::Num(4.0));
+        if computed {
+            source.operations.insert(
+                0,
+                FusionOp::Primitive {
+                    op: PrimitiveOp::Add,
+                    inputs: vec![0, 0],
+                    output: Some(8),
+                },
+            );
+            let FusionOp::Primitive { inputs, .. } = &mut source.operations[1] else {
+                unreachable!()
+            };
+            inputs[0] = 8;
+        }
+        let program =
+            resolve_policy(&source, &[], ProviderPrecision::F32, PrecisionPolicy::Exact).unwrap();
+        let shader = source
+            .prepare_typed_shader(&[2], &program, ScalarType::F32)
+            .unwrap();
+        assert!(shader.input_indices().is_empty());
+        assert!(shader
+            .source()
+            .contains("let control0_bits: u32 = 0x00000001u;"));
+        assert!(shader.source().contains(if computed {
+            "rm_exact_product_bits(typed0_bits,"
+        } else {
+            "rm_exact_product_bits(control0_bits,"
+        }));
+        assert_eq!(shader.implementations().len(), 1);
+        #[cfg(feature = "wgpu")]
+        crate::wgsl::validation_tests::validate_generated(
+            "captured-word-product",
+            shader.source(),
+            64,
+            8,
+            crate::wgsl::validation_tests::RequiredCaps::None,
+        );
+    }
+}
+
+#[test]
 fn scalar_product_projection_preserves_shape_and_never_omits_data_fanout() {
     for shape in [vec![0, 3], vec![2, 1, 3]] {
         let source = source(None, false);

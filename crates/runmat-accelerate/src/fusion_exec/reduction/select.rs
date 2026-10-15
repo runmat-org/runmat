@@ -61,7 +61,6 @@ pub(super) fn choose(
         &input_plan.inventory,
     )
     .ok_or_else(|| anyhow!("typed reduction input resource projection overflow"))?;
-    let execution_units = program.producer_work_units().max(1);
     let cost = |execution_ns| ExecutionCostEstimate {
         components: ExecutionCostComponents {
             execution_ns,
@@ -81,13 +80,26 @@ pub(super) fn choose(
     } else {
         None
     };
+    let host_execution_ns = program
+        .host_total_work_units()
+        .and_then(|units| units.checked_mul(100));
+    // An executable ordinary route without a price remains ordinary execution,
+    // not a fabricated placement candidate or a provider feasibility failure.
+    if host.is_some() && host_execution_ns.is_none() {
+        return Ok(Choice::Shared {
+            observation: FusionCpuObservation::new(None),
+            readback: selected_readback(host),
+        });
+    }
     let mut cpu = ExecutionCandidateDescriptor {
         identity: format!("cpu.shared.{operation}.typed"),
         region: None,
         kind: ExecutionCandidateKind::SharedRuntime,
         execution_location: CandidateExecutionLocation::Host,
         preparation: CandidatePreparationState::Ready,
-        cost: cost(execution_units.saturating_mul(100).max(100)),
+        // With no executable host route, LocalCpuAdmission::Unavailable keeps
+        // this structural descriptor out of the numeric graph and feedback.
+        cost: cost(host_execution_ns.unwrap_or(0)),
         output_residency: CandidateOutputResidency::Host,
         presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: Vec::new(),
@@ -104,6 +116,13 @@ pub(super) fn choose(
     let physical = selections
         .iter()
         .map(|selection| {
+            let execution_units = selection
+                .work()
+                .checked_total_scalar_work_units()
+                .ok_or_else(|| anyhow!("selected reduction total work overflow"))?;
+            let execution_ns = execution_units
+                .checked_mul(10)
+                .ok_or_else(|| anyhow!("selected reduction execution prior overflow"))?;
             let typed = ProviderTypedReductionWorkload::from_selection(selection)
                 .with_input_preparation(input_plan.inventory.clone())
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
@@ -116,14 +135,14 @@ pub(super) fn choose(
                 input_adaptation: Some(resources.route),
                 outputs: vec![typed.output.clone()],
                 workload: ProviderWorkload {
-                    scalar_work_units: Some(typed.work.producer_scalar_work_units),
+                    scalar_work_units: Some(execution_units),
                     typed_reduction: Some(typed),
                     ..Default::default()
                 },
                 preparation: CandidatePreparationState::Cold,
                 preparation_program: Some(ProviderPreparationProgram::TypedReduction { selection }),
                 shader_requirements: None,
-                fallback: cost(execution_units.saturating_mul(10).max(100)),
+                fallback: cost(execution_ns),
                 required_upload_bytes: Some(resources.required_upload_bytes),
                 required_download_bytes: 0,
                 downstream_materialization: false,

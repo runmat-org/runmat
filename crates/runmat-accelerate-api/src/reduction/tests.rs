@@ -284,8 +284,32 @@ fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
     identity.work.partial_payload_bytes = 72;
     identity.work.partial_requested_bytes = 72;
     identity.work.workgroup_bytes = 96;
-    ProviderReductionRecipe::new(Digest::sha256(b"identity"), identity, sources())
+    let identity = ProviderReductionRecipe::new(Digest::sha256(b"identity"), identity, sources())
         .expect("rank-preserving identity must retain zero singleton strides");
+    let single = identity
+        .terminal_work_prior(ReductionStrategy::SinglePass)
+        .unwrap();
+    let two = identity
+        .terminal_work_prior(ReductionStrategy::TwoPass)
+        .unwrap();
+    assert_eq!(
+        (
+            single.sample_visits,
+            single.combines,
+            single.finalizations,
+            single.conversions
+        ),
+        (0, 0, 6, 6)
+    );
+    assert_eq!(
+        (
+            two.sample_visits,
+            two.combines,
+            two.finalizations,
+            two.conversions
+        ),
+        (6, 0, 6, 6)
+    );
 
     let mut scalar = descriptor();
     scalar.contract.input_shape = vec![1, 1, 1];
@@ -329,6 +353,28 @@ fn strategy_is_frozen_in_identity_and_exact_selected_work() {
     assert_eq!(single.work().dispatches, 1);
     assert_eq!(two.work().dispatches, 2);
     assert_eq!(single.work().output_requested_bytes, 16);
+    let first = r
+        .terminal_work_prior(ReductionStrategy::SinglePass)
+        .unwrap();
+    let second = r.terminal_work_prior(ReductionStrategy::TwoPass).unwrap();
+    assert_eq!(
+        (first.sample_visits, first.combines, first.finalizations),
+        (8, 8 + 2 * 7, 2)
+    );
+    assert_eq!(
+        (second.sample_visits, second.combines, second.finalizations),
+        (8, 8 + 4 + 6 * 7, 2)
+    );
+    assert_eq!(first.count_updates, first.combines);
+    assert_eq!(second.count_updates, second.combines);
+    assert_eq!(
+        single.work().terminal_scalar_work_units,
+        first.checked_units().unwrap()
+    );
+    assert_eq!(
+        two.work().checked_total_scalar_work_units(),
+        Some(8 + second.checked_units().unwrap())
+    );
     assert!(std::ptr::eq(two.recipe(), &r));
     let mut changed = sources();
     changed.pass2.push_str("\n// distinct compiled pipeline");
@@ -339,6 +385,29 @@ fn strategy_is_frozen_in_identity_and_exact_selected_work() {
     let mut geometry = descriptor();
     geometry.geometry.single.workgroups = [1, 2, 1];
     assert_ne!(r.identity(), recipe(geometry).identity());
+}
+
+#[test]
+fn word_boundary_conversion_is_not_priced_twice_and_total_overflow_declines() {
+    let native = recipe(descriptor());
+    let mut words = descriptor();
+    words.execution_precision = ProviderPrecision::F32;
+    words.producer_transport = crate::scalar_program::ScalarTransport::Binary32Words;
+    let words = recipe(words);
+    for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let native = native.terminal_work_prior(strategy).unwrap();
+        let decoded = words.terminal_work_prior(strategy).unwrap();
+        assert_eq!(native.conversions, 8);
+        assert_eq!(decoded.conversions, 0);
+        assert_eq!(
+            native.checked_units().unwrap(),
+            decoded.checked_units().unwrap() + 8
+        );
+    }
+    let mut overflow = descriptor();
+    overflow.work.producer_scalar_work_units = u64::MAX;
+    let overflow = recipe(overflow);
+    assert!(ReductionSelection::new(&overflow, ReductionStrategy::SinglePass).is_err());
 }
 
 #[test]
@@ -377,6 +446,41 @@ fn malformed_physical_packets_fail_closed_before_submission() {
 }
 
 #[test]
+fn empty_slices_price_tree_and_output_fill_without_sampling_or_mean_division() {
+    let mut d = descriptor();
+    d.inputs.clear();
+    d.iteration_shape[0] = 0;
+    d.contract.input_shape = d.iteration_shape.clone();
+    d.contract.operation = FusionReductionOperation::Mean;
+    d.contract.count = FusionReductionCount::SliceLength;
+    d.contract.empty = FusionReductionEmpty::NaN;
+    d.geometry.reduce_elements = 0;
+    d.geometry.chunks = 1;
+    d.geometry.partial_elements = 2;
+    d.geometry.pass1 = d.geometry.single;
+    d.work.partial_payload_bytes = 32;
+    d.work.partial_requested_bytes = 32;
+    d.work.producer_scalar_work_units = 0;
+    let r = recipe(d);
+    for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let prior = r.terminal_work_prior(strategy).unwrap();
+        assert_eq!(
+            (prior.sample_visits, prior.divisions, prior.finalizations),
+            (0, 0, 2)
+        );
+        assert!(prior.combines > 0);
+        assert!(
+            ReductionSelection::new(&r, strategy)
+                .unwrap()
+                .work()
+                .checked_total_scalar_work_units()
+                .unwrap()
+                > 0
+        );
+    }
+}
+
+#[test]
 fn empty_output_keeps_minimum_output_allocation_but_no_scratch_or_dispatch() {
     let mut d = descriptor();
     d.inputs.clear(); // A constant producer need not bind a data operand.
@@ -406,6 +510,7 @@ fn empty_output_keeps_minimum_output_allocation_but_no_scratch_or_dispatch() {
         assert_eq!(selection.work().dispatches, 0);
         assert_eq!(selection.work().partial_requested_bytes, 0);
         assert_eq!(selection.work().output_requested_bytes, 4);
+        assert_eq!(selection.work().terminal_scalar_work_units, 0);
     }
 }
 

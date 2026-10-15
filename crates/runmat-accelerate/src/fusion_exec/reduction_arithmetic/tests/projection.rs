@@ -97,6 +97,12 @@ fn exact_product_words_survive_native_single_power_and_reduction_projection() {
                 let mut changed = request(&source, Value::Num(2.0));
                 changed.inputs.push(Value::Num(8.0));
                 assert!(program.require_current_controls(&changed).is_err());
+                let mut changed_power = request(&source, Value::Num(1.0));
+                changed_power.inputs.push(Value::Num(4.0));
+                assert!(
+                    program.require_current_controls(&changed_power).is_err(),
+                    "all omitted controls, including POWER, retain original words"
+                );
                 let recipe = build(
                     &program,
                     ReductionRecipeConfig {

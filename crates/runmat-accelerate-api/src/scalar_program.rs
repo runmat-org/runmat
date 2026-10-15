@@ -15,7 +15,7 @@ pub use exact_product::ExactBinary32Product;
 mod implementation;
 pub use implementation::{EmittedScalarImplementation, ScalarImplementation, ScalarTransport};
 
-pub const SCALAR_PROGRAM_REVISION: u32 = 4;
+pub const SCALAR_PROGRAM_REVISION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarLiteral {
@@ -168,6 +168,12 @@ impl ScalarProgram {
                         "represented arithmetic differs from operand or result classes"
                     );
                 }
+                if let ScalarOperation::UnaryMath(_) = operation {
+                    ensure!(
+                        input_classes == [class],
+                        "unary math must preserve represented floating class"
+                    );
+                }
                 if let ScalarOperation::Cast(target) = operation {
                     ensure!(*target == class, "scalar cast result class mismatch");
                 }
@@ -190,7 +196,7 @@ impl ScalarProgram {
             required.len() == wire.nodes.len(),
             "unreachable scalar program node"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v4", &wire))?);
+        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v5", &wire))?);
         Ok(Self { wire, identity })
     }
 

@@ -35,12 +35,12 @@ pub use integer_literal::{
 pub use real_unary::{RealUnaryClassification, RealUnaryPredicate};
 pub use reduction::{
     FusionReductionContract, FusionReductionCount, FusionReductionEmpty, FusionReductionOperation,
-    FusionReductionTies, ReductionNaN, SumInvocation, SumOutputClass,
+    FusionReductionTies, FusionReductionWorkPrior, ReductionNaN, SumInvocation, SumOutputClass,
 };
 mod floating_remainder;
 pub use floating_remainder::FloatingRemainderKind;
 pub use rules::*;
-pub use scalar_program::ScalarOperation;
+pub use scalar_program::{ScalarOperation, ScalarUnaryMath};
 pub use source::{merge_span, Span};
 pub use symbolic::{
     parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration,

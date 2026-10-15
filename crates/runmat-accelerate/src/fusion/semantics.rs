@@ -632,11 +632,27 @@ impl ResolvedProgram {
         self.exact_products.get(&output).copied()
     }
 
-    pub(crate) fn exact_product_control_bits(&self, control: ValueId) -> Option<u64> {
+    /// Original words from operation-owned receipts, not a name, a narrowed
+    /// physical buffer, or an unevaluated producer's ancestor. Callers first
+    /// prove exclusive metadata use through embedded_controls_for_precision.
+    pub(crate) fn embedded_scalar_control_bits(&self, control: ValueId) -> Option<u64> {
         self.exact_products
             .values()
             .find(|receipt| receipt.control == control)
             .map(|receipt| receipt.exact.original_double_bits())
+            .or_else(|| {
+                self.arithmetic.iter().find_map(|(&output, evidence)| {
+                    self.exact_single_base_power(output)?;
+                    let FusionArithmeticEvidence::RealPower(receipt) = evidence;
+                    if receipt.exponent_id != control {
+                        return None;
+                    }
+                    match receipt.exponent_scalar? {
+                        runmat_accelerate_api::PowerScalarControl::DoubleBits(bits) => Some(bits),
+                        _ => None,
+                    }
+                })
+            })
     }
 
     pub(crate) fn require_exact_product_controls(
@@ -784,7 +800,7 @@ impl ResolvedProgram {
                 &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
         }
         Ok(Digest::sha256(serde_json::to_vec(&(
-            "typed-fusion-v6",
+            "typed-fusion-v7",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             &self.source_operations,
             &self.source_input_ids,

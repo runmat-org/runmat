@@ -9,6 +9,7 @@ mod recipe;
 mod submission;
 mod types;
 mod validation;
+mod work;
 
 pub use input_preparation::{
     ProviderReductionInputInventory, ProviderReductionInputPreparation, ProviderReductionInputStage,

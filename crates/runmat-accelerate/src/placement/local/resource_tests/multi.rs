@@ -437,6 +437,7 @@ fn typed_reduction_refuses_floating_cast_as_input_adapter_before_query() {
                         workgroup_bytes: 64,
                         uniform_bytes: 0,
                         producer_scalar_work_units: 1,
+                        terminal_scalar_work_units: 0,
                     },
                     inputs: vec![prepared],
                     output,

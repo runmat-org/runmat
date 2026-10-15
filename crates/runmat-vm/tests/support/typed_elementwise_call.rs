@@ -1,5 +1,5 @@
 //! One compiled general-chain execution witness shared by native and WebGPU hosts.
-//! This intentionally does not qualify the original mixed-Double POWER expression.
+//! Expanded and original POWER forms retain distinct qualification cases.
 use super::test_helpers;
 use super::typed_reduction_placement::{
     feedback::selected_provider_capability_digest, CapturingPlacement,
@@ -15,7 +15,34 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
-    let expression = "exp(-x).*sin(4*x)+tanh(x).*tanh(x)";
+    assert_chain_full_call(decoded_function, false, false).await;
+}
+
+pub(crate) async fn assert_original_chain_full_call(decoded_function: bool) {
+    assert_chain_full_call(decoded_function, true, false).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn assert_original_sum_full_call(decoded_function: bool) {
+    assert_chain_full_call(decoded_function, true, true).await;
+}
+
+async fn assert_chain_full_call(decoded_function: bool, original_power: bool, reduction: bool) {
+    let expression = if original_power {
+        "exp(-x).*sin(4*x)+tanh(x).^2"
+    } else {
+        "exp(-x).*sin(4*x)+tanh(x).*tanh(x)"
+    };
+    let expression = if reduction {
+        format!("sum({expression})")
+    } else {
+        expression.to_owned()
+    };
+    let operation = if reduction {
+        "fusion.reduction"
+    } else {
+        "fusion.elementwise"
+    };
     let source = if decoded_function {
         format!("function y = general_chain(x)\ny = {expression};\nend\nx = gpuArray(single(ones(1, 16384))); y = general_chain(x); z = gather(y);")
     } else {
@@ -52,11 +79,11 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
     let signals = graph_bytecode.instructions.iter().enumerate().filter_map(|(pc, instruction)| {
         matches!(instruction, runmat_vm::Instr::CallBuiltinMulti(name, 1, 1) if name == "exp" || name == "sin" || name == "tanh").then_some(pc)
     }).collect::<Vec<_>>();
-    assert_eq!(signals.len(), 4);
+    assert_eq!(signals.len(), if original_power { 3 } else { 4 });
     let chain = groups
         .iter()
         .find(|group| {
-            group.kind == FusionKind::ElementwiseChain
+            group.kind == (if reduction { FusionKind::Reduction } else { FusionKind::ElementwiseChain })
                 && signals
                     .iter()
                     .all(|pc| group.span.start <= *pc && *pc <= group.span.end)
@@ -115,19 +142,23 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
     let Value::Tensor(output) = &published[slot] else {
         panic!("published gathered numeric tensor required");
     };
-    assert_eq!(output.shape(), [1, 16384]);
+    assert_eq!(output.shape(), if reduction { [1, 1] } else { [1, 16384] });
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
     let expected = (-1f64).exp() * 4f64.sin() + 1f64.tanh().powi(2);
+    // The existing per-element transcendental tolerance is not an exact host
+    // bit oracle. Sum retains that error budget scaled by its actual length;
+    // no F32 accumulation substitutes for the canonical Double accumulator.
+    let scale = if reduction { 16384.0 } else { 1.0 };
     assert!(output
         .materialize_f64()
         .iter()
-        .all(|actual| (actual - expected).abs() < 2e-6));
+        .all(|actual| (actual - expected * scale).abs() < 2e-6 * scale));
     runtime.scope(async {}).await;
     let feedback = placement.delivered.lock().unwrap();
     let completed = feedback
         .iter()
         .filter(|feedback| {
-            feedback.signature.operation == "fusion.elementwise"
+            feedback.signature.operation == operation
                 && feedback.kind == ExecutionCandidateKind::ProviderFusion
         })
         .collect::<Vec<_>>();
@@ -139,7 +170,7 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
         .iter()
         .filter(|trace| {
             !before.contains(&trace.correlation)
-                && trace.operation == "fusion.elementwise"
+                && trace.operation == operation
                 && trace.events.iter().any(|event| {
                     event.kind == PlacementEventKind::Selected
                         && event.variant == Some(PlacementVariant::ProviderFusion)
@@ -159,6 +190,11 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
         completed.len(),
         1,
         "one actual provider fenced receipt; FullCall authority is checked below"
+    );
+    assert_eq!(
+        placement.reduction_selection.borrow().len(),
+        usize::from(reduction),
+        "only the original Sum case selects a typed reduction recipe"
     );
     for receipt in completed {
         assert!(receipt.succeeded);

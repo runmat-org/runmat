@@ -10,6 +10,8 @@ pub(super) fn seed(
     expressions: &mut HashMap<ValueId, String>,
     selected: Option<&HashSet<usize>>,
     roots: Option<&[ValueId]>,
+    words: &mut HashMap<ValueId, String>,
+    capture_words: bool,
 ) -> Result<String> {
     let mut used = roots
         .unwrap_or_default()
@@ -54,6 +56,19 @@ pub(super) fn seed(
         let literal = program::literal(&plan.const_values[&id])
             .ok_or_else(|| anyhow!("typed fusion has an unsupported captured scalar"))?;
         let class = program.represented_constant_class(id, literal.class())?;
+        if capture_words && class == NumericClass::Single {
+            let bits = match literal {
+                ScalarLiteral::F32Bits(bits) => bits,
+                // Only the existing explicit precision-policy owner can have
+                // resolved original Double storage to represented Single.
+                ScalarLiteral::F64Bits(bits) => (f64::from_bits(bits) as f32).to_bits(),
+            };
+            let name = format!("control{id}_bits");
+            body.push_str(&format!("    let {name}: u32 = 0x{bits:08x}u;\n    let control{id} = bitcast<f32>({name});\n"));
+            words.insert(id, name);
+            expressions.insert(id, format!("control{id}"));
+            continue;
+        }
         let expression = match (literal, class) {
             (ScalarLiteral::F32Bits(bits), NumericClass::Single) => {
                 format!("bitcast<f32>(0x{bits:08x}u)")
