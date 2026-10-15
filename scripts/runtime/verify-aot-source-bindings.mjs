@@ -26,7 +26,10 @@ if (javaRequested && !javaHome) {
 
 const directory = mkdtempSync(join(tmpdir(), "runmat-aot-sources-"));
 const timeout = 120_000;
+const traceInvocations = process.env.RUNMAT_AOT_RETAIN_FAILED_ARTIFACTS === "1";
 function invoke(program, args = []) {
+    if (traceInvocations) console.error(`linked AOT start: ${JSON.stringify({ program, args })}`);
+    const started = Date.now();
     const completed = spawnSync(program, args, {
         cwd: directory,
         env: {
@@ -39,6 +42,12 @@ function invoke(program, args = []) {
         maxBuffer: 16 * 1024 * 1024,
         timeout
     });
+    if (traceInvocations) {
+        console.error(`linked AOT exit: ${JSON.stringify({ program, elapsed_ms: Date.now() - started, status: completed.status, signal: completed.signal, error: completed.error?.code ?? null })}`);
+        if (completed.error || completed.status !== 0 || completed.signal) {
+            console.error(`linked AOT output tail: ${JSON.stringify({ stdout: String(completed.stdout ?? "").slice(-2048), stderr: String(completed.stderr ?? "").slice(-2048) })}`);
+        }
+    }
     if (completed.error) throw completed.error;
     return completed;
 }
