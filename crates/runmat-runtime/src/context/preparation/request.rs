@@ -89,8 +89,11 @@ impl AdmittedBuiltinPreparation {
                 if let Some(plan) = super::real_power::plan(self, context, provider)? {
                     Ok(Some(super::AdmittedBuiltinCompound::RealPower(plan)))
                 } else {
-                    super::real_power_scalar::plan(self, context, provider)
-                        .map(|plan| plan.map(super::AdmittedBuiltinCompound::RealPowerScalar))
+                    super::real_power_scalar::plan(self, context, provider).map(|plan| {
+                        plan.map(|plan| {
+                            super::AdmittedBuiltinCompound::RealPowerScalar(Box::new(plan))
+                        })
+                    })
                 }
             }
             None => Ok(None),

@@ -107,7 +107,7 @@ where
                     super::compound::execute(runtime, compound, left, right).await?
                 }
                 AdmittedBuiltinCompound::RealPowerScalar(compound) => {
-                    super::scalar_compound::execute(runtime, compound, left, right).await?
+                    super::scalar_compound::execute(runtime, *compound, left, right).await?
                 }
                 AdmittedBuiltinCompound::RealUnary(_) => {
                     let mut error =

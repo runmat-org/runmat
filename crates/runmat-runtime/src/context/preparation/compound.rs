@@ -16,7 +16,7 @@ use runmat_value::Value;
 pub enum AdmittedBuiltinCompound {
     RealUnary(AdmittedRealUnaryCompound),
     RealPower(AdmittedRealPowerCompound),
-    RealPowerScalar(AdmittedRealPowerScalarCompound),
+    RealPowerScalar(Box<AdmittedRealPowerScalarCompound>),
 }
 
 impl AdmittedBuiltinCompound {
