@@ -2099,6 +2099,8 @@ impl FusionGroupPlan {
         } else {
             "1.0".to_string()
         };
+        // Render a complete typed zero for both axis templates.
+        let zero = cast_literal(scalar_ty, "0.0");
         // Helper(s) at module scope
         shader.push_str(&format!(
             "fn isNanF(value: {scalar}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\n",
@@ -2118,13 +2120,7 @@ impl FusionGroupPlan {
                 "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
             );
             shader.push_str("  let col = wid.x;\n  if (col >= params.ncols) { return; }\n");
-            shader.push_str(&format!(
-                "  var acc: {scalar_ty} = {}0.0;\n",
-                if scalar_ty == "f64" { "f64(" } else { "" }
-            ));
-            if scalar_ty == "f64" {
-                shader.push_str("  // close cast for f64 literal\n");
-            }
+            shader.push_str(&format!("  var acc: {scalar_ty} = {zero};\n"));
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var r = lid.x;\n");
             // Load row-wise values from each input and fold into expression
@@ -2174,13 +2170,7 @@ impl FusionGroupPlan {
                 "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
             );
             shader.push_str("  let row = wid.x;\n  // For axis=1, number of output slices equals rows (params.ncols)\n  if (row >= params.ncols) { return; }\n");
-            shader.push_str(&format!(
-                "  var acc: {scalar_ty} = {}0.0;\n",
-                if scalar_ty == "f64" { "f64(" } else { "" }
-            ));
-            if scalar_ty == "f64" {
-                shader.push_str("  // close cast for f64 literal\n");
-            }
+            shader.push_str(&format!("  var acc: {scalar_ty} = {zero};\n"));
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
             {
