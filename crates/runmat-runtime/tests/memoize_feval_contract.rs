@@ -1,7 +1,10 @@
 //! Public dispatch must use one runtime's registry and invocation state.
 use futures::executor::block_on;
-use runmat_runtime::{call_builtin_async_with_outputs, call_feval_async_with_outputs};
+use runmat_runtime::{
+    call_builtin_async_with_outputs_in_context, call_feval_async_with_outputs_in_context,
+};
 use runmat_value::Value;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -19,6 +22,9 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
         );
     }
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
     let calls = Arc::new(Mutex::new(0));
     let observed = calls.clone();
     let origin = runmat_execution::FunctionBindingOrigin {
@@ -27,8 +33,9 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     };
     let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
     let expected_binding = binding.clone();
-    let _invoker =
-        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+    let _invoker = {
+        let _selected = runtime.enter();
+        runmat_runtime::user_functions::install_local_bound_function_invoker(Rc::new(
             move |_runtime, actual, args, requested, _lexical_environment| {
                 assert_eq!(actual, expected_binding, "wrong portable callback binding");
                 let observed = observed.clone();
@@ -49,8 +56,10 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
                         .map_err(|error| error.into_runtime_error())
                 })
             },
-        ));
-    let memoized = block_on(call_builtin_async_with_outputs(
+        ))
+    };
+    let memoized = block_on(call_builtin_async_with_outputs_in_context(
+        &runtime,
         "memoize",
         &[Value::bound_function_handle(
             "fixture".into(),
@@ -63,7 +72,8 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     ))
     .unwrap();
     let _caller = runmat_runtime::output_count::push_output_count(Some(7));
-    let invalid = block_on(call_feval_async_with_outputs(
+    let invalid = block_on(call_feval_async_with_outputs_in_context(
+        &runtime,
         memoized.value().clone(),
         &[Value::Num(2.0)],
         runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
@@ -75,7 +85,8 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     );
     assert_eq!(*calls.lock().unwrap(), 0);
     for expected in 1..=2 {
-        let error = block_on(call_feval_async_with_outputs(
+        let error = block_on(call_feval_async_with_outputs_in_context(
+            &runtime,
             memoized.value().clone(),
             &[Value::Num(2.0)],
             3,
@@ -115,7 +126,8 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
             (2, Value::OutputList(vec![Value::Num(2.0), Value::Num(4.0)])),
         ] {
             assert_eq!(
-                block_on(call_feval_async_with_outputs(
+                block_on(call_feval_async_with_outputs_in_context(
+                    &runtime,
                     memoized.value().clone(),
                     &[Value::Num(2.0)],
                     count
@@ -132,7 +144,13 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     }
     assert_eq!(
         block_on(memoized.with_owned_async(|memoized| async move {
-            call_feval_async_with_outputs(memoized, &[Value::String(":".into())], 1).await
+            call_feval_async_with_outputs_in_context(
+                &runtime,
+                memoized,
+                &[Value::String(":".into())],
+                1,
+            )
+            .await
         }))
         .unwrap(),
         Value::String(":".into())

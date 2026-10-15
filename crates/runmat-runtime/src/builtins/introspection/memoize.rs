@@ -272,24 +272,41 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "MemoizedFunction.subsref",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn memoized_subsref_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     receiver: Value,
     subscript: Value,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsref(receiver, path, memoized_read_step, None).await
+    let read_runtime = runtime.clone();
+    let read_first = move |receiver, step| memoized_read_step(read_runtime, receiver, step);
+    match runtime.as_ref() {
+        Some(runtime) => {
+            crate::object::protocol::execute_owned_subsref_in_context(
+                runtime, receiver, path, read_first, None,
+            )
+            .await
+        }
+        None => {
+            crate::object::protocol::execute_owned_subsref(receiver, path, read_first, None).await
+        }
+    }
 }
 
 async fn memoized_read_step(
+    runtime: Option<crate::context::RuntimeContext>,
     receiver: Value,
     step: crate::object::indexing::ObjectSubscript,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let payload = step.selector_value()?;
     let handle = memoized_handle(&receiver)?;
     match step.kind() {
-        crate::object::indexing::ObjectIndexKind::Paren => call_memoized(handle, payload).await,
+        crate::object::indexing::ObjectIndexKind::Paren => {
+            call_memoized(runtime.as_ref(), handle, payload).await
+        }
         crate::object::indexing::ObjectIndexKind::Member => {
             crate::execution::RootedValue::new(memoized_member(handle, payload)?)
                 .map_err(|error| error.into_runtime_error())
@@ -574,6 +591,7 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
 }
 
 async fn call_memoized(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: &HandleRef,
     payload: Value,
 ) -> BuiltinResult<crate::execution::RootedValue> {
@@ -594,7 +612,18 @@ async fn call_memoized(
         }
     }
 
-    let output = crate::call_feval_async_with_outputs(function, &args, requested_outputs).await?;
+    let output = match runtime {
+        Some(runtime) => {
+            crate::call_feval_async_with_outputs_in_context(
+                runtime,
+                function,
+                &args,
+                requested_outputs,
+            )
+            .await?
+        }
+        None => crate::call_feval_async_with_outputs(function, &args, requested_outputs).await?,
+    };
     // Validate the requested prefix before publishing a cache entry. The
     // callable has already run exactly once; an output shortage is not cached.
     use crate::sequence::ResolveValueSequence;
@@ -1289,7 +1318,8 @@ mod tests {
     ) -> crate::BuiltinResult<crate::execution::RootedValue> {
         let subscript =
             crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-        super::memoized_subsref_builtin(receiver, subscript).await
+        let runtime = exact_memoized_runtime();
+        super::memoized_subsref_builtin(Some(runtime), receiver, subscript).await
     }
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
@@ -1391,6 +1421,29 @@ mod tests {
         )))
         .expect("memoized function");
         (value, guard)
+    }
+
+    fn call_feval_fixture(
+        runtime: &crate::context::RuntimeContext,
+        function: Value,
+        args: &[Value],
+        requested_outputs: usize,
+    ) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+        block_on(crate::call_feval_async_with_outputs_in_context(
+            runtime,
+            function,
+            args,
+            requested_outputs,
+        ))
+    }
+
+    fn exact_memoized_runtime() -> crate::context::RuntimeContext {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        {
+            let _scope = runtime.enter();
+            super::ensure_memoized_function_class_registered();
+        }
+        runtime
     }
 
     #[test]
@@ -1625,19 +1678,11 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
 
-        let first = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(4.0)],
-            1,
-        ))
-        .expect("first call");
-        let second = block_on(crate::call_feval_async_with_outputs(
-            f,
-            &[Value::Num(4.0)],
-            1,
-        ))
-        .expect("second call");
+        let first =
+            call_feval_fixture(&runtime, f.clone(), &[Value::Num(4.0)], 1).expect("first call");
+        let second = call_feval_fixture(&runtime, f, &[Value::Num(4.0)], 1).expect("second call");
 
         assert_eq!(first, Value::Num(5.0));
         assert_eq!(second, Value::Num(5.0));
@@ -1656,19 +1701,11 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
 
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(f64::NAN)],
-            1,
-        ))
-        .expect("first call");
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f,
-            &[Value::Num(f64::NAN)],
-            1,
-        ))
-        .expect("second call");
+        let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(f64::NAN)], 1)
+            .expect("first call");
+        let _ = call_feval_fixture(&runtime, f, &[Value::Num(f64::NAN)], 1).expect("second call");
 
         assert_eq!(*counter.lock().unwrap(), 1);
     }
@@ -1684,6 +1721,7 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
         let _caller = crate::output_count::push_output_count(Some(7));
 
         for _ in 0..2 {
@@ -1692,12 +1730,8 @@ mod tests {
                 (2, Value::OutputList(vec![Value::Num(3.0), Value::Num(4.0)])),
                 (0, Value::OutputList(Vec::new())),
             ] {
-                let output = block_on(crate::call_feval_async_with_outputs(
-                    f.clone(),
-                    &[Value::Num(2.0)],
-                    count,
-                ))
-                .expect("requested outputs");
+                let output = call_feval_fixture(&runtime, f.clone(), &[Value::Num(2.0)], count)
+                    .expect("requested outputs");
                 assert_eq!(output, expected, "requested {count} outputs");
                 assert_eq!(crate::output_count::current_output_count(), Some(7));
             }
@@ -1716,11 +1750,13 @@ mod tests {
         ));
         let (f, _bound) = memoized();
         let _caller = crate::output_count::push_output_count(Some(7));
-        let invalid = block_on(crate::call_feval_async_with_outputs(
+        let runtime = exact_memoized_runtime();
+        let invalid = call_feval_fixture(
+            &runtime,
             f.clone(),
             &[Value::Num(2.0)],
             runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
-        ))
+        )
         .unwrap_err();
         assert_eq!(
             invalid.identifier(),
@@ -1738,6 +1774,7 @@ mod tests {
                     panic!("memoized handle")
                 };
                 block_on(call_memoized(
+                    Some(&runtime),
                     handle,
                     Value::Cell(CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()),
                 ))
@@ -1834,23 +1871,15 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
         set_handle_property(handle, ENABLED_PROPERTY, Value::Bool(false));
 
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(4.0)],
-            1,
-        ))
-        .expect("first call");
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(4.0)],
-            1,
-        ))
-        .expect("second call");
+        let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(4.0)], 1).expect("first call");
+        let _ =
+            call_feval_fixture(&runtime, f.clone(), &[Value::Num(4.0)], 1).expect("second call");
         let stats = block_on(stats_builtin(f)).expect("stats");
         let cache = cache_entries(&stats);
 
@@ -1871,25 +1900,17 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
         set_handle_property(handle, CACHE_SIZE_PROPERTY, Value::Num(2.0));
 
         for value in [1.0, 2.0, 3.0] {
-            let _ = block_on(crate::call_feval_async_with_outputs(
-                f.clone(),
-                &[Value::Num(value)],
-                1,
-            ))
-            .expect("call");
+            let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(value)], 1).expect("call");
         }
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(1.0)],
-            1,
-        ))
-        .expect("evicted call");
+        let _ =
+            call_feval_fixture(&runtime, f.clone(), &[Value::Num(1.0)], 1).expect("evicted call");
         let stats = block_on(stats_builtin(f)).expect("stats");
         let cache = cache_entries(&stats);
 
@@ -1912,6 +1933,7 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
 
         {
             let _outputs = crate::output_count::push_output_count(Some(1));
@@ -1919,30 +1941,17 @@ mod tests {
             assert_eq!(err.identifier(), Some("RunMat:clearCache:TooManyOutputs"));
         }
 
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(8.0)],
-            1,
-        ))
-        .expect("first call");
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(8.0)],
-            1,
-        ))
-        .expect("second call");
+        let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("first call");
+        let _ =
+            call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("second call");
         block_on(clear_cache_builtin(f.clone())).expect("clear cache");
         let stats = block_on(stats_builtin(f.clone())).expect("stats");
         let cache = cache_entries(&stats);
         assert_eq!(cache.fields.get("TotalHits"), Some(&Value::Num(0.0)));
         assert_eq!(cache.fields.get("TotalMisses"), Some(&Value::Num(0.0)));
 
-        let _ = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(8.0)],
-            1,
-        ))
-        .expect("after clear");
+        let _ =
+            call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("after clear");
         block_on(clear_all_memoized_caches_builtin()).expect("clear all");
         let stats = block_on(stats_builtin(f)).expect("stats after all");
         let cache = cache_entries(&stats);
@@ -1967,17 +1976,14 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
         set_handle_property(handle, CACHE_SIZE_PROPERTY, Value::Num(0.0));
 
-        let err = block_on(crate::call_feval_async_with_outputs(
-            f,
-            &[Value::Num(4.0)],
-            1,
-        ))
-        .expect_err("expected cache size error");
+        let err = call_feval_fixture(&runtime, f, &[Value::Num(4.0)], 1)
+            .expect_err("expected cache size error");
 
         assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidCacheSize"));
     }
@@ -2065,6 +2071,7 @@ mod tests {
         let _guard =
             crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));
         let (f, _bound) = memoized();
+        let runtime = exact_memoized_runtime();
         let payload_target = runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(
             "PayloadHandle".to_string(),
         )))
@@ -2075,12 +2082,8 @@ mod tests {
             valid: true,
         });
 
-        let result = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            std::slice::from_ref(&payload),
-            1,
-        ))
-        .expect("memoized handle output");
+        let result = call_feval_fixture(&runtime, f.clone(), std::slice::from_ref(&payload), 1)
+            .expect("memoized handle output");
         let stats = block_on(stats_builtin(f)).expect("stats");
         let cache = cache_entries(&stats);
         let Some(Value::Cell(outputs)) = cache.fields.get("Outputs") else {
