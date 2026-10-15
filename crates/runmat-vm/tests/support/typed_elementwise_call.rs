@@ -184,7 +184,10 @@ async fn assert_chain_full_call(decoded_function: bool, original_power: bool, re
     assert_eq!(
         chain_traces.len(),
         1,
-        "one compiled general chain must queue on the actual provider"
+        "one compiled general chain must queue on the actual provider; decoded={decoded_function}, original_power={original_power}, reduction={reduction}; fusion events={:#?}; feedback={:?}",
+        traces.traces.iter().filter(|trace| !before.contains(&trace.correlation) && trace.operation == operation)
+            .map(|trace| trace.events.iter().map(|event| (&event.kind, &event.variant, &event.reason, event.duration_ns)).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        feedback.iter().map(|receipt| (&receipt.signature.operation, receipt.kind, receipt.succeeded)).collect::<Vec<_>>()
     );
     assert_eq!(
         completed.len(),

@@ -28,10 +28,13 @@ use typed_reduction_placement::CapturingPlacement;
 
 #[path = "support/typed_elementwise_call.rs"]
 mod typed_elementwise_call;
+#[path = "support/fusion_diagnostics.rs"]
+mod fusion_diagnostics;
 
 #[test]
 #[ignore = "requires an actual WGPU adapter; unavailable hardware fails when explicitly run"]
 fn actual_vm_general_chain_and_decoded_function_complete_with_receipts() {
+    fusion_diagnostics::enable();
     runmat_gc::gc_test_context(|| {
         register_wgpu_provider(WgpuProviderOptions::default())
             .expect("actual WGPU adapter required");

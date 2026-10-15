@@ -75,7 +75,10 @@ pub(super) fn infer(
         output.contiguity = ContiguityFact::Unknown;
     }
     apply_prototype(admitted.prototype, &mut output, &mut diagnostics);
-    if left.storage == StorageFact::Unknown || right.storage == StorageFact::Unknown {
+    if [left, right].iter().any(|fact| {
+        matches!(fact.storage, StorageFact::Unknown | StorageFact::Opaque)
+            || fact.kind == ValueKindFact::Unknown
+    }) {
         output.storage = StorageFact::Unknown;
     }
     if output.storage == StorageFact::Scalar
@@ -85,8 +88,15 @@ pub(super) fn infer(
     {
         output.storage = StorageFact::Dense;
     }
+    let materialized_storage = (request.arguments.len() == 2 && diagnostics.is_empty())
+        .then(|| materialized_real_storage(left, right, &output.shape))
+        .flatten();
+    if let Some(storage) = materialized_storage {
+        output.storage = storage;
+    }
     match output.residency {
         ResidencyFact::Host => {}
+        _ if materialized_storage.is_some() => {}
         ResidencyFact::Device { .. } => output.storage = StorageFact::Opaque,
         _ => output.storage = StorageFact::Unknown,
     }
@@ -95,6 +105,29 @@ pub(super) fn infer(
         output.contiguity = ContiguityFact::Unknown;
     }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+/// Publication carrier is independent of automatic placement and real-result
+/// domain admission. Ordinary floating arithmetic reconstructs materialized
+/// tensors. Double one-element results may instead scalarize on the host.
+fn materialized_real_storage(
+    left: &ValueFact,
+    right: &ValueFact,
+    shape: &ShapeFact,
+) -> Option<StorageFact> {
+    let numeric = |fact: &ValueFact| {
+        let numeric = fact.numeric()?;
+        (matches!(fact.storage, StorageFact::Scalar | StorageFact::Dense)
+            && numeric.domain == NumericDomain::Real)
+            .then_some(numeric.class)
+    };
+    let class = runmat_types::floating_binary_result_class(numeric(left)?, numeric(right)?)?;
+    match (class, shape.element_count()?) {
+        (runmat_types::NumericClass::Single, _) => Some(StorageFact::Dense),
+        (runmat_types::NumericClass::Double, 1) => None,
+        (runmat_types::NumericClass::Double, _) => Some(StorageFact::Dense),
+        _ => None,
+    }
 }
 
 fn apply_prototype(
