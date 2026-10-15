@@ -202,23 +202,11 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::General,
             ..pure(BuiltinSemanticKind::General)
         },
-        "reshape" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Reshape,
-        )),
-        "permute" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Permute,
-        )),
-        "repmat" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Repmat,
-        )),
-        "ipermute" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Permute,
-        )),
         "transpose" | "ctranspose" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::Transpose,
         )),
-        "squeeze" | "flip" | "fliplr" | "flipud" | "rot90" | "circshift" | "tril" | "triu"
-        | "diag" | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
+        "flip" | "fliplr" | "flipud" | "rot90" | "circshift" | "tril" | "triu" | "diag"
+        | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::General,
         )),
         "cat" => pure(BuiltinSemanticKind::ShapeTransform(

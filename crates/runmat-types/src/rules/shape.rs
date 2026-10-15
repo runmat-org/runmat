@@ -235,15 +235,16 @@ pub fn permute_shape(
     source: &ShapeFact,
     one_based_order: &[usize],
 ) -> Result<ShapeFact, InferenceDiagnostic> {
-    let Some(rank) = source.rank() else {
-        return Ok(ShapeFact::Unknown);
-    };
-    if one_based_order.len() < rank {
+    if source
+        .rank()
+        .is_some_and(|rank| one_based_order.len() < rank)
+    {
         return Err(InferenceDiagnostic::error(
             "RM-TYPE-PERMUTE",
             format!(
-                "permutation has only {} dimensions but source rank is {rank}",
-                one_based_order.len()
+                "permutation has only {} dimensions but source rank is {}",
+                one_based_order.len(),
+                source.rank().expect("known rank")
             ),
         ));
     }
@@ -258,7 +259,7 @@ pub fn permute_shape(
         }
         seen[*dimension - 1] = true;
     }
-    let Some(dims) = aligned_dims(source, output_rank) else {
+    let Some(dims) = structural_dims(source, output_rank) else {
         return Ok(ShapeFact::Unknown);
     };
     Ok(ShapeFact::Shaped {
@@ -269,9 +270,37 @@ pub fn permute_shape(
     })
 }
 
+/// Remove only proven singleton axes. An unknown higher-rank extent may be
+/// one, so its output rank cannot be asserted merely by retaining that axis.
+pub fn squeeze_shape(source: &ShapeFact) -> ShapeFact {
+    let Some(dims) = source.known_dims() else {
+        return source.clone();
+    };
+    if dims.len() <= 2 {
+        return source.clone();
+    }
+    if dims.iter().any(Option::is_none) {
+        return ShapeFact::Unknown;
+    }
+    let mut dims = dims
+        .into_iter()
+        .filter(|dim| *dim != Some(1))
+        .collect::<Vec<_>>();
+    if dims.is_empty() {
+        dims = vec![Some(1), Some(1)];
+    } else if dims.len() == 1 {
+        dims.push(Some(1));
+    }
+    ShapeFact::from(dims)
+}
+
 pub fn repmat_shape(source: &ShapeFact, repetitions: &[DimensionFact]) -> ShapeFact {
-    let rank = source.rank().unwrap_or(0).max(repetitions.len()).max(2);
-    let Some(source) = aligned_dims(source, rank) else {
+    let Some(source_rank) = source.rank() else {
+        // Repetitions provide a lower bound, not an upper bound on source rank.
+        return ShapeFact::Unknown;
+    };
+    let rank = source_rank.max(repetitions.len()).max(2);
+    let Some(source) = structural_dims(source, rank) else {
         return ShapeFact::Ranked { rank };
     };
     let mut repetitions = repetitions.to_vec();
@@ -281,6 +310,9 @@ pub fn repmat_shape(source: &ShapeFact, repetitions: &[DimensionFact]) -> ShapeF
             .iter()
             .zip(repetitions)
             .map(|(dimension, repetition)| match (dimension, repetition) {
+                (DimensionFact::Known(0), _) | (_, DimensionFact::Known(0)) => {
+                    DimensionFact::Known(0)
+                }
                 (DimensionFact::Known(a), DimensionFact::Known(b)) => a
                     .checked_mul(b)
                     .map_or(DimensionFact::Unknown, DimensionFact::Known),
@@ -288,6 +320,19 @@ pub fn repmat_shape(source: &ShapeFact, repetitions: &[DimensionFact]) -> ShapeF
             })
             .collect(),
     }
+}
+
+// Structural transforms pad trailing axes, unlike implicit expansion's
+// leading-axis promotion of one-dimensional operands.
+fn structural_dims(source: &ShapeFact, rank: usize) -> Option<Vec<DimensionFact>> {
+    let mut dimensions = match source {
+        ShapeFact::Unknown => return None,
+        ShapeFact::Scalar => vec![DimensionFact::Known(1); 2],
+        ShapeFact::Ranked { rank } => vec![DimensionFact::Unknown; *rank],
+        ShapeFact::Shaped { dims } => dims.clone(),
+    };
+    dimensions.resize(rank, DimensionFact::Known(1));
+    Some(dimensions)
 }
 
 pub fn reduction_shape(source: &ShapeFact, one_based_dimension: Option<usize>) -> ShapeFact {
@@ -419,6 +464,29 @@ mod broadcast_tests {
             shaped(&[4, 1])
         );
         assert!(broadcast_shape(&shaped(&[4]), &shaped(&[2, 5])).is_err());
+        // Structural transforms pad trailing axes rather than broadcasting a
+        // one-dimensional source as a row.
+        assert_eq!(
+            permute_shape(&shaped(&[4]), &[2, 1]).unwrap(),
+            shaped(&[1, 4])
+        );
+        assert_eq!(
+            repmat_shape(&shaped(&[4]), &[DimensionFact::Known(2)]),
+            shaped(&[8, 1])
+        );
+        assert_eq!(
+            repmat_shape(&shaped(&[0, 3]), &[DimensionFact::Unknown]),
+            ShapeFact::from(vec![Some(0), Some(3)])
+        );
+        assert!(permute_shape(&ShapeFact::Unknown, &[1, 1]).is_err());
+        assert_eq!(
+            repmat_shape(
+                &ShapeFact::Unknown,
+                &[DimensionFact::Known(2), DimensionFact::Known(3)]
+            ),
+            ShapeFact::Unknown
+        );
+        assert_eq!(squeeze_shape(&shaped(&[1, 4, 1])), shaped(&[4, 1]));
     }
 
     #[test]

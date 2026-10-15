@@ -418,21 +418,14 @@ fn parse_numeric_dimension_value_typed(
     value: f64,
     allow_zero: bool,
 ) -> Result<usize, DimensionDecodeError> {
-    if !value.is_finite() {
-        return Err(DimensionDecodeError::NonFinite);
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > 1e-6 {
-        return Err(DimensionDecodeError::Fractional);
-    }
-    let minimum = if allow_zero { 0.0 } else { 1.0 };
-    if rounded < minimum {
-        return Err(DimensionDecodeError::BelowMinimum);
-    }
-    if !fits_platform_usize(rounded) {
-        return Err(DimensionDecodeError::OutOfPlatformRange);
-    }
-    Ok(rounded as usize)
+    use runmat_types::dimension::ScalarDimensionValueError as Error;
+    runmat_types::dimension::decode_scalar_dimension(value, allow_zero).map_err(|error| match error
+    {
+        Error::NonFinite => DimensionDecodeError::NonFinite,
+        Error::Fractional => DimensionDecodeError::Fractional,
+        Error::BelowMinimum => DimensionDecodeError::BelowMinimum,
+        Error::OutsidePlatformRange => DimensionDecodeError::OutOfPlatformRange,
+    })
 }
 
 fn scalar_dimension_legacy_message(
@@ -542,10 +535,6 @@ fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
             DimensionDecodeError::OutOfPlatformRange
         }
     })
-}
-
-fn fits_platform_usize(value: f64) -> bool {
-    runmat_types::dimension_fits_platform(value)
 }
 
 fn dims_from_tensor_values(
