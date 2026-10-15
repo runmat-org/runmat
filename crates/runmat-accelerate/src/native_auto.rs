@@ -19,7 +19,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use futures::lock::Mutex as AsyncMutex;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorView, ProviderOperationFamily,

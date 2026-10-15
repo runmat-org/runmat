@@ -146,8 +146,10 @@ mod tests {
     }
     #[test]
     fn absent_rate_keeps_execution_ordinary_without_numeric_candidate_or_feedback() {
-        let mut config = ThresholdConfig::default();
-        config.cpu_reduction_per_elem = 0.0;
+        let config = ThresholdConfig {
+            cpu_reduction_per_elem: 0.0,
+            ..ThresholdConfig::default()
+        };
         let auto = NativeAutoOffload::new(&OWNER, config);
         let evaluation = auto.evaluate_reduction(8);
         let (evaluation, rejection, plan) = auto.plan_operation(
