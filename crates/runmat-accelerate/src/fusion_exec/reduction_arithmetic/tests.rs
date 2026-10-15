@@ -1,4 +1,5 @@
 use super::*;
+mod projection;
 use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
 use crate::fusion_exec::{
     execute_reduction_with_shape_placed, execute_reduction_with_shape_placed_async,

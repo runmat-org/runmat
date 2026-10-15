@@ -3,6 +3,7 @@
 use super::{AdmittedBindings, FusionExecutionRequest};
 use crate::fusion::{semantics::ResolvedProgram, typed_producer::TypedProducer};
 use crate::graph::ValueId;
+use futures::FutureExt;
 use runmat_accelerate_api::scalar_program::ScalarProgram;
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult, ProviderPrecision};
 use runmat_execution::Digest;
@@ -11,10 +12,11 @@ use runmat_runtime::builtins::common::spec::{
 };
 use runmat_types::NumericClass;
 use runmat_value::Value;
-use std::collections::HashMap;
 
 #[path = "reduction_program/inputs.rs"]
 mod inputs;
+#[path = "reduction_program/physical.rs"]
+mod physical;
 
 /// A physical data operand retains its exact original carrier and view. Layout
 /// strides must later be obtained from the provider's existing operand-layout
@@ -34,6 +36,7 @@ pub struct ResolvedReductionProgram<'a> {
     identity: Digest,
     data_classes: Vec<NumericClass>,
     execution_precision: ProviderPrecision,
+    owner_precision: ProviderPrecision,
     producer_work_units: u64,
     checked_scalar: Option<ScalarProgram>,
     host_bindings: Option<Vec<runmat_builtins::BuiltinBindingIdentity>>,
@@ -67,6 +70,9 @@ impl<'a> ResolvedReductionProgram<'a> {
     pub fn execution_precision(&self) -> ProviderPrecision {
         self.execution_precision
     }
+    pub fn owner_precision(&self) -> ProviderPrecision {
+        self.owner_precision
+    }
     pub fn producer_work_units(&self) -> u64 {
         self.producer_work_units
     }
@@ -90,6 +96,21 @@ impl<'a> ResolvedReductionProgram<'a> {
 pub async fn resolve_reduction_program<'a>(
     request: &'a FusionExecutionRequest<'_>,
     precision: ProviderPrecision,
+) -> ProviderExecutionResult<Option<ResolvedReductionProgram<'a>>> {
+    resolve(request, precision, false).await
+}
+
+pub(super) async fn resolve_reduction_program_static<'a>(
+    request: &'a FusionExecutionRequest<'_>,
+    precision: ProviderPrecision,
+) -> ProviderExecutionResult<Option<ResolvedReductionProgram<'a>>> {
+    resolve(request, precision, true).await
+}
+
+async fn resolve<'a>(
+    request: &'a FusionExecutionRequest<'_>,
+    precision: ProviderPrecision,
+    static_only: bool,
 ) -> ProviderExecutionResult<Option<ResolvedReductionProgram<'a>>> {
     let Some(mapped) = inputs::map(request) else {
         return Ok(None);
@@ -124,26 +145,40 @@ pub async fn resolve_reduction_program<'a>(
             }
         }
     }
-    let Some(prepared) = (declaration.prepare)(FusionReductionControls {
+    let preparation = (declaration.prepare)(FusionReductionControls {
         values: &mapped.controls,
         requested_outputs: 1,
-    })
-    .await
-    .map_err(ProviderExecutionError::from_source)?
-    else {
+    });
+    // Host-only controls were checked by map. Static entrypoints never block
+    // or probe a device; a suspending parser simply has no static receipt.
+    let preparation = if static_only {
+        let Some(result) = preparation.now_or_never() else {
+            return Ok(None);
+        };
+        result
+    } else {
+        preparation.await
+    };
+    let Some(prepared) = preparation.map_err(ProviderExecutionError::from_source)? else {
         return Ok(None);
     };
     let values: Vec<_> = mapped.data.iter().map(|input| input.value).collect();
-    let program = match ResolvedProgram::resolve_captured(
-        &mapped.producer,
-        &values,
-        precision,
-        request.placement,
-        &snapshots,
-    )
-    .await
-    {
-        Ok(program) => program,
+    let resolved = if static_only {
+        ResolvedProgram::resolve_static_captured(&mapped.producer, &values, precision, &snapshots)
+    } else {
+        ResolvedProgram::resolve_captured(
+            &mapped.producer,
+            &values,
+            precision,
+            request.placement,
+            &snapshots,
+        )
+        .await
+        .map(Some)
+    };
+    let program = match resolved {
+        Ok(Some(program)) => program,
+        Ok(None) => return Ok(None),
         Err(error) => {
             return match error.into_execution_or_structural() {
                 Ok(_) => Ok(None),
@@ -175,16 +210,15 @@ pub async fn resolve_reduction_program<'a>(
     {
         return Ok(None);
     }
-    let scalar = match precision {
+    let physical::Projection {
+        controls,
+        precision: producer_precision,
+        expressions,
+    } = physical::Projection::derive(&mapped, &program, precision);
+    let scalar = match producer_precision {
         ProviderPrecision::F32 => ScalarType::F32,
         ProviderPrecision::F64 => ScalarType::F64,
     };
-    let expressions: HashMap<_, _> = mapped
-        .data
-        .iter()
-        .enumerate()
-        .map(|(slot, input)| (input.value_id, format!("input{slot}.data[i{slot}]")))
-        .collect();
     let producer = match TypedProducer::emit(
         &mapped.producer,
         &program,
@@ -208,6 +242,7 @@ pub async fn resolve_reduction_program<'a>(
     let mapping: Vec<_> = mapped
         .data
         .iter()
+        .filter(|input| !controls.contains(&input.value_id))
         .map(|input| (input.value_id, input.request_slot))
         .collect();
     let semantic = Digest::sha256(
@@ -228,6 +263,7 @@ pub async fn resolve_reduction_program<'a>(
     let data_classes = mapped
         .data
         .iter()
+        .filter(|input| !controls.contains(&input.value_id))
         .map(|input| program.floating_class(input.value_id))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let elements =
@@ -285,14 +321,19 @@ pub async fn resolve_reduction_program<'a>(
         })
         .collect::<Option<Vec<_>>>();
     Ok(Some(ResolvedReductionProgram {
-        data: mapped.data,
+        data: mapped
+            .data
+            .into_iter()
+            .filter(|input| !controls.contains(&input.value_id))
+            .collect(),
         contract,
         body: producer.body,
         preamble,
         expression,
         identity,
         data_classes,
-        execution_precision: precision,
+        execution_precision: producer_precision,
+        owner_precision: precision,
         producer_work_units,
         checked_scalar,
         host_bindings,

@@ -10,7 +10,7 @@ use runmat_execution::Digest;
 use runmat_types::{NumericClass, ScalarOperation};
 use serde::{Deserialize, Serialize};
 
-pub const SCALAR_PROGRAM_REVISION: u32 = 2;
+pub const SCALAR_PROGRAM_REVISION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarLiteral {
@@ -133,9 +133,27 @@ impl ScalarProgram {
                         .get(operand)
                         .ok_or_else(|| anyhow!("forward or missing scalar operand"))?;
                     input_classes.push(*input_class);
-                    if matches!(operation, ScalarOperation::Operator(_)) {
+                    if matches!(operation, ScalarOperation::Operator(operator) if *operator != runmat_types::OperatorKind::ElementwisePower)
+                    {
                         ensure!(*input_class == class, "scalar operation class mismatch");
                     }
+                }
+                if *operation
+                    == ScalarOperation::Operator(runmat_types::OperatorKind::ElementwisePower)
+                {
+                    let control = match operands.as_slice() {
+                        [_, exponent] => wire.nodes.iter().find_map(|node| match node {
+                            ScalarNode::Literal {
+                                id,
+                                value: ScalarLiteral::F64Bits(bits),
+                            } if id == exponent => {
+                                Some(crate::PowerScalarControl::DoubleBits(*bits))
+                            }
+                            _ => None,
+                        }),
+                        _ => None,
+                    };
+                    ensure!(class == NumericClass::Single && input_classes == [NumericClass::Single, NumericClass::Double] && control.and_then(crate::ExactSingleBasePower::for_control).is_some(), "power scalar program requires certified Single base and original Double literal control");
                 }
                 if matches!(operation, ScalarOperation::MixedRealAddToSingle) {
                     ensure!(
@@ -170,7 +188,7 @@ impl ScalarProgram {
             required.len() == wire.nodes.len(),
             "unreachable scalar program node"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v2", &wire))?);
+        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v3", &wire))?);
         Ok(Self { wire, identity })
     }
 
@@ -180,6 +198,46 @@ impl ScalarProgram {
 
     pub fn identity(&self) -> Digest {
         self.identity
+    }
+
+    /// Literal controls whose every use is a checked certified exponent. This
+    /// describes source metadata; it does not authenticate live allocations.
+    pub fn metadata_control_ids(&self) -> HashSet<u32> {
+        let mut controls = self
+            .wire
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                ScalarNode::Apply {
+                    operation:
+                        ScalarOperation::Operator(runmat_types::OperatorKind::ElementwisePower),
+                    operands,
+                    ..
+                } => operands.get(1).copied(),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        controls.remove(&self.wire.root);
+        for node in &self.wire.nodes {
+            if let ScalarNode::Apply {
+                operation,
+                operands,
+                ..
+            } = node
+            {
+                for (position, operand) in operands.iter().enumerate() {
+                    if position != 1
+                        || *operation
+                            != ScalarOperation::Operator(
+                                runmat_types::OperatorKind::ElementwisePower,
+                            )
+                    {
+                        controls.remove(operand);
+                    }
+                }
+            }
+        }
+        controls
     }
 
     /// A decoded wire is only structurally valid. A future submission owner

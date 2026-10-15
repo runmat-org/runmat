@@ -1,4 +1,61 @@
 use super::*;
+
+#[test]
+fn certified_power_wire_retains_double_bits_and_rejects_nonliteral_or_wider_controls() {
+    for exponent in [0.0_f64, -0.0, 1.0, 2.0] {
+        let nodes = vec![
+            ScalarNode::Input {
+                id: 0,
+                class: NumericClass::Single,
+            },
+            ScalarNode::Literal {
+                id: 1,
+                value: ScalarLiteral::F64Bits(exponent.to_bits()),
+            },
+            ScalarNode::Apply {
+                id: 2,
+                source_index: 0,
+                class: NumericClass::Single,
+                operation: ScalarOperation::Operator(runmat_types::OperatorKind::ElementwisePower),
+                operands: vec![0, 1],
+            },
+        ];
+        let program = ScalarProgram::new(
+            Digest::sha256(b"captured-power"),
+            SCALAR_PROGRAM_REVISION,
+            nodes,
+            2,
+        )
+        .unwrap();
+        assert_eq!(program.metadata_control_ids(), HashSet::from([1]));
+        let decoded = ScalarProgram::from_wire(
+            serde_json::from_slice(&serde_json::to_vec(program.wire()).unwrap()).unwrap(),
+        )
+        .unwrap();
+        decoded.require_rederived_identity(&program).unwrap();
+        for invalid in [
+            ScalarNode::Input {
+                id: 1,
+                class: NumericClass::Double,
+            },
+            ScalarNode::Literal {
+                id: 1,
+                value: ScalarLiteral::F64Bits(3.0_f64.to_bits()),
+            },
+            ScalarNode::Literal {
+                id: 1,
+                value: ScalarLiteral::F32Bits(2.0_f32.to_bits()),
+            },
+        ] {
+            let mut wire = program.wire().clone();
+            wire.nodes[1] = invalid;
+            assert!(ScalarProgram::from_wire(wire).is_err());
+        }
+        let mut old = program.wire().clone();
+        old.semantic_revision = 2;
+        assert!(ScalarProgram::from_wire(old).is_err());
+    }
+}
 use runmat_types::OperatorKind;
 
 fn source() -> Digest {

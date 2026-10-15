@@ -116,7 +116,7 @@ pub fn build(
     })?;
     let output_precision = precision_of_output(contract)?;
     ensure!(
-        program.execution_precision() == ProviderPrecision::F64
+        program.owner_precision() == ProviderPrecision::F64
             || (precision == ProviderPrecision::F32 && output_precision == ProviderPrecision::F32),
         "provider cannot represent reduction arithmetic"
     );

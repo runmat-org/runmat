@@ -11,6 +11,8 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct ReductionRecipeDescriptor {
     pub contract: FusionReductionContract,
+    /// Scalar producer/data lowering precision, independent of partial
+    /// accumulator precision, public output precision and provider default.
     pub execution_precision: ProviderPrecision,
     pub config: ReductionRecipeConfig,
     pub inputs: Vec<ReductionInputBinding>,

@@ -25,7 +25,8 @@ impl ScalarOperation {
                 | OperatorKind::Subtract
                 | OperatorKind::ElementwiseMultiply
                 | OperatorKind::ElementwiseDivide
-                | OperatorKind::ElementwiseLeftDivide => Some(2),
+                | OperatorKind::ElementwiseLeftDivide
+                | OperatorKind::ElementwisePower => Some(2),
                 _ => None,
             },
             Self::MixedRealAddToSingle => Some(2),

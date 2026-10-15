@@ -562,7 +562,10 @@ impl ResolvedProgram {
                 self.exact_single_base_power(output)?;
                 Some(self.power_arithmetic(output)?.exponent_id)
             })
-            .filter(|id| plan.inputs.contains(id) && !outputs.contains(id))
+            .filter(|id| {
+                (plan.inputs.contains(id) || plan.const_values.contains_key(id))
+                    && !outputs.contains(id)
+            })
             .collect::<HashSet<_>>();
         for operation in &plan.operations {
             let (inputs, output) = match operation {

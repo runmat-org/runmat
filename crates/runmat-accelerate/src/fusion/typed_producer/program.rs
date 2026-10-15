@@ -64,11 +64,35 @@ impl TypedProducer {
         let mut leaf_ids: Vec<_> = leaf_ids.into_iter().collect();
         leaf_ids.sort_unstable();
         let mut nodes = Vec::new();
+        let controls = program.embedded_power_controls(plan, &[root]);
         for id in leaf_ids {
             if !leaves.contains_key(&id) {
                 return Err(anyhow!("scalar producer has an unbound leaf"));
             }
             let class = program.floating_class(id)?;
+            if controls.contains(&id) {
+                let bits = plan
+                    .operations
+                    .iter()
+                    .find_map(|operation| {
+                        let (_, output) = operands(operation);
+                        let receipt = program.power_arithmetic(output?)?;
+                        (receipt.exponent_id == id)
+                            .then_some(receipt.exponent_scalar?)
+                            .and_then(|control| match control {
+                                runmat_accelerate_api::PowerScalarControl::DoubleBits(bits) => {
+                                    Some(bits)
+                                }
+                                _ => None,
+                            })
+                    })
+                    .ok_or_else(|| anyhow!("certified control lost its original Double bits"))?;
+                nodes.push(ScalarNode::Literal {
+                    id,
+                    value: ScalarLiteral::F64Bits(bits),
+                });
+                continue;
+            }
             require_provider_class(class, buffer_type)?;
             if program.is_invocation_input(id) {
                 nodes.push(ScalarNode::Input { id, class });
@@ -127,6 +151,8 @@ impl TypedProducer {
         mut expressions: HashMap<ValueId, String>,
     ) -> Result<Option<Self>> {
         let mut body = String::new();
+        let mut exact_power = false;
+        let metadata_controls = checked.metadata_control_ids();
         for node in &checked.wire().nodes {
             match node {
                 ScalarNode::Input { id, class } => {
@@ -138,8 +164,10 @@ impl TypedProducer {
                 // Source text cannot promise NaN payload preservation merely
                 // because the portable receipt retains its exact bits. The
                 // established WGSL constant path remains in charge for now.
-                ScalarNode::Literal { .. } => {
-                    return Ok(None);
+                ScalarNode::Literal { id, .. } => {
+                    if !metadata_controls.contains(id) {
+                        return Ok(None);
+                    }
                 }
                 ScalarNode::Apply {
                     id,
@@ -149,6 +177,38 @@ impl TypedProducer {
                     operands,
                 } => {
                     require_provider_class(*class, buffer_type)?;
+                    if *operation == ScalarOperation::Operator(OperatorKind::ElementwisePower) {
+                        if buffer_type != ScalarType::F32 {
+                            return Ok(None);
+                        }
+                        let [base, exponent] = operands.as_slice() else {
+                            return Err(anyhow!("certified POWER arity changed"));
+                        };
+                        let control = checked
+                            .wire()
+                            .nodes
+                            .iter()
+                            .find_map(|node| match node {
+                                ScalarNode::Literal {
+                                    id,
+                                    value: ScalarLiteral::F64Bits(bits),
+                                } if id == exponent => Some(
+                                    runmat_accelerate_api::PowerScalarControl::DoubleBits(*bits),
+                                ),
+                                _ => None,
+                            })
+                            .and_then(runmat_accelerate_api::ExactSingleBasePower::for_control)
+                            .ok_or_else(|| anyhow!("certified POWER control is unavailable"))?;
+                        let base = expressions
+                            .get(base)
+                            .ok_or_else(|| anyhow!("missing certified POWER base"))?;
+                        let name = crate::kernel_math::power_exact::entrypoint(control);
+                        let temporary = format!("typed{source_index}");
+                        body.push_str(&format!("    let {temporary}: f32 = bitcast<f32>({name}(bitcast<u32>({base})));\n"));
+                        expressions.insert(*id, temporary);
+                        exact_power = true;
+                        continue;
+                    }
                     let scalar = match class {
                         NumericClass::Single => ScalarType::F32,
                         NumericClass::Double => ScalarType::F64,
@@ -196,7 +256,7 @@ impl TypedProducer {
             expressions,
             helpers: Vec::new(),
             checked_program: Some(checked.clone()),
-            exact_power: false,
+            exact_power,
         }))
     }
 }
@@ -249,6 +309,13 @@ pub(super) fn resolved_operation(
     };
     let id = output.ok_or_else(|| anyhow!("scalar operation has no output"))?;
     let class = program.floating_class(id)?;
+    // Only captured canonical arithmetic evidence can upgrade the existing
+    // closed operator to the certified family. A name/template is not proof.
+    if program.exact_single_base_power(id).is_some() {
+        return Ok(Some(ScalarOperation::Operator(
+            OperatorKind::ElementwisePower,
+        )));
+    }
     let selected_identity = if let Some(declaration) = program.declaration(id) {
         let entry = program
             .catalog_entry(id)

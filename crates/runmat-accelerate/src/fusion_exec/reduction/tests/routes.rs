@@ -432,35 +432,54 @@ fn cancelled_canonical_session_refuses_before_preparation_effects() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn malformed_or_unsupported_submission_is_terminal_after_preparation() {
     for mode in [SubmissionMode::Unsupported, SubmissionMode::MalformedOutput] {
-        runmat_gc::gc_test_context(|| {
-            let provider = TypedCallerProvider::registered(1 << 20);
-            *provider.submission_mode.lock().unwrap() = mode;
-            let _selected = ThreadProviderGuard::set(Some(provider));
-            let plan = sum_plan();
-            let error = execute(host_request(&plan, vec![1.0, 2.0]))
-                .err()
-                .expect("selected malformed/unsupported submission must fail");
-            assert!(error.is_after_effect());
-            assert!(!error.is_unsupported(), "AfterEffect must prohibit replay");
-            if mode == SubmissionMode::Unsupported {
-                let mut cause: &(dyn std::error::Error + 'static) = &error;
-                loop {
-                    if cause.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
-                        break;
+        for projected in [false, true] {
+            runmat_gc::gc_test_context(|| {
+                let provider = TypedCallerProvider::registered(1 << 20);
+                *provider.submission_mode.lock().unwrap() = mode;
+                let _selected = ThreadProviderGuard::set(Some(provider));
+                let plan = if projected {
+                    super::projection::power_plan()
+                } else {
+                    sum_plan()
+                };
+                let invocation = if projected {
+                    FusionExecutionRequest {
+                        plan: &plan,
+                        inputs: vec![
+                            Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                            Value::Num(2.0),
+                        ],
+                        placement: None,
+                        runtime: None,
                     }
-                    cause = cause.source().expect("typed unsupported cause retained");
+                } else {
+                    host_request(&plan, vec![1.0, 2.0])
+                };
+                let error = execute(invocation)
+                    .err()
+                    .expect("selected malformed/unsupported submission must fail");
+                assert!(error.is_after_effect());
+                assert!(!error.is_unsupported(), "AfterEffect must prohibit replay");
+                if mode == SubmissionMode::Unsupported {
+                    let mut cause: &(dyn std::error::Error + 'static) = &error;
+                    loop {
+                        if cause.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
+                            break;
+                        }
+                        cause = cause.source().expect("typed unsupported cause retained");
+                    }
                 }
-            }
-            assert_eq!(provider.submissions.load(Ordering::SeqCst), 1);
-            let probes = provider.probes.lock().unwrap();
-            assert_eq!(probes[0].retirements(), 1);
-            if mode == SubmissionMode::MalformedOutput {
-                assert_eq!(probes.len(), 2);
-                assert_eq!(probes[1].retirements(), 1, "malformed output retires");
-            } else {
-                assert_eq!(probes.len(), 1);
-            }
-        });
+                assert_eq!(provider.submissions.load(Ordering::SeqCst), 1);
+                let probes = provider.probes.lock().unwrap();
+                assert_eq!(probes[0].retirements(), 1);
+                if mode == SubmissionMode::MalformedOutput {
+                    assert_eq!(probes.len(), 2);
+                    assert_eq!(probes[1].retirements(), 1, "malformed output retires");
+                } else {
+                    assert_eq!(probes.len(), 1);
+                }
+            });
+        }
     }
 }
 
@@ -489,56 +508,68 @@ fn provider_switch_during_upload_is_detected_before_submission() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn typed_vm_provider_without_observation_receipt_cannot_mint_full_call_completion() {
-    runmat_gc::gc_test_context(|| {
-        let provider = TypedCallerProvider::registered(1 << 20);
-        provider.estimated_execution_ns.store(1, Ordering::SeqCst);
-        let _selected = ThreadProviderGuard::set(Some(provider));
-        let session = Rc::new(crate::placement::PlacementSession::default());
-        let runtime = RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ))
-        .with_service_ports(RuntimeServicePorts::default().with_placement(session.clone()));
-        let plan = sum_plan();
-        let semantic = runmat_runtime::context::VmFusionSemanticIdentity::from_validated_digest(
-            crate::fusion::exact_source_plan_identity(&plan)
-                .expect("typed fixture has exact semantic identity"),
-        );
-        let installed = runmat_runtime::context::VmFusionInstalledRegion::install(
-            &runtime,
-            semantic,
-            plan.group.id,
-            plan.group.span.start,
-            plan.group.span.end,
-        )
-        .expect("same-context VM region");
-        let right = installed.right(&runtime).expect("same-context VM right");
-        assert!(right.placement_revision().is_some());
-        let input = provider
-            .resident_input(vec![1.0, 2.0], NumericElementType::F64)
-            .unwrap();
-        let outcome = futures::executor::block_on(execute_reduction_with_shape_placed_async_vm(
-            request(
+    for projected in [false, true] {
+        runmat_gc::gc_test_context(|| {
+            let provider = TypedCallerProvider::registered(1 << 20);
+            provider.estimated_execution_ns.store(1, Ordering::SeqCst);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let session = Rc::new(crate::placement::PlacementSession::default());
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(RuntimeServicePorts::default().with_placement(session.clone()));
+            let plan = if projected {
+                super::projection::power_plan()
+            } else {
+                sum_plan()
+            };
+            let semantic = runmat_runtime::context::VmFusionSemanticIdentity::from_validated_digest(
+                crate::fusion::exact_source_plan_identity(&plan)
+                    .expect("typed fixture has exact semantic identity"),
+            );
+            let installed = runmat_runtime::context::VmFusionInstalledRegion::install(
+                &runtime,
+                semantic,
+                plan.group.id,
+                plan.group.span.start,
+                plan.group.span.end,
+            )
+            .expect("same-context VM region");
+            let right = installed.right(&runtime).expect("same-context VM right");
+            assert!(right.placement_revision().is_some());
+            let input = provider
+                .resident_input(
+                    vec![1.0, 2.0],
+                    if projected {
+                        NumericElementType::F32
+                    } else {
+                        NumericElementType::F64
+                    },
+                )
+                .unwrap();
+            let mut invocation = request(
                 &plan,
                 Value::GpuTensor(input),
                 Some(crate::placement::PlacementCorrelationId(915)),
                 Some(runtime),
-            ),
-            2,
-            1,
-            &[1, 1],
-            8,
-            right,
-        ))
-        .unwrap();
-        let FusionExecutionOutcome::Executed(selected) = outcome else {
-            panic!("selected typed provider route must execute")
-        };
-        assert!(matches!(selected.value, Value::GpuTensor(_)));
-        assert_eq!(provider.submissions.load(Ordering::SeqCst), 1);
-        assert!(
-            selected.completion.is_none(),
-            "default provider reports Unsupported observation, never an empty receipt"
-        );
-        assert!(session.profile_snapshot().feedback.is_empty());
-    });
+            );
+            if projected {
+                invocation.inputs.push(Value::Num(2.0));
+            }
+            let outcome = futures::executor::block_on(
+                execute_reduction_with_shape_placed_async_vm(invocation, 2, 1, &[1, 1], 8, right),
+            )
+            .unwrap();
+            let FusionExecutionOutcome::Executed(selected) = outcome else {
+                panic!("selected typed provider route must execute")
+            };
+            assert!(matches!(selected.value, Value::GpuTensor(_)));
+            assert_eq!(provider.submissions.load(Ordering::SeqCst), 1);
+            assert!(
+                selected.completion.is_none(),
+                "default provider reports Unsupported observation, never an empty receipt"
+            );
+            assert!(session.profile_snapshot().feedback.is_empty());
+        });
+    }
 }

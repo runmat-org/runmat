@@ -53,8 +53,7 @@ impl WgpuProvider {
             .map_err(ProviderExecutionError::from)?;
         let f64_required = d.execution_precision == ProviderPrecision::F64
             || d.output_precision == ProviderPrecision::F64
-            || (selection.strategy() == ReductionStrategy::TwoPass
-                && d.partial.precision == ProviderPrecision::F64)
+            || d.partial.precision == ProviderPrecision::F64
             || d.inputs
                 .iter()
                 .any(|b| b.precision == ProviderPrecision::F64);

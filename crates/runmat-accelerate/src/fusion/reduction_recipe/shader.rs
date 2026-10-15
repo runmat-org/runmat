@@ -46,7 +46,7 @@ pub(super) fn validate_lowered_sources(recipe: &ProviderReductionRecipe) -> Resu
         .collect();
     let producer = TypedProducer::lower_checked_wgsl(checked, scalar, expressions)?
         .ok_or_else(|| anyhow!("checked reduction producer has no WGSL lowering"))?;
-    let preamble = format!("// {}\n\n", checked.wire().source_identity);
+    let preamble = producer.checked_preamble()?;
     let expected = render(
         recipe.descriptor(),
         recipe.semantic_identity(),

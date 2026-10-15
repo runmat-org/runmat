@@ -303,7 +303,30 @@ impl AccelProvider for TypedCallerProvider {
             ));
         }
         let descriptor = submission.selection().recipe().descriptor();
-        let values = self.input_values.lock().unwrap().clone();
+        let mut values = self.input_values.lock().unwrap().clone();
+        // Independent host oracle for the compact certified producer fixture,
+        // not the production integer-word implementation or a capability claim.
+        if let Some(program) = submission.selection().recipe().checked_scalar() {
+            for node in &program.wire().nodes {
+                if let runmat_accelerate_api::scalar_program::ScalarNode::Apply {
+                    operation:
+                        runmat_types::ScalarOperation::Operator(
+                            runmat_types::OperatorKind::ElementwisePower,
+                        ),
+                    operands,
+                    ..
+                } = node
+                {
+                    let exponent = program.wire().nodes.iter().find_map(|node| match node {
+                        runmat_accelerate_api::scalar_program::ScalarNode::Literal { id, value: runmat_accelerate_api::scalar_program::ScalarLiteral::F64Bits(bits) } if Some(id) == operands.get(1) => Some(f64::from_bits(*bits)),
+                        _ => None,
+                    }).expect("checked original control");
+                    for value in &mut values {
+                        *value = f64::from(value.powf(exponent) as f32);
+                    }
+                }
+            }
+        }
         *self.submitted_input_values.lock().unwrap() = Some(values.clone());
         let result = match descriptor.contract.operation {
             FusionReductionOperation::Sum => values.iter().copied().sum(),

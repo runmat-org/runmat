@@ -74,6 +74,28 @@ pub fn execute_reduction_with_shape_placed(
     output_shape: &[usize],
     workgroup_size: u32,
 ) -> ExecutionResult<FusionExecutionOutcome<Value>> {
+    // Extrema have no legacy raw-hook flavor. Admit a projected producer
+    // before that compatibility-only flavor check so sync callers can use the
+    // same checked recipe as async callers without manufacturing a Sum lane.
+    if let (Some(bindings), Some(owner)) = (AdmittedBindings::new(&request), provider()) {
+        if legacy::selected_legacy_flavor(&request, &bindings).is_none()
+            && reduction_arithmetic::requires_selected_arithmetic(&request, &bindings)?
+        {
+            if let Some(arithmetic) =
+                reduction_arithmetic::admitted_static(&request, &bindings, owner.precision())?
+            {
+                if arithmetic.requires_typed() {
+                    return execute_projected_sync(
+                        request,
+                        reduce_len,
+                        num_slices,
+                        output_shape,
+                        workgroup_size,
+                    );
+                }
+            }
+        }
+    }
     execute_reduction_with_shape_core(
         request,
         reduce_len,
@@ -100,6 +122,7 @@ pub async fn execute_reduction_with_shape_placed_async(
         output_shape,
         workgroup_size,
         None,
+        false,
     )
     .await?
     {
@@ -127,6 +150,7 @@ pub async fn execute_reduction_with_shape_placed_async_vm(
         output_shape,
         workgroup_size,
         Some(right),
+        false,
     )
     .await
 }
@@ -138,6 +162,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
     output_shape: &[usize],
     workgroup_size: u32,
     mut right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    synchronous: bool,
 ) -> ExecutionResult<FusionExecutionOutcome<TypedReductionVmOutput>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
@@ -151,9 +176,12 @@ async fn execute_reduction_with_shape_placed_async_inner(
         }
     };
     let selected_identity = bindings.identity(None)?;
-    let Some(arithmetic) =
+    let arithmetic = if synchronous {
+        reduction_arithmetic::admitted_static(&request, &bindings, selected_provider.precision())?
+    } else {
         reduction_arithmetic::admitted(&request, &bindings, selected_provider.precision()).await?
-    else {
+    };
+    let Some(arithmetic) = arithmetic else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
@@ -168,9 +196,16 @@ async fn execute_reduction_with_shape_placed_async_inner(
         return Err(anyhow!("selected reduction authority changed during admission").into());
     }
     validation::request(&request, reduce_len, num_slices, output_shape)?;
-    if let Some(program) =
+    let program = if synchronous {
+        super::reduction_program::resolve_reduction_program_static(
+            &request,
+            selected_provider.precision(),
+        )
+        .await?
+    } else {
         super::resolve_reduction_program(&request, selected_provider.precision()).await?
-    {
+    };
+    if let Some(program) = program {
         let current = AdmittedBindings::new(&request)
             .ok_or_else(|| anyhow!("selected reduction binding changed during typed admission"))?;
         if current.identity(None)? != selected_identity
@@ -212,6 +247,14 @@ async fn execute_reduction_with_shape_placed_async_inner(
                         FusionCpuObservation::new(None),
                     ));
                 };
+                // The synchronous adapter polls this shared route exactly
+                // once. Only borrow/upload preparation is non-suspending;
+                // asynchronous cast owners stay on the async entrypoint.
+                if synchronous && !input_plan.casts.is_empty() {
+                    return Ok(FusionExecutionOutcome::SharedRuntime(
+                        FusionCpuObservation::new(None),
+                    ));
+                }
                 let strategies =
                     match selected_provider.reduction_recipe_candidates(recipe.physical()) {
                         Ok(strategies) => strategies,
@@ -286,7 +329,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
     // axis geometry. A typed recipe can index an exact N-D axis, but failure to
     // select that recipe must return to ordinary runtime execution rather than
     // reinterpret an N-D buffer as contiguous legacy rows or columns.
-    if output_shape.len() > 2 {
+    if output_shape.len() > 2 || arithmetic.requires_typed() {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
@@ -306,6 +349,40 @@ async fn execute_reduction_with_shape_placed_async_inner(
                 completion: None,
             })
         }
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            FusionExecutionOutcome::SharedRuntime(observation)
+        }
+    })
+}
+
+/// Drive the effect-free static admission and non-suspending typed execution
+/// once, never blocking a runtime or replaying a partially executed future.
+pub(super) fn execute_projected_sync(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    output_shape: &[usize],
+    workgroup_size: u32,
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
+    use futures::FutureExt;
+    let result = execute_reduction_with_shape_placed_async_inner(
+        request,
+        reduce_len,
+        num_slices,
+        output_shape,
+        workgroup_size,
+        None,
+        true,
+    )
+    .now_or_never()
+    .ok_or_else(|| {
+        runmat_accelerate_api::ProviderExecutionError::from(anyhow!(
+            "non-suspending projected reduction unexpectedly suspended"
+        ))
+        .after_effect()
+    })??;
+    Ok(match result {
+        FusionExecutionOutcome::Executed(output) => FusionExecutionOutcome::Executed(output.value),
         FusionExecutionOutcome::SharedRuntime(observation) => {
             FusionExecutionOutcome::SharedRuntime(observation)
         }

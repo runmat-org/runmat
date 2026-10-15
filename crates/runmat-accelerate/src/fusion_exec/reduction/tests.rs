@@ -17,6 +17,7 @@ use std::sync::atomic::Ordering;
 mod provider;
 use provider::*;
 mod routes;
+mod projection;
 
 fn initialize_registry() {
     #[cfg(target_arch = "wasm32")]

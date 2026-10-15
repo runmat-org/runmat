@@ -112,6 +112,15 @@ pub(super) fn execute_reduction_with_shape_core(
     } else {
         arithmetic
     };
+    if arithmetic.is_some_and(reduction_arithmetic::PreparedReductionArithmetic::requires_typed) {
+        return super::execute_projected_sync(
+            request,
+            reduce_len,
+            num_slices,
+            output_shape,
+            workgroup_size,
+        );
+    }
     if let Some(arithmetic) = arithmetic {
         arithmetic.validate(
             request.plan,

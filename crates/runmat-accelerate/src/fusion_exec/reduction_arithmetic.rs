@@ -38,6 +38,9 @@ pub(super) fn requires_selected_arithmetic(
 
 pub(super) enum PreparedReductionArithmetic {
     Unneeded,
+    /// Authenticated arithmetic requires the projected checked recipe. The
+    /// legacy raw-source ABI must never stage its metadata controls as data.
+    TypedOnly,
     Selected(Box<SelectedReductionArithmetic>),
 }
 
@@ -49,6 +52,9 @@ pub(super) struct SelectedReductionArithmetic {
 }
 
 impl PreparedReductionArithmetic {
+    pub(super) fn requires_typed(&self) -> bool {
+        matches!(self, Self::TypedOnly)
+    }
     pub(super) fn selected(&self) -> bool {
         matches!(self, Self::Selected(_))
     }
@@ -93,7 +99,7 @@ impl PreparedReductionArithmetic {
     }
     pub(super) fn emission(&self) -> Option<&ReductionProducerEmission> {
         match self {
-            Self::Unneeded => None,
+            Self::Unneeded | Self::TypedOnly => None,
             Self::Selected(selected) => Some(&selected.emission),
         }
     }
@@ -121,18 +127,22 @@ fn selected_source(
             | crate::fusion::FusionOp::Builtin { output, .. } => *output,
         };
         if let Some(output) = output {
-            // Unlike ordinary elementwise fusion, this reduction frame still
-            // stages every source leaf as data. It cannot yet omit an original
-            // Double control using its authenticated POWER receipt.
+            // The legacy raw reduction frame stages every source leaf as
+            // data. Certified metadata controls require the checked recipe.
             if program.power_arithmetic(output).is_some_and(|receipt| {
                 matches!(
                     receipt.mode,
                     runmat_accelerate_api::RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
                 )
             }) {
-                return unavailable(anyhow::anyhow!(
-                    "selected reduction has no mixed POWER physical control projection"
-                ));
+                if program.exact_single_base_power(output).is_none() {
+                    return unavailable(anyhow::anyhow!(
+                        "selected reduction has no certified mixed POWER arithmetic"
+                    ));
+                }
+                // Validate the full checked producer and physical projection
+                // in the shared typed recipe owner, never in the legacy frame.
+                return Ok(Some(PreparedReductionArithmetic::TypedOnly));
             }
             if let Err(error) = program.require_ordinary_arithmetic(output, precision) {
                 return unavailable(error);

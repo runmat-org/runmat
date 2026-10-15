@@ -281,6 +281,18 @@ impl TypedProducer {
 
         Ok(format!("// {identity}\n{math}\n"))
     }
+    pub(crate) fn checked_preamble(&self) -> Result<String> {
+        let checked = self
+            .checked_program
+            .as_ref()
+            .ok_or_else(|| anyhow!("producer has no checked scalar program"))?;
+        let math = if self.exact_power {
+            crate::kernel_math::power_exact::functions()
+        } else {
+            ""
+        };
+        Ok(format!("// {}\n{math}\n", checked.wire().source_identity))
+    }
 }
 pub(crate) fn producer_indices(
     plan: &FusionGroupPlan,
