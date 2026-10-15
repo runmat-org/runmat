@@ -82,12 +82,15 @@ impl AdmittedBuiltinPreparation {
     ) -> crate::BuiltinResult<Option<super::AdmittedBuiltinCompound>> {
         match self.compound_body {
             Some(AdmittedCompoundBody::RealUnary(_)) => {
-                super::real_unary::plan(self, context, provider)
-                    .map(|plan| plan.map(super::AdmittedBuiltinCompound::RealUnary))
+                super::real_unary::plan(self, context, provider).map(|plan| {
+                    plan.map(|plan| super::AdmittedBuiltinCompound::RealUnary(Box::new(plan)))
+                })
             }
             Some(AdmittedCompoundBody::RealPower) => {
                 if let Some(plan) = super::real_power::plan(self, context, provider)? {
-                    Ok(Some(super::AdmittedBuiltinCompound::RealPower(plan)))
+                    Ok(Some(super::AdmittedBuiltinCompound::RealPower(Box::new(
+                        plan,
+                    ))))
                 } else {
                     super::real_power_scalar::plan(self, context, provider).map(|plan| {
                         plan.map(|plan| {

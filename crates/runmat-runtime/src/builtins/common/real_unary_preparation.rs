@@ -144,7 +144,7 @@ where
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build());
             }
-            return runner::execute(runtime, compound, value, body, adapter).await;
+            return runner::execute(runtime, *compound, value, body, adapter).await;
         }
         if let Value::GpuTensor(source) = &value {
             if let Some(owner) =

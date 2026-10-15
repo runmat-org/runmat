@@ -104,7 +104,7 @@ where
             let left = values.remove(0);
             let output = match compound {
                 AdmittedBuiltinCompound::RealPower(compound) => {
-                    super::compound::execute(runtime, compound, left, right).await?
+                    super::compound::execute(runtime, *compound, left, right).await?
                 }
                 AdmittedBuiltinCompound::RealPowerScalar(compound) => {
                     super::scalar_compound::execute(runtime, *compound, left, right).await?

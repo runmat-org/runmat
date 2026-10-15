@@ -14,8 +14,8 @@ use runmat_execution::{CandidateOutputResidency, CandidateResourceDemand, Digest
 use runmat_value::Value;
 
 pub enum AdmittedBuiltinCompound {
-    RealUnary(AdmittedRealUnaryCompound),
-    RealPower(AdmittedRealPowerCompound),
+    RealUnary(Box<AdmittedRealUnaryCompound>),
+    RealPower(Box<AdmittedRealPowerCompound>),
     RealPowerScalar(Box<AdmittedRealPowerScalarCompound>),
 }
 
