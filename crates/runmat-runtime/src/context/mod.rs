@@ -120,10 +120,10 @@ pub use services::{
     RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
     RuntimeHostEffectResourceService, RuntimeHostService, RuntimeHttpService,
     RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
-    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
-    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
-    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
-    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackDelivery,
+    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
+    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
+    RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{

@@ -54,12 +54,12 @@ impl Witness {
         let mut pending = std::mem::take(&mut *self.pending.borrow_mut());
         for mut source in pending.drain(..) {
             if let Some(feedback) = source.take_ready() {
+                let snapshot = feedback.snapshot().expect("completed presentation");
                 if let Some(admission) = &self.admission {
-                    admission
-                        .observe(feedback.clone())
+                    RuntimePlacementService::observe_deferred_feedback(admission, feedback)
                         .expect("admitted feedback");
                 }
-                self.feedback.borrow_mut().push(feedback);
+                self.feedback.borrow_mut().push(snapshot);
             } else if !source.terminal_without_feedback() {
                 self.pending.borrow_mut().push(source);
             }

@@ -132,7 +132,7 @@ impl RuntimePlacementService for PlacementWitnessService {
         let mut still_pending = Vec::new();
         for mut source in pending.drain(..) {
             if let Some(feedback) = source.take_ready() {
-                self.feedback.borrow_mut().push(feedback);
+                self.observe_deferred_feedback(feedback).unwrap();
             } else if !source.terminal_without_feedback() {
                 still_pending.push(source);
             }

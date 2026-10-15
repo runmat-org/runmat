@@ -21,6 +21,8 @@ mod pending;
 mod prepared_request;
 mod whole_work;
 pub(super) use prepared_request::PreparedPlacementRequest;
+pub(crate) use whole_work::select_unobserved;
+pub(super) use whole_work::{candidate_resources_admitted, no_resource_candidate};
 #[cfg(test)]
 #[path = "session/authority_tests.rs"]
 mod authority_tests;
@@ -864,7 +866,11 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
 impl PlacementSession {
     fn drain_observations(&self) {
         for feedback in self.pending.take_ready() {
-            if let Err(error) = self.record_feedback(feedback) {
+            if let Err(error) =
+                runmat_runtime::context::RuntimePlacementService::observe_deferred_feedback(
+                    self, feedback,
+                )
+            {
                 log::warn!("placement observation rejected: {error}");
             }
         }

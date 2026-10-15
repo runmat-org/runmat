@@ -2179,8 +2179,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Returns a side-effect-free component cost estimate for an already
     /// feasible operation. Providers may return `None` until they have a
-    /// trustworthy prior or observation; placement then supplies a bounded
-    /// low-confidence policy prior rather than probing by execution.
+    /// trustworthy prior or observation. `None` means unavailable pricing,
+    /// not unsupported execution. Placement preserves that absence; only an
+    /// explicitly supplied physical prior or authorized complete-route
+    /// observation may replace it. Feasibility remains a separate query.
     fn estimate_cost(&self, _query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {
         None
     }

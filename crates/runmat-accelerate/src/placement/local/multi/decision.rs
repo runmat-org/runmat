@@ -1,7 +1,11 @@
 //! One service graph and one selected physical receipt for the whole candidate set.
 use super::*;
+use crate::placement::partition::{
+    single_candidate_resources_admitted, CandidateResourceFacts, ResourceAdmissionError,
+};
 
 pub(super) struct DecisionRequest<'a> {
+    pub(super) constraint: runmat_execution::WholeWorkConstraint,
     pub(super) provider: &'a dyn AccelProvider,
     pub(super) operation: &'a str,
     pub(super) semantic_identity: Option<Digest>,
@@ -9,9 +13,9 @@ pub(super) struct DecisionRequest<'a> {
     pub(super) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(super) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
-    pub(super) cpu: ExecutionCandidateDescriptor,
+    pub(super) cpu: LocalCpuCandidate,
     pub(super) cpu_resources: Option<CandidateResourceDemand>,
-    pub(super) cpu_cost: ExecutionCostEstimate,
+    pub(super) cpu_cost: runmat_execution::CandidateCostEvidence,
     pub(super) admitted: Vec<Admitted>,
     pub(super) rejected: Vec<(
         Option<Digest>,
@@ -20,12 +24,12 @@ pub(super) struct DecisionRequest<'a> {
     )>,
     pub(super) source_digest: Digest,
     pub(super) residency: crate::placement::residency::ResidencySummary,
-    pub(super) session: Option<(
+    pub(super) physical_facts: (
         runmat_execution::PlacementResourceSnapshot,
         Digest,
         u64,
         bool,
-    )>,
+    ),
     pub(super) compare_profitability: bool,
     pub(super) runtime: Option<&'a runmat_runtime::context::RuntimeContext>,
     pub(super) policy: PlacementPolicy,
@@ -34,7 +38,16 @@ pub(super) struct DecisionRequest<'a> {
 pub(super) fn select_decision(
     request: DecisionRequest<'_>,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    if request.cpu.route.cost.estimate().is_none()
+        || request
+            .admitted
+            .iter()
+            .any(|entry| entry.descriptor.is_none())
+    {
+        return super::unpriced::select(request);
+    }
     let DecisionRequest {
+        constraint,
         provider,
         operation,
         semantic_identity,
@@ -48,18 +61,28 @@ pub(super) fn select_decision(
         rejected,
         source_digest,
         residency,
-        session,
+        physical_facts,
         compare_profitability,
         runtime,
         policy,
     } = request;
+    let cpu = cpu
+        .into_priced()
+        .expect("numeric branch requires an estimated host carrier");
+    let (resources, digest, host_epoch, _) = physical_facts;
+    resources.validate().map_err(|message| {
+        plan_error(crate::placement::PlacementPlanError {
+            code: "RunMat:Placement:InvalidRequest",
+            message: message.into(),
+        })
+    })?;
     // Stable order makes the set signature and the service graph independent
     // of provider candidate enumeration order. Original indices still map to
     // the caller's exact checked selection/recipe for execution.
-    admitted.sort_by(|left, right| left.descriptor.identity.cmp(&right.descriptor.identity));
+    admitted.sort_by(|left, right| left.priced().identity.cmp(&right.priced().identity));
     if admitted
         .windows(2)
-        .any(|pair| pair[0].descriptor.identity == pair[1].descriptor.identity)
+        .any(|pair| pair[0].priced().identity == pair[1].priced().identity)
     {
         return Err(Box::new(
             runmat_runtime::build_runtime_error("duplicate physical candidate identity")
@@ -68,7 +91,7 @@ pub(super) fn select_decision(
         ));
     }
     let mut graph_candidates = Vec::with_capacity(admitted.len() + 1);
-    if let Some(resources) = cpu_resources {
+    if let Some(resources) = cpu_resources.filter(|_| compare_profitability) {
         graph_candidates.push(PlacementGraphCandidate {
             resources,
             descriptor: cpu.clone(),
@@ -79,31 +102,70 @@ pub(super) fn select_decision(
     for entry in &admitted {
         graph_candidates.push(PlacementGraphCandidate {
             resources: candidate_resource(entry),
-            descriptor: entry.descriptor.clone(),
+            descriptor: entry.priced().clone(),
             output_facts: None,
             transactional_results: entry.transactional,
         });
     }
-    let select_local = || {
-        select_candidate(
-            if compare_profitability && cpu_resources.is_some() {
-                std::iter::once(cpu.clone())
-                    .chain(admitted.iter().map(|entry| entry.descriptor.clone()))
-                    .collect::<Vec<_>>()
-            } else {
-                admitted
-                    .iter()
-                    .map(|entry| entry.descriptor.clone())
-                    .collect()
+    let mut insufficient_resource_evidence = false;
+    graph_candidates.retain(|candidate| {
+        let descriptor = &candidate.descriptor;
+        // Match the canonical numeric selector's admissible price domain
+        // before graph publication or cross-route classification.
+        if descriptor.validate().is_err() || descriptor.cost.checked_risk_adjusted_ns().is_none() {
+            return false;
+        }
+        match single_candidate_resources_admitted(
+            CandidateResourceFacts {
+                location: descriptor.execution_location,
+                output_residency: descriptor.output_residency,
+                presentation: &descriptor.presentation,
+                kind: descriptor.kind,
+                demand: candidate.resources,
+                transactional_results: candidate.transactional_results,
             },
+            &resources,
+            true,
+        ) {
+            Ok(()) => true,
+            Err(reason) => {
+                insufficient_resource_evidence |=
+                    matches!(reason, ResourceAdmissionError::InsufficientEvidence { .. });
+                false
+            }
+        }
+    });
+    if resources.cancellation_requested {
+        return Err(plan_error(crate::placement::PlacementPlanError {
+            code: "RunMat:Placement:Cancelled",
+            message: "placement cancelled before dispatch".into(),
+        }));
+    }
+    if graph_candidates.is_empty() {
+        return Err(plan_error(
+            crate::placement::session::no_resource_candidate(insufficient_resource_evidence),
+        ));
+    }
+    let compared_routes = graph_candidates
+        .iter()
+        .any(|candidate| !candidate.descriptor.kind.is_provider())
+        && graph_candidates
+            .iter()
+            .any(|candidate| candidate.descriptor.kind.is_provider());
+    let select_local = |candidates: &[PlacementGraphCandidate]| {
+        select_candidate(
+            candidates
+                .iter()
+                .map(|candidate| candidate.descriptor.clone())
+                .collect::<Vec<_>>(),
             policy,
         )
-        .expect("at least one admitted placement candidate")
+        .ok_or_else(|| plan_error(crate::placement::session::no_resource_candidate(false)))
     };
     let mut feedback = None;
     let mut observation_admitted = false;
     let selected = if compare_profitability {
-        if let (Some(runtime), Some((resources, digest, host_epoch, _))) = (runtime, session) {
+        if let Some(runtime) = runtime {
             let revision = observation_revision(
                 runtime,
                 observation_contract,
@@ -115,7 +177,7 @@ pub(super) fn select_decision(
             if let (Some(service), Some(revision)) = (runtime.service_ports().placement(), revision)
             {
                 let facts = if admitted.len() == 1
-                    && admitted[0].descriptor.identity == candidate_name(provider, operation, None)
+                    && admitted[0].priced().identity == candidate_name(provider, operation, None)
                 {
                     signature::with_output_resources(
                         signature::runtime_facts(
@@ -125,7 +187,7 @@ pub(super) fn select_decision(
                             &resources,
                             host_epoch,
                         ),
-                        Some(admitted[0].output_bytes),
+                        admitted[0].output_size(),
                     )
                 } else {
                     signature::candidate_set_facts(
@@ -133,7 +195,7 @@ pub(super) fn select_decision(
                             .iter()
                             .map(|entry| {
                                 (
-                                    &entry.descriptor.identity,
+                                    &entry.priced().identity,
                                     &entry.cost_query,
                                     entry.output_bytes,
                                 )
@@ -172,7 +234,7 @@ pub(super) fn select_decision(
                     graph: PlacementGraph {
                         nodes: vec![PlacementGraphNode {
                             identity: operation.into(),
-                            candidates: graph_candidates,
+                            candidates: graph_candidates.clone(),
                         }],
                         edges: Vec::new(),
                     },
@@ -182,57 +244,87 @@ pub(super) fn select_decision(
                     require_transactional_results: true,
                 })?;
                 let decision = selection.decision;
+                if decision.signature != signature || decision.selections.len() != 1 {
+                    return Err(Box::new(
+                        runmat_runtime::build_runtime_error(
+                            "placement returned a different physical graph decision",
+                        )
+                        .with_identifier("RunMat:Placement:InvalidDecision")
+                        .build(),
+                    ));
+                }
                 observation_admitted = true;
-                let selected_name = &decision.selections[0].candidate;
-                let selected = if cpu_resources.is_some() && selected_name == &cpu.identity {
-                    cpu.clone()
-                } else {
-                    admitted
-                        .iter()
-                        .find(|entry| &entry.descriptor.identity == selected_name)
-                        .map(|entry| entry.descriptor.clone())
-                        .ok_or_else(|| {
-                            Box::new(
-                                runmat_runtime::build_runtime_error(
-                                    "placement selected an unknown physical candidate",
-                                )
-                                .with_identifier("RunMat:Placement:InvalidDecision")
-                                .build(),
+                let selected_name = decision
+                    .selections
+                    .first()
+                    .map(|selected| &selected.candidate);
+                let selected = graph_candidates
+                    .iter()
+                    .find(|entry| {
+                        Some(&entry.descriptor.identity) == selected_name
+                            && decision.selections[0].kind == entry.descriptor.kind
+                            && decision.selections[0].node == operation
+                    })
+                    .map(|entry| entry.descriptor.clone())
+                    .ok_or_else(|| {
+                        Box::new(
+                            runmat_runtime::build_runtime_error(
+                                "placement selected an unknown physical candidate",
                             )
-                        })?
-                };
-                feedback = Some(Box::new(LocalPlacementFeedback {
-                    runtime: runtime.clone(),
-                    signature,
-                    candidate: selected.identity.clone(),
-                    kind: selected.kind,
-                    permit: selection.observation_permit,
-                }));
+                            .with_identifier("RunMat:Placement:InvalidDecision")
+                            .build(),
+                        )
+                    })?;
+                feedback = selection.observation_permit.map(|permit| {
+                    Box::new(LocalPlacementFeedback {
+                        runtime: runtime.clone(),
+                        signature,
+                        candidate: selected.identity.clone(),
+                        kind: selected.kind,
+                        authority: LocalPlacementFeedbackAuthority::Graph(permit),
+                    })
+                });
                 selected
             } else {
-                select_local()
+                select_local(&graph_candidates)?
             }
         } else {
-            select_local()
+            select_local(&graph_candidates)?
         }
     } else {
-        select_local()
+        select_local(&graph_candidates)?
     };
     let chosen = admitted
         .iter()
-        .find(|entry| entry.descriptor.identity == selected.identity);
+        .find(|entry| entry.priced().identity == selected.identity);
     let receipt = chosen
         .or_else(|| admitted.first())
         .expect("admitted provider candidate");
     Ok(LocalPlacementOutcome::Selected {
-        selected: Box::new(selected),
+        predicted_total_ns: selected.cost.checked_total_ns(),
+        selected: Box::new(runmat_execution::SelectedExecutionCandidate {
+            node: operation.into(),
+            candidate: selected.identity,
+            kind: selected.kind,
+        }),
+        decision_kind: if matches!(
+            constraint,
+            runmat_execution::WholeWorkConstraint::ProviderRequired { .. }
+        ) {
+            runmat_execution::WholeWorkDecisionKind::ProviderRequired
+        } else if compared_routes {
+            runmat_execution::WholeWorkDecisionKind::Compared
+        } else {
+            runmat_execution::WholeWorkDecisionKind::Uncompared
+        },
         cpu_cost,
-        provider_cost: receipt.descriptor.cost,
+        provider_cost: Some(receipt.priced().cost),
+        provider_rejection: None,
         feedback,
         provider_query: Box::new(receipt.cost_query.operation.clone()),
         provider_observation: observation_admitted
             && if admitted.len() == 1
-                && admitted[0].descriptor.identity == candidate_name(provider, operation, None)
+                && admitted[0].priced().identity == candidate_name(provider, operation, None)
             {
                 // Preserve the old one-record receipt even when CPU won.
                 receipt.cost_query.context.observation.is_some()

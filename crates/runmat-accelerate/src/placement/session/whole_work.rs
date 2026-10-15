@@ -261,15 +261,8 @@ impl PlacementSession {
         let mut insufficient_resource_evidence = false;
         for candidate in request.candidates {
             let demand = candidate.resources;
-            if let Err(reason) = single_candidate_resources_admitted(
-                CandidateResourceFacts {
-                    location: candidate.execution_location,
-                    output_residency: candidate.output_residency,
-                    presentation: &candidate.presentation,
-                    kind: candidate.kind,
-                    demand,
-                    transactional_results: candidate.transactional_results,
-                },
+            if let Err(reason) = candidate_resources_admitted(
+                candidate,
                 request.resources,
                 request.require_transactional_results,
             ) {
@@ -321,14 +314,7 @@ impl PlacementSession {
             });
         }
         if admitted.is_empty() {
-            return Err(if insufficient_resource_evidence {
-                PlacementPlanError {
-                    code: "RunMat:Placement:InsufficientResourceEvidence",
-                    message: "a resource budget requires a matching route memory bound".into(),
-                }
-            } else {
-                no_legal_candidate()
-            });
+            return Err(no_resource_candidate(insufficient_resource_evidence));
         }
 
         if managed {
@@ -380,17 +366,8 @@ impl PlacementSession {
             WholeWorkConstraint::ProviderRequired { .. }
         ) || provider_only
         {
-            let item = admitted
-                .iter()
-                .filter(|item| matches!(item.cost, CandidateCostEvidence::Estimated(_)))
-                .min_by_key(|item| match item.cost {
-                    CandidateCostEvidence::Estimated(estimate) => {
-                        (estimate.checked_risk_adjusted_ns(), &item.identity)
-                    }
-                    CandidateCostEvidence::Unavailable(_) => unreachable!(),
-                })
-                .or_else(|| admitted.first())
-                .expect("nonempty admitted whole-work candidates");
+            let item =
+                route_choice(&admitted, true).expect("nonempty admitted whole-work candidates");
             return Ok(SelectionDraft::Direct {
                 selected: CompactSelectedExecutionCandidate {
                     node: operation,
@@ -447,7 +424,7 @@ impl PlacementSession {
             })
             .collect();
         if estimated.is_empty() {
-            return unmeasured_host(&admitted, operation);
+            return host_selection(&admitted, operation, WholeWorkDecisionKind::Unmeasured);
         }
         // A measured host route is required before the ordinary numeric graph
         // can compare it with provider candidates. Unmeasured host routes are
@@ -456,7 +433,20 @@ impl PlacementSession {
             .iter()
             .any(|(item, _)| !item.candidate.kind.is_provider())
         {
-            return unmeasured_host(&admitted, operation);
+            return host_selection(&admitted, operation, WholeWorkDecisionKind::Unmeasured);
+        }
+        if estimated.len() == 1 {
+            // A valid CPU quote remains useful, but a one-route graph does
+            // not establish profitability against an unquoted/absent route.
+            return host_selection(
+                &admitted,
+                operation,
+                if admitted.len() == 1 {
+                    WholeWorkDecisionKind::Uncompared
+                } else {
+                    WholeWorkDecisionKind::Unmeasured
+                },
+            );
         }
         let node = PlacementGraphNode {
             identity: request.signature.operation.to_owned(),
@@ -489,22 +479,72 @@ impl PlacementSession {
     }
 }
 
-fn unmeasured_host(
+mod unobserved;
+pub(crate) use unobserved::select_unobserved;
+pub(in crate::placement) fn candidate_resources_admitted(
+    candidate: &WholeWorkCandidate,
+    resources: &runmat_execution::PlacementResourceSnapshot,
+    require_transactional_results: bool,
+) -> Result<(), ResourceAdmissionError> {
+    single_candidate_resources_admitted(
+        CandidateResourceFacts {
+            location: candidate.execution_location,
+            output_residency: candidate.output_residency,
+            presentation: &candidate.presentation,
+            kind: candidate.kind,
+            demand: candidate.resources,
+            transactional_results: candidate.transactional_results,
+        },
+        resources,
+        require_transactional_results,
+    )
+}
+
+pub(in crate::placement) fn no_resource_candidate(insufficient: bool) -> PlacementPlanError {
+    if insufficient {
+        PlacementPlanError {
+            code: "RunMat:Placement:InsufficientResourceEvidence",
+            message: "a resource budget requires a matching route memory bound".into(),
+        }
+    } else {
+        no_legal_candidate()
+    }
+}
+fn route_choice<'a, 'b>(admitted: &'b [Admitted<'a>], provider: bool) -> Option<&'b Admitted<'a>> {
+    admitted
+        .iter()
+        .filter(|item| item.candidate.kind.is_provider() == provider)
+        .filter(|item| matches!(item.cost, CandidateCostEvidence::Estimated(_)))
+        .min_by_key(|item| match item.cost {
+            CandidateCostEvidence::Estimated(estimate) => {
+                (estimate.checked_risk_adjusted_ns(), item.identity)
+            }
+            CandidateCostEvidence::Unavailable(_) => unreachable!(),
+        })
+        .or_else(|| {
+            admitted
+                .iter()
+                .find(|item| item.candidate.kind.is_provider() == provider)
+        })
+}
+
+fn host_selection(
     admitted: &[Admitted<'_>],
     operation: PlacementOperationId,
+    kind: WholeWorkDecisionKind,
 ) -> Result<SelectionDraft, PlacementPlanError> {
-    let item = admitted
-        .iter()
-        .find(|item| !item.candidate.kind.is_provider())
-        .ok_or_else(no_legal_candidate)?;
+    let item = route_choice(admitted, false).ok_or_else(no_legal_candidate)?;
     Ok(SelectionDraft::Direct {
         selected: CompactSelectedExecutionCandidate {
             node: operation,
             candidate: item.identity,
             kind: item.candidate.kind,
         },
-        kind: WholeWorkDecisionKind::Unmeasured,
-        predicted_total_ns: None,
+        kind,
+        predicted_total_ns: item
+            .cost
+            .estimate()
+            .and_then(|cost| cost.checked_total_ns()),
         probe: None,
     })
 }

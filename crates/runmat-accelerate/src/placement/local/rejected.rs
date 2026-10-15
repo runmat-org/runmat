@@ -11,7 +11,7 @@ use runmat_runtime::context::RuntimeContext;
 use super::{
     observation_revision, observation_semantic_identity, session_facts,
     session_provider_provenance, signature, LocalPlacementFeedback,
-    TotalCandidateObservationContract,
+    LocalPlacementFeedbackAuthority, TotalCandidateObservationContract,
 };
 use crate::placement::{residency::ResidencySummary, PlacementPolicy};
 
@@ -112,6 +112,6 @@ pub(super) fn rejected_cpu_feedback(
         signature,
         candidate: request.cpu.identity.clone(),
         kind: request.cpu.kind,
-        permit: selection.observation_permit,
+        authority: LocalPlacementFeedbackAuthority::Graph(selection.observation_permit?),
     }))
 }

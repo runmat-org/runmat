@@ -2,12 +2,10 @@ use super::*;
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
-use std::sync::OnceLock;
 
 #[test]
 fn pol2cart_actual_nary_preparation_preserves_all_outputs_and_provider_feedback() {
-    static PROVIDER: OnceLock<crate::simple_provider::InProcessProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(crate::simple_provider::InProcessProvider::new);
+    let provider = super::admitted_owners::owner();
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     for use_provider in [false, true] {
         for outputs in 0..=3 {

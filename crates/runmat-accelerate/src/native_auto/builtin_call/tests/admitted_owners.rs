@@ -12,11 +12,12 @@ use std::sync::{
     Mutex,
 };
 
-struct Owner {
+pub(super) struct Owner {
     inner: crate::simple_provider::InProcessProvider,
     uploads: AtomicUsize,
     downloads: AtomicUsize,
     allocations: Mutex<Vec<WeakGpuTensorHandle>>,
+    reject_upload: bool,
 }
 impl Owner {
     fn publish(&self, handle: GpuTensorHandle) -> GpuTensorHandle {
@@ -54,8 +55,17 @@ impl AccelProvider for Owner {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        self.inner.capability_snapshot()
+    }
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        self.inner.placement_resources()
+    }
     fn upload(&self, host: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
+        if self.reject_upload {
+            return Err(anyhow!("test upload failure"));
+        }
         Ok(self.publish(self.inner.upload(host)?))
     }
     fn upload_numeric_raw(
@@ -63,6 +73,11 @@ impl AccelProvider for Owner {
         host: &HostNumericTensorView<'_>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
+        if self.reject_upload {
+            return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                anyhow!("test upload failure"),
+            ));
+        }
         Ok(self.publish(self.inner.upload_numeric_raw(host)?))
     }
     fn download<'a>(
@@ -79,13 +94,55 @@ impl AccelProvider for Owner {
         // This fixture tests ownership before planning, not hook availability.
         known_fixture_resources(query)
     }
+    fn estimate_cost(
+        &self,
+        _: &runmat_accelerate_api::ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        Some(fixture_quote())
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric(handle)
+    }
+    fn cast_to_integer<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        target: runmat_accelerate_api::IntegerElementType,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Ok(self.publish(self.inner.cast_to_integer(input, target).await?)) })
+    }
+    fn unary_sin<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Ok(self.publish(self.inner.unary_sin(input).await?)) })
+    }
+    fn unary_cos<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Ok(self.publish(self.inner.unary_cos(input).await?)) })
+    }
+    fn elem_mul<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Ok(self.publish(self.inner.elem_mul(lhs, rhs).await?)) })
+    }
 }
-fn owner() -> &'static Owner {
+pub(super) fn owner() -> &'static Owner {
+    owner_with_upload_failure(false)
+}
+pub(super) fn owner_with_upload_failure(reject_upload: bool) -> &'static Owner {
     let provider = Box::leak(Box::new(Owner {
         inner: crate::simple_provider::InProcessProvider::new(),
         uploads: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
         allocations: Mutex::new(Vec::new()),
+        reject_upload,
     }));
     // SAFETY: leaked owners have process lifetime and unique monotonically allocated IDs.
     unsafe {

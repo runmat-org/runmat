@@ -6,6 +6,8 @@ pub(crate) use completion::publish_provider_feedback_vm_full_call;
 pub(crate) use completion::{publish_provider_feedback, publish_provider_feedback_full_call};
 mod fusion;
 mod local;
+#[cfg(test)]
+pub(crate) use local::LocalPlacementFeedbackAuthority;
 mod partition;
 mod planner;
 mod provider_contract;
@@ -63,7 +65,7 @@ pub use fusion::fusion_operation_token;
 pub(crate) use fusion::{FusionLeafIndexWork, FusionPlacementObserver};
 pub(crate) use local::{
     plan_local, plan_local_multi, plan_local_vm_cpu_with_provider, LocalCpuAdmission,
-    LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementFeedback,
+    LocalCpuCandidate, LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementFeedback,
     LocalPlacementOutcome, LocalPlacementRequest, LocalProviderAdmission,
     TotalCandidateObservationContract,
 };

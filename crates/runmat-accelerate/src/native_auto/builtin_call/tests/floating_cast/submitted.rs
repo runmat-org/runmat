@@ -127,13 +127,14 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     let feedback = source
         .take_ready()
         .expect("completed private map fence delivers the deferred source");
-    assert!(feedback.succeeded);
-    assert!(feedback.total_elapsed_ns > 0);
+    let snapshot = feedback.snapshot().expect("completed sample");
+    assert!(snapshot.succeeded);
+    assert!(snapshot.total_elapsed_ns > 0);
     assert_eq!(
-        feedback.signature,
+        snapshot.signature,
         probe.decisions.requests.borrow()[0].signature
     );
-    probe.observe(feedback).unwrap();
+    probe.observe_deferred_feedback(feedback).unwrap();
     assert!(
         source.take_ready().is_none(),
         "receipt is consumed exactly once"

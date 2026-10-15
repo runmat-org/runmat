@@ -1,9 +1,11 @@
 //! Owning-session delivery of provider-completed candidate totals.
+use super::local::LocalPlacementFeedbackAuthority;
 use super::LocalPlacementFeedback;
 use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderOperationReceipt,
 };
 use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
+#[cfg(test)]
 use runmat_runtime::context::RuntimeGraphObservationPermit;
 use runmat_runtime::context::RuntimePlacementFeedbackSource;
 use runmat_runtime::context::VmFusionFeedbackLease;
@@ -87,23 +89,20 @@ fn publish_provider_feedback_with_boundary(
     let Some(service) = feedback.runtime.service_ports().placement() else {
         return;
     };
-    let Some(permit) = feedback.permit else {
-        return;
-    };
     let mut source = DeferredProviderFeedback {
         receipt,
         command_contribution,
         signature: feedback.signature,
         candidate: feedback.candidate,
         kind: feedback.kind,
-        permit,
+        authority: feedback.authority,
         cancellation,
         terminal_without_feedback: false,
         boundary,
         installation,
     };
     if let Some(ready) = source.take_ready() {
-        let _ = service.observe_selected_graph(source.permit.as_ref(), ready);
+        let _ = service.observe_deferred_feedback(ready);
     } else if !source.terminal_without_feedback()
         && service.defer_feedback(Box::new(source)).is_err()
     {
@@ -119,7 +118,7 @@ struct DeferredProviderFeedback {
     signature: runmat_execution::PlacementSignature,
     candidate: String,
     kind: runmat_execution::ExecutionCandidateKind,
-    permit: std::sync::Arc<dyn RuntimeGraphObservationPermit>,
+    authority: LocalPlacementFeedbackAuthority,
     cancellation: runmat_execution::cancellation::CancellationToken,
     terminal_without_feedback: bool,
     boundary: CandidateTimingBoundary,
@@ -139,9 +138,9 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
     fn signature(&self) -> &runmat_execution::PlacementSignature {
         &self.signature
     }
-    fn take_ready(&mut self) -> Option<runmat_execution::PlacementFeedback> {
+    fn take_ready(&mut self) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
         if !self
-            .permit
+            .authority
             .authorizes(&self.signature, &self.candidate, self.kind)
         {
             self.receipt.fail(ProviderObservationFailure::Abandoned);
@@ -164,7 +163,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
         }
         let observation = self.receipt.take_completed()?;
         if !self
-            .permit
+            .authority
             .authorizes(&self.signature, &self.candidate, self.kind)
         {
             self.retire_unattributable();
@@ -228,13 +227,19 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
             },
             ProviderObservationStatus::Pending => return None,
         };
-        Some(runmat_execution::PlacementFeedback {
-            signature: self.signature.clone(),
-            candidate: self.candidate.clone(),
-            kind: self.kind,
-            total_elapsed_ns: elapsed,
-            succeeded,
-        })
+        let delivery = self
+            .authority
+            .delivery(runmat_execution::PlacementFeedback {
+                signature: self.signature.clone(),
+                candidate: self.candidate.clone(),
+                kind: self.kind,
+                total_elapsed_ns: elapsed,
+                succeeded,
+            });
+        if delivery.is_none() {
+            self.terminal_without_feedback = true;
+        }
+        delivery
     }
 
     fn terminal_without_feedback(&self) -> bool {
@@ -244,7 +249,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
 
 #[cfg(test)]
 #[derive(Debug)]
-struct ReceiptFixturePermit(runmat_execution::Digest);
+pub(super) struct ReceiptFixturePermit(pub(super) runmat_execution::Digest);
 
 #[cfg(test)]
 impl RuntimeGraphObservationPermit for ReceiptFixturePermit {
@@ -258,6 +263,26 @@ impl RuntimeGraphObservationPermit for ReceiptFixturePermit {
             && candidate == "provider.fixture"
             && kind == runmat_execution::ExecutionCandidateKind::ProviderOperation
     }
+}
+
+#[cfg(test)]
+pub(in crate::placement) fn whole_work_source_for_test(
+    receipt: ProviderOperationReceipt,
+    selected: runmat_runtime::context::RuntimeWholeWorkSelection,
+) -> Box<dyn RuntimePlacementFeedbackSource> {
+    let mut source = source_for_test(
+        receipt,
+        CandidateTimingBoundary::FullCall {
+            prelude: std::time::Duration::ZERO,
+        },
+    );
+    source.signature = selected.decision.signature.clone();
+    source.candidate = selected.decision.selected.candidate.clone();
+    source.kind = selected.decision.selected.kind;
+    source.authority = LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
+        std::sync::Mutex::new(Some(selected)),
+    ));
+    Box::new(source)
 }
 
 #[cfg(test)]
@@ -299,7 +324,9 @@ fn source_for_test(
     DeferredProviderFeedback {
         receipt,
         command_contribution: None,
-        permit: std::sync::Arc::new(ReceiptFixturePermit(signature.cache_key())),
+        authority: LocalPlacementFeedbackAuthority::Graph(std::sync::Arc::new(
+            ReceiptFixturePermit(signature.cache_key()),
+        )),
         signature,
         candidate: "provider.fixture".into(),
         kind: ExecutionCandidateKind::ProviderOperation,
@@ -365,7 +392,9 @@ mod tests {
         let candidate = "provider.physical";
         let kind = ExecutionCandidateKind::ProviderFusion;
         let selected = |signature: PlacementSignature| LocalPlacementFeedback {
-            permit: Some(session.test_graph_observation_permit(signature.clone(), candidate, kind)),
+            authority: super::LocalPlacementFeedbackAuthority::Graph(
+                session.test_graph_observation_permit(signature.clone(), candidate, kind),
+            ),
             runtime: runtime.clone(),
             signature,
             candidate: candidate.into(),
@@ -440,7 +469,11 @@ mod tests {
                 query_allocation: None,
             });
         clock.0.store(1_000, Ordering::SeqCst);
-        let feedback = source.take_ready().expect("provider completion is ready");
+        let feedback = source
+            .take_ready()
+            .expect("provider completion is ready")
+            .snapshot()
+            .expect("sample");
         assert!(feedback.succeeded);
         assert_eq!(feedback.total_elapsed_ns, 100);
         let snapshot = command.seal();
@@ -487,7 +520,13 @@ mod tests {
             let mut receipt = ProviderOperationReceipt::new();
             receipt.fail(failure);
             let mut v2 = source_for_test(receipt, CandidateTimingBoundary::PreparationBodyCleanup);
-            assert!(!v2.take_ready().expect("v2 negative sample").succeeded);
+            assert!(
+                !v2.take_ready()
+                    .expect("v2 negative sample")
+                    .snapshot()
+                    .expect("sample")
+                    .succeeded
+            );
         }
         let mut receipt = ProviderOperationReceipt::new();
         receipt.fail(ProviderObservationFailure::ProviderFailed);
@@ -506,7 +545,9 @@ mod tests {
             source_for_test(receipt, CandidateTimingBoundary::PreparationBodyCleanup);
         let feedback = preparation_failure
             .take_ready()
-            .expect("existing preparation-body failure remains attributable");
+            .expect("existing preparation-body failure remains attributable")
+            .snapshot()
+            .expect("sample");
         assert!(!feedback.succeeded);
         assert_eq!(feedback.total_elapsed_ns, 0);
     }
@@ -527,7 +568,9 @@ mod tests {
             failed_source_for_test(ProviderObservationFailure::ProviderFailed);
         let feedback = completed_error
             .take_ready()
-            .expect("completed operational error");
+            .expect("completed operational error")
+            .snapshot()
+            .expect("sample");
         assert!(!feedback.succeeded);
         assert!(!completed_error.terminal_without_feedback());
     }

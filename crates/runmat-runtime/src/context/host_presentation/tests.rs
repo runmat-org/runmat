@@ -12,9 +12,9 @@ use runmat_execution::profiling::{
     CommandProfilingReceipt, CommandProfilingRoot, ProviderObservationCounts,
 };
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionCandidateKind, PlacementDecision, PlacementInvalidation,
-    PlacementPlanRequest, PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
-    WholeWorkPlacementRequest,
+    CancellationReason, Digest, ExecutionCandidateKind, PlacementDecision, PlacementFeedback,
+    PlacementInvalidation, PlacementPlanRequest, PlacementRevision, SelectedExecutionCandidate,
+    WholeWorkDecision, WholeWorkDecisionKind, WholeWorkPlacementRequest,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -48,7 +48,7 @@ impl Witness {
         let mut pending = std::mem::take(&mut *self.pending.borrow_mut());
         for mut source in pending.drain(..) {
             if let Some(feedback) = source.take_ready() {
-                self.feedback.borrow_mut().push(feedback);
+                RuntimePlacementService::observe_deferred_feedback(self, feedback).unwrap();
             } else if !source.terminal_without_feedback() {
                 self.pending.borrow_mut().push(source);
             }

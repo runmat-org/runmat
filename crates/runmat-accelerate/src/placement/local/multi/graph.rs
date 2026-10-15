@@ -7,12 +7,29 @@ use runmat_execution::CandidatePeakLiveDemand;
 
 pub(super) struct Admitted {
     pub(super) original_index: usize,
-    pub(super) descriptor: ExecutionCandidateDescriptor,
+    pub(super) descriptor: Option<ExecutionCandidateDescriptor>,
+    pub(super) identity: String,
+    pub(super) kind: runmat_execution::ExecutionCandidateKind,
+    pub(super) cost: runmat_execution::CandidateCostEvidence,
     pub(super) cost_query: ProviderCostQuery,
-    pub(super) output_bytes: u64,
+    pub(super) output_bytes: ResourceByteBound,
     pub(super) transient_bytes: Option<u64>,
     pub(super) transactional: bool,
     pub(super) input_resources: Option<crate::placement::TypedReductionInputResources>,
+}
+
+impl Admitted {
+    pub(super) fn output_size(&self) -> Option<u64> {
+        match self.output_bytes {
+            ResourceByteBound::Known(bytes) => Some(bytes),
+            ResourceByteBound::Unavailable(_) => None,
+        }
+    }
+    pub(super) fn priced(&self) -> &ExecutionCandidateDescriptor {
+        self.descriptor
+            .as_ref()
+            .expect("numeric branch admits only estimated costs")
+    }
 }
 
 pub(super) fn candidate_name(
@@ -37,7 +54,12 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
         .map_or(ResourceByteBound::Known(0), |resources| {
             resources.final_created_live_bytes
         });
-    let scratch = if let Some(typed) = admitted
+    let scratch = if admitted.cost.estimate().is_none() {
+        // The quote was also the legacy carrier for additional scratch
+        // (including observation buffers). Absence cannot become zero here;
+        // exact body/input-stage facts remain retained independently below.
+        ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)
+    } else if let Some(typed) = admitted
         .cost_query
         .operation
         .workload
@@ -49,12 +71,12 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
         match (admitted.transient_bytes, final_created) {
             (Some(transient), ResourceByteBound::Known(created)) => transient
                 .checked_add(created)
-                .and_then(|peak| peak.checked_sub(admitted.output_bytes))
+                .and_then(|peak| peak.checked_sub(admitted.output_size()?))
                 .and_then(|extra| {
                     admitted
-                        .descriptor
                         .cost
-                        .scratch_bytes
+                        .estimate()
+                        .and_then(|cost| cost.scratch_bytes)
                         .unwrap_or(0)
                         .max(typed.work.partial_requested_bytes)
                         .checked_add(created)
@@ -73,10 +95,14 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
     {
         ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoPeakMemoryBound)
     } else {
-        admitted.descriptor.cost.scratch_bytes.map_or(
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            Into::into,
-        )
+        admitted
+            .cost
+            .estimate()
+            .and_then(|cost| cost.scratch_bytes)
+            .map_or(
+                ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
+                Into::into,
+            )
     };
     // The prepared handles remain owned until the final dispatch completes.
     // With an exact typed peak, publish the complete incremental live set so
@@ -91,15 +117,13 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
             .is_some()
     {
         match scratch {
-            ResourceByteBound::Known(extra) => {
-                admitted
-                    .output_bytes
-                    .checked_add(extra)
-                    .map(|peak_bytes| CandidatePeakLiveDemand {
-                        peak_bytes,
-                        already_live_bytes: 0,
-                    })
-            }
+            ResourceByteBound::Known(extra) => admitted
+                .output_size()
+                .and_then(|bytes| bytes.checked_add(extra))
+                .map(|peak_bytes| CandidatePeakLiveDemand {
+                    peak_bytes,
+                    already_live_bytes: 0,
+                }),
             ResourceByteBound::Unavailable(_) => None,
         }
     } else {
@@ -107,7 +131,7 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
     };
     CandidateResourceDemand {
         cpu_millicores: 0,
-        retained_bytes: admitted.output_bytes.into(),
+        retained_bytes: admitted.output_bytes,
         scratch_bytes: scratch,
         queue_slots: 1,
         provider_host_workspace: admitted
@@ -115,23 +139,6 @@ pub(super) fn candidate_resource(admitted: &Admitted) -> CandidateResourceDemand
             .map(|resources| resources.host_workspace),
         provider_input_stages: admitted.input_resources.map(|resources| resources.stages),
         peak_live,
-    }
-}
-
-pub(super) fn cpu_resource(cpu: &ExecutionCandidateDescriptor) -> CandidateResourceDemand {
-    CandidateResourceDemand {
-        cpu_millicores: 1_000,
-        retained_bytes: ResourceByteBound::Unavailable(
-            ResourceBoundUnavailable::NoRetainedValueBound,
-        ),
-        scratch_bytes: cpu.cost.scratch_bytes.map_or(
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            Into::into,
-        ),
-        queue_slots: 0,
-        provider_host_workspace: None,
-        provider_input_stages: None,
-        peak_live: None,
     }
 }
 
@@ -145,9 +152,10 @@ mod tests {
         ProviderResidency, ProviderStorage, ProviderTypedReductionWorkload, ProviderWorkload,
     };
     use runmat_execution::{
-        CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
-        CandidatePreparationState, EstimateConfidence, EstimateSource, ExecutionCandidateKind,
-        ExecutionCostComponents, ExecutionCostEstimate, ProviderInputStageDemands,
+        CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputPresentation,
+        CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
+        ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate,
+        ProviderInputStageDemands,
     };
 
     fn admitted(transient_bytes: Option<u64>) -> Admitted {
@@ -166,7 +174,10 @@ mod tests {
         };
         Admitted {
             original_index: 0,
-            descriptor: ExecutionCandidateDescriptor {
+            identity: "provider.1.fusion.reduction.fixture".into(),
+            kind: ExecutionCandidateKind::ProviderFusion,
+            cost: CandidateCostEvidence::Estimated(cost),
+            descriptor: Some(ExecutionCandidateDescriptor {
                 identity: "provider.1.fusion.reduction.fixture".into(),
                 region: None,
                 kind: ExecutionCandidateKind::ProviderFusion,
@@ -176,7 +187,7 @@ mod tests {
                 output_residency: CandidateOutputResidency::Provider { device_id: 1 },
                 presentation: CandidateOutputPresentation::Direct,
                 guards: vec![],
-            },
+            }),
             cost_query: ProviderCostQuery {
                 context: ProviderCostContext::default(),
                 operation: ProviderFeasibilityQuery {
@@ -210,7 +221,7 @@ mod tests {
                 required_download_bytes: 0,
                 downstream_materialization: false,
             },
-            output_bytes: 16,
+            output_bytes: ResourceByteBound::Known(16),
             transient_bytes,
             transactional: true,
             input_resources: None,

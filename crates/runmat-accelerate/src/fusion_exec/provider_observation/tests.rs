@@ -1,5 +1,5 @@
 use super::*;
-use crate::placement::PlacementSession;
+use crate::placement::{LocalPlacementFeedbackAuthority, PlacementSession};
 use runmat_accelerate_api::observation::{ProviderObservationClock, ProviderObservationFailure};
 use runmat_execution::profiling::{CommandProfilingRoot, ProviderObservationCounts};
 use runmat_execution::{Digest, PlacementRevision, PlacementSignature};
@@ -44,6 +44,22 @@ fn runtime(session: Rc<PlacementSession>) -> RuntimeContext {
 fn vm_semantic(label: &[u8]) -> runmat_runtime::context::VmFusionSemanticIdentity {
     runmat_runtime::context::VmFusionSemanticIdentity::from_validated_digest(Digest::sha256(label))
 }
+fn graph_feedback(
+    runtime: RuntimeContext,
+    session: &PlacementSession,
+    signature: PlacementSignature,
+    candidate: &str,
+) -> LocalPlacementFeedback {
+    let kind = runmat_execution::ExecutionCandidateKind::ProviderFusion;
+    let permit = session.test_graph_observation_permit(signature.clone(), candidate, kind);
+    LocalPlacementFeedback {
+        runtime,
+        signature,
+        candidate: candidate.into(),
+        kind,
+        authority: LocalPlacementFeedbackAuthority::Graph(permit),
+    }
+}
 fn selected(
     runtime: RuntimeContext,
     session: &PlacementSession,
@@ -65,7 +81,7 @@ fn selected(
             signature,
             candidate: candidate.into(),
             kind,
-            permit: Some(permit),
+            authority: LocalPlacementFeedbackAuthority::Graph(permit),
         }),
         receipt: Some(receipt),
         command_contribution,
@@ -197,13 +213,6 @@ fn final_scope_drop_drains_completion_after_inner_destructor() {
 fn vm_full_call_custom_clock_receipt_cannot_publish_a_positive_sample() {
     let session = Rc::new(PlacementSession::default());
     let runtime = runtime(session.clone());
-    let mut feedback = LocalPlacementFeedback {
-        runtime: runtime.clone(),
-        signature: signature(),
-        candidate: "provider.fusion.custom-clock".into(),
-        kind: runmat_execution::ExecutionCandidateKind::ProviderFusion,
-        permit: None,
-    };
     let installed = runmat_runtime::context::VmFusionInstalledRegion::install(
         &runtime,
         vm_semantic(b"custom clock"),
@@ -215,15 +224,17 @@ fn vm_full_call_custom_clock_receipt_cannot_publish_a_positive_sample() {
     let right = installed
         .right(&runtime)
         .expect("same-context completion right");
-    feedback.signature.revision = right
+    let mut feedback_signature = signature();
+    feedback_signature.revision = right
         .placement_revision()
         .cloned()
         .expect("real VM session revision");
-    feedback.permit = Some(session.test_graph_observation_permit(
-        feedback.signature.clone(),
-        &feedback.candidate,
-        feedback.kind,
-    ));
+    let feedback = graph_feedback(
+        runtime.clone(),
+        &session,
+        feedback_signature,
+        "provider.fusion.custom-clock",
+    );
     let clock = Arc::new(Clock(AtomicU64::new(10)));
     let receipt = ProviderOperationReceipt::with_clock(clock.clone());
     let submission = receipt.recorder().submission().unwrap();
@@ -256,19 +267,14 @@ fn published_pending_receipt_survives_owner_drop_and_concurrent_same_code_instal
             .unwrap();
     let right = installed.right(&runtime).unwrap();
     let stale_sibling = installed.right(&runtime).unwrap();
-    let mut feedback = LocalPlacementFeedback {
-        runtime: runtime.clone(),
-        signature: signature(),
-        candidate: "provider.fusion.concurrent".into(),
-        kind: runmat_execution::ExecutionCandidateKind::ProviderFusion,
-        permit: None,
-    };
-    feedback.signature.revision = right.placement_revision().unwrap().clone();
-    feedback.permit = Some(session.test_graph_observation_permit(
-        feedback.signature.clone(),
-        &feedback.candidate,
-        feedback.kind,
-    ));
+    let mut feedback_signature = signature();
+    feedback_signature.revision = right.placement_revision().unwrap().clone();
+    let feedback = graph_feedback(
+        runtime.clone(),
+        &session,
+        feedback_signature,
+        "provider.fusion.concurrent",
+    );
     let selected_signature = feedback.signature.clone();
     let outer_started = Instant::now();
     let receipt = ProviderOperationReceipt::new();
@@ -304,7 +310,7 @@ fn published_pending_receipt_survives_owner_drop_and_concurrent_same_code_instal
         signature: selected_signature.clone(),
         candidate: "provider.fusion.concurrent".into(),
         kind: runmat_execution::ExecutionCandidateKind::ProviderFusion,
-        permit: Some(session.test_graph_observation_permit(
+        authority: LocalPlacementFeedbackAuthority::Graph(session.test_graph_observation_permit(
             selected_signature.clone(),
             "provider.fusion.concurrent",
             runmat_execution::ExecutionCandidateKind::ProviderFusion,
@@ -347,19 +353,14 @@ fn profile_replacement_retires_vm_pending_receipt_but_fresh_right_is_admitted() 
     let outer_started = Instant::now();
     let receipt = ProviderOperationReceipt::new();
     let submission = receipt.recorder().submission().unwrap();
-    let mut feedback = LocalPlacementFeedback {
-        runtime: runtime.clone(),
-        signature: signature(),
-        candidate: "provider.fusion.reset".into(),
-        kind: runmat_execution::ExecutionCandidateKind::ProviderFusion,
-        permit: None,
-    };
-    feedback.signature.revision = revision.clone();
-    feedback.permit = Some(session.test_graph_observation_permit(
-        feedback.signature.clone(),
-        &feedback.candidate,
-        feedback.kind,
-    ));
+    let mut feedback_signature = signature();
+    feedback_signature.revision = revision.clone();
+    let feedback = graph_feedback(
+        runtime.clone(),
+        &session,
+        feedback_signature,
+        "provider.fusion.reset",
+    );
     let selected = FusionPlacementSelection {
         observer: FusionPlacementObserver::new(None),
         feedback: Some(feedback),

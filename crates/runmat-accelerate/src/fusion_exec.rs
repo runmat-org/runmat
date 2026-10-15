@@ -647,8 +647,10 @@ fn select_fusion_provider_with_implementation(
             },
             preparation_program,
             shader_requirements,
-            cpu,
-            provider_fallback,
+            cpu: cpu.into(),
+            provider_fallback: runmat_execution::CandidateCostEvidence::Estimated(
+                provider_fallback,
+            ),
             required_upload_bytes,
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -683,7 +685,7 @@ fn select_fusion_provider_with_implementation(
             observer.selected(
                 PlacementVariant::ProviderFusion,
                 "complete_cost",
-                provider_cost.checked_total_ns(),
+                provider_cost.and_then(|cost| cost.checked_total_ns()),
             );
             let mut ticket = if vm_right.is_some() {
                 FusionPlacementSelection::new_vm(
@@ -715,7 +717,7 @@ fn select_fusion_provider_with_implementation(
             observer.selected(
                 PlacementVariant::SharedRuntime,
                 "complete_cost",
-                cpu_cost.checked_total_ns(),
+                cpu_cost.estimate().and_then(|cost| cost.checked_total_ns()),
             );
             Ok(FusionExecutionOutcome::SharedRuntime(
                 FusionCpuObservation::new(feedback),

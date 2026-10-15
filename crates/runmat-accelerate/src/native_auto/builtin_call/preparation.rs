@@ -218,7 +218,7 @@ impl NativeAutoOffload {
                 preparation_program: operation.preparation_program(),
                 prepared_authority: completion.as_ref().map(|right| right.session_authority()),
             },
-        );
+        )?;
         let trace = record_decision(decision_entry(
             &identity,
             workload.elements.and_then(|n| usize::try_from(n).ok()),
