@@ -583,6 +583,7 @@ impl RuntimeGraphicsCallbackQueue {
 
     /// The sealed publisher may only replace the prepared Figure property slot.
     /// It cannot await, invoke user code, or touch this queue.
+    #[cfg(feature = "plot-core")]
     pub(crate) fn replace_selected_property_transaction<T>(
         &self,
         selected: RuntimeContext,

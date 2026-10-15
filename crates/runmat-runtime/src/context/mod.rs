@@ -82,8 +82,9 @@ pub use graphics_callbacks::{
 };
 #[cfg(feature = "plot-core")]
 pub(crate) use graphics_presentation::complete_selected as complete_selected_graphics;
-#[cfg(test)]
+#[cfg(all(test, feature = "plot-core"))]
 pub(crate) use graphics_presentation::GraphicsFlushEffectSource;
+#[cfg(feature = "plot-core")]
 pub(crate) use graphics_presentation::{
     attach_disposition as attach_graphics_disposition,
     await_completion as await_graphics_completion,

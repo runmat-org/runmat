@@ -31,9 +31,15 @@ fn filter_multioutput_continuation_concatenates_numeric_arrays() {
 
 #[test]
 fn alias_and_binary_array_results_use_dynamic_concatenation() {
-    execute_with_dynamic_concat(
+    for source in [
         "x = [1 2]; alias = x; changed = x + 1; joined = [alias changed]; assert(isequal(joined,[1 2 2 3]));",
-    );
+        "a = ones(3,1)*2; b = ones(3,1)*2; z = [a,b]; assert(isequal(z,2*ones(3,2)));",
+        "a = ones(3,1)*2; b = ones(3,1)*2; z = [a;b]; assert(isequal(z,2*ones(6,1)));",
+        "e = [1;2;3]; z = [-e]; assert(isequal(z,[-1;-2;-3]));",
+        "x = (1:4)'; z = [x x]; assert(isequal(z,[1 1;2 2;3 3;4 4]));",
+    ] {
+        execute_with_dynamic_concat(source);
+    }
 }
 
 #[test]

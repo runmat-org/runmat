@@ -7,10 +7,12 @@
 use crate::RuntimeError;
 use std::future::Future;
 use std::pin::Pin;
+#[cfg(feature = "plot-core")]
 #[path = "graphics_presentation/completion.rs"]
 mod completion;
-#[cfg(test)]
+#[cfg(all(test, feature = "plot-core"))]
 pub(crate) use completion::GraphicsFlushEffectSource;
+#[cfg(feature = "plot-core")]
 pub(crate) use completion::{attach_disposition, await_completion};
 #[cfg(feature = "plot-core")]
 #[path = "graphics_presentation/selected.rs"]
