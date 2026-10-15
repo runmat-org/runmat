@@ -234,6 +234,16 @@ impl RuntimePlacementService for MeasuredPlacement {
             assert!(selected.observation_permit.as_ref().is_some_and(|permit| {
                 permit.authorizes(&selected.decision.signature, &choice.candidate, choice.kind)
             }));
+            let warm_provider_observation = observed
+                .iter()
+                .filter(|(candidate, kind, preparation, evidence)| {
+                    *kind == ExecutionCandidateKind::ProviderFusion
+                        && *preparation == CandidatePreparationState::Warm
+                        && matches!(evidence, CandidateObservationEvidence::Observed(_))
+                        && (choice.kind != ExecutionCandidateKind::ProviderFusion
+                            || candidate == &choice.candidate)
+                })
+                .min_by_key(|(_, _, _, evidence)| super::performance::observed_cost(*evidence).2);
             self.choices.borrow_mut().push(MeasuredChoice {
                 signature: selected.decision.signature.clone(),
                 candidate: choice.candidate.clone(),
@@ -252,27 +262,15 @@ impl RuntimePlacementService for MeasuredPlacement {
                         .then(|| candidate.clone())
                     },
                 ),
-                warm_provider_observed_candidate: observed.iter().find_map(
-                    |(candidate, kind, preparation, evidence)| {
-                        (*kind == ExecutionCandidateKind::ProviderFusion
-                            && *preparation == CandidatePreparationState::Warm
-                            && matches!(evidence, CandidateObservationEvidence::Observed(_)))
-                        .then(|| candidate.clone())
-                    },
-                ),
+                warm_provider_observed_candidate: warm_provider_observation
+                    .map(|(candidate, _, _, _)| candidate.clone()),
                 cpu_observation_before: observed.iter().find_map(|(_, kind, _, evidence)| {
                     (*kind == ExecutionCandidateKind::SharedRuntime
                         && matches!(evidence, CandidateObservationEvidence::Observed(_)))
                     .then_some(*evidence)
                 }),
-                warm_provider_observation_before: observed.iter().find_map(
-                    |(_, kind, preparation, evidence)| {
-                        (*kind == ExecutionCandidateKind::ProviderFusion
-                            && *preparation == CandidatePreparationState::Warm
-                            && matches!(evidence, CandidateObservationEvidence::Observed(_)))
-                        .then_some(*evidence)
-                    },
-                ),
+                warm_provider_observation_before: warm_provider_observation
+                    .map(|(_, _, _, evidence)| *evidence),
                 offers: observed
                     .iter()
                     .map(|(candidate, kind, preparation, evidence)| {

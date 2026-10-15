@@ -7,7 +7,7 @@ use super::*;
 use runmat_accelerate::placement::{ExplorationMode, PlacementSessionConfig};
 use runmat_execution::{
     CandidateObservationEvidence, EstimateConfidence, EstimateSource, ExecutionCandidateKind,
-    ExecutionCostComponents, ExecutionCostEstimate,
+    ExecutionCostComponents, ExecutionCostEstimate, PlacementFeedback, PlacementSignature,
 };
 
 struct QualifiedWinner {
@@ -25,7 +25,9 @@ struct QualifiedWinner {
     invocations: usize,
 }
 
-fn observed_cost(evidence: CandidateObservationEvidence) -> (u64, EstimateConfidence, u64) {
+pub(super) fn observed_cost(
+    evidence: CandidateObservationEvidence,
+) -> (u64, EstimateConfidence, u64) {
     let CandidateObservationEvidence::Observed(observed) = evidence else {
         panic!("performance route lacks completed observation evidence");
     };
@@ -45,6 +47,24 @@ fn observed_cost(evidence: CandidateObservationEvidence) -> (u64, EstimateConfid
             .checked_risk_adjusted_ns()
             .expect("observed route cost must be representable"),
     )
+}
+
+fn completed_receipt_count(
+    receipts: &[PlacementFeedback],
+    signature: &PlacementSignature,
+    candidate: &str,
+    kind: ExecutionCandidateKind,
+) -> usize {
+    receipts
+        .iter()
+        .filter(|feedback| {
+            feedback.signature == *signature
+                && feedback.candidate == candidate
+                && feedback.kind == kind
+                && feedback.succeeded
+                && feedback.total_elapsed_ns > 0
+        })
+        .count()
 }
 
 fn train_measured_routes(workload: ComparisonWorkload) -> QualifiedWinner {
@@ -69,11 +89,28 @@ fn train_measured_routes(workload: ComparisonWorkload) -> QualifiedWinner {
     let mut winner = None;
     for invocation in 1..=32 {
         let choice = execute_workload(workload, &bytecode, &runtime, placement.as_ref());
-        if choice.from_cache
-            && choice.selected_observed_before
-            && choice.cpu_observed_candidate.is_some()
-            && choice.warm_provider_observed_candidate.is_some()
-        {
+        let qualifying_receipts = if let (Some(cpu), Some(provider)) = (
+            choice.cpu_observed_candidate.as_ref(),
+            choice.warm_provider_observed_candidate.as_ref(),
+        ) {
+            let receipts = placement.delivered.lock().unwrap();
+            [
+                (cpu, ExecutionCandidateKind::SharedRuntime),
+                (provider, ExecutionCandidateKind::ProviderFusion),
+            ]
+            .into_iter()
+            .all(|(candidate, kind)| {
+                completed_receipt_count(
+                    &receipts[..choice.receipts_before],
+                    &choice.signature,
+                    candidate,
+                    kind,
+                ) >= 2
+            })
+        } else {
+            false
+        };
+        if choice.from_cache && choice.selected_observed_before && qualifying_receipts {
             winner = Some((choice, invocation));
             break;
         }
@@ -97,20 +134,19 @@ fn train_measured_routes(workload: ComparisonWorkload) -> QualifiedWinner {
             .expect("provider evidence was captured before the winning plan"),
     );
     let receipts = placement.delivered.lock().unwrap();
-    let count = |candidate: &str, kind| {
-        receipts[..choice.receipts_before]
-            .iter()
-            .filter(|feedback| {
-                feedback.signature == choice.signature
-                    && feedback.candidate == candidate
-                    && feedback.kind == kind
-                    && feedback.succeeded
-                    && feedback.total_elapsed_ns > 0
-            })
-            .count()
-    };
-    let cpu_receipts = count(&cpu_candidate, ExecutionCandidateKind::SharedRuntime);
-    let provider_receipts = count(&provider_candidate, ExecutionCandidateKind::ProviderFusion);
+    let completed = &receipts[..choice.receipts_before];
+    let cpu_receipts = completed_receipt_count(
+        completed,
+        &choice.signature,
+        &cpu_candidate,
+        ExecutionCandidateKind::SharedRuntime,
+    );
+    let provider_receipts = completed_receipt_count(
+        completed,
+        &choice.signature,
+        &provider_candidate,
+        ExecutionCandidateKind::ProviderFusion,
+    );
     assert!(
         cpu_receipts >= 2,
         "two exact completed CPU FullCalls before planning"
