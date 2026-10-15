@@ -95,6 +95,14 @@ impl AccelProvider for CounterProvider {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        let mut snapshot = runmat_accelerate_api::ProviderCapabilitySnapshot::conservative(self);
+        // Uploads create private owned leases. Preparation publishes them only
+        // after validation; failure or abandonment drops the unpublished leases.
+        // The tests below exercise that transaction, including malformed aliases.
+        snapshot.concurrency.transactional_results = true;
+        snapshot
+    }
     fn query_feasibility(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
