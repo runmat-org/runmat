@@ -496,11 +496,6 @@ pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-pub(crate) fn canonical_option_name(name: &str) -> String {
-    runmat_builtins::OptimOptionField::parse(name)
-        .map_or_else(|| name.to_string(), |field| field.name().to_string())
-}
-
 pub(crate) fn lookup_option<'a>(options: &'a StructValue, name: &str) -> Option<&'a Value> {
     options
         .fields

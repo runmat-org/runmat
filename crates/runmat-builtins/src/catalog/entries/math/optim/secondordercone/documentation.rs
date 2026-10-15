@@ -7,7 +7,22 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
  description: "`secondordercone(A,b,d,gamma)` creates a constraint descriptor for `norm(A*x + b) <= d'*x + gamma`. Pass the result, or a cell array of such results, to `coneprog`.",
  keywords: &["secondordercone", "coneprog", "second-order cone", "SOCP", "optimization"],
  related: &["coneprog"],
- sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["`A` must be a nonempty numeric matrix.", "`b` must be a numeric vector with length equal to `size(A,1)`; `d` must be a numeric vector with length equal to `size(A,2)`; `gamma` must be a finite numeric scalar.", "The returned descriptor is a host struct with `A`, `b`, `d`, `gamma`, and `Type` fields. Pass this host descriptor directly to `coneprog`.", "Supported native integer coefficients are read from native storage and normalized to binary64 with its ordinary rounding. Wide integer coefficients need not remain exact; the host numerical output is double. This preserves RunMat's floating-boundary behavior and does not assert MATLAB integer-overload parity."] }, BuiltinDocumentationSection { heading: "Execution", paragraphs: &["The host numerical boundary gathers resident numeric operands. No device solver, elementwise fusion, reduction fusion, broadcasting solver, or distributed solver is provided.", "The constructor requires exactly four arguments A, b, d, gamma. Numeric constants remain host data; no device constant buffer or shader ABI is promised."] }],
+ sections: &[BuiltinDocumentationSection {
+        heading: "Behavior",
+        paragraphs: &[
+            "`A` must be a nonempty numeric matrix.",
+            "`b` must be a numeric vector with length equal to `size(A,1)`; `d` must be a numeric vector with length equal to `size(A,2)`; `gamma` must be a finite numeric scalar.",
+            "The returned descriptor is a host struct with `A`, `b`, `d`, `gamma`, and `Type` fields. Pass this host descriptor directly to `coneprog`.",
+            "Supported native integer coefficients are read from native storage and normalized to binary64 with its ordinary rounding. Wide integer coefficients need not remain exact; the host numerical output is double. This preserves RunMat's floating-boundary behavior and does not assert MATLAB integer-overload parity."
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Execution",
+        paragraphs: &[
+            "The host numerical boundary gathers resident numeric operands. No device solver, elementwise fusion, reduction fusion, broadcasting solver, or distributed solver is provided.",
+            "The constructor requires exactly four arguments A, b, d, gamma. Numeric constants remain host data; no device constant buffer or shader ABI is promised."
+        ],
+    }],
  examples: &[
 BuiltinExample { id: "example-1", title: "Create a unit-disk cone", program: "soc = secondordercone(eye(2), [0; 0], [0; 0], 1)", display_output: Some("soc =\n  struct with fields:\n      A: [2x2 double]\n      b: [2x1 double]\n      d: [2x1 double]\n  gamma: 1\n   Type: \"secondordercone\""), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(soc.A,eye(2))); assert(isequal(soc.b,[0;0])); assert(isequal(soc.d,[0;0])); assert(soc.gamma==1); assert(strcmp(soc.Type,'secondordercone'));" } },
  ],

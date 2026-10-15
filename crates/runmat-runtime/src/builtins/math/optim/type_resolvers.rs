@@ -17,7 +17,3 @@ pub fn nonlinear_solve_type(args: &[Type], _context: &ResolveContext) -> Type {
         _ => Type::tensor(),
     }
 }
-
-pub fn optim_options_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Struct { known_fields: None }
-}
