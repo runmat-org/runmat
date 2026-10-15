@@ -103,16 +103,34 @@ fn plus_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
             NumericStorage::F64(output)
         }
         (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => {
+            let arithmetic = runmat_types::RealFloatingRecipe::for_classes(
+                runmat_types::OperatorKind::Add,
+                runmat_types::NumericClass::Single,
+                runmat_types::NumericClass::Double,
+            )
+            .expect("real host storage has a represented recipe");
             let mut output = vec![0.0f32; plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                output[output_index] = (f64::from(lhs[lhs_index]) + rhs[rhs_index]) as f32;
+                output[output_index] = arithmetic
+                    .evaluate(f64::from(lhs[lhs_index]), rhs[rhs_index])
+                    .expect("validated real arithmetic")
+                    as f32;
             }
             NumericStorage::F32(output)
         }
         (NumericStorage::F64(lhs), NumericStorage::F32(rhs)) => {
+            let arithmetic = runmat_types::RealFloatingRecipe::for_classes(
+                runmat_types::OperatorKind::Add,
+                runmat_types::NumericClass::Double,
+                runmat_types::NumericClass::Single,
+            )
+            .expect("real host storage has a represented recipe");
             let mut output = vec![0.0f32; plan.len()];
             for (output_index, lhs_index, rhs_index) in plan.iter() {
-                output[output_index] = (lhs[lhs_index] + f64::from(rhs[rhs_index])) as f32;
+                output[output_index] = arithmetic
+                    .evaluate(lhs[lhs_index], f64::from(rhs[rhs_index]))
+                    .expect("validated real arithmetic")
+                    as f32;
             }
             NumericStorage::F32(output)
         }

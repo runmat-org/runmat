@@ -7,6 +7,7 @@ mod literal;
 mod member;
 mod mutation;
 mod operator;
+mod real_arithmetic;
 mod satisfaction;
 mod shape;
 mod widen;
@@ -23,6 +24,7 @@ pub use operator::{
     floating_binary_result_class, infer_binary, infer_unary, real_floating_add_mode,
     RealFloatingAddMode,
 };
+pub use real_arithmetic::RealFloatingRecipe;
 pub use satisfaction::*;
 pub use shape::*;
 pub use widen::FactWiden;

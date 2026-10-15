@@ -141,15 +141,11 @@ pub fn infer_binary(operator: OperatorKind, left: &ValueFact, right: &ValueFact)
     };
     let kind = if comparison {
         ValueKindFact::Logical
-    } else if operator == OperatorKind::Add {
-        real_floating_add_mode(left, right)
-            .map(|mode| {
-                ValueKindFact::Numeric(NumericFact {
-                    class: mode.result_class(),
-                    domain: crate::NumericDomain::Real,
-                })
-            })
-            .unwrap_or_else(|| numeric_result_kind(numeric_fact(left), numeric_fact(right)))
+    } else if let Some(recipe) = super::RealFloatingRecipe::for_facts(operator, left, right) {
+        ValueKindFact::Numeric(NumericFact {
+            class: recipe.result_class(),
+            domain: crate::NumericDomain::Real,
+        })
     } else if operator == OperatorKind::ElementwiseMultiply
         || (operator == OperatorKind::MatrixMultiply
             && [left, right]
@@ -189,6 +185,7 @@ pub enum RealFloatingAddMode {
 
 /// Class projection shared with catalog arithmetic. This does not by itself
 /// admit a computation or establish its intermediate precision.
+#[inline]
 pub const fn floating_binary_result_class(
     left: crate::NumericClass,
     right: crate::NumericClass,
@@ -231,38 +228,33 @@ impl RealFloatingAddMode {
         }
     }
 
+    #[inline]
     pub fn add_represented(self, left: f64, right: f64) -> f64 {
-        match self {
-            Self::Single => f64::from((left as f32) + (right as f32)),
-            Self::Double => left + right,
-            Self::MixedDoubleThenSingle => f64::from((left + right) as f32),
-        }
+        let (left_class, right_class) = match self {
+            Self::Single => (crate::NumericClass::Single, crate::NumericClass::Single),
+            Self::Double => (crate::NumericClass::Double, crate::NumericClass::Double),
+            Self::MixedDoubleThenSingle => {
+                (crate::NumericClass::Single, crate::NumericClass::Double)
+            }
+        };
+        super::RealFloatingRecipe::for_classes(OperatorKind::Add, left_class, right_class)
+            .and_then(|recipe| recipe.evaluate(left, right))
+            .expect("real Add mode has a represented recipe")
     }
 }
 
 pub fn real_floating_add_mode(left: &ValueFact, right: &ValueFact) -> Option<RealFloatingAddMode> {
-    // Only proven scalar/dense carriers use this represented arithmetic.
-    // Sparse results have value-dependent densification, while unknown and
-    // opaque storage cannot establish the same numerical owner.
-    if !matches!(left.storage, StorageFact::Scalar | StorageFact::Dense)
-        || !matches!(right.storage, StorageFact::Scalar | StorageFact::Dense)
-    {
-        return None;
-    }
-    let left = left.numeric()?;
-    let right = right.numeric()?;
-    if left.domain != crate::NumericDomain::Real || right.domain != crate::NumericDomain::Real {
-        return None;
-    }
-    match (left.class, right.class) {
+    // Retain the established provider ABI modes only as a projection of the
+    // canonical represented arithmetic owner, never a second classifier.
+    let recipe = super::RealFloatingRecipe::for_facts(OperatorKind::Add, left, right)?;
+    match (recipe.computation_class(), recipe.result_class()) {
         (crate::NumericClass::Single, crate::NumericClass::Single) => {
             Some(RealFloatingAddMode::Single)
         }
         (crate::NumericClass::Double, crate::NumericClass::Double) => {
             Some(RealFloatingAddMode::Double)
         }
-        (crate::NumericClass::Single, crate::NumericClass::Double)
-        | (crate::NumericClass::Double, crate::NumericClass::Single) => {
+        (crate::NumericClass::Double, crate::NumericClass::Single) => {
             Some(RealFloatingAddMode::MixedDoubleThenSingle)
         }
         _ => None,

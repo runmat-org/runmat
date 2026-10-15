@@ -54,8 +54,26 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses elem_mul for admitted real and complex-interleaved pairs; complex singleton expansion uses the provider broadcast hook directly, while real expansion can use repmat. Real scalar pairs can use scalar_mul; unsupported hooks fall back to host execution.",
 };
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: TIMES_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        admit_static: None,
+        helpers: &[],
+        required_real_unary: None,
+        required_arithmetic: None,
+        scalar_operation: Some(runmat_types::ScalarOperation::Operator(
+            runmat_types::OperatorKind::ElementwiseMultiply,
+        )),
+    };
+
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::times",
+    semantics = FUSION_SEMANTICS,
     host_resources = crate::builtins::math::host_resources::real_binary
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {

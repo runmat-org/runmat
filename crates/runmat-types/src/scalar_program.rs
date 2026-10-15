@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{NumericClass, OperatorKind};
+use crate::{NumericClass, OperatorKind, RealFloatingRecipe};
 
 /// Closed scalar operation identity for a proved pure fusion slice.
 ///
@@ -10,9 +10,9 @@ use crate::{NumericClass, OperatorKind};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ScalarOperation {
     Operator(OperatorKind),
-    /// Real Single+Double addition evaluates in Double, then rounds the sum
-    /// once to Single. Operand order is retained by the Apply node.
-    MixedRealAddToSingle,
+    /// Canonical real arithmetic with explicit computation and result classes.
+    /// Operand order and one result conversion belong to the original Apply.
+    RealArithmetic(RealFloatingRecipe),
     Cast(NumericClass),
 }
 
@@ -29,7 +29,7 @@ impl ScalarOperation {
                 | OperatorKind::ElementwisePower => Some(2),
                 _ => None,
             },
-            Self::MixedRealAddToSingle => Some(2),
+            Self::RealArithmetic(_) => Some(2),
             Self::Cast(NumericClass::Single | NumericClass::Double) => Some(1),
             Self::Cast(_) => None,
         }

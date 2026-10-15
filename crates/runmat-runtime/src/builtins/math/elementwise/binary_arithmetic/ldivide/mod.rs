@@ -42,8 +42,26 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses validated exact-owner elem_div for supported same-class resident pairs, including provider-supported implicit expansion and typed-integer division; scalar_div/scalar_rdiv retain floating scalar cases, while exact integer scalar values are uploaded in the resident integer class. Unsupported or mixed-class cases use a class-preserving host fallback before 'like' prototypes are honoured.",
 };
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: LDIVIDE_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        admit_static: None,
+        helpers: &[],
+        required_real_unary: None,
+        required_arithmetic: None,
+        scalar_operation: Some(runmat_types::ScalarOperation::Operator(
+            runmat_types::OperatorKind::ElementwiseLeftDivide,
+        )),
+    };
+
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::ldivide",
+    semantics = FUSION_SEMANTICS,
     host_resources = crate::builtins::math::host_resources::real_binary
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {

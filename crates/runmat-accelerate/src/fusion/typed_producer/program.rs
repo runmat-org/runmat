@@ -229,11 +229,11 @@ impl TypedProducer {
                         .map(|expression| format!("{name}({expression})"))
                         .collect::<Vec<_>>();
                     let expression = match (operation, arguments.as_slice()) {
-                        (ScalarOperation::MixedRealAddToSingle, _) => {
+                        (ScalarOperation::RealArithmetic(recipe), _) => {
                             let [left, right] = raw_arguments.as_slice() else {
-                                return Err(anyhow!("mixed real addition has invalid arity"));
+                                return Err(anyhow!("represented arithmetic has invalid arity"));
                             };
-                            format!("f32((f64({left}) + f64({right})))")
+                            real_arithmetic_expr(*recipe, [left, right], buffer_type)?
                         }
                         (ScalarOperation::Operator(operator), _) => {
                             crate::fusion::scalar_operator_expr(*operator, &arguments)
@@ -348,21 +348,32 @@ pub(super) fn resolved_operation(
         };
         primitive_operation(*op)
     };
-    // A primitive Add and a selected canonical declaration of that same
-    // closed scalar operation share one represented-arithmetic owner. A
-    // textual builtin name or an unselected implementation cannot claim it.
-    let identity = if selected_identity == Some(ScalarOperation::Operator(OperatorKind::Add)) {
-        let [left, right] = inputs.as_slice() else {
-            return Err(anyhow!("scalar Add has invalid arity"));
-        };
-        match runmat_types::real_floating_add_mode(program.fact(*left)?, program.fact(*right)?) {
-            Some(runmat_types::RealFloatingAddMode::MixedDoubleThenSingle) => {
-                if class != NumericClass::Single {
-                    return Err(anyhow!("mixed real Add result class mismatch"));
-                }
-                Some(ScalarOperation::MixedRealAddToSingle)
+    // Primitive and captured canonical operators share the represented host
+    // recipe. A name/template alone cannot assert computation precision.
+    let identity = if let Some(ScalarOperation::Operator(operator)) = selected_identity {
+        if matches!(
+            operator,
+            OperatorKind::Add
+                | OperatorKind::Subtract
+                | OperatorKind::ElementwiseMultiply
+                | OperatorKind::ElementwiseDivide
+                | OperatorKind::ElementwiseLeftDivide
+        ) {
+            let [left, right] = inputs.as_slice() else {
+                return Err(anyhow!("real scalar arithmetic has invalid arity"));
+            };
+            let recipe = runmat_types::RealFloatingRecipe::for_facts(
+                operator,
+                program.fact(*left)?,
+                program.fact(*right)?,
+            )
+            .ok_or_else(|| anyhow!("real scalar arithmetic has no represented recipe"))?;
+            if class != recipe.result_class() {
+                return Err(anyhow!("real scalar arithmetic result class mismatch"));
             }
-            _ => selected_identity,
+            Some(ScalarOperation::RealArithmetic(recipe))
+        } else {
+            selected_identity
         }
     } else {
         selected_identity
@@ -383,4 +394,33 @@ pub(super) fn resolved_operation(
         }
     }
     Ok(identity)
+}
+
+/// The only WGSL renderer for represented real arithmetic, shared by checked
+/// and legacy/multi-output paths. Never cast Double data to the result class
+/// before the operation, and never run Double computation in an F32 data ABI.
+pub(super) fn real_arithmetic_expr(
+    recipe: runmat_types::RealFloatingRecipe,
+    arguments: [&str; 2],
+    buffer_type: ScalarType,
+) -> Result<String> {
+    require_provider_class(recipe.computation_class(), buffer_type)?;
+    let computation = match recipe.computation_class() {
+        NumericClass::Single => "f32",
+        NumericClass::Double => "f64",
+        _ => return Err(anyhow!("unsupported represented computation class")),
+    };
+    let result = match recipe.result_class() {
+        NumericClass::Single => "f32",
+        NumericClass::Double => "f64",
+        _ => return Err(anyhow!("unsupported represented result class")),
+    };
+    let arguments = arguments.map(|argument| format!("{computation}({argument})"));
+    let expression = crate::fusion::scalar_operator_expr(recipe.operator(), &arguments)
+        .ok_or_else(|| anyhow!("represented arithmetic lacks WGSL lowering"))?;
+    if recipe.computation_class() == recipe.result_class() {
+        Ok(expression)
+    } else {
+        Ok(format!("{result}({expression})"))
+    }
 }

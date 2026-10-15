@@ -1,6 +1,9 @@
 use super::*;
 use runmat_value::Tensor;
 
+#[path = "typed_producer_arithmetic_tests.rs"]
+mod represented_arithmetic;
+
 fn binary(op: PrimitiveOp) -> FusionGroupPlan {
     plan(
         vec![FusionOp::Primitive {
@@ -105,9 +108,9 @@ fn mixed_add_uses_double_sum_then_single_result_in_checked_and_legacy_emission()
                     assert!(matches!(
                         checked.wire().nodes.last(),
                         Some(runmat_accelerate_api::scalar_program::ScalarNode::Apply {
-                            operation: runmat_types::ScalarOperation::MixedRealAddToSingle,
+                            operation: runmat_types::ScalarOperation::RealArithmetic(recipe),
                             ..
-                        })
+                        }) if recipe.operator() == runmat_types::OperatorKind::Add
                     ));
                     let selected =
                         TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), Some(&[2]))

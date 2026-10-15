@@ -224,7 +224,14 @@ fn mixed_add_wire_requires_exact_classes_and_new_revision() {
                 id: 2,
                 source_index: 0,
                 class: NumericClass::Single,
-                operation: ScalarOperation::MixedRealAddToSingle,
+                operation: ScalarOperation::RealArithmetic(
+                    runmat_types::RealFloatingRecipe::for_classes(
+                        runmat_types::OperatorKind::Add,
+                        NumericClass::Single,
+                        NumericClass::Double,
+                    )
+                    .unwrap(),
+                ),
                 operands: vec![0, 1],
             },
         ],
@@ -232,13 +239,19 @@ fn mixed_add_wire_requires_exact_classes_and_new_revision() {
     )
     .unwrap();
     let encoded = serde_json::to_vec(mixed.wire()).unwrap();
+    // Computation precision is authenticated, not an arbitrary decoded hint.
+    let mut forged = serde_json::to_value(mixed.wire()).unwrap();
+    forged["nodes"][2]["Apply"]["operation"]["RealArithmetic"]["computation_class"] =
+        serde_json::to_value(NumericClass::Single).unwrap();
+    let forged: ScalarProgramWire = serde_json::from_value(forged).unwrap();
+    assert!(ScalarProgram::from_wire(forged).is_err());
     let decoded: ScalarProgramWire = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(
         ScalarProgram::from_wire(decoded).unwrap().identity(),
         mixed.identity()
     );
     let mut old = mixed.wire().clone();
-    old.semantic_revision = 1;
+    old.semantic_revision = 3;
     assert!(ScalarProgram::from_wire(old).is_err());
     let mut wrong_result = mixed.wire().clone();
     let ScalarNode::Apply { class, .. } = &mut wrong_result.nodes[2] else {

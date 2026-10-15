@@ -10,7 +10,7 @@ use runmat_execution::Digest;
 use runmat_types::{NumericClass, ScalarOperation};
 use serde::{Deserialize, Serialize};
 
-pub const SCALAR_PROGRAM_REVISION: u32 = 3;
+pub const SCALAR_PROGRAM_REVISION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarLiteral {
@@ -155,15 +155,12 @@ impl ScalarProgram {
                     };
                     ensure!(class == NumericClass::Single && input_classes == [NumericClass::Single, NumericClass::Double] && control.and_then(crate::ExactSingleBasePower::for_control).is_some(), "power scalar program requires certified Single base and original Double literal control");
                 }
-                if matches!(operation, ScalarOperation::MixedRealAddToSingle) {
+                if let ScalarOperation::RealArithmetic(recipe) = operation {
                     ensure!(
-                        class == NumericClass::Single
-                            && matches!(
-                                input_classes.as_slice(),
-                                [NumericClass::Single, NumericClass::Double]
-                                    | [NumericClass::Double, NumericClass::Single]
-                            ),
-                        "mixed real addition requires one Single and one Double operand"
+                        matches!(input_classes.as_slice(), [left, right]
+                            if runmat_types::RealFloatingRecipe::for_classes(recipe.operator(), *left, *right) == Some(*recipe))
+                            && class == recipe.result_class(),
+                        "represented arithmetic differs from operand or result classes"
                     );
                 }
                 if let ScalarOperation::Cast(target) = operation {
@@ -188,7 +185,7 @@ impl ScalarProgram {
             required.len() == wire.nodes.len(),
             "unreachable scalar program node"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v3", &wire))?);
+        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v4", &wire))?);
         Ok(Self { wire, identity })
     }
 

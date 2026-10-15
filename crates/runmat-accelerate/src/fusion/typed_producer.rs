@@ -171,71 +171,58 @@ impl TypedProducer {
                     Ok((*id, format!("{operation_name}({expression})")))
                 })
                 .collect::<Result<HashMap<_, _>>>()?;
-            let selected_add = matches!(
-                operation,
-                FusionOp::Primitive {
-                    op: crate::graph::PrimitiveOp::Add,
-                    ..
-                }
-            ) || program
-                .declaration(output)
-                .and_then(|declaration| declaration.semantics)
-                .and_then(|semantics| semantics.scalar_operation)
-                == Some(runmat_types::ScalarOperation::Operator(
-                    runmat_types::OperatorKind::Add,
-                ));
-            let mixed_real_add = selected_add
-                && matches!(
-                    program::resolved_operation(program, operation)?,
-                    Some(runmat_types::ScalarOperation::MixedRealAddToSingle)
-                );
-            let expression = if mixed_real_add {
-                if buffer_type == ScalarType::F32 {
-                    return Err(anyhow!(
-                        "fusion provider cannot represent mixed Double addition"
-                    ));
-                }
-                let [left, right] = inputs.as_slice() else {
-                    return Err(anyhow!("mixed real addition has invalid arity"));
-                };
-                let left = expressions
-                    .get(left)
-                    .ok_or_else(|| anyhow!("missing mixed Add left operand"))?;
-                let right = expressions
-                    .get(right)
-                    .ok_or_else(|| anyhow!("missing mixed Add right operand"))?;
-                Some(format!("f32((f64({left}) + f64({right})))"))
-            } else if let Some(declaration) = program.declaration(output) {
-                if selected.is_some() {
-                    let entry = program
-                        .catalog_entry(output)
-                        .ok_or_else(|| anyhow!("missing typed producer contract"))?;
-                    if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
-                        || entry.contract.workspace_effect.is_some()
-                        || entry.contract.environment_effect.is_some()
+            let resolved = program::resolved_operation(program, operation)?;
+            let expression =
+                if let Some(runmat_types::ScalarOperation::RealArithmetic(recipe)) = resolved {
+                    let [left, right] = inputs.as_slice() else {
+                        return Err(anyhow!("represented arithmetic has invalid arity"));
+                    };
+                    let arguments = [
+                        expressions
+                            .get(left)
+                            .map(String::as_str)
+                            .ok_or_else(|| anyhow!("missing represented arithmetic operand"))?,
+                        expressions
+                            .get(right)
+                            .map(String::as_str)
+                            .ok_or_else(|| anyhow!("missing represented arithmetic operand"))?,
+                    ];
+                    Some(program::real_arithmetic_expr(
+                        recipe,
+                        arguments,
+                        buffer_type,
+                    )?)
+                } else if let Some(declaration) = program.declaration(output) {
+                    if selected.is_some() {
+                        let entry = program
+                            .catalog_entry(output)
+                            .ok_or_else(|| anyhow!("missing typed producer contract"))?;
+                        if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
+                            || entry.contract.workspace_effect.is_some()
+                            || entry.contract.environment_effect.is_some()
+                        {
+                            return Err(anyhow!("typed producer slice requires a pure contract"));
+                        }
+                    }
+                    for helper in declaration
+                        .semantics
+                        .into_iter()
+                        .flat_map(|semantics| semantics.helpers)
                     {
-                        return Err(anyhow!("typed producer slice requires a pure contract"));
+                        if !helpers.contains(&(*helper, operation_type)) {
+                            helpers.push((*helper, operation_type));
+                        }
+                    }
+                    admitted_expression(declaration, inputs, &operands, operation_type)
+                } else {
+                    match operation {
+                        FusionOp::Primitive { op, .. } => primitive_expr(*op, inputs, &operands),
+                        FusionOp::Builtin { .. } => {
+                            return Err(anyhow!("fusion builtin was not admitted"))
+                        }
                     }
                 }
-                for helper in declaration
-                    .semantics
-                    .into_iter()
-                    .flat_map(|semantics| semantics.helpers)
-                {
-                    if !helpers.contains(&(*helper, operation_type)) {
-                        helpers.push((*helper, operation_type));
-                    }
-                }
-                admitted_expression(declaration, inputs, &operands, operation_type)
-            } else {
-                match operation {
-                    FusionOp::Primitive { op, .. } => primitive_expr(*op, inputs, &operands),
-                    FusionOp::Builtin { .. } => {
-                        return Err(anyhow!("fusion builtin was not admitted"))
-                    }
-                }
-            }
-            .ok_or_else(|| anyhow!("no typed fusion expression for the selected operation"))?;
+                .ok_or_else(|| anyhow!("no typed fusion expression for the selected operation"))?;
             let temporary = format!("typed{index}");
             body.push_str(&format!(
                 "    let {temporary}: {operation_name} = {expression};\n"
