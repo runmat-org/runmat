@@ -37,16 +37,17 @@ fn unquoted_dispatcher_call_observes_only_after_exact_full_call_publication() {
     let args = [input];
     let pending =
         runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "logical", &args);
-    assert!(session.profile_snapshot().feedback.is_empty());
+    assert!(session.ordinary_feedback_for_test().is_empty());
     let output = futures::executor::block_on(context.scope(pending)).unwrap();
     let Value::LogicalArray(logical) = output.value() else {
         panic!("ordinary host logical output")
     };
     assert_eq!(logical.shape, [1, 4]);
     assert_eq!(logical.data.as_slice(), &[0, 1, 1, 0]);
-    let snapshot = session.profile_snapshot();
-    assert_eq!(snapshot.feedback.len(), 1);
-    let sample = &snapshot.feedback[0];
+    let snapshot = session.ordinary_feedback_for_test();
+    assert_eq!(snapshot.len(), 1);
+    assert!(session.profile_snapshot().feedback.is_empty());
+    let sample = &snapshot[0];
     assert_eq!(
         sample.kind,
         runmat_execution::ExecutionCandidateKind::SharedRuntime

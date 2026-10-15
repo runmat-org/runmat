@@ -526,6 +526,14 @@ impl PlacementSession {
         }
     }
 
+    /// Inspect ordinary session-local measurements without the persistence
+    /// filter. Binding-session feedback must never enter an exported profile.
+    #[cfg(test)]
+    pub(crate) fn ordinary_feedback_for_test(&self) -> Vec<PlacementFeedbackSeries> {
+        self.drain_observations();
+        self.state.borrow().feedback.values().cloned().collect()
+    }
+
     pub fn profile_snapshot(&self) -> PlacementProfileSnapshot {
         self.drain_observations();
         let mut feedback: Vec<_> = self.state.borrow().feedback.values().cloned().collect();

@@ -273,7 +273,7 @@ fn automatic_resident_calls_keep_private_native_mirrors_and_publish_real_host_fu
             let pending = runmat_runtime::dispatcher::call_builtin_async_in_context(
                 &context, operation, &args,
             );
-            assert!(session.profile_snapshot().feedback.is_empty());
+            assert!(session.ordinary_feedback_for_test().is_empty());
             let output = futures::executor::block_on(context.scope(pending)).unwrap();
             let Value::Tensor(result) = output.value() else {
                 panic!("private host numeric output");
@@ -317,16 +317,17 @@ fn automatic_resident_calls_keep_private_native_mirrors_and_publish_real_host_fu
             );
             assert!(source.allocation_lease().validate_live().is_ok());
             assert!(args.iter().all(|value| matches!(value, Value::GpuTensor(handle) if handle.shares_allocation_with(&source))));
-            let profile = session.profile_snapshot();
-            assert_eq!(profile.feedback.len(), 1);
+            let profile = session.ordinary_feedback_for_test();
+            assert_eq!(profile.len(), 1);
+            assert!(session.profile_snapshot().feedback.is_empty());
             assert_eq!(
-                profile.feedback[0].kind,
+                profile[0].kind,
                 runmat_execution::ExecutionCandidateKind::SharedRuntime
             );
-            assert_eq!(profile.feedback[0].samples, 1);
-            assert_eq!(profile.feedback[0].failures, 0);
+            assert_eq!(profile[0].samples, 1);
+            assert_eq!(profile[0].failures, 0);
             assert!(matches!(
-                profile.feedback[0].signature.revision.authority,
+                profile[0].signature.revision.authority,
                 runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
             ));
             drop((args, source, output));
@@ -411,13 +412,14 @@ fn promoting_resident_calls_preserve_native_domains_errors_and_full_call_boundar
                     "no restore/re-promotion"
                 );
                 assert!(source.allocation_lease().validate_live().is_ok());
-                let profile = session.profile_snapshot();
-                assert_eq!(profile.feedback.len(), 1, "{operation}");
+                let profile = session.ordinary_feedback_for_test();
+                assert_eq!(profile.len(), 1, "{operation}");
+                assert!(session.profile_snapshot().feedback.is_empty());
                 assert_eq!(
-                    profile.feedback[0].kind,
+                    profile[0].kind,
                     runmat_execution::ExecutionCandidateKind::SharedRuntime
                 );
-                assert_eq!(profile.feedback[0].failures, u64::from(actual.is_err()));
+                assert_eq!(profile[0].failures, u64::from(actual.is_err()));
                 drop((actual, expected, args, source));
                 assert_eq!(provider.live_count(), 0);
             }
@@ -508,13 +510,14 @@ fn mixed_power_private_host_route_keeps_double_arithmetic_and_single_publication
         assert_native_result(actual.value(), expected.value());
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
         assert_eq!(provider.uploads.load(Ordering::Relaxed), 1);
-        let profile = session.profile_snapshot();
-        assert_eq!(profile.feedback.len(), 1);
+        let profile = session.ordinary_feedback_for_test();
+        assert_eq!(profile.len(), 1);
+        assert!(session.profile_snapshot().feedback.is_empty());
         assert_eq!(
-            profile.feedback[0].kind,
+            profile[0].kind,
             runmat_execution::ExecutionCandidateKind::SharedRuntime
         );
-        assert_eq!(profile.feedback[0].failures, 0);
+        assert_eq!(profile[0].failures, 0);
         drop((actual, expected, args, source));
         assert_eq!(provider.live_count(), 0);
     }
@@ -549,7 +552,7 @@ fn cancellation_during_private_call_readback_never_runs_or_publishes_the_body() 
         runmat_runtime::GpuGatherRetry::Never
     );
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
-    assert!(session.profile_snapshot().feedback.is_empty());
+    assert!(session.ordinary_feedback_for_test().is_empty());
     assert!(source.allocation_lease().validate_live().is_ok());
     drop((args, source));
     assert_eq!(provider.live_count(), 0);
@@ -582,8 +585,7 @@ fn explicit_resident_call_keeps_provider_route_despite_a_cheaper_host_estimate()
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
     assert_eq!(provider.uploads.load(Ordering::Relaxed), 0);
     assert!(session
-        .profile_snapshot()
-        .feedback
+        .ordinary_feedback_for_test()
         .iter()
         .all(|sample| sample.kind.is_provider()));
     let actual = futures::executor::block_on(provider.inner.download_numeric(result)).unwrap();
