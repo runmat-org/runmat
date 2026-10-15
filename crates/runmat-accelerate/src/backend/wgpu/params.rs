@@ -965,10 +965,13 @@ pub struct LinspaceParamsF64 {
     pub start: f64,
     pub step: f64,
     pub stop: f64,
+    pub first: f64,
+    pub last: f64,
     pub total: u32,
     pub chunk: u32,
     pub offset: u32,
-    pub _pad: u32,
+    pub mode: u32,
+    pub _pad: f64,
 }
 
 #[repr(C)]
@@ -977,11 +980,13 @@ pub struct LinspaceParamsF32 {
     pub start: f32,
     pub step: f32,
     pub stop: f32,
-    pub _pad0: f32,
+    pub first: f32,
+    pub last: f32,
     pub total: u32,
     pub chunk: u32,
     pub offset: u32,
-    pub _pad1: u32,
+    pub mode: u32,
+    pub _pad: [u32; 3],
 }
 
 #[repr(C)]

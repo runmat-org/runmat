@@ -5315,6 +5315,13 @@ impl AccelProvider for InProcessProvider {
         self.allocate_tensor(data, vec![1, count])
     }
 
+    fn sequence(
+        &self,
+        request: &runmat_accelerate_api::ProviderSequenceRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.sequence_constructor(request)
+    }
+
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
         let mut data = vec![0.0; len];

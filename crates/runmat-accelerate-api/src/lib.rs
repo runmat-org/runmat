@@ -60,6 +60,8 @@ pub use provider_execution::{
     is_unsupported_provider_error, ProviderExecutionCompletionError, ProviderExecutionError,
     ProviderExecutionFuture, ProviderExecutionResult,
 };
+mod sequence;
+pub use sequence::{ProviderSequenceKind, ProviderSequenceRequest};
 mod placement;
 mod power;
 pub mod power_service;
@@ -2795,6 +2797,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
 
     // Optional operator hooks (default to unsupported)
+    /// Generate a real row sequence in the requested physical class. `None`
+    /// means no native route was attempted; an attempted failure is terminal.
+    /// The first and final values are supplied separately so exponentiation
+    /// and signed-zero endpoints do not drift through device arithmetic.
+    fn sequence(
+        &self,
+        _request: &ProviderSequenceRequest,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
+    }
+
     fn linspace(&self, _start: f64, _stop: f64, _count: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("linspace not supported by provider"))
     }

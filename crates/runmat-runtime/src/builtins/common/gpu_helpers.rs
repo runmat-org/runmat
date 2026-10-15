@@ -803,6 +803,37 @@ pub fn upload_tensor_protecting_typed(
     runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)
 }
 
+/// Side-effect-free admission for a real sequence's exact native-class upload.
+/// A legacy preferred-precision `upload` adapter is not evidence that another
+/// floating class can be published; providers must own the exact transfer query.
+pub fn real_sequence_upload_feasible(
+    provider: &dyn AccelProvider,
+    precision: ProviderPrecision,
+    shape: &[usize],
+) -> bool {
+    let Some(shape) = shape
+        .iter()
+        .copied()
+        .map(u64::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+    else {
+        return false;
+    };
+    let representation = runmat_accelerate_api::ProviderRepresentation {
+        element_type: match precision {
+            ProviderPrecision::F32 => runmat_accelerate_api::ProviderElementType::F32,
+            ProviderPrecision::F64 => runmat_accelerate_api::ProviderElementType::F64,
+        },
+        storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape,
+        residency: runmat_accelerate_api::ProviderResidency::Device,
+    };
+    runmat_accelerate_api::class_preserving_upload_query(vec![representation])
+        .is_some_and(|query| provider.query_feasibility(&query).is_supported())
+}
+
 mod restore;
 pub use restore::{
     restore_class_preserving_value, restore_class_preserving_value_protecting,

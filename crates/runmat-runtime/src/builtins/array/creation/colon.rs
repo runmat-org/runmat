@@ -1,6 +1,5 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -36,11 +35,12 @@ enum ScalarOrigin {
     Char,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ParsedScalar {
     value: f64,
     prefer_gpu: bool,
     origin: ScalarOrigin,
+    source: Option<runmat_accelerate_api::GpuTensorHandle>,
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::colon")]
@@ -49,14 +49,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("linspace")],
+    provider_hooks: &[ProviderHook::Custom("sequence")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Falls back to uploading the host-generated vector when provider linspace kernels are unavailable.",
+    notes: "The typed double sequence hook preserves exact owner and endpoints; pre-attempt absence permits class-preserving host upload.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::colon")]
@@ -298,6 +298,18 @@ fn colon_error_with_message(
     builder.build()
 }
 
+fn sequence_provider_error(
+    stage: &str,
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut result = colon_error_with_message(
+        format!("colon: {stage} failed: {error}"),
+        &COLON_ERROR_INTERNAL,
+    );
+    result.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(result, error)
+}
+
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
@@ -345,12 +357,19 @@ async fn colon_builtin(
         } else {
             start_scalar.prefer_gpu || stop_scalar.prefer_gpu
         };
+        let source = sequence_source(&[&start_scalar, &stop_scalar])?;
+        let protected = [&start_scalar, &stop_scalar]
+            .into_iter()
+            .filter_map(|scalar| scalar.source.as_ref())
+            .collect::<Vec<_>>();
         build_sequence(
             start_scalar.value,
             step,
             stop_scalar.value,
             explicit_gpu,
             char_mode,
+            source.as_ref(),
+            &protected,
         )
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end).await?;
@@ -362,11 +381,16 @@ async fn colon_builtin(
         } else {
             start_scalar.prefer_gpu || step_scalar.prefer_gpu || stop_scalar.prefer_gpu
         };
+        let source = sequence_source(&[&start_scalar, &step_scalar, &stop_scalar])?;
+        let protected = [&start_scalar, &step_scalar, &stop_scalar]
+            .into_iter()
+            .filter_map(|scalar| scalar.source.as_ref())
+            .collect::<Vec<_>>();
         if step_scalar.value == 0.0 {
             return if char_mode {
                 build_char_sequence(Vec::new())
             } else {
-                finalize_numeric_sequence(Vec::new(), explicit_gpu)
+                finalize_numeric_sequence(Vec::new(), explicit_gpu, source.as_ref(), &protected)
             };
         }
         build_sequence(
@@ -375,6 +399,8 @@ async fn colon_builtin(
             stop_scalar.value,
             explicit_gpu,
             char_mode,
+            source.as_ref(),
+            &protected,
         )
     }
 }
@@ -779,23 +805,25 @@ fn build_sequence(
     stop: f64,
     explicit_gpu: bool,
     char_mode: bool,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> crate::BuiltinResult<Value> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
         return Err(colon_error(&COLON_ERROR_NON_FINITE_INPUT));
     }
     if step == 0.0 {
-        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu, source, protected);
     }
 
     let plan = plan_progression(start, step, stop)?;
 
     if char_mode {
-        let data = materialize_progression(&plan, start, step);
+        let data = materialize_progression(&plan, start, step)?;
         return build_char_sequence(data);
     }
 
     if plan.count == 0 {
-        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu, source, protected);
     }
 
     let prefer_gpu =
@@ -808,20 +836,72 @@ fn build_sequence(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.linspace(start, plan.final_end, plan.count) {
-                return Ok(Value::GpuTensor(handle));
+        if let Some(provider) = source
+            .and_then(gpu_helpers::exact_provider_for_handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
+            let request = runmat_accelerate_api::ProviderSequenceRequest::linear(
+                start,
+                plan.final_end,
+                plan.count,
+                runmat_accelerate_api::ProviderPrecision::F64,
+            );
+            match provider.sequence(&request) {
+                Ok(Some(handle)) => {
+                    return validated_sequence_output(
+                        handle, provider, source, protected, plan.count,
+                    )
+                }
+                Ok(None) => {}
+                Err(error) => return Err(sequence_provider_error("provider sequence", error)),
             }
         }
     }
 
-    let data = materialize_progression(&plan, start, step);
-    finalize_numeric_sequence(data, prefer_gpu)
+    let data = materialize_progression(&plan, start, step)?;
+    finalize_numeric_sequence(data, prefer_gpu, source, protected)
 }
 
-fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
+fn finalize_numeric_sequence(
+    data: Vec<f64>,
+    prefer_gpu: bool,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<Value> {
     let len = data.len();
     let shape = vec![1usize, len];
+    let tensor = Tensor::new(data, shape)
+        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))?;
+
+    if let Some(source) = source {
+        let provider = gpu_helpers::exact_provider_for_handle(source).ok_or_else(|| {
+            colon_error_with_message(
+                "colon: no exact owner for resident scalar",
+                &COLON_ERROR_INTERNAL,
+            )
+        })?;
+        if !gpu_helpers::real_sequence_upload_feasible(
+            provider,
+            runmat_accelerate_api::ProviderPrecision::F64,
+            tensor.shape(),
+        ) {
+            if runmat_accelerate_api::handle_is_explicit(source) {
+                let mut error = colon_error_with_message(
+                    "colon: owner cannot preserve double GPU class",
+                    &COLON_ERROR_INTERNAL,
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(error);
+            }
+            return Ok(tensor::tensor_into_value(tensor));
+        }
+        return gpu_helpers::restore_class_preserving_value_with_operands(
+            source,
+            Value::Tensor(tensor),
+            "colon",
+            gpu_helpers::RestoreOperandContext::new(protected, protected),
+        );
+    }
 
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
@@ -831,19 +911,64 @@ fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> crate::Builtin
             );
         }
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
+            if !gpu_helpers::real_sequence_upload_feasible(
+                provider,
+                runmat_accelerate_api::ProviderPrecision::F64,
+                tensor.shape(),
+            ) {
+                return Ok(tensor::tensor_into_value(tensor));
+            }
+            match gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[]) {
+                Ok(handle) => return validated_sequence_output(handle, provider, None, &[], len),
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if error.is_unsupported() => {}
+                Err(error) => {
+                    return Err(sequence_provider_error(
+                        "typed sequence upload",
+                        error.into_execution_error(),
+                    ))
+                }
             }
         }
     }
 
-    Tensor::new(data, shape)
-        .map(tensor::tensor_into_value)
-        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn validated_sequence_output(
+    output: runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    count: usize,
+) -> crate::BuiltinResult<Value> {
+    let valid = output.shape() == [1, count]
+        && output.device_id() == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output)
+            == Some(runmat_accelerate_api::ProviderPrecision::F64)
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output)
+        && protected
+            .iter()
+            .all(|input| !input.shares_allocation_with(&output));
+    if !valid {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            colon_error_with_message(
+                "colon: malformed provider sequence output",
+                &COLON_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    let mut output = output;
+    if let Some(source) = source {
+        gpu_helpers::propagate_output_provenance(&mut output, protected.iter().copied())?;
+    }
+    gpu_helpers::resident_gpu_value(output)
 }
 
 struct ProgressionPlan {
@@ -917,18 +1042,31 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<Pr
     Ok(ProgressionPlan { count, final_end })
 }
 
-fn materialize_progression(plan: &ProgressionPlan, start: f64, step: f64) -> Vec<f64> {
+fn materialize_progression(
+    plan: &ProgressionPlan,
+    start: f64,
+    step: f64,
+) -> crate::BuiltinResult<Vec<f64>> {
     if plan.count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut data = Vec::with_capacity(plan.count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(plan.count).map_err(|error| {
+        colon_error_with_message(
+            format!("colon: cannot reserve sequence: {error}"),
+            &COLON_ERROR_SEQUENCE_LIMIT,
+        )
+    })?;
     for idx in 0..plan.count {
         data.push(start + step * (idx as f64));
+    }
+    if let Some(first) = data.first_mut() {
+        *first = start;
     }
     if let Some(last) = data.last_mut() {
         *last = plan.final_end;
     }
-    data
+    Ok(data)
 }
 
 fn default_step(_start: f64, _stop: f64) -> f64 {
@@ -948,16 +1086,32 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
 async fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
     match value {
         Value::GpuTensor(handle) => {
+            gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+                colon_error_with_message(
+                    "colon: no exact owner for resident scalar",
+                    &COLON_ERROR_INTERNAL,
+                )
+            })?;
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let scalar = tensor_scalar(name, &tensor)?;
             Ok(ParsedScalar {
                 value: scalar,
                 prefer_gpu: true,
                 origin: ScalarOrigin::Numeric,
+                source: Some(handle),
             })
         }
         other => parse_real_scalar_host(name, other),
     }
+}
+
+fn sequence_source(
+    scalars: &[&ParsedScalar],
+) -> crate::BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        scalars.iter().filter_map(|scalar| scalar.source.clone()),
+        "colon",
+    )
 }
 
 fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
@@ -966,41 +1120,49 @@ fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<Pars
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Int(i) => Ok(ParsedScalar {
             value: i.to_f64(),
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Bool(b) => Ok(ParsedScalar {
             value: if b { 1.0 } else { 0.0 },
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Tensor(t) => tensor_scalar(name, &t).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::LogicalArray(logical) => logical_scalar(name, &logical).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Complex(re, im) => complex_to_real(name, re, im).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::CharArray(chars) => char_scalar(name, &chars).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Char,
+            source: None,
         }),
         Value::String(_) | Value::StringArray(_) => Err(colon_error_with_message(
             format!("{name}: inputs must be real scalar values; received a string-like argument"),
@@ -1124,6 +1286,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor,
     };
@@ -1708,6 +1871,37 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn double_colon_declines_f32_preferred_owner_without_widening_a_handle() {
+        test_support::with_f32_test_provider(|_| {
+            let output = finalize_numeric_sequence(vec![0.0, 0.5, 1.0], true, None, &[])
+                .expect("class-preserving host fallback");
+            let Value::Tensor(tensor) = output else {
+                panic!("expected host double")
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+            assert_eq!(tensor.materialize_f64(), vec![0.0, 0.5, 1.0]);
+        });
+    }
+
+    #[test]
+    fn colon_host_progression_retains_negative_zero_start() {
+        let plan = plan_progression(-0.0, 1.0, 1.0).unwrap();
+        assert_eq!(
+            materialize_progression(&plan, -0.0, 1.0).unwrap()[0].to_bits(),
+            (-0.0f64).to_bits()
+        );
+    }
+
+    #[test]
+    fn colon_host_progression_rejects_unreservable_count() {
+        let plan = ProgressionPlan {
+            count: usize::MAX,
+            final_end: 1.0,
+        };
+        assert!(materialize_progression(&plan, 0.0, 1.0).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -1738,6 +1932,12 @@ pub(crate) mod tests {
         let gathered = match gpu {
             Value::GpuTensor(handle) => {
                 test_support::gather(Value::GpuTensor(handle)).expect("gather gpu")
+            }
+            Value::Tensor(tensor)
+                if provider.precision() == runmat_accelerate_api::ProviderPrecision::F32 =>
+            {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+                tensor
             }
             other => panic!("expected GPU tensor, got {other:?}"),
         };

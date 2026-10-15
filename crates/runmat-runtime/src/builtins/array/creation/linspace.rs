@@ -1,7 +1,7 @@
 //! MATLAB-compatible `linspace` builtin with GPU-aware semantics for RunMat.
 
 use log::trace;
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
@@ -30,20 +30,29 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("linspace")],
+    provider_hooks: &[ProviderHook::Custom("sequence")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may generate sequences directly; the runtime uploads host-generated data when hooks are absent.",
+    notes: "The typed sequence hook owns exact class and endpoints; pre-attempt absence permits class-preserving host generation and upload.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("linspace")
         .build()
+}
+
+fn provider_sequence_error(
+    stage: &str,
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut result = builtin_error(format!("linspace: {stage} failed: {error}"));
+    result.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(result, error)
 }
 
 fn linspace_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
@@ -260,16 +269,15 @@ async fn linspace_builtin(
 
     let (start_scalar, start_source) = parse_scalar("linspace", start).await?;
     let (stop_scalar, stop_source) = parse_scalar("linspace", stop).await?;
-    if start_source
-        .as_ref()
-        .zip(stop_source.as_ref())
-        .is_some_and(|(left, right)| left.device_id() != right.device_id())
-    {
-        return Err(builtin_error(
-            "linspace: GPU endpoints must belong to the same provider",
-        ));
-    }
-    let source = start_source.as_ref().or(stop_source.as_ref());
+    let protected = start_source
+        .iter()
+        .chain(stop_source.iter())
+        .collect::<Vec<_>>();
+    let source = gpu_helpers::select_resident_output_source(
+        protected.iter().map(|handle| (*handle).clone()),
+        "linspace",
+    )?;
+    let source = source.as_ref();
 
     let count = if rest.is_empty() {
         Count::Length(100)
@@ -278,40 +286,16 @@ async fn linspace_builtin(
     };
     if matches!(count, Count::Nan) {
         let single = start_scalar.single || stop_scalar.single;
-        if let Some(source) = source {
-            if let Some(provider) =
-                gpu_helpers::exact_provider_for_handle(source).filter(|provider| {
-                    !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-                })
-            {
-                let data = [f64::NAN];
-                let shape = [1usize, 1usize];
-                if let Ok(handle) = provider.upload(&HostTensorView {
-                    data: &data,
-                    shape: &shape,
-                }) {
-                    return validated_sequence_output(
-                        source,
-                        provider,
-                        handle,
-                        vec![1, 1],
-                        if single {
-                            NumericDType::F32
-                        } else {
-                            NumericDType::F64
-                        },
-                        "linspace",
-                    );
-                }
-            }
-        }
-        return if single {
+        let tensor = if single {
             Tensor::from_f32(vec![f32::NAN], vec![1, 1])
         } else {
             Tensor::new(vec![f64::NAN], vec![1, 1])
         }
-        .map(Value::Tensor)
-        .map_err(|error| builtin_error(format!("linspace: {error}")));
+        .map_err(|error| builtin_error(format!("linspace: {error}")))?;
+        return match source {
+            Some(source) => restore_real_sequence(source, tensor, &protected),
+            None => Ok(Value::Tensor(tensor)),
+        };
     }
     let Count::Length(count) = count else {
         unreachable!("NaN count returned above")
@@ -327,7 +311,14 @@ async fn linspace_builtin(
         );
     }
     let prefer_gpu = residency.prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu, source)
+    build_sequence(
+        start_scalar,
+        stop_scalar,
+        count,
+        prefer_gpu,
+        source,
+        &protected,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -538,6 +529,7 @@ fn build_sequence(
     count: usize,
     prefer_gpu: bool,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (stop_re, stop_im) = stop.parts();
@@ -545,7 +537,7 @@ fn build_sequence(
     let single = start.single || stop.single;
 
     if complex {
-        let data = generate_complex_sequence(start_re, start_im, stop_re, stop_im, count);
+        let data = generate_complex_sequence(start_re, start_im, stop_re, stop_im, count)?;
         let tensor = if single {
             ComplexTensor::from_f32(
                 data.into_iter()
@@ -559,7 +551,12 @@ fn build_sequence(
         .map_err(|e| builtin_error(format!("linspace: {e}")))?;
         let value = Value::ComplexTensor(tensor);
         return match source {
-            Some(source) => gpu_helpers::restore_class_preserving_value(source, value, "linspace"),
+            Some(source) => gpu_helpers::restore_class_preserving_value_with_operands(
+                source,
+                value,
+                "linspace",
+                gpu_helpers::RestoreOperandContext::new(protected, protected),
+            ),
             None => Ok(value),
         };
     }
@@ -576,26 +573,31 @@ fn build_sequence(
         let provider = source
             .and_then(gpu_helpers::exact_provider_for_handle)
             .or_else(runmat_accelerate_api::provider);
-        if let Some(provider) = provider.filter(|provider| {
-            !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-        }) {
+        if let Some(provider) = provider {
             if count > 0 {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!(
-                        "linspace: attempting provider.linspace start={} stop={} count={}",
+                        "linspace: attempting provider.sequence start={} stop={} count={}",
                         start_re,
                         stop_re,
                         count
                     );
                 }
-                match provider.linspace(start_re, stop_re, count) {
-                    Ok(handle) => {
-                        trace!("linspace: provider.linspace succeeded");
+                let request = runmat_accelerate_api::ProviderSequenceRequest::linear(
+                    start_re,
+                    stop_re,
+                    count,
+                    requested_precision(single),
+                );
+                match provider.sequence(&request) {
+                    Ok(Some(handle)) => {
+                        trace!("linspace: provider.sequence succeeded");
                         if let Some(source) = source {
                             return validated_sequence_output(
                                 source,
                                 provider,
                                 handle,
+                                protected,
                                 vec![1, count],
                                 if single {
                                     NumericDType::F32
@@ -617,15 +619,26 @@ fn build_sequence(
                             "linspace",
                         );
                     }
-                    Err(err) => {
-                        trace!("linspace: provider.linspace failed: {err}");
-                    }
+                    Ok(None) => trace!("linspace: provider.sequence unavailable"),
+                    Err(error) => return Err(provider_sequence_error("provider sequence", error)),
                 }
             }
         }
     }
 
-    let data = generate_real_sequence(start_re, stop_re, count);
+    let data = generate_real_sequence(start_re, stop_re, count)?;
+    let tensor = if single {
+        Tensor::from_f32(
+            data.into_iter().map(|value| value as f32).collect(),
+            vec![1, count],
+        )
+    } else {
+        Tensor::new(data, vec![1, count])
+    }
+    .map_err(|e| builtin_error(format!("linspace: {e}")))?;
+    if let Some(source) = source {
+        return restore_real_sequence(source, tensor, protected);
+    }
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
         {
@@ -638,18 +651,17 @@ fn build_sequence(
         let provider = source
             .and_then(gpu_helpers::exact_provider_for_handle)
             .or_else(runmat_accelerate_api::provider);
-        if let Some(provider) = provider.filter(|provider| {
-            !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-        }) {
-            let shape = [1usize, count];
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                if let Some(source) = source {
-                    return validated_sequence_output(
-                        source,
+        if let Some(provider) = provider {
+            if !gpu_helpers::real_sequence_upload_feasible(
+                provider,
+                requested_precision(single),
+                tensor.shape(),
+            ) {
+                return Ok(Value::Tensor(tensor));
+            }
+            match gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[]) {
+                Ok(handle) => {
+                    return validated_unowned_sequence_output(
                         provider,
                         handle,
                         vec![1, count],
@@ -661,37 +673,60 @@ fn build_sequence(
                         "linspace",
                     );
                 }
-                return validated_unowned_sequence_output(
-                    provider,
-                    handle,
-                    vec![1, count],
-                    if single {
-                        NumericDType::F32
-                    } else {
-                        NumericDType::F64
-                    },
-                    "linspace",
-                );
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if error.is_unsupported() => {}
+                Err(error) => {
+                    return Err(provider_sequence_error(
+                        "typed sequence upload",
+                        error.into_execution_error(),
+                    ))
+                }
             }
         }
     }
-
-    let tensor = if single {
-        Tensor::from_f32(
-            data.into_iter().map(|value| value as f32).collect(),
-            vec![1, count],
-        )
-    } else {
-        Tensor::new(data, vec![1, count])
-    }
-    .map_err(|e| builtin_error(format!("linspace: {e}")))?;
     Ok(Value::Tensor(tensor))
+}
+
+fn restore_real_sequence(
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    tensor: Tensor,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(source)
+        .ok_or_else(|| builtin_error("linspace: no provider owns the endpoint"))?;
+    if !gpu_helpers::real_sequence_upload_feasible(
+        provider,
+        requested_precision(tensor.numeric_dtype() == NumericDType::F32),
+        tensor.shape(),
+    ) {
+        if runmat_accelerate_api::handle_is_explicit(source) {
+            let mut error = builtin_error("linspace: owner cannot preserve requested GPU class");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+        return Ok(Value::Tensor(tensor));
+    }
+    gpu_helpers::restore_class_preserving_value_with_operands(
+        source,
+        Value::Tensor(tensor),
+        "linspace",
+        gpu_helpers::RestoreOperandContext::new(protected, protected),
+    )
+}
+
+fn requested_precision(single: bool) -> ProviderPrecision {
+    if single {
+        ProviderPrecision::F32
+    } else {
+        ProviderPrecision::F64
+    }
 }
 
 fn validated_sequence_output(
     source: &runmat_accelerate_api::GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     output: runmat_accelerate_api::GpuTensorHandle,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
     shape: Vec<usize>,
     dtype: NumericDType,
     builtin: &str,
@@ -700,7 +735,9 @@ fn validated_sequence_output(
         NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
         _ => runmat_accelerate_api::ProviderPrecision::F64,
     };
-    let valid = !source.shares_allocation_with(&output)
+    let valid = protected
+        .iter()
+        .all(|input| !input.shares_allocation_with(&output))
         && output.shape() == shape
         && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
@@ -719,7 +756,7 @@ fn validated_sequence_output(
         ));
     }
     let mut output = output;
-    gpu_helpers::propagate_output_provenance(&mut output, [source])?;
+    gpu_helpers::propagate_output_provenance(&mut output, protected.iter().copied())?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -754,22 +791,27 @@ fn validated_unowned_sequence_output(
     gpu_helpers::resident_gpu_value(output)
 }
 
-fn generate_real_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {
+fn generate_real_sequence(start: f64, stop: f64, count: usize) -> crate::BuiltinResult<Vec<f64>> {
     if count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if count == 1 {
-        return vec![stop];
+        return Ok(vec![stop]);
     }
-    let mut data = Vec::with_capacity(count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(count)
+        .map_err(|error| builtin_error(format!("linspace: cannot reserve sequence: {error}")))?;
     let step = (stop - start) / ((count - 1) as f64);
     for idx in 0..count {
         data.push(start + (idx as f64) * step);
     }
+    if let Some(first) = data.first_mut() {
+        *first = start;
+    }
     if let Some(last) = data.last_mut() {
         *last = stop;
     }
-    data
+    Ok(data)
 }
 
 fn generate_complex_sequence(
@@ -778,14 +820,16 @@ fn generate_complex_sequence(
     stop_re: f64,
     stop_im: f64,
     count: usize,
-) -> Vec<(f64, f64)> {
+) -> crate::BuiltinResult<Vec<(f64, f64)>> {
     if count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if count == 1 {
-        return vec![(stop_re, stop_im)];
+        return Ok(vec![(stop_re, stop_im)]);
     }
-    let mut data = Vec::with_capacity(count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(count)
+        .map_err(|error| builtin_error(format!("linspace: cannot reserve sequence: {error}")))?;
     let step_re = (stop_re - start_re) / ((count - 1) as f64);
     let step_im = (stop_im - start_im) / ((count - 1) as f64);
     for idx in 0..count {
@@ -793,15 +837,19 @@ fn generate_complex_sequence(
         let im = start_im + (idx as f64) * step_im;
         data.push((re, im));
     }
+    if let Some(first) = data.first_mut() {
+        *first = (start_re, start_im);
+    }
     if let Some(last) = data.last_mut() {
         *last = (stop_re, stop_im);
     }
-    data
+    Ok(data)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_accelerate_api::HostTensorView;
 
     #[test]
     fn count_parser_preserves_representable_uint64() {
@@ -851,6 +899,82 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn double_sequence_declines_f32_preferred_owner_without_losing_class() {
+        test_support::with_f32_test_provider(|_| {
+            let output = build_sequence(
+                Endpoint {
+                    scalar: Scalar::Real(0.0),
+                    single: false,
+                },
+                Endpoint {
+                    scalar: Scalar::Real(1.0),
+                    single: false,
+                },
+                5,
+                true,
+                None,
+                &[],
+            )
+            .expect("double host fallback");
+            match output {
+                Value::Tensor(tensor) => {
+                    assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+                    assert_eq!(tensor.shape(), &[1, 5]);
+                    assert_eq!(tensor.materialize_f64()[4], 1.0);
+                }
+                other => panic!("expected class-preserving host result, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn host_sequence_retains_negative_zero_start() {
+        assert_eq!(
+            generate_real_sequence(-0.0, 1.0, 3).unwrap()[0].to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert_eq!(
+            generate_complex_sequence(-0.0, -0.0, 1.0, 1.0, 3).unwrap()[0]
+                .0
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+    }
+
+    #[test]
+    fn host_sequence_rejects_unreservable_count() {
+        assert!(generate_real_sequence(0.0, 1.0, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn single_sequence_can_use_native_typed_hook_on_f64_preferred_owner() {
+        test_support::with_test_provider(|_| {
+            let output = build_sequence(
+                Endpoint {
+                    scalar: Scalar::Real(0.0),
+                    single: true,
+                },
+                Endpoint {
+                    scalar: Scalar::Real(1.0),
+                    single: false,
+                },
+                5,
+                true,
+                None,
+                &[],
+            )
+            .expect("single typed upload");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident single")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(ProviderPrecision::F32)
+            );
+        });
+    }
+
+    #[test]
     fn sequence_rejects_distinct_view_of_borrowed_allocation_without_retiring_source() {
         test_support::with_test_provider(|provider| {
             let source = gpu_helpers::upload_tensor(
@@ -864,6 +988,7 @@ pub(crate) mod tests {
                 &source,
                 provider,
                 alias,
+                &[&source],
                 vec![1, 2],
                 NumericDType::F64,
                 "linspace",
@@ -1408,7 +1533,7 @@ pub(crate) mod tests {
         )
         .expect("linspace");
         let gathered = test_support::gather(result).expect("gather");
-        let expected = generate_real_sequence(0.0, 1.0, 9);
+        let expected = generate_real_sequence(0.0, 1.0, 9).unwrap();
 
         let precision = runmat_accelerate_api::provider()
             .expect("provider")

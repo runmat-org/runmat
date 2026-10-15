@@ -3,6 +3,74 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{AccelProvider, HostNumericDataOwned, HostNumericTensorView};
 
 #[test]
+fn actual_wgpu_typed_sequences_preserve_class_and_exact_endpoints() {
+    use runmat_accelerate_api::{ProviderPrecision, ProviderSequenceRequest};
+    let provider = crate::backend::wgpu::provider::register_wgpu_provider(
+        crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("actual WGPU adapter required for typed sequences");
+    let precision = provider.precision();
+    let opposite = match precision {
+        ProviderPrecision::F32 => ProviderPrecision::F64,
+        ProviderPrecision::F64 => ProviderPrecision::F32,
+    };
+    assert!(provider
+        .sequence(&ProviderSequenceRequest::linear(-0.0, 1.0, 2, opposite))
+        .unwrap()
+        .is_none());
+    let linear = provider
+        .sequence(&ProviderSequenceRequest::linear(-0.0, 1.0, 2, precision))
+        .unwrap()
+        .expect("native typed linear sequence");
+    let logarithmic = provider
+        .sequence(&ProviderSequenceRequest::log10(
+            0.0,
+            std::f64::consts::PI.log10(),
+            3,
+            precision,
+            1.0,
+            std::f64::consts::PI,
+        ))
+        .unwrap()
+        .expect("native typed logarithmic sequence");
+    assert_eq!(linear.shape(), [1, 2]);
+    assert_eq!(logarithmic.shape(), [1, 3]);
+    assert_eq!(
+        runmat_accelerate_api::handle_precision(&linear),
+        Some(precision)
+    );
+    assert_eq!(
+        runmat_accelerate_api::handle_precision(&logarithmic),
+        Some(precision)
+    );
+    match block_on(provider.download_numeric(&linear)).unwrap().data {
+        HostNumericDataOwned::F32(values) => {
+            assert_eq!(values[0].to_bits(), (-0.0f32).to_bits());
+            assert_eq!(values[1].to_bits(), 1.0f32.to_bits());
+        }
+        HostNumericDataOwned::F64(values) => {
+            assert_eq!(values[0].to_bits(), (-0.0f64).to_bits());
+            assert_eq!(values[1].to_bits(), 1.0f64.to_bits());
+        }
+        other => panic!("unexpected linear class {other:?}"),
+    }
+    match block_on(provider.download_numeric(&logarithmic))
+        .unwrap()
+        .data
+    {
+        HostNumericDataOwned::F32(values) => {
+            assert_eq!(values[2].to_bits(), (std::f64::consts::PI as f32).to_bits())
+        }
+        HostNumericDataOwned::F64(values) => {
+            assert_eq!(values[2].to_bits(), std::f64::consts::PI.to_bits())
+        }
+        other => panic!("unexpected logarithmic class {other:?}"),
+    }
+    linear.release().unwrap();
+    logarithmic.release().unwrap();
+}
+
+#[test]
 fn actual_wgpu_fill_like_retains_negative_zero_sign() {
     let provider = crate::backend::wgpu::provider::register_wgpu_provider(
         crate::backend::wgpu::provider::WgpuProviderOptions::default(),

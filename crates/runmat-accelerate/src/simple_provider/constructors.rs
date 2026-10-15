@@ -1,6 +1,8 @@
-//! Concrete in-process constant constructors; absence is decided before effects.
+//! Concrete in-process constructors; optional absence is decided before effects.
 use super::*;
-use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult};
+use runmat_accelerate_api::{
+    ProviderExecutionError, ProviderExecutionResult, ProviderSequenceKind, ProviderSequenceRequest,
+};
 use std::cell::Cell;
 
 fn execute_constructor(
@@ -17,7 +19,73 @@ fn execute_constructor(
     })
 }
 
+fn sequence_value(request: &ProviderSequenceRequest, index: usize, step: f64) -> f64 {
+    let position = request.start + (index as f64) * step;
+    let mut value = match request.kind {
+        ProviderSequenceKind::Linear => position,
+        ProviderSequenceKind::Log10 => 10f64.powf(position),
+    };
+    if index == 0 && request.count > 1 {
+        value = request.first;
+    }
+    if index + 1 == request.count {
+        value = request.last;
+    }
+    value
+}
+
 impl InProcessProvider {
+    pub(super) fn sequence_constructor(
+        &self,
+        request: &ProviderSequenceRequest,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        execute_constructor(|effect| {
+            let bytes_per_element = match request.precision {
+                ProviderPrecision::F32 => 4usize,
+                ProviderPrecision::F64 => 8usize,
+            };
+            request
+                .count
+                .checked_mul(bytes_per_element)
+                .ok_or_else(|| anyhow!("sequence: output byte size overflow"))?;
+            let step = if request.count <= 1 {
+                0.0
+            } else {
+                (request.stop - request.start) / ((request.count - 1) as f64)
+            };
+            let data = match request.precision {
+                ProviderPrecision::F32 => {
+                    let mut values = Vec::new();
+                    values
+                        .try_reserve_exact(request.count)
+                        .map_err(|error| anyhow!("sequence: cannot reserve output: {error}"))?;
+                    for index in 0..request.count {
+                        values.push(sequence_value(request, index, step) as f32);
+                    }
+                    InProcessNumericData::F32(values)
+                }
+                ProviderPrecision::F64 => {
+                    let mut values = Vec::new();
+                    values
+                        .try_reserve_exact(request.count)
+                        .map_err(|error| anyhow!("sequence: cannot reserve output: {error}"))?;
+                    for index in 0..request.count {
+                        values.push(sequence_value(request, index, step));
+                    }
+                    InProcessNumericData::F64(values)
+                }
+            };
+            self.allocate_produced_observed(
+                data,
+                vec![1, request.count],
+                GpuTensorStorage::Real,
+                false,
+                Some(effect),
+            )
+            .map(Some)
+        })
+    }
+
     pub(super) fn fill_constructor(
         &self,
         shape: &[usize],

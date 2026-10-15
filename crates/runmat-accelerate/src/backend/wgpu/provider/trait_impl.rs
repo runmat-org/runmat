@@ -860,6 +860,26 @@ impl AccelProvider for WgpuProvider {
         self.linspace_exec(start, stop, count)
     }
 
+    fn sequence(
+        &self,
+        request: &runmat_accelerate_api::ProviderSequenceRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        if request.precision != self.precision() {
+            return Ok(None);
+        }
+        let effect = std::cell::Cell::new(false);
+        self.sequence_exec_observed(request, &effect)
+            .map(Some)
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if effect.get() {
+                    error.after_effect()
+                } else {
+                    error.with_unproven_effects()
+                }
+            })
+    }
+
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.random_uniform_exec(shape)
     }

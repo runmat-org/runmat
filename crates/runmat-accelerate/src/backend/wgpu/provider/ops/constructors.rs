@@ -1012,6 +1012,26 @@ impl WgpuProvider {
         stop: f64,
         count: usize,
     ) -> Result<GpuTensorHandle> {
+        let request = runmat_accelerate_api::ProviderSequenceRequest::linear(
+            start,
+            stop,
+            count,
+            match self.precision {
+                NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+            },
+        );
+        self.sequence_exec_observed(&request, &std::cell::Cell::new(false))
+    }
+
+    pub(crate) fn sequence_exec_observed(
+        &self,
+        request: &runmat_accelerate_api::ProviderSequenceRequest,
+        effect: &std::cell::Cell<bool>,
+    ) -> Result<GpuTensorHandle> {
+        let start = request.start;
+        let stop = request.stop;
+        let count = request.count;
         if count > u32::MAX as usize {
             return Err(anyhow!("linspace: sequence length exceeds GPU limits"));
         }
@@ -1019,6 +1039,7 @@ impl WgpuProvider {
         let shape = vec![1, count];
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer = self.create_storage_buffer(emission, count, "runmat-linspace-out")?;
+            effect.set(true);
             if count == 0 {
                 return Ok(out_buffer);
             }
@@ -1060,10 +1081,16 @@ impl WgpuProvider {
                             start,
                             step,
                             stop,
+                            first: request.first,
+                            last: request.last,
                             total: total_u32,
                             chunk: chunk_u32,
                             offset: offset_u32,
-                            _pad: 0,
+                            mode: u32::from(matches!(
+                                request.kind,
+                                runmat_accelerate_api::ProviderSequenceKind::Log10
+                            )),
+                            _pad: 0.0,
                         };
                         self.uniform_buffer(emission, &params, "runmat-linspace-params-f64")?
                     }
@@ -1072,11 +1099,16 @@ impl WgpuProvider {
                             start: start as f32,
                             step: step as f32,
                             stop: stop as f32,
-                            _pad0: 0.0,
+                            first: request.first as f32,
+                            last: request.last as f32,
                             total: total_u32,
                             chunk: chunk_u32,
                             offset: offset_u32,
-                            _pad1: 0,
+                            mode: u32::from(matches!(
+                                request.kind,
+                                runmat_accelerate_api::ProviderSequenceKind::Log10
+                            )),
+                            _pad: [0; 3],
                         };
                         self.uniform_buffer(emission, &params, "runmat-linspace-params-f32")?
                     }
