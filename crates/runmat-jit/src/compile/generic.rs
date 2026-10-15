@@ -26,6 +26,7 @@ impl GenericCompiler {
         specialized: bool,
     ) -> JitResult<runmat_native_executor::NativeExecutable> {
         assembly.verify()?;
+        assembly.target.require_host_executable()?;
         let mut flags = cranelift_codegen::settings::builder();
         flags
             .set("use_colocated_libcalls", "false")
@@ -35,10 +36,13 @@ impl GenericCompiler {
         if specialized {
             flags.set("opt_level", "speed").map_err(module_error)?;
         }
-        let isa = cranelift_native::builder()
-            .map_err(|error| JitError::Module(error.to_string()))?
-            .finish(cranelift_codegen::settings::Flags::new(flags))
-            .map_err(module_error)?;
+        // This module and its host-tuned code remain in-process behind the
+        // executor/cache owner; no portable machine-code cache key is claimed.
+        let isa = runmat_native_codegen::cranelift::compilation_isa(
+            &assembly.target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+            cranelift_codegen::settings::Flags::new(flags),
+        )?;
         let builder = JITBuilder::with_isa(isa, default_libcall_names());
         let mut module = JITModule::new(builder);
         let mut definitions = Vec::with_capacity(assembly.functions.len());

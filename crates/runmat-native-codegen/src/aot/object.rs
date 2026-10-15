@@ -67,10 +67,11 @@ pub fn emit_relocatable_object_for_runtime(
             },
         )
         .map_err(module_error)?;
-    let isa = cranelift_native::builder()
-        .map_err(module_error)?
-        .finish(cranelift_codegen::settings::Flags::new(flags))
-        .map_err(module_error)?;
+    let isa = crate::cranelift::compilation_isa(
+        &assembly.target,
+        crate::cranelift::IsaCompilationPurpose::SelectedBaselineObject,
+        cranelift_codegen::settings::Flags::new(flags),
+    )?;
     let builder = ObjectBuilder::new(isa, "runmat-user-program", default_libcall_names())
         .map_err(module_error)?;
     let mut module = ObjectModule::new(builder);

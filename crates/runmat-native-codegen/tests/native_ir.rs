@@ -1228,8 +1228,18 @@ fn verifier_rejects_omission_stale_effect_state_and_abi_drift() {
     );
 
     let mut wrong_abi = assembly;
-    wrong_abi.target.abi.encoded_version += 1;
-    assert_eq!(wrong_abi.verify().unwrap_err().code, "native.abi.binding");
+    let expected = match &mut wrong_abi.target {
+        NativeTarget::Native { probe, .. } => {
+            probe.abi_encoded_version += 1;
+            "native.target.abi"
+        }
+        NativeTarget::PortableWasm32 { schema_version } => {
+            *schema_version += 1;
+            "native.target.wasm_schema"
+        }
+        NativeTarget::UnavailableHost => panic!("lowered fixture must have an admissible target"),
+    };
+    assert_eq!(wrong_abi.verify().unwrap_err().code, expected);
 }
 
 #[test]
@@ -1249,10 +1259,172 @@ fn native_cache_identity_binds_target_and_abi() {
     );
 
     let mut cross_target = assembly.target;
-    cross_target.architecture = "not-the-current-architecture".into();
+    let expected = match &mut cross_target {
+        NativeTarget::Native { target, .. } => {
+            target.target.architecture = match target.target.architecture {
+                runmat_execution::host::NativeArchitecture::X86_64 => {
+                    runmat_execution::host::NativeArchitecture::Aarch64
+                }
+                runmat_execution::host::NativeArchitecture::Aarch64 => {
+                    runmat_execution::host::NativeArchitecture::X86_64
+                }
+            };
+            "native.target.contract"
+        }
+        NativeTarget::PortableWasm32 { schema_version } => {
+            *schema_version += 1;
+            "native.target.wasm_schema"
+        }
+        NativeTarget::UnavailableHost => panic!("lowered fixture must have an admissible target"),
+    };
+    assert_eq!(cross_target.validate().unwrap_err().code, expected);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn selected_baseline_objects_and_portable_wasm_have_distinct_admission_domains() {
+    use runmat_execution::host::{
+        NativeArchitecture, NativeCpuBaseline, NativeEnvironment, NativeOperatingSystem,
+    };
+    let host_isa_rejection =
+        |target: &NativeTarget| match runmat_native_codegen::cranelift::compilation_isa(
+            target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+            cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+        ) {
+            Err(error) => error.code,
+            Ok(_) => panic!("inadmissible target obtained a host-tuned ISA"),
+        };
+    let original = lower(&function(vec![assignment(1)]));
+    original.target.require_host_executable().unwrap();
+    let tuned = runmat_native_codegen::cranelift::compilation_isa(
+        &original.target,
+        runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+        cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+    )
+    .unwrap();
+    let host = cranelift_native::builder()
+        .unwrap()
+        .finish(cranelift_codegen::settings::Flags::new(
+            cranelift_codegen::settings::builder(),
+        ))
+        .unwrap();
+    assert_eq!(tuned.triple(), host.triple());
+    assert_eq!(tuned.isa_flags().iter().map(|flag| (flag.name, flag.value_string())).collect::<Vec<_>>(),
+        host.isa_flags().iter().map(|flag| (flag.name, flag.value_string())).collect::<Vec<_>>(),
+        "process-local JIT preserves canonical host feature detection rather than forcing portable baseline flags");
+    for (architecture, baseline) in [
+        (NativeArchitecture::X86_64, NativeCpuBaseline::X86_64V1),
+        (NativeArchitecture::Aarch64, NativeCpuBaseline::ArmV8A),
+    ] {
+        // Synthetic records exercise encoding/lowering, not target-built probe
+        // provenance, deployed ABI compatibility, or foreign execution.
+        let mut probe = runmat_runtime::native::native_abi_probe();
+        probe.architecture = architecture;
+        probe.operating_system = NativeOperatingSystem::Linux;
+        probe.environment = NativeEnvironment::Gnu;
+        let mut assembly = original.clone();
+        assembly.target = NativeTarget::from_probe(probe, baseline).unwrap();
+        assembly.native_cache_key = assembly
+            .target
+            .cache_key(
+                &assembly.executable_cache_key,
+                assembly.selected_entrypoint,
+                &assembly.selected_entrypoint_body,
+            )
+            .unwrap();
+        assembly.verify().unwrap();
+        let isa = runmat_native_codegen::cranelift::compilation_isa(
+            &assembly.target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::SelectedBaselineObject,
+            cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+        )
+        .unwrap();
+        assert!(isa
+            .isa_flags()
+            .iter()
+            .all(|flag| flag.as_bool() != Some(true)));
+        assert_eq!(
+            isa.triple().to_string(),
+            assembly.target.native_parts().unwrap().0.triple().unwrap()
+        );
+        let object = emit_relocatable_object(&assembly, NativeOptimization::Speed).unwrap();
+        assert!(!object.bytes.is_empty());
+        assert_eq!(object.manifest.target, assembly.target);
+        assert_eq!(
+            runmat_native_codegen::NativeAssembly::from_canonical_bytes(
+                &assembly.canonical_bytes().unwrap()
+            )
+            .unwrap(),
+            assembly
+        );
+        if assembly.target != original.target {
+            assert_eq!(
+                assembly.target.require_host_executable().unwrap_err().code,
+                "native.target.host_execution"
+            );
+            assert_eq!(
+                host_isa_rejection(&assembly.target),
+                "native.target.host_execution",
+                "foreign target must reject at the ISA owner before host feature detection"
+            );
+        }
+    }
+    let mut portable = original;
+    let mut shifted_probe = runmat_runtime::native::native_abi_probe();
+    shifted_probe.offsets.swap(0, 1);
+    let shifted = NativeTarget::from_probe(
+        shifted_probe,
+        portable.target.native_parts().unwrap().0.cpu_baseline,
+    )
+    .unwrap();
+    shifted.validate().unwrap();
     assert_eq!(
-        cross_target.validate().unwrap_err().code,
-        "native.target.cross_layout"
+        shifted.require_host_executable().unwrap_err().code,
+        "native.target.host_execution",
+        "self-consistent changed layout metadata is not the actual host ABI"
+    );
+    portable.target = NativeTarget::PortableWasm32 {
+        schema_version: runmat_native_codegen::PORTABLE_WASM_LOWERING_SCHEMA_VERSION,
+    };
+    portable.native_cache_key = portable
+        .target
+        .cache_key(
+            &portable.executable_cache_key,
+            portable.selected_entrypoint,
+            &portable.selected_entrypoint_body,
+        )
+        .unwrap();
+    portable.verify().unwrap();
+    assert_eq!(
+        runmat_native_codegen::NativeAssembly::from_canonical_bytes(
+            &portable.canonical_bytes().unwrap()
+        )
+        .unwrap(),
+        portable
+    );
+    assert_eq!(
+        portable.target.require_host_executable().unwrap_err().code,
+        "native.target.native_required"
+    );
+    assert_eq!(
+        emit_relocatable_object(&portable, NativeOptimization::Speed)
+            .unwrap_err()
+            .code,
+        "native.target.native_required"
+    );
+    let old = serde_json::json!({"architecture": "x86_64", "operating_system": "linux", "pointer_width": 64, "abi": runmat_native_codegen::abi::current_native_abi_binding()});
+    assert!(
+        serde_json::from_value::<NativeTarget>(old).is_err(),
+        "untagged prior target shape must not acquire a domain by default"
+    );
+    assert_eq!(
+        NativeTarget::UnavailableHost.validate().unwrap_err().code,
+        "native.target.host_unavailable"
+    );
+    assert_eq!(
+        host_isa_rejection(&NativeTarget::UnavailableHost),
+        "native.target.host_unavailable"
     );
 }
 
@@ -1768,7 +1940,12 @@ fn region_contract(id: RegionId) -> RegionContract {
 fn wasm_uses_the_same_generic_ir_contract() {
     let assembly = lower(&function(vec![assignment(1)]));
     assembly.verify().unwrap();
-    assert_eq!(assembly.target.architecture, "wasm32");
+    assert_eq!(
+        assembly.target,
+        NativeTarget::PortableWasm32 {
+            schema_version: runmat_native_codegen::PORTABLE_WASM_LOWERING_SCHEMA_VERSION
+        }
+    );
     assert_eq!(
         assembly,
         serde_json::from_slice(&serde_json::to_vec(&assembly).unwrap()).unwrap()

@@ -3,6 +3,7 @@ mod manifest;
 #[cfg(target_os = "windows")]
 mod msvc;
 mod product;
+mod probe;
 
 pub use embedded::embedded_runtime_archive;
 pub use manifest::{
@@ -12,4 +13,5 @@ pub use manifest::{
 pub(crate) use manifest::{MAX_RUNTIME_ARCHIVE_BYTES, MAX_RUNTIME_PAYLOAD_BYTES};
 #[cfg(target_os = "windows")]
 pub use msvc::{prepare_msvc_runtime_archive, PreparedMsvcRuntimeArchive};
+pub use probe::read_native_abi_probe;
 pub use product::{build_runtime_archive, RuntimeArchive};

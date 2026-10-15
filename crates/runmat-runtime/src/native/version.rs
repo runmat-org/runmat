@@ -8,7 +8,7 @@ use super::{
     NativeValueRef,
 };
 
-pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 6;
+pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 7;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,13 +23,14 @@ impl NativeAbiVersion {
     }
 }
 
-pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 5 };
+pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 6 };
+
+/// Single canonical preimage, also embedded by the target-built ABI probe.
+pub const NATIVE_ABI_CONTRACT_PREIMAGE: &[u8] = b"runmat-native-abi-v7\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-site-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0explicit-builtin-invocation-v3\0no-obsolete-slow-call-slot\0target-layout-probe-v1";
 
 /// Target-independent identity used by executable/runtime compatibility keys.
 pub fn native_abi_contract_fingerprint() -> runmat_execution::Digest {
-    runmat_execution::Digest::sha256(
-        b"runmat-native-abi-v6\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-site-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0explicit-builtin-invocation-v3\0no-obsolete-slow-call-slot",
-    )
+    runmat_execution::Digest::sha256(NATIVE_ABI_CONTRACT_PREIMAGE)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,7 +40,7 @@ pub struct NativeTypeLayout {
 }
 
 impl NativeTypeLayout {
-    fn of<T>() -> Self {
+    const fn of<T>() -> Self {
         Self {
             size: size_of::<T>(),
             alignment: align_of::<T>(),
@@ -75,9 +76,11 @@ pub struct NativeAbiLayout {
     pub site_request: NativeTypeLayout,
     pub site_outcome_kind: NativeTypeLayout,
     pub site_outcome: NativeTypeLayout,
+    /// Wire order is the shared NativeAbiField enumeration, never Rust layout.
+    pub field_offsets: [u32; runmat_execution::host::NativeAbiField::ALL.len()],
 }
 
-pub fn native_abi_layout() -> NativeAbiLayout {
+pub const fn native_abi_layout() -> NativeAbiLayout {
     NativeAbiLayout {
         pointer_width: usize::BITS as u16,
         host_status: NativeTypeLayout::of::<NativeHostStatus>(),
@@ -102,10 +105,32 @@ pub fn native_abi_layout() -> NativeAbiLayout {
         site_request: NativeTypeLayout::of::<NativeSiteRequest>(),
         site_outcome_kind: NativeTypeLayout::of::<NativeSiteOutcomeKind>(),
         site_outcome: NativeTypeLayout::of::<NativeSiteOutcome>(),
+        field_offsets: [
+            std::mem::offset_of!(NativeCall, host) as u32,
+            std::mem::offset_of!(NativeCall, frame) as u32,
+            std::mem::offset_of!(NativeFrame, resume) as u32,
+            std::mem::offset_of!(NativeResumeState, block) as u32,
+            std::mem::offset_of!(NativeHostVTable, context) as u32,
+            std::mem::offset_of!(NativeHostVTable, execute_site) as u32,
+            std::mem::offset_of!(NativeSiteRequest, function) as u32,
+            std::mem::offset_of!(NativeSiteRequest, block) as u32,
+            std::mem::offset_of!(NativeSiteRequest, position) as u32,
+            std::mem::offset_of!(NativeSiteRequest, phase) as u32,
+            std::mem::offset_of!(NativeSiteRequest, ordinal) as u32,
+            std::mem::offset_of!(NativeSiteRequest, reserved) as u32,
+            std::mem::offset_of!(NativeSiteOutcome, kind) as u32,
+            std::mem::offset_of!(NativeSiteOutcome, edge) as u32,
+            std::mem::offset_of!(NativeSiteOutcome, flags) as u32,
+            std::mem::offset_of!(NativeSiteOutcome, reserved) as u32,
+        ],
     }
 }
 
 pub fn native_abi_layout_fingerprint() -> runmat_execution::Digest {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(probe) = super::try_native_abi_probe() {
+        return runmat_execution::Digest::sha256(&probe.canonical_bytes());
+    }
     let layout = native_abi_layout();
     runmat_execution::Digest::sha256(format!(
         "runmat-native-layout-v1\0{}\0{:?}",
@@ -121,10 +146,10 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn version_and_contract_identity_are_stable() {
-        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0005);
+        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0006);
         assert_eq!(
             native_abi_contract_fingerprint().to_string(),
-            "sha256:a90ddaadcab108a87a7f8d734aa7c4e82ea170b0b2539a6efe66d7b9519a8ba3"
+            "sha256:11a42834618a1739096467355c73eb7ba41e5e4e04ee020a12fade19556ff790"
         );
     }
 

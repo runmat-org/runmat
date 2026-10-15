@@ -13,6 +13,10 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     assembly
         .verify()
         .map_err(|error| format!("standalone Native IR failed verification: {error}"))?;
+    assembly
+        .target
+        .require_host_executable()
+        .map_err(|error| format!("standalone target is not executable by this runtime: {error}"))?;
     let interop = &assembly.requirements.interop;
     let paired_ir_is_pure = interop.foreign_types.is_empty()
         && interop.adapters.is_empty()

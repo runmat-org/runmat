@@ -3,7 +3,7 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 10;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 11;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 7;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
@@ -404,15 +404,7 @@ pub use runmat_execution::host::{NativeObjectFormat, NativeOptimization};
 pub fn native_object_format_for_target(
     target: &NativeTarget,
 ) -> Result<NativeObjectFormat, crate::NativeCodegenError> {
-    match target.operating_system.as_str() {
-        "linux" => Ok(NativeObjectFormat::Elf),
-        "macos" => Ok(NativeObjectFormat::MachO),
-        "windows" => Ok(NativeObjectFormat::Coff),
-        _ => Err(crate::NativeCodegenError::new(
-            "native.object.format",
-            "target does not have a supported native object format",
-        )),
-    }
+    Ok(target.native_parts()?.0.target.object_format)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

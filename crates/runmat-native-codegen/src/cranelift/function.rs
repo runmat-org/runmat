@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use cranelift::prelude::*;
 
 use crate::{NativeCodegenError, NativeCodegenResult, NativeFunction, NativeTarget};
+use runmat_execution::host::NativeAbiField;
 use runmat_runtime::native::NativeSiteOutcomeKind;
 
 use super::abi::AbiTypes;
@@ -17,14 +18,7 @@ pub fn lower_function(
     function: &NativeFunction,
     target: &NativeTarget,
 ) -> NativeCodegenResult<CraneliftFunction> {
-    target.validate()?;
-    if target.pointer_width != usize::BITS as u16 {
-        return Err(NativeCodegenError::new(
-            "native.cranelift.pointer_width",
-            "Cranelift lowering requires the current target pointer width",
-        ));
-    }
-    let abi = AbiTypes::current();
+    let abi = AbiTypes::for_target(target)?;
     let mut ir = cranelift_codegen::ir::Function::with_name_signature(
         cranelift_codegen::ir::UserFuncName::user(0, function.id.0),
         abi.entry_signature.clone(),
@@ -72,7 +66,7 @@ pub fn lower_function(
         abi.pointer,
         MemFlags::new(),
         call,
-        super::abi::call_host_offset(),
+        abi.offset(NativeAbiField::CallHost),
     );
     let host_missing = builder.ins().icmp_imm(IntCC::Equal, host, 0);
     let host_ready = builder.create_block();
@@ -84,13 +78,13 @@ pub fn lower_function(
         abi.pointer,
         MemFlags::new(),
         host,
-        super::abi::host_context_offset(),
+        abi.offset(NativeAbiField::HostContext),
     );
     let execute_site = builder.ins().load(
         abi.pointer,
         MemFlags::new(),
         host,
-        super::abi::host_execute_site_offset(),
+        abi.offset(NativeAbiField::HostExecuteSite),
     );
     let execute_missing = builder.ins().icmp_imm(IntCC::Equal, execute_site, 0);
     let resume_dispatch = builder.create_block();
@@ -114,7 +108,7 @@ pub fn lower_function(
         context,
         execute_site,
     };
-    let slots = SiteSlots::new(&mut builder);
+    let slots = SiteSlots::new(&mut builder, &abi);
     for block in &function.blocks {
         builder.switch_to_block(blocks[&block.id]);
         for instruction in &block.instructions {
@@ -157,7 +151,7 @@ fn dispatch_resume_block(
         abi.pointer,
         MemFlags::new(),
         call,
-        super::abi::call_frame_offset(),
+        abi.offset(NativeAbiField::CallFrame),
     );
     let frame_missing = builder.ins().icmp_imm(IntCC::Equal, frame, 0);
     let resume_ready = builder.create_block();
@@ -169,7 +163,7 @@ fn dispatch_resume_block(
         abi.pointer,
         MemFlags::new(),
         frame,
-        super::abi::frame_resume_offset(),
+        abi.offset(NativeAbiField::FrameResume),
     );
     let resume_missing = builder.ins().icmp_imm(IntCC::Equal, resume, 0);
     let block_ready = builder.create_block();
@@ -181,7 +175,7 @@ fn dispatch_resume_block(
         types::I32,
         MemFlags::new(),
         resume,
-        super::abi::resume_block_offset(),
+        abi.offset(NativeAbiField::ResumeBlock),
     );
     for (index, (block, target)) in blocks.iter().enumerate() {
         let matches = builder

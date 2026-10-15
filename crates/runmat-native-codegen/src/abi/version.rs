@@ -24,7 +24,7 @@ pub fn validate_current_native_abi(binding: &NativeAbiBinding) -> NativeCodegenR
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
@@ -42,7 +42,18 @@ mod tests {
         foreign.validate().unwrap();
         assert!(validate_current_native_abi(&foreign).is_err());
         let mut target = crate::NativeTarget::current();
-        target.abi = foreign;
+        let crate::NativeTarget::Native {
+            target: selected, ..
+        } = &mut target
+        else {
+            panic!("native ABI fixture requires a native target")
+        };
+        selected.target.abi = foreign.identity().unwrap();
+        assert!(
+            selected.validate().is_ok(),
+            "portable target metadata alone is not native ABI admission"
+        );
         assert!(target.validate().is_err());
+        assert!(target.require_host_executable().is_err());
     }
 }
