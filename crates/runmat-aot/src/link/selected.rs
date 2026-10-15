@@ -56,7 +56,7 @@ pub fn link_selected_standalone(
 
 fn plan(
     selected: &SelectedNativeProduct<'_>,
-    inputs: &SelectedLinkInputs,
+    inputs: &SelectedLinkInputs<'_>,
     admission: &ExternalNativeLinkAdmission,
     identity: super::NativeProgramLinkIdentity,
 ) -> AotResult<LinkPlan> {

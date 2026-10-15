@@ -9,6 +9,34 @@ mod product;
 fn id(name: &str) -> ComponentId {
     ComponentId::new(name).unwrap()
 }
+
+#[test]
+fn authenticated_dependency_projection_reuses_scc_closure_without_unselected_roots() {
+    let (manifest, required, mut contents) = fixture();
+    let selected = manifest.select(&required, None).unwrap();
+    contents.retain(|id, _| selected.components().contains(id));
+    let verified = manifest
+        .verify_selected_bytes(&selected, &contents)
+        .unwrap();
+    let closure = verified
+        .component_dependency_closure(&id("runtime"))
+        .unwrap();
+    assert_eq!(
+        closure.into_iter().collect::<Vec<_>>(),
+        [id("a"), id("b"), id("runtime")]
+    );
+    assert_eq!(
+        verified
+            .component_dependency_closure(&id("linker"))
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        [id("linker")]
+    );
+    assert!(verified
+        .component_dependency_closure(&id("unused"))
+        .is_err());
+}
 fn fixture() -> (
     TargetPackManifest,
     TargetPackRequirements,

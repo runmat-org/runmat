@@ -4,6 +4,8 @@ pub mod archive;
 pub mod compile;
 mod error;
 pub mod link;
+pub mod installation;
+mod tree;
 mod object;
 
 pub use error::{AotError, AotResult};

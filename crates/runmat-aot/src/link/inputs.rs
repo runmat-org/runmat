@@ -1,24 +1,23 @@
 //! One private lease for exact selected build inputs and ordered native bytes.
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use runmat_execution::Digest;
-use runmat_execution_artifact::target_pack::{ComponentId, NativeBuildInput};
+use runmat_execution_artifact::target_pack::ComponentId;
 use runmat_native_codegen::aot::{RelocatableNativeObject, SelectedNativeProduct};
 
-use super::{build_tree::NativeBuildTree, toolchain::ExternalNativeLinkAdmission};
+use super::toolchain::ExternalNativeLinkAdmission;
+use crate::tree::{physical::write_new, resolve_build_tree, HostedNativeTree, ResolvedNativeTree};
 use crate::{archive::RuntimeArchive, AotError, AotResult};
 
 /// Explicit external bytes for a non-hermetic HostedDeclared input. Neither
 /// an ambient path nor a matching pack declaration synthesizes these bytes.
 #[derive(Default)]
 pub struct HostedNativeBuildTrees<'a> {
-    pub toolchain: Option<&'a [u8]>,
-    pub sysroot: Option<&'a [u8]>,
+    pub toolchain: Option<HostedNativeTree<'a>>,
+    pub sysroot: Option<HostedNativeTree<'a>>,
 }
 
-pub(super) struct SelectedLinkInputs {
+pub(super) struct SelectedLinkInputs<'a> {
     pub lease: tempfile::TempDir,
     pub object: PathBuf,
     pub runtime: PathBuf,
@@ -26,17 +25,17 @@ pub(super) struct SelectedLinkInputs {
     pub components: BTreeMap<ComponentId, PathBuf>,
     pub toolchain_root: PathBuf,
     pub sysroot_root: PathBuf,
-    toolchain: NativeBuildTree,
-    sysroot: NativeBuildTree,
+    toolchain: ResolvedNativeTree<'a>,
+    sysroot: ResolvedNativeTree<'a>,
 }
 
-impl SelectedLinkInputs {
+impl<'a> SelectedLinkInputs<'a> {
     pub fn stage(
-        selected: &SelectedNativeProduct<'_>,
+        selected: &'a SelectedNativeProduct<'_>,
         object: &RelocatableNativeObject,
         runtime: &RuntimeArchive,
         admission: &ExternalNativeLinkAdmission,
-        hosted: HostedNativeBuildTrees<'_>,
+        hosted: HostedNativeBuildTrees<'a>,
         parent: &Path,
     ) -> AotResult<Self> {
         super::plan::validate_pair(object, runtime)?;
@@ -48,19 +47,60 @@ impl SelectedLinkInputs {
         let product = selected.product().selected().expect("selected constructor");
         let contents = selected.contents();
         let manifest = contents.manifest();
-        let toolchain = tree(
-            selected,
+        let toolchain = resolve_build_tree(
+            contents,
             &manifest.build_inputs.linker,
             hosted.toolchain,
             admission.toolchain,
+            &admission.storage,
         )?;
-        let sysroot = tree(
-            selected,
+        let sysroot = resolve_build_tree(
+            contents,
             &manifest.build_inputs.sysroot,
             hosted.sysroot,
             admission.sysroot,
+            &admission.storage,
         )?;
         admission.validate(product.fingerprint().map_err(invalid)?, &toolchain)?;
+        admission.storage.file(object.bytes.len() as u64)?;
+        let mut bytes = toolchain
+            .manifest
+            .total_bytes
+            .checked_add(sysroot.manifest.total_bytes)
+            .and_then(|value| value.checked_add(object.bytes.len() as u64))
+            .ok_or_else(|| invalid("selected input extent overflow"))?;
+        for id in contents.selection().runtime_components() {
+            admission.storage.file(
+                contents
+                    .component_bytes(id)
+                    .ok_or_else(|| invalid("selected bytes are missing"))?
+                    .len() as u64,
+            )?;
+            bytes = bytes
+                .checked_add(
+                    contents
+                        .component_bytes(id)
+                        .ok_or_else(|| invalid("selected bytes are missing"))?
+                        .len() as u64,
+                )
+                .ok_or_else(|| invalid("selected input extent overflow"))?;
+        }
+        let additional_files = contents.selection().runtime_components().len() as u64 + 1;
+        let files = toolchain
+            .manifest
+            .file_count
+            .checked_add(sysroot.manifest.file_count)
+            .and_then(|count| count.checked_add(additional_files))
+            .ok_or_else(|| invalid("selected input count overflow"))?;
+        let entries = admission
+            .storage
+            .admit(&toolchain.manifest)?
+            .checked_add(admission.storage.admit(&sysroot.manifest)?)
+            .and_then(|count| count.checked_add(additional_files))
+            // Private lease, toolchain root, sysroot root, component root.
+            .and_then(|count| count.checked_add(4))
+            .ok_or_else(|| invalid("selected input count overflow"))?;
+        admission.storage.admit_total(entries, files, bytes)?;
         let decoded_runtime = runtime.decode()?;
         if contents.component_bytes(&manifest.runtime_component) != Some(decoded_runtime.as_slice())
         {
@@ -87,8 +127,8 @@ impl SelectedLinkInputs {
         write_new(&object_path, &object.bytes)?;
         let toolchain_root = lease.path().join("toolchain");
         let sysroot_root = lease.path().join("sysroot");
-        toolchain.stage(&toolchain_root)?;
-        sysroot.stage(&sysroot_root)?;
+        toolchain.stage(&toolchain_root, &admission.storage)?;
+        sysroot.stage(&sysroot_root, &admission.storage)?;
         let component_root = lease.path().join("components");
         std::fs::create_dir(&component_root).map_err(|error| {
             AotError::io("stage selected component directory", &component_root, error)
@@ -166,49 +206,6 @@ impl SelectedLinkInputs {
             .file(path.as_str())
             .ok_or_else(|| invalid("hosted dependency is not an exact regular sysroot member"))
     }
-}
-
-fn tree(
-    selected: &SelectedNativeProduct<'_>,
-    input: &NativeBuildInput,
-    hosted: Option<&[u8]>,
-    expected: Digest,
-) -> AotResult<NativeBuildTree> {
-    let bytes = match input {
-        NativeBuildInput::ContentAddressed { component } => {
-            if hosted.is_some() {
-                return Err(invalid(
-                    "external bytes cannot replace a content-addressed build input",
-                ));
-            }
-            selected
-                .contents()
-                .component_bytes(component)
-                .ok_or_else(|| invalid("retained build input bytes are missing"))?
-        }
-        NativeBuildInput::HostedDeclared { fingerprint } => {
-            if fingerprint != &expected {
-                return Err(invalid(
-                    "hosted build input differs from trusted expected tree identity",
-                ));
-            }
-            hosted.ok_or_else(|| {
-                invalid("hosted declaration requires explicit physical build-tree bytes")
-            })?
-        }
-    };
-    NativeBuildTree::decode(bytes, expected)
-}
-
-pub(super) fn write_new(path: &Path, bytes: &[u8]) -> AotResult<()> {
-    let mut file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| AotError::io("create private native input", path, error))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| AotError::io("write private native input", path, error))
 }
 
 fn verify_file(path: &Path, expected: &[u8]) -> AotResult<()> {

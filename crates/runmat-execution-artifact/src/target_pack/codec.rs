@@ -102,4 +102,23 @@ impl VerifiedTargetPackContents<'_> {
     pub fn component_bytes(&self, id: &ComponentId) -> Option<&[u8]> {
         self.contents.get(id).map(Vec::as_slice)
     }
+    /// Canonical SCC-safe graph projection within these authenticated bytes.
+    /// Returned IDs are metadata membership, never execution authority.
+    pub fn component_dependency_closure(
+        &self,
+        root: &ComponentId,
+    ) -> ArtifactResult<std::collections::BTreeSet<ComponentId>> {
+        if self.component_bytes(root).is_none() {
+            return Err(invalid("dependency root is not in this verified selection"));
+        }
+        let index = components::index(&self.manifest.components)?;
+        let mut reached = std::collections::BTreeSet::new();
+        components::retain(&index, [root.clone()], &mut reached)?;
+        if reached.iter().any(|id| self.component_bytes(id).is_none()) {
+            return Err(invalid(
+                "dependency closure is not authenticated in this selection",
+            ));
+        }
+        Ok(reached)
+    }
 }

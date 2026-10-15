@@ -1,5 +1,15 @@
 #[derive(Debug, thiserror::Error)]
 pub enum AotError {
+    #[error("native materialization resource unavailable: {message}")]
+    ResourceUnavailable { message: String },
+    #[error(
+        "installation handoff failed; completed generation retained at `{generation}`: {source}"
+    )]
+    InstallationPublication {
+        generation: std::path::PathBuf,
+        #[source]
+        source: Box<AotError>,
+    },
     #[error("atomic publication to `{output}` failed; prior destination was not moved; recoverable inputs retained at `{recovery}`: {source}")]
     Publication {
         output: std::path::PathBuf,

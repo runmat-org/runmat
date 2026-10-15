@@ -6,7 +6,7 @@ use crate::{archive::RuntimeArchive, AotError, AotResult};
 
 use super::{LinkerDriver, LinkerFamily};
 
-pub const NATIVE_LINK_PLAN_SCHEMA_VERSION: u16 = 2;
+pub const NATIVE_LINK_PLAN_SCHEMA_VERSION: u16 = 3;
 
 /// Exact authored object and runtime bytes, independent of the shared pack
 /// selection/tool qualification. Different programs cannot share this record.

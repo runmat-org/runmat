@@ -10,7 +10,7 @@ enum PublicationPolicy {
     Replace,
 }
 
-pub(super) fn publish(
+pub(crate) fn publish(
     lease: tempfile::TempDir,
     source: &Path,
     output: &Path,

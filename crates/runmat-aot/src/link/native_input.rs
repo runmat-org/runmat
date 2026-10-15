@@ -2,7 +2,7 @@
 use crate::{AotError, AotResult};
 
 #[derive(Clone, Copy)]
-pub(super) enum NativeImagePurpose {
+pub(crate) enum NativeImagePurpose {
     Dependency,
     FinalExecutable,
 }
@@ -10,7 +10,7 @@ use object::Object;
 use runmat_execution::host::{NativeArchitecture, NativeObjectFormat, NativeTargetIdentity};
 use runmat_execution_artifact::target_pack::TargetPackComponentKind;
 
-pub(super) fn validate(
+pub(crate) fn validate(
     bytes: &[u8],
     kind: TargetPackComponentKind,
     target: &NativeTargetIdentity,
@@ -78,7 +78,7 @@ fn validate_object(bytes: &[u8], target: &NativeTargetIdentity) -> AotResult<()>
     Ok(())
 }
 
-pub(super) fn validate_hosted_dependency(
+pub(crate) fn validate_hosted_dependency(
     bytes: &[u8],
     target: &NativeTargetIdentity,
 ) -> AotResult<()> {
@@ -92,7 +92,7 @@ pub(super) fn validate_hosted_dependency(
     validate_image(bytes, target, NativeImagePurpose::Dependency)
 }
 
-pub(super) fn validate_linked_program<'data, R: object::ReadRef<'data>>(
+pub(crate) fn validate_linked_program<'data, R: object::ReadRef<'data>>(
     bytes: R,
     target: &NativeTargetIdentity,
 ) -> AotResult<()> {

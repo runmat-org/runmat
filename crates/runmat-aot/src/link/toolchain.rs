@@ -7,7 +7,7 @@ use runmat_execution::Digest;
 use runmat_package::NormalizedRelativePath;
 use std::collections::BTreeMap;
 
-use super::build_tree::NativeBuildTree;
+use crate::tree::{NativeStorageGrant, ResolvedNativeTree};
 use crate::{AotError, AotResult};
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -64,6 +64,7 @@ pub struct NativeLinkBuildIdentity {
     pub toolchain: Digest,
     pub sysroot: Digest,
     pub qualification: Digest,
+    pub storage: NativeStorageGrant,
     /// A sequence, not a JSON map with complex enum keys.
     pub hosted_dependencies: Vec<(NativeHostedDependency, NormalizedRelativePath)>,
 }
@@ -80,6 +81,8 @@ pub struct ExternalNativeLinkAdmission {
     pub toolchain: Digest,
     pub sysroot: Digest,
     pub qualification: Digest,
+    /// Independent caller materialization permission, not a manifest claim.
+    pub storage: NativeStorageGrant,
     /// Exact reached hosted dependency locators. Runtime availability/install
     /// semantics remain a separately qualified hosted deployment obligation.
     pub hosted_dependencies: BTreeMap<NativeHostedDependency, NormalizedRelativePath>,
@@ -95,6 +98,7 @@ impl ExternalNativeLinkAdmission {
             toolchain: self.toolchain,
             sysroot: self.sysroot,
             qualification: self.qualification,
+            storage: self.storage,
             hosted_dependencies: self
                 .hosted_dependencies
                 .iter()
@@ -102,7 +106,7 @@ impl ExternalNativeLinkAdmission {
                 .collect(),
         }
     }
-    pub(super) fn validate(&self, product: Digest, tree: &NativeBuildTree) -> AotResult<()> {
+    pub(super) fn validate(&self, product: Digest, tree: &ResolvedNativeTree<'_>) -> AotResult<()> {
         if self.product != product
             || self.execution_host != NativeLinkExecutionHost::current()?
             || [
@@ -127,7 +131,7 @@ impl ExternalNativeLinkAdmission {
 
     fn validate_executable(
         &self,
-        tree: &NativeBuildTree,
+        tree: &ResolvedNativeTree<'_>,
         entrypoint: &NormalizedRelativePath,
     ) -> AotResult<()> {
         let bytes = tree.executable(entrypoint.as_str()).ok_or_else(|| {
