@@ -4,13 +4,10 @@ use runmat_value::{CharArray, ComplexStorage};
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -21,14 +18,11 @@ use runmat_value::{
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod descriptors;
+mod constructor;
 pub use descriptors::{
     NONZEROS_DESCRIPTOR, SPDIAGS_DESCRIPTOR, SPEYE_DESCRIPTOR, SPONES_DESCRIPTOR, SPRAND_DESCRIPTOR,
 };
@@ -50,53 +44,6 @@ const NONZEROS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     }];
 pub const NONZEROS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "v = nonzeros(integer_A)", inputs: &NONZEROS_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Stored nonzero values are copied in column order into a full same-class column. Host, sparse, scalar, and supported real gpuArray inputs preserve exact integer class; automatic residency may gather transparently and explicit residency is restored through the exact owner." }];
-
-const SPARSE_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer sparse value storage is a RunMat extension; the public sparse value domain is double, single, or logical.",
-    }];
-const SPARSE_INTEGER_DIMS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "m, n, or nzmax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Structural size and allocation controls are decoded exactly and range checked before conversion to platform dimensions.",
-    }];
-const SPARSE_INTEGER_SUBSCRIPT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "i and j",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "Integer row and column subscripts are decoded without binary64 conversion and must use one shared integer datatype.",
-    }];
-const SPARSE_INTEGER_TRIPLET_VALUE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "i and j",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "Integer row and column subscripts use one shared datatype and remain exact.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "v",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer stored values are independently compatibility-gated and retain their native class in RunMat mode.",
-    },
-];
-pub const SPARSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_A)", inputs: &SPARSE_INTEGER_A_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "RunMat mode constructs authoritative typed CSC value storage; MATLAB-compatible modes reject before provider access." },
-    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_m, integer_n, typename?)", inputs: &SPARSE_INTEGER_DIMS_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension controls select host sparse shape while typename selects documented double, single, or logical storage." },
-    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_SUBSCRIPT_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer subscripts remain exact through duplicate accumulation and CSC ordering; the stored value class follows v." },
-    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, integer_v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_TRIPLET_VALUE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The typed-value form is RunMat-only, sums duplicate entries with class-specific saturation, and stores exact native integer CSC values." },
-];
 
 const SPEYE_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -215,278 +162,11 @@ pub const SPDIAGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
     BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)", inputs: &SPDIAGS_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed offsets and dimensions are gated RunMat extensions decoded exactly before diagonal selection or allocation." },
 ];
 
-const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sparse matrix.",
-}];
-
-const SPARSE_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Full or sparse matrix to convert.",
-}];
-
-const SPARSE_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of columns.",
-    },
-];
-
-const SPARSE_INPUT_DIMS_TYPENAME: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sparse storage type: double or single.",
-    },
-];
-
-const SPARSE_INPUT_TRIPLETS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "i",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based row subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "j",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based column subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "v",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values for each row/column pair.",
-    },
-];
-
-const SPARSE_INPUT_TRIPLETS_DIMS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "i",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based row subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "j",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based column subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "v",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values for each row/column pair.",
-    },
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of columns.",
-    },
-];
-
-const SPARSE_INPUT_TRIPLETS_DIMS_NZMAX: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "i",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based row subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "j",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based column subscripts.",
-    },
-    BuiltinParamDescriptor {
-        name: "v",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values for each row/column pair.",
-    },
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "nzmax",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Allocation hint accepted for MATLAB compatibility.",
-    },
-];
-
-const SPARSE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(A)",
-        inputs: &SPARSE_INPUT_A,
-        outputs: &SPARSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(m, n)",
-        inputs: &SPARSE_INPUT_DIMS,
-        outputs: &SPARSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(m, n, typename)",
-        inputs: &SPARSE_INPUT_DIMS_TYPENAME,
-        outputs: &SPARSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(i, j, v)",
-        inputs: &SPARSE_INPUT_TRIPLETS,
-        outputs: &SPARSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(i, j, v, m, n)",
-        inputs: &SPARSE_INPUT_TRIPLETS_DIMS,
-        outputs: &SPARSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sparse(i, j, v, m, n, nzmax)",
-        inputs: &SPARSE_INPUT_TRIPLETS_DIMS_NZMAX,
-        outputs: &SPARSE_OUTPUT,
-    },
-];
-
-const SPARSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPARSE.INVALID_INPUT",
-    identifier: Some("RunMat:sparse:InvalidInput"),
-    when: "Inputs are not a supported sparse construction form.",
-    message: "sparse: invalid input",
+pub use runmat_builtins::{SPARSE_DESCRIPTOR, SPARSE_INTEGER_CAPABILITIES};
+use runmat_builtins::{
+    SPARSE_ERRORS, SPARSE_ERROR_INTERNAL, SPARSE_ERROR_INVALID_INDEX, SPARSE_ERROR_INVALID_INPUT,
+    SPARSE_INPUT_A, SPARSE_INPUT_DIMS,
 };
-
-const SPARSE_ERROR_INVALID_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPARSE.INVALID_INDEX",
-    identifier: Some("RunMat:sparse:InvalidIndex"),
-    when: "Row or column subscripts are nonpositive, noninteger, or outside explicit dimensions.",
-    message: "sparse: invalid index",
-};
-
-const SPARSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPARSE.INTERNAL",
-    identifier: Some("RunMat:sparse:Internal"),
-    when: "Sparse matrix materialisation fails internally.",
-    message: "sparse: internal error",
-};
-
-const SPARSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    SPARSE_ERROR_INVALID_INPUT,
-    SPARSE_ERROR_INVALID_INDEX,
-    SPARSE_ERROR_INTERNAL,
-];
-
-pub const SPARSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPARSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPARSE_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::sparse")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("sparse"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Sparse matrices are host-resident CSC values. GPU inputs are gathered before sparse construction because RunMat's acceleration API currently exposes dense tensor handles only.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::sparse")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Sparse construction is a representation-changing operation and is not fused.",
-};
-
-fn sparse_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args {
-        [Type::Tensor { shape: Some(shape) }] => Type::Tensor {
-            shape: Some(shape.clone()),
-        },
-        [Type::Logical { shape: Some(shape) }] => Type::Tensor {
-            shape: Some(shape.clone()),
-        },
-        [Type::Num | Type::Int, Type::Num | Type::Int] => Type::Tensor {
-            shape: Some(vec![None, None]),
-        },
-        _ => Type::tensor(),
-    }
-}
 
 fn sparse_error(
     error: &'static BuiltinErrorDescriptor,
@@ -501,23 +181,20 @@ fn sparse_error(
 
 #[runtime_builtin(
     name = "sparse",
-    category = "array/creation",
-    summary = "Create sparse matrices from full arrays or row/column/value triplets.",
-    keywords = "sparse,csc,matrix,nonzero,gpu",
-    accel = "custom",
-    type_resolver(sparse_type),
-    descriptor(crate::builtins::array::creation::sparse::SPARSE_DESCRIPTOR),
-    extensions(crate::compatibility::SPARSE_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::creation::sparse::SPARSE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &SPARSE_DESCRIPTOR,
+        &SPARSE_ERROR_INVALID_INPUT,
+        NAME,
+    )?;
     reject_disabled_integer_sparse_constructor(&args)?;
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(gpu_helpers::gather_value_async(&arg).await?);
-    }
-    construct_sparse(gathered).map(Value::SparseTensor)
+    constructor::prepare(args)?
+        .execute()
+        .await
+        .map(Value::SparseTensor)
 }
 
 #[runtime_builtin(
@@ -690,36 +367,6 @@ async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     spdiags_value(gathered)
 }
 
-fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
-    reject_disabled_integer_sparse_constructor(&args)?;
-    match args.len() {
-        1 => sparse_from_value(args.into_iter().next().expect("one argument")),
-        2 => {
-            let mut iter = args.into_iter();
-            let rows = parse_size_arg(iter.next().as_ref().expect("rows"), "m")?;
-            let cols = parse_size_arg(iter.next().as_ref().expect("cols"), "n")?;
-            Ok(SparseTensor::zeros(rows, cols))
-        }
-        3 if keyword_of(&args[2]).is_some() => {
-            let rows = parse_size_arg(&args[0], "m")?;
-            let cols = parse_size_arg(&args[1], "n")?;
-            match sparse_storage_class(&args[2], "sparse")? {
-                MatrixClass::Floating(NumericDType::F64) => Ok(SparseTensor::zeros(rows, cols)),
-                MatrixClass::Floating(NumericDType::F32) => Ok(SparseTensor::zeros_f32(rows, cols)),
-                MatrixClass::Logical => Ok(SparseTensor::zeros_logical(rows, cols)),
-                MatrixClass::Floating(_) => {
-                    unreachable!("sparse typename parser returned integer dtype")
-                }
-            }
-        }
-        3 | 5 | 6 => sparse_from_triplet_form(args),
-        _ => Err(sparse_error(
-            &SPARSE_ERROR_INVALID_INPUT,
-            "sparse: expected sparse(A), sparse(m,n), or sparse(i,j,v[,m,n[,nzmax]])",
-        )),
-    }
-}
-
 fn reject_disabled_integer_sparse_constructor(args: &[Value]) -> BuiltinResult<()> {
     let integer_payload = match args {
         [value] => value_is_real_integer(value),
@@ -848,10 +495,14 @@ fn sparse_storage_class(value: &Value, label: &str) -> BuiltinResult<MatrixClass
             format!("{label}: typename must be \"double\", \"single\", or \"logical\""),
         )
     })?;
-    match type_name.as_str() {
-        "double" => Ok(MatrixClass::Floating(NumericDType::F64)),
-        "single" => Ok(MatrixClass::Floating(NumericDType::F32)),
-        "logical" => Ok(MatrixClass::Logical),
+    match runmat_builtins::SparseStorageType::parse(&type_name) {
+        Some(runmat_builtins::SparseStorageType::Double) => {
+            Ok(MatrixClass::Floating(NumericDType::F64))
+        }
+        Some(runmat_builtins::SparseStorageType::Single) => {
+            Ok(MatrixClass::Floating(NumericDType::F32))
+        }
+        Some(runmat_builtins::SparseStorageType::Logical) => Ok(MatrixClass::Logical),
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!(
@@ -2759,12 +2410,12 @@ fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTens
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
-fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
-    validate_triplet_subscript_classes(&args[0], &args[1])?;
-    let rows_vec = triplet_subscripts(&args[0], "row")?;
-    let cols_vec = triplet_subscripts(&args[1], "column")?;
-    let values = triplet_values(&args[2])?;
-
+fn sparse_from_parsed_triplets(
+    rows_vec: Vec<usize>,
+    cols_vec: Vec<usize>,
+    values: TripletValues,
+    dimensions: Option<(usize, usize)>,
+) -> BuiltinResult<SparseTensor> {
     let target_length = rows_vec.len().max(cols_vec.len()).max(values.len());
 
     let rows_vec = if rows_vec.len() == 1 && target_length > 1 {
@@ -2786,20 +2437,8 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
         ));
     }
 
-    let explicit_dims = args.len() >= 5;
-    let mut rows = if explicit_dims {
-        parse_size_arg(&args[3], "m")?
-    } else {
-        0
-    };
-    let mut cols = if explicit_dims {
-        parse_size_arg(&args[4], "n")?
-    } else {
-        0
-    };
-    if args.len() == 6 {
-        let _ = parse_size_arg(&args[5], "nzmax")?;
-    }
+    let explicit_dims = dimensions.is_some();
+    let (mut rows, mut cols) = dimensions.unwrap_or((0, 0));
 
     let mut coordinates = Vec::with_capacity(target_length);
     for (&row, &col) in rows_vec.iter().zip(cols_vec.iter()) {
@@ -2842,20 +2481,28 @@ fn validate_triplet_subscript_classes(rows: &Value, cols: &Value) -> BuiltinResu
         &SPARSE_ERROR_INVALID_INPUT,
         match (row_class, col_class) {
             (Some(row), Some(col)) => format!(
-                "sparse: integer row and column subscripts must have the same datatype, got {row} and {col}"
+                "sparse: integer row and column subscripts must have the same datatype, got {} and {}", row.class_name(), col.class_name()
             ),
             _ => "sparse: when either row or column subscripts use an integer datatype, both must use the same integer datatype".to_string(),
         },
     ))
 }
 
-fn integer_subscript_class(value: &Value) -> Option<&'static str> {
-    match value {
-        Value::Int(value) => Some(value.class_name()),
-        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
-        Value::SparseTensor(sparse) => sparse.integer_storage().map(IntegerStorage::class_name),
-        _ => None,
-    }
+fn integer_subscript_class(value: &Value) -> Option<runmat_types::IntegerClass> {
+    let class = match value {
+        Value::GpuTensor(handle) => {
+            return runmat_accelerate_api::handle_integer_type(handle).map(Into::into)
+        }
+        Value::Int(value) => value.numeric_dtype().class_identity(),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            tensor.numeric_dtype().class_identity()
+        }
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            sparse.numeric_dtype()?.class_identity()
+        }
+        _ => return None,
+    };
+    runmat_types::NumericClass::from_class_identity(&class)?.integer_class()
 }
 
 enum TripletValues {
@@ -4243,19 +3890,114 @@ pub(crate) mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn sparse_provider_contract_is_explicitly_host_resident() {
-        assert!(GPU_SPEC.provider_hooks.is_empty());
-        assert!(matches!(
-            GPU_SPEC.residency,
-            ResidencyPolicy::GatherImmediately
-        ));
+        use runmat_accelerate_api::{
+            AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+        };
+        use std::{
+            future::Future,
+            sync::atomic::{AtomicUsize, Ordering},
+            task::{Context, Poll},
+        };
+        struct PendingOwner {
+            allocations: runmat_accelerate_api::test_support::TestAllocationOwner,
+            downloads: AtomicUsize,
+        }
+        impl AccelProvider for PendingOwner {
+            fn device_id(&self) -> u32 {
+                self.allocations.device_id()
+            }
+            fn device_info(&self) -> String {
+                "sparse-pending-readback".into()
+            }
+            fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+                panic!("readback only")
+            }
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                panic!("class-preserving readback")
+            }
+            fn download_numeric<'a>(
+                &'a self,
+                _: &'a GpuTensorHandle,
+            ) -> AccelNumericDownloadFuture<'a> {
+                Box::pin(async move {
+                    self.downloads.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending().await
+                })
+            }
+        }
+        let placement = runmat_builtins::SPARSE_CATALOG_ENTRY.placement;
         assert_eq!(
-            GPU_SPEC.supported_precisions,
-            &[ScalarType::F32, ScalarType::F64]
+            placement.residency,
+            runmat_builtins::BuiltinResidencyPolicy::GatherToHost
         );
-        assert!(GPU_SPEC.notes.contains("host-resident CSC"));
-        assert!(GPU_SPEC.notes.contains("dense tensor handles only"));
+        assert_eq!(
+            placement.accelerator,
+            runmat_builtins::BuiltinAcceleratorPolicy::Forbidden
+        );
+        assert_eq!(
+            placement.fusion,
+            runmat_builtins::BuiltinFusionPolicy::Boundary
+        );
+        // A live handle with no registered provider distinguishes domain
+        // rejection from accidentally attempting a download first.
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = Value::GpuTensor(allocation.handle.clone());
+        for args in [
+            vec![resident.clone(), Value::Num(1.0), Value::Complex(1.0, 1.0)],
+            vec![
+                resident.clone(),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(-1.0),
+                Value::Num(3.0),
+            ],
+            vec![
+                resident.clone(),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(1.0),
+            ],
+        ] {
+            let error = sparse_builtin(args).expect_err("host-invalid call before readback");
+            assert_eq!(error.identifier(), SPARSE_ERROR_INVALID_INPUT.identifier);
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let error =
+                sparse_builtin(vec![resident.clone()]).expect_err("output count before readback");
+            assert_eq!(error.identifier(), SPARSE_ERROR_INVALID_INPUT.identifier);
+        }
+        let future = super::sparse_builtin(vec![resident]);
+        drop(future);
+        let owner = Box::leak(Box::new(PendingOwner {
+            allocations: owner,
+            downloads: AtomicUsize::new(0),
+        }));
+        // SAFETY: this namespace's provider remains alive for the test process.
+        unsafe { runmat_accelerate_api::register_device_provider(owner) };
+        let mut future = Box::pin(super::sparse_builtin(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 1);
+        drop(future);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 
     #[cfg(feature = "wgpu")]

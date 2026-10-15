@@ -10,11 +10,13 @@ mod r#true;
 mod zeros;
 mod empty;
 mod magic;
+mod sparse;
 
 pub use empty::*;
 pub use full::*;
 pub use inf::*;
 pub use magic::*;
+pub use sparse::*;
 pub use nan::*;
 pub use r#false::*;
 pub use r#true::*;
@@ -29,6 +31,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(zeros::ENTRIES.iter().copied());
     values.extend(empty::ENTRIES.iter().copied());
     values.extend(magic::ENTRIES.iter().copied());
+    values.extend(sparse::ENTRIES.iter().copied());
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
