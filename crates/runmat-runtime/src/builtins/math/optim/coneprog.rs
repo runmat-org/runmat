@@ -371,7 +371,7 @@ async fn split_options(rest: Vec<Value>) -> BuiltinResult<(Vec<Value>, SolverOpt
         return Ok((rest, SolverOptions::default()));
     };
     if let Value::Struct(st) = last {
-        if is_options_struct(&st) {
+        if is_options_struct(st) {
             let options = gathered_options(st).await?;
             let mut without = rest;
             without.pop();

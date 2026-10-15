@@ -30,9 +30,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         )),
         Some(ValueFact {
             kind: ValueKindFact::Struct(options),
-            storage,
+            storage: StorageFact::Scalar | StorageFact::Unknown,
             ..
-        }) if matches!(storage, StorageFact::Scalar | StorageFact::Unknown) => {
+        }) => {
             let has_solver = options
                 .fields
                 .keys()
