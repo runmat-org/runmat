@@ -15,8 +15,7 @@ use runmat_runtime::builtins::common::spec::{
 };
 use runmat_runtime::value_fact::value_fact;
 use runmat_types::{
-    infer_binary, infer_unary, CallRequest, NumericClass, NumericDomain, OperatorKind,
-    OutputSelection, ValueFact,
+    infer_binary, infer_unary, CallRequest, NumericClass, NumericDomain, OutputSelection, ValueFact,
 };
 use runmat_value::Value;
 use serde::Serialize;
@@ -705,21 +704,6 @@ fn primitive_fact(operation: PrimitiveOp, arguments: &[ValueFact]) -> Result<Val
         ));
     }
     let operator = match operation {
-        PrimitiveOp::Add => OperatorKind::Add,
-        PrimitiveOp::Sub => OperatorKind::Subtract,
-        PrimitiveOp::Mul => OperatorKind::MatrixMultiply,
-        PrimitiveOp::ElemMul => OperatorKind::ElementwiseMultiply,
-        PrimitiveOp::ElemDiv => OperatorKind::ElementwiseDivide,
-        PrimitiveOp::ElemLeftDiv => OperatorKind::ElementwiseLeftDivide,
-        PrimitiveOp::Neg => OperatorKind::UnaryMinus,
-        PrimitiveOp::UPlus => OperatorKind::UnaryPlus,
-        PrimitiveOp::LessEqual => OperatorKind::LessEqual,
-        PrimitiveOp::Less => OperatorKind::Less,
-        PrimitiveOp::Greater => OperatorKind::Greater,
-        PrimitiveOp::GreaterEqual => OperatorKind::GreaterEqual,
-        PrimitiveOp::Equal => OperatorKind::Equal,
-        PrimitiveOp::NotEqual => OperatorKind::NotEqual,
-        PrimitiveOp::Transpose => OperatorKind::Transpose,
         // Real operands alone do not establish power's result domain or its
         // exceptional-value semantics. The operation owner must supply proof.
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
@@ -727,6 +711,7 @@ fn primitive_fact(operation: PrimitiveOp, arguments: &[ValueFact]) -> Result<Val
                 "fusion power requires operation-owned domain evidence"
             ));
         }
+        _ => operation.operator_kind(),
     };
     let inference = match arguments {
         [operand] => infer_unary(operator, operand),

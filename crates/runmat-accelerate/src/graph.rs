@@ -113,6 +113,32 @@ pub enum PrimitiveOp {
     Transpose,
 }
 
+impl PrimitiveOp {
+    /// Language identity, shared by inference and exact host-owner selection.
+    pub const fn operator_kind(self) -> runmat_types::OperatorKind {
+        use runmat_types::OperatorKind as O;
+        match self {
+            Self::Add => O::Add,
+            Self::Sub => O::Subtract,
+            Self::Mul => O::MatrixMultiply,
+            Self::Pow => O::MatrixPower,
+            Self::Neg => O::UnaryMinus,
+            Self::UPlus => O::UnaryPlus,
+            Self::ElemMul => O::ElementwiseMultiply,
+            Self::ElemDiv => O::ElementwiseDivide,
+            Self::ElemPow => O::ElementwisePower,
+            Self::ElemLeftDiv => O::ElementwiseLeftDivide,
+            Self::LessEqual => O::LessEqual,
+            Self::Less => O::Less,
+            Self::Greater => O::Greater,
+            Self::GreaterEqual => O::GreaterEqual,
+            Self::Equal => O::Equal,
+            Self::NotEqual => O::NotEqual,
+            Self::Transpose => O::Transpose,
+        }
+    }
+}
+
 impl fmt::Display for PrimitiveOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {

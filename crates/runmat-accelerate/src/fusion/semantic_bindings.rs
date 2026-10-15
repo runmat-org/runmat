@@ -49,10 +49,26 @@ pub(crate) fn selected_host_binding_for_primitive(
     op: PrimitiveOp,
     runtime: Option<&runmat_runtime::context::RuntimeContext>,
 ) -> Option<BuiltinBindingIdentity> {
-    let entry = match op {
-        PrimitiveOp::Add => &runmat_builtins::PLUS_CATALOG_ENTRY,
-        _ => return None,
-    };
+    if !matches!(
+        op,
+        PrimitiveOp::Add
+            | PrimitiveOp::Sub
+            | PrimitiveOp::ElemMul
+            | PrimitiveOp::ElemDiv
+            | PrimitiveOp::ElemLeftDiv
+            | PrimitiveOp::ElemPow
+    ) {
+        return None;
+    }
+    let name = op.operator_kind().overload_name()?;
+    selected_canonical_host_binding(name.display_name(), runtime)
+}
+
+pub(crate) fn selected_canonical_host_binding(
+    name: &str,
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
+) -> Option<BuiltinBindingIdentity> {
+    let entry = builtin_catalog_entry_by_name(name)?;
     let [binding] = entry.bindings else {
         return None;
     };

@@ -39,6 +39,22 @@ where
 {
     let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
         .map_err(|cause| cause.into_runtime_error())?;
+    if input_count == 2 {
+        if let Some(route) = crate::builtins::math::host_route::canonical(
+            context,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            [&left, &right].into_iter(),
+        ) {
+            // Every owner using this adapter branches only on these operands;
+            // an unqualified real host pair runs its existing host-only body.
+            let output = body(left, right).await?;
+            route.confirm_host_branch(
+                context.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            );
+            return Ok(output);
+        }
+    }
     let admitted = input_count == 2
         && match (&left, &right) {
             (Value::Tensor(a), Value::Tensor(b)) => {

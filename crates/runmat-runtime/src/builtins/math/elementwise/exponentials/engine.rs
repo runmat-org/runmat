@@ -8,7 +8,11 @@ use super::operation::ExponentialOperation;
 #[cfg(test)]
 mod tests;
 
-pub(super) async fn execute(operation: ExponentialOperation, value: Value) -> BuiltinResult<Value> {
+pub(super) async fn execute(
+    runtime: Option<&crate::context::RuntimeContext>,
+    operation: ExponentialOperation,
+    value: Value,
+) -> BuiltinResult<Value> {
     if let Some(function) = operation.symbolic_function() {
         if let Some(symbolic) = symbolic_function(&value, function) {
             return Ok(symbolic);
@@ -17,13 +21,14 @@ pub(super) async fn execute(operation: ExponentialOperation, value: Value) -> Bu
     super::extensions::ensure(operation, &value)?;
     match value {
         Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
-            super::table::evaluate(operation, object).await
+            super::table::evaluate(runtime, operation, object).await
         }
-        value => execute_non_table(operation, value).await,
+        value => execute_non_table(runtime, operation, value).await,
     }
 }
 
 pub(super) async fn execute_non_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     operation: ExponentialOperation,
     value: Value,
 ) -> BuiltinResult<Value> {
@@ -36,6 +41,20 @@ pub(super) async fn execute_non_table(
     match value {
         Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
         Value::SparseTensor(sparse) => super::sparse::evaluate(operation, sparse),
-        value => super::host::evaluate(operation, value),
+        value => {
+            let route = crate::builtins::math::host_route::canonical(
+                runtime,
+                crate::context::VmFusionHostInstruction::ElementwiseCall,
+                std::iter::once(&value),
+            );
+            let output = super::host::evaluate(operation, value)?;
+            if let Some(route) = route {
+                route.confirm_host_branch(
+                    runtime.unwrap(),
+                    crate::context::VmFusionHostInstruction::ElementwiseCall,
+                );
+            }
+            Ok(output)
+        }
     }
 }

@@ -35,6 +35,44 @@ pub(super) struct AdmittedBindings {
 }
 
 impl AdmittedBindings {
+    /// Intrinsic VM numeric owners retain their operator identity. Unary minus
+    /// also authenticates its real canonical `times` dependency; scalar matrix
+    /// multiplication deliberately does not borrow a named mtimes override.
+    pub fn host_operations(
+        &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> Option<Vec<runmat_runtime::context::VmFusionHostOperation>> {
+        use runmat_runtime::context::VmFusionHostOperation as H;
+        let mut operations = Vec::new();
+        for operation in &self.operations {
+            match &operation.identity {
+                Identity::Primitive(
+                    op @ (PrimitiveOp::Neg | PrimitiveOp::UPlus | PrimitiveOp::Mul),
+                ) => {
+                    operations.push(H::Intrinsic(op.operator_kind()));
+                    if *op == PrimitiveOp::Neg {
+                        let times =
+                            runmat_types::OperatorKind::ElementwiseMultiply.overload_name()?;
+                        operations.push(H::Builtin(
+                            crate::fusion::semantic_bindings::selected_canonical_host_binding(
+                                times.display_name(),
+                                runtime,
+                            )?,
+                        ));
+                    }
+                }
+                Identity::Primitive(op) => operations.push(H::Builtin(
+                    selected_host_binding_for_primitive(*op, runtime)?,
+                )),
+                Identity::Call {
+                    binding: SelectedFusionIdentity::Canonical(binding),
+                    ..
+                } => operations.push(H::Builtin(*binding)),
+                Identity::Call { .. } => return None,
+            }
+        }
+        Some(operations)
+    }
     /// Exact canonical implementations already captured for the selected
     /// fusion program. Legacy or opaque entries cannot certify a VM host
     /// region's inner execution.

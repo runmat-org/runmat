@@ -30,6 +30,22 @@ where
 {
     let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
         .map_err(|cause| cause.into_runtime_error())?;
+    if input_count == 2 {
+        if let Some(route) = crate::builtins::math::host_route::canonical(
+            runtime,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            [&left, &right].into_iter(),
+        ) {
+            // The canonical power body still owns domain/class arithmetic;
+            // only operand promotion is bypassed for the selected host route.
+            let output = body(left, right).await?;
+            route.confirm_host_branch(
+                runtime.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            );
+            return Ok(output);
+        }
+    }
     let admitted = input_count == 2 && [&left, &right].into_iter().all(|value| {
         matches!(value, Value::Tensor(t) if matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     });

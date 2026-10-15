@@ -71,6 +71,17 @@ pub async fn value_matmul(
     crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::mtimes_eval(a, b).await
 }
 
+pub async fn value_matmul_in_context(
+    context: &crate::context::RuntimeContext,
+    a: &runmat_value::Value,
+    b: &runmat_value::Value,
+) -> BuiltinResult<runmat_value::Value> {
+    crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::mtimes_eval_in_context(
+        context, a, b,
+    )
+    .await
+}
+
 fn complex_matrix_mul(
     a: &runmat_value::ComplexTensor,
     b: &runmat_value::ComplexTensor,

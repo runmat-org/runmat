@@ -20,8 +20,12 @@ pub(super) const OPERATION: ExponentialOperation = ExponentialOperation::Expm1;
 #[runtime_builtin(
     name = "expm1",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::elementwise::exponentials::expm1"
 )]
-async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
-    super::engine::execute(OPERATION, value).await
+async fn expm1_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    super::engine::execute(runtime.as_ref(), OPERATION, value).await
 }

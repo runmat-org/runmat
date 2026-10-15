@@ -13,11 +13,19 @@ pub async fn promote_binary_in_context(
     b: &Value,
 ) -> ProviderExecutionResult<(Value, Value)> {
     if let Some(route) = runtime.vm_fusion_host_route() {
-        if route.allows_host_promotion(runtime) && matches!(op, BinaryOp::Elementwise) {
-            if matches!((a, b),
-                (Value::Tensor(left), Value::Tensor(right))
-                    if left.numeric_dtype() == NumericDType::F32
-                        && right.numeric_dtype() == NumericDType::F32)
+        if route.allows_host_promotion(runtime) {
+            let host = |value: &Value| {
+                matches!(value, Value::Num(_))
+                    || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
+            };
+            let scalar = |value: &Value| {
+                matches!(value, Value::Num(_))
+                    || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
+            };
+            if host(a)
+                && host(b)
+                && (matches!(op, BinaryOp::Elementwise)
+                    || (matches!(op, BinaryOp::MatMul) && (scalar(a) || scalar(b))))
             {
                 return Ok((a.clone(), b.clone()));
             }

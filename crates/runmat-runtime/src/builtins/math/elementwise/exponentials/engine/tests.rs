@@ -14,6 +14,7 @@ fn complex_integer_host_rejection_uses_selected_operation_error() {
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).unwrap();
         for error in [
             block_on(execute_non_table(
+                None,
                 operation,
                 Value::ComplexTensor(tensor.clone()),
             ))
@@ -41,6 +42,7 @@ fn resident_complex_integer_rejection_precedes_provider_lookup() {
             .unwrap();
         assert!(runmat_accelerate_api::provider().is_none());
         let error = block_on(execute_non_table(
+            None,
             operation,
             Value::GpuTensor(allocation.handle.clone()),
         ))

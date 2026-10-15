@@ -136,6 +136,20 @@ impl VmFusionCompletionRight {
         runtime: &RuntimeContext,
         expected_bindings: Vec<BuiltinBindingIdentity>,
     ) -> Option<VmFusionHostRoute> {
+        self.host_route_operations(
+            runtime,
+            expected_bindings
+                .into_iter()
+                .map(super::VmFusionHostOperation::Builtin)
+                .collect(),
+        )
+    }
+
+    pub fn host_route_operations(
+        &self,
+        runtime: &RuntimeContext,
+        expected_operations: Vec<super::VmFusionHostOperation>,
+    ) -> Option<VmFusionHostRoute> {
         let session = self.revalidated_session(runtime)?;
         let placement = runtime.service_ports().placement()?;
         VmFusionHostRoute::new(
@@ -148,7 +162,7 @@ impl VmFusionCompletionRight {
                 issuer_live: self.issuer_live.clone(),
                 generation: session.generation_permit(),
             },
-            expected_bindings,
+            expected_operations,
         )
     }
     /// Selection may borrow the exact session revision, never manufacture one.

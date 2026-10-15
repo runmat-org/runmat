@@ -12,6 +12,140 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn general_numeric_host_owners_confirm_single_double_intrinsics_and_calls() {
+    use crate::context::{VmFusionHostInstruction as I, VmFusionHostOperation as H};
+    use futures::executor::block_on;
+    use runmat_types::OperatorKind;
+    use runmat_value::{NumericDType, Tensor, Value};
+    runmat_gc::gc_test_context(|| {
+        for single in [false, true] {
+            for case in 0..12 {
+                let service = Rc::new(SessionWitness::default());
+                let selected = context(Some(service), Some(program(b"general-host-owner")));
+                let installed = VmFusionInstalledRegion::install(
+                    &selected,
+                    semantic(b"numeric-owner"),
+                    0,
+                    0,
+                    0,
+                )
+                .unwrap();
+                let (instruction, operations, name) = match case {
+                    0 => (
+                        I::Intrinsic(OperatorKind::UnaryMinus),
+                        vec![
+                            H::Intrinsic(OperatorKind::UnaryMinus),
+                            H::Builtin(runmat_builtins::TIMES_CATALOG_ENTRY.binding_identity(
+                                &runmat_builtins::TIMES_CATALOG_ENTRY.bindings[0],
+                            )),
+                        ],
+                        None,
+                    ),
+                    1 => (
+                        I::Intrinsic(OperatorKind::MatrixMultiply),
+                        vec![H::Intrinsic(OperatorKind::MatrixMultiply)],
+                        None,
+                    ),
+                    _ => {
+                        let name = [
+                            "times", "sin", "exp", "tanh", "power", "expm1", "log", "log10",
+                            "log1p", "log2",
+                        ][case - 2];
+                        let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
+                        (
+                            if case == 2 || case == 6 {
+                                I::ElementwiseBinary
+                            } else {
+                                I::ElementwiseCall
+                            },
+                            vec![H::Builtin(entry.binding_identity(&entry.bindings[0]))],
+                            Some(name),
+                        )
+                    }
+                };
+                let route = installed
+                    .right(&selected)
+                    .unwrap()
+                    .host_route_operations(&selected, operations)
+                    .unwrap();
+                route.begin_instruction(0, instruction);
+                let runtime = selected
+                    .clone()
+                    .with_vm_fusion_host_route(Some(route.clone()));
+                let value = Value::Tensor(if single {
+                    Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap()
+                } else {
+                    Tensor::new(vec![0.25, 0.5], vec![1, 2]).unwrap()
+                });
+                let result = match case {
+                    0 => block_on(crate::unary_arithmetic::evaluate_in_context(
+                        Some(&runtime),
+                        crate::unary_arithmetic::UnaryArithmeticOperation::Minus,
+                        value,
+                    ))
+                    .unwrap(),
+                    1 => crate::execution::RootedValue::new(
+                        block_on(crate::value_matmul_in_context(
+                            &runtime,
+                            &Value::Num(4.0),
+                            &value,
+                        ))
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                    _ => {
+                        let args = if case == 2 || case == 6 {
+                            vec![value, Value::Num(2.0)]
+                        } else {
+                            vec![value]
+                        };
+                        block_on(crate::call_builtin_async_in_context(
+                            &runtime,
+                            name.unwrap(),
+                            &args,
+                        ))
+                        .unwrap()
+                    }
+                };
+                let Value::Tensor(output) = result.value() else {
+                    panic!("numeric owner must return its real host tensor");
+                };
+                assert_eq!(
+                    output.numeric_dtype(),
+                    if single {
+                        NumericDType::F32
+                    } else {
+                        NumericDType::F64
+                    }
+                );
+                for (actual, x) in output.materialize_f64().iter().zip([0.25f64, 0.5]) {
+                    let expected = match case {
+                        0 => -x,
+                        1 => 4.0 * x,
+                        2 => 2.0 * x,
+                        3 => x.sin(),
+                        4 => x.exp(),
+                        5 => x.tanh(),
+                        6 => x * x,
+                        7 => x.exp_m1(),
+                        8 => x.ln(),
+                        9 => x.log10(),
+                        10 => x.ln_1p(),
+                        _ => x.log2(),
+                    };
+                    assert!((actual - expected).abs() < if single { 1e-6 } else { 1e-12 });
+                }
+                route.instruction_exit(0);
+                assert!(
+                    route.complete(),
+                    "actual numeric owner did not confirm case={case} single={single}"
+                );
+            }
+        }
+    });
+}
+
 #[derive(Default)]
 struct SessionWitness {
     registrations: Cell<usize>,

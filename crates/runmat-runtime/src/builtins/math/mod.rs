@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v5
 
 pub mod bitwise;
+pub(crate) mod host_route;
 pub mod discrete;
 pub mod elementwise;
 pub mod fft;

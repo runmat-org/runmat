@@ -672,7 +672,7 @@ pub use builtins::common::elementwise::{
     elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow, power,
 };
 pub use builtins::common::indexing::perform_indexing;
-pub use builtins::common::matrix::value_matmul;
+pub use builtins::common::matrix::{value_matmul, value_matmul_in_context};
 // Explicitly re-export for external users of the VM that build matrices from values
 // (kept above)
 // Note: constants and mathematics modules only contain #[runtime_builtin] functions

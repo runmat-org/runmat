@@ -73,6 +73,20 @@ where
 {
     let _input = RootedValueLease::for_values(std::iter::once(&value))
         .map_err(|cause| cause.into_runtime_error())?;
+    if signature == 0 && input_count == 1 {
+        if let Some(route) = crate::builtins::math::host_route::canonical(
+            runtime,
+            crate::context::VmFusionHostInstruction::ElementwiseCall,
+            std::iter::once(&value),
+        ) {
+            let output = execute(value).await?;
+            route.confirm_host_branch(
+                runtime.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseCall,
+            );
+            return Ok(output);
+        }
+    }
     if !admits(&value, identity)? {
         // These representations use the identity's exact host/complex or
         // owner-restoring path; they are not inputs to a real floating hook.

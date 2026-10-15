@@ -150,7 +150,7 @@ pub use vm_fusion_completion::{
     VmFusionInstalledRegion, VmFusionRegionRegistration, VmFusionSemanticIdentity,
     VmFusionSessionRegistration,
 };
-pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostRoute};
+pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostOperation, VmFusionHostRoute};
 
 #[cfg(test)]
 mod display_tests;

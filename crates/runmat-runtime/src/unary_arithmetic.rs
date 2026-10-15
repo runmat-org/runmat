@@ -56,6 +56,15 @@ pub async fn evaluate_in_context(
 
     match operation {
         UnaryArithmeticOperation::Plus => {
+            if crate::builtins::math::host_route::real_floating_host(&value) {
+                if let Some(context) = context {
+                    if let Some(route) = context.vm_fusion_host_route() {
+                        if route.allows_intrinsic_host(context, operator) {
+                            route.confirm_intrinsic_host(context, operator);
+                        }
+                    }
+                }
+            }
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
         }
         UnaryArithmeticOperation::Minus => match context {

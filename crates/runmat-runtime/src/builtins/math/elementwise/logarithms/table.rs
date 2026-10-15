@@ -9,6 +9,8 @@ pub(super) async fn evaluate(
     operation: LogarithmOperation,
     object: ObjectInstance,
 ) -> BuiltinResult<RootedValue> {
+    // Per-column math cannot certify the enclosing object/table instruction.
+    let nested = runtime.map(|runtime| runtime.clone().without_vm_fusion_host_route());
     let source = Value::Object(object.clone());
     let _source = RootedValueLease::for_values(std::iter::once(&source))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -17,7 +19,7 @@ pub(super) async fn evaluate(
     let mut names = Vec::with_capacity(variables.fields.len());
     let mut output = RootedValuesBuilder::with_capacity(variables.fields.len());
     for (name, value) in variables.fields {
-        let transformed = super::engine::execute_non_table(runtime, operation, value)
+        let transformed = super::engine::execute_non_table(nested.as_ref(), operation, value)
             .await
             .map_err(|error| {
                 super::errors::invalid(

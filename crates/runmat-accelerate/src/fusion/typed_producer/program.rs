@@ -222,17 +222,19 @@ fn literal(value: &Value) -> Option<ScalarLiteral> {
 }
 
 fn primitive_operation(op: PrimitiveOp) -> Option<ScalarOperation> {
-    let kind = match op {
-        PrimitiveOp::Add => OperatorKind::Add,
-        PrimitiveOp::Sub => OperatorKind::Subtract,
-        PrimitiveOp::ElemMul => OperatorKind::ElementwiseMultiply,
-        PrimitiveOp::ElemDiv => OperatorKind::ElementwiseDivide,
-        PrimitiveOp::ElemLeftDiv => OperatorKind::ElementwiseLeftDivide,
-        PrimitiveOp::Neg => OperatorKind::UnaryMinus,
-        PrimitiveOp::UPlus => OperatorKind::UnaryPlus,
-        _ => return None,
-    };
-    Some(ScalarOperation::Operator(kind))
+    if !matches!(
+        op,
+        PrimitiveOp::Add
+            | PrimitiveOp::Sub
+            | PrimitiveOp::ElemMul
+            | PrimitiveOp::ElemDiv
+            | PrimitiveOp::ElemLeftDiv
+            | PrimitiveOp::Neg
+            | PrimitiveOp::UPlus
+    ) {
+        return None;
+    }
+    Some(ScalarOperation::Operator(op.operator_kind()))
 }
 
 pub(super) fn resolved_operation(

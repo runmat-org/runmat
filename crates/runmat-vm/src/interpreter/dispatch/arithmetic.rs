@@ -80,8 +80,10 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(runtime, AutoBinaryOp::MatMul, &a, &b).await?;
-                    RootedValue::new(runmat_runtime::value_matmul(&a_acc, &b_acc).await?)
-                        .map_err(|error| error.into_runtime_error())
+                    RootedValue::new(
+                        runmat_runtime::value_matmul_in_context(runtime, &a_acc, &b_acc).await?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 },
             )
             .await?;

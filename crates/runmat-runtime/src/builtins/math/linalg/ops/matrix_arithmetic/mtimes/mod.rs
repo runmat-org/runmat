@@ -36,5 +36,15 @@ pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value
         .map_err(errors::from_product)
 }
 
+pub(crate) async fn mtimes_eval_in_context(
+    context: &crate::context::RuntimeContext,
+    lhs: &Value,
+    rhs: &Value,
+) -> BuiltinResult<Value> {
+    super::product::evaluate_in_context(Some(context), lhs, rhs)
+        .await
+        .map_err(errors::from_product)
+}
+
 #[cfg(test)]
 pub(crate) mod tests;

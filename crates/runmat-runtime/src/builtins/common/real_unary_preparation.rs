@@ -24,6 +24,21 @@ where
 {
     let _input = RootedValueLease::for_values(std::iter::once(&value))
         .map_err(|cause| cause.into_runtime_error())?;
+    if let Some(route) = crate::builtins::math::host_route::canonical(
+        runtime,
+        crate::context::VmFusionHostInstruction::ElementwiseCall,
+        std::iter::once(&value),
+    ) {
+        // The admitted host operand reaches the existing host-only numeric
+        // body. Domain diagnostics and complex-result semantics stay there;
+        // only provider-oriented preparation/promotion is bypassed.
+        let output = body(value).await?;
+        route.confirm_host_branch(
+            runtime.unwrap(),
+            crate::context::VmFusionHostInstruction::ElementwiseCall,
+        );
+        return Ok(output);
+    }
     if !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
         return body(value).await;

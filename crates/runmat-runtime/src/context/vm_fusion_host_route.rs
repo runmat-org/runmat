@@ -18,14 +18,24 @@ use std::sync::{Arc, Weak};
 pub enum VmFusionHostInstruction {
     Structural,
     ElementwiseBinary,
+    ElementwiseCall,
+    Intrinsic(runmat_types::OperatorKind),
     Reduction,
     Unproved,
+}
+
+/// Numeric intrinsic execution is not a named builtin binding. Keep its
+/// language operator identity distinct from canonical dispatch dependencies.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VmFusionHostOperation {
+    Builtin(BuiltinBindingIdentity),
+    Intrinsic(runmat_types::OperatorKind),
 }
 
 #[derive(Clone)]
 pub struct VmFusionHostRoute {
     origin: VmFusionHostOrigin,
-    expected_bindings: Rc<[BuiltinBindingIdentity]>,
+    expected_operations: Rc<[VmFusionHostOperation]>,
     state: Rc<RefCell<RouteState>>,
 }
 
@@ -50,9 +60,9 @@ struct RouteState {
 impl VmFusionHostRoute {
     pub(super) fn new(
         origin: VmFusionHostOrigin,
-        expected_bindings: Vec<BuiltinBindingIdentity>,
+        expected_operations: Vec<VmFusionHostOperation>,
     ) -> Option<Self> {
-        if expected_bindings.is_empty() {
+        if expected_operations.is_empty() {
             return None;
         }
         Some(Self {
@@ -63,7 +73,7 @@ impl VmFusionHostRoute {
                 terminal_confirmed: false,
             })),
             origin,
-            expected_bindings: expected_bindings.into(),
+            expected_operations: expected_operations.into(),
         })
     }
 
@@ -110,7 +120,10 @@ impl VmFusionHostRoute {
         match state.pending.take() {
             Some((pending, instruction, true)) if pending == pc => {
                 if pc == self.origin.registration.span_end() {
-                    if instruction == VmFusionHostInstruction::Reduction {
+                    if !matches!(
+                        instruction,
+                        VmFusionHostInstruction::Structural | VmFusionHostInstruction::Unproved
+                    ) {
                         state.terminal_confirmed = true;
                     } else {
                         state.invalid = true;
@@ -145,7 +158,13 @@ impl VmFusionHostRoute {
         let state = self.state.borrow();
         !state.invalid
             && state.pending.is_some_and(|(_, instruction, _)| {
-                instruction == VmFusionHostInstruction::ElementwiseBinary
+                matches!(
+                    instruction,
+                    VmFusionHostInstruction::ElementwiseBinary
+                        | VmFusionHostInstruction::Intrinsic(
+                            runmat_types::OperatorKind::MatrixMultiply
+                        )
+                )
             })
     }
 
@@ -161,10 +180,11 @@ impl VmFusionHostRoute {
         !state.invalid
             && state
                 .pending
-                .is_some_and(|(_, expected, _)| expected == instruction)
-            && runtime
-                .vm_fusion_selected_binding()
-                .is_some_and(|binding| self.expected_bindings.contains(&binding))
+                .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
+            && runtime.vm_fusion_selected_binding().is_some_and(|binding| {
+                self.expected_operations
+                    .contains(&VmFusionHostOperation::Builtin(binding))
+            })
     }
 
     pub fn confirm_host_branch(
@@ -173,14 +193,75 @@ impl VmFusionHostRoute {
         instruction: VmFusionHostInstruction,
     ) {
         let valid = self.current_for(runtime)
-            && runtime
-                .vm_fusion_selected_binding()
-                .is_some_and(|binding| self.expected_bindings.contains(&binding));
+            && runtime.vm_fusion_selected_binding().is_some_and(|binding| {
+                self.expected_operations
+                    .contains(&VmFusionHostOperation::Builtin(binding))
+            });
         let mut state = self.state.borrow_mut();
         match state.pending.as_mut() {
-            Some((_, expected, confirmed)) if valid && *expected == instruction => {
+            Some((_, expected, confirmed))
+                if valid && self.instruction_matches(*expected, instruction) =>
+            {
                 *confirmed = true;
             }
+            _ => state.invalid = true,
+        }
+    }
+
+    fn instruction_matches(
+        &self,
+        expected: VmFusionHostInstruction,
+        actual: VmFusionHostInstruction,
+    ) -> bool {
+        expected == actual
+            || matches!(
+                (expected, actual),
+                (
+                    VmFusionHostInstruction::ElementwiseCall,
+                    VmFusionHostInstruction::ElementwiseBinary
+                )
+            )
+            || (matches!(
+                (expected, actual),
+                (
+                    VmFusionHostInstruction::Intrinsic(runmat_types::OperatorKind::UnaryMinus),
+                    VmFusionHostInstruction::ElementwiseBinary
+                )
+            ) && self
+                .expected_operations
+                .contains(&VmFusionHostOperation::Intrinsic(
+                    runmat_types::OperatorKind::UnaryMinus,
+                )))
+    }
+
+    pub fn allows_intrinsic_host(
+        &self,
+        runtime: &RuntimeContext,
+        operator: runmat_types::OperatorKind,
+    ) -> bool {
+        self.current_for(runtime)
+            && self
+                .expected_operations
+                .contains(&VmFusionHostOperation::Intrinsic(operator))
+            && {
+                let state = self.state.borrow();
+                !state.invalid
+                    && state.pending.is_some_and(|(_, instruction, _)| {
+                        instruction == VmFusionHostInstruction::Intrinsic(operator)
+                    })
+            }
+    }
+
+    /// Called only by the intrinsic numeric owner after its proven host branch.
+    pub fn confirm_intrinsic_host(
+        &self,
+        runtime: &RuntimeContext,
+        operator: runmat_types::OperatorKind,
+    ) {
+        let valid = self.allows_intrinsic_host(runtime, operator);
+        let mut state = self.state.borrow_mut();
+        match state.pending.as_mut() {
+            Some((_, _, confirmed)) if valid => *confirmed = true,
             _ => state.invalid = true,
         }
     }
