@@ -27,10 +27,10 @@ impl ComparisonWorkload {
     pub(super) fn source(self) -> &'static str {
         match self {
             Self::Latency8x8 => {
-                "x = reshape(single(1:64), 8, 8); y = min(x + x, [], 1); z = gather(y);"
+                "x = gather(reshape(single(1:64), 8, 8)); y = min(x + x, [], 1); z = gather(y);"
             }
             Self::Throughput2048x2048 => {
-                "x = reshape(single(1:4194304), 2048, 2048); y = min(x + x, [], 1); z = gather(y);"
+                "x = gather(reshape(single(1:4194304), 2048, 2048)); y = min(x + x, [], 1); z = gather(y);"
             }
         }
     }
