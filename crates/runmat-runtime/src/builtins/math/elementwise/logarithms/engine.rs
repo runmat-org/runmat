@@ -3,6 +3,7 @@ use crate::builtins::math::symbolic::symbolic_function;
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_value::Value;
 
 pub(super) async fn execute(
@@ -42,16 +43,20 @@ pub(super) async fn execute_non_table(
         operation.fallback_publication(),
         crate::builtins::common::real_unary_preparation::RealUnaryAdapter {
             internal_error: operation.internal_error(),
-            before_host: |input, classification| {
+            before_host: |input: &GpuTensorHandle, classification| {
                 if classification == runmat_types::RealUnaryClassification::Outside {
                     super::provider::ensure_explicit_complex_extension(operation, input)?;
                 }
                 Ok(())
             },
-            publish_host: |provider, input, result| {
+            publish_host: |provider: &'static dyn AccelProvider,
+                           input: &GpuTensorHandle,
+                           result| {
                 super::provider::publish_host_result(operation, provider, input, result)
             },
-            publish_real: |provider, input, output| {
+            publish_real: |provider: &'static dyn AccelProvider,
+                           input: &GpuTensorHandle,
+                           output| {
                 super::provider::contract::validate(operation, provider, input, output)
             },
         },

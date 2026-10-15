@@ -15,6 +15,7 @@ pub(crate) use specs::{
     __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
 };
 
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -48,11 +49,15 @@ async fn sqrt_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
         crate::context::preparation::RealUnaryPublication::Restore,
         crate::builtins::common::real_unary_preparation::RealUnaryAdapter {
             internal_error: &runmat_builtins::SQRT_ERROR_INTERNAL,
-            before_host: |_, _| Ok(()),
-            publish_host: |provider, input, output| {
+            before_host: |_: &GpuTensorHandle, _| Ok(()),
+            publish_host: |provider: &'static dyn AccelProvider,
+                           input: &GpuTensorHandle,
+                           output| {
                 super::super::unary_provider::restore_output(provider, input, output, BUILTIN_NAME)
             },
-            publish_real: |provider, input, output| {
+            publish_real: |provider: &'static dyn AccelProvider,
+                           input: &GpuTensorHandle,
+                           output| {
                 super::super::unary_provider::validate_real_unary_output(
                     provider,
                     input,

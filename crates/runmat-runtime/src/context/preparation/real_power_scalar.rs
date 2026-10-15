@@ -264,6 +264,7 @@ pub(super) fn plan(
         .ok_or_else(|| invalid("scalar POWER output projection unavailable"))?
         .output;
     let capabilities = owner.capability_snapshot();
+    let source_identity = source.view_identity();
     let identity = Digest::sha256_serialized(&(
         "admitted-real-power-scalar-v1",
         admission.binding,
@@ -272,7 +273,7 @@ pub(super) fn plan(
         admission.input_count,
         admission.requested_outputs,
         request.numerical_domain(),
-        source.view_identity(),
+        (source_identity.allocation(), source_identity.view()),
         control,
         &shape,
         projection.identity().map_err(|_| overflow())?,

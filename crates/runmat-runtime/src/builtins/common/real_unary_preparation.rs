@@ -66,7 +66,7 @@ where
         );
         return Ok(output);
     }
-    let resident = matches!(&value, Value::GpuTensor(handle)
+    let resident = matches!(&value, Value::GpuTensor(_)
         if crate::builtins::math::host_route::real_floating_shape(&value).is_some());
     if !resident
         && !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))

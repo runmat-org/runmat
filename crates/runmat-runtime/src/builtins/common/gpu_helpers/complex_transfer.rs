@@ -1,7 +1,8 @@
 //! Native pair-to-interleaved transfer allocation, shared with admission.
 use runmat_accelerate_api::{ProviderElementType, ProviderRepresentation, ProviderStorage};
+use runmat_value::ComplexElement;
 
-pub(super) fn interleave<T: Copy>(pairs: &[(T, T)]) -> Result<Vec<T>, String> {
+pub(super) fn interleave<T: Copy>(pairs: &[ComplexElement<T>]) -> Result<Vec<T>, String> {
     let count = pairs
         .len()
         .checked_mul(2)
@@ -12,7 +13,7 @@ pub(super) fn interleave<T: Copy>(pairs: &[(T, T)]) -> Result<Vec<T>, String> {
     values
         .try_reserve_exact(count)
         .map_err(|cause| format!("complex upload allocation failed: {cause}"))?;
-    for &(real, imag) in pairs {
+    for &ComplexElement(real, imag) in pairs {
         values.push(real);
         values.push(imag);
     }
