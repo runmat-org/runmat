@@ -131,8 +131,28 @@ impl AccelProvider for Provider {
 struct Capture {
     session: crate::placement::PlacementSession,
     requests: RefCell<Vec<PlacementPlanRequest>>,
+    /// Opt into forwarding the actual session's graph observation authority.
+    /// Default captures retain the legacy plan-only, non-learning contract.
+    graph_observations: bool,
 }
 impl RuntimePlacementService for Capture {
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, runmat_runtime::RuntimeError>
+    {
+        if self.graph_observations {
+            self.requests.borrow_mut().push(request.clone());
+            RuntimePlacementService::plan_with_observation_permit(&self.session, request)
+        } else {
+            self.plan(request).map(|decision| {
+                runmat_runtime::context::RuntimeGraphPlacementSelection {
+                    decision,
+                    observation_permit: None,
+                }
+            })
+        }
+    }
     fn plan(
         &self,
         request: PlacementPlanRequest,
@@ -534,46 +554,66 @@ fn known_output_and_scratch_overflow_fails_closed_without_saturation() {
 
 #[test]
 fn unknown_is_not_zero_or_exceeded_capacity_and_explicit_execution_stays_supported() {
-    let capture = Rc::new(Capture::default());
-    let provider = Provider {
-        output: None,
-        capacity: u64::MAX,
-    };
-    let LocalPlacementOutcome::ProviderRejected {
-        code: ProviderRejectionCode::UnknownResourceEstimate,
-        feedback: Some(feedback),
-        ..
-    } = plan(&provider, &capture, true, 0)
-    else {
-        panic!("CPU-only placement session must retain an observation ticket")
-    };
-    assert_eq!(feedback.candidate, "cpu.fixture");
-    // This custom service implements only the historical plan hook. It may
-    // still select and execute, but it cannot authorize a learned sample.
-    assert!(!feedback.is_current());
-    let requests = capture.requests.borrow();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].graph.nodes[0].candidates.len(), 1);
-    assert_eq!(
-        requests[0].graph.nodes[0].candidates[0].descriptor.kind,
-        ExecutionCandidateKind::SharedRuntime
-    );
-    drop(requests);
-    feedback.observe(13, true);
-    assert!(capture.session.profile_snapshot().feedback.is_empty());
-    let error = try_plan_with_outputs(&provider, &capture, false, 0, None, vec![])
-        .expect_err("explicit intent cannot prove unavailable retained bytes");
-    assert_eq!(
-        error.identifier(),
-        Some("RunMat:Placement:InsufficientResourceEvidence")
-    );
-    assert_eq!(capture.requests.borrow().len(), 1);
-    let encoded = serde_json::to_string(&ProviderRejectionCode::UnknownResourceEstimate).unwrap();
-    assert_eq!(encoded, "\"unknown_resource_estimate\"");
-    assert_eq!(
-        serde_json::from_str::<ProviderRejectionCode>(&encoded).unwrap(),
-        ProviderRejectionCode::UnknownResourceEstimate
-    );
+    for graph_observations in [false, true] {
+        let capture = Rc::new(Capture {
+            graph_observations,
+            ..Default::default()
+        });
+        let provider = Provider {
+            output: None,
+            capacity: u64::MAX,
+        };
+        let LocalPlacementOutcome::ProviderRejected {
+            code: ProviderRejectionCode::UnknownResourceEstimate,
+            feedback,
+            ..
+        } = plan(&provider, &capture, true, 0)
+        else {
+            panic!("unknown provider output must retain the legal host rejection route")
+        };
+        assert_eq!(feedback.is_some(), graph_observations);
+        if let Some(feedback) = feedback.as_ref() {
+            assert_eq!(feedback.candidate, "cpu.fixture");
+            assert!(feedback.is_current());
+        }
+        let requests = capture.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].graph.nodes[0].candidates.len(), 1);
+        assert_eq!(
+            requests[0].graph.nodes[0].candidates[0].descriptor.kind,
+            ExecutionCandidateKind::SharedRuntime
+        );
+        drop(requests);
+        if let Some(feedback) = feedback {
+            feedback.observe(13, true);
+        }
+        let profile = capture.session.profile_snapshot();
+        assert_eq!(profile.feedback.len(), usize::from(graph_observations));
+        if graph_observations {
+            assert_eq!(profile.feedback[0].samples, 1);
+            assert_eq!(profile.feedback[0].failures, 0);
+            assert_eq!(profile.feedback[0].total_elapsed_ns, 13);
+            assert_eq!(profile.feedback[0].candidate, "cpu.fixture");
+            assert_eq!(
+                profile.feedback[0].kind,
+                ExecutionCandidateKind::SharedRuntime
+            );
+        }
+        let error = try_plan_with_outputs(&provider, &capture, false, 0, None, vec![])
+            .expect_err("explicit intent cannot prove unavailable retained bytes");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
+        assert_eq!(capture.requests.borrow().len(), 1);
+        let encoded =
+            serde_json::to_string(&ProviderRejectionCode::UnknownResourceEstimate).unwrap();
+        assert_eq!(encoded, "\"unknown_resource_estimate\"");
+        assert_eq!(
+            serde_json::from_str::<ProviderRejectionCode>(&encoded).unwrap(),
+            ProviderRejectionCode::UnknownResourceEstimate
+        );
+    }
 }
 
 #[test]
