@@ -12,6 +12,42 @@ pub(crate) use host_arrays::{first_nonfinite, logical_values, tensor_values};
 mod scalar_options;
 pub(crate) use scalar_options::{prepare_solver_options, ScalarOptionFields};
 
+/// Reuse the canonical input contract before provider work. Payload values,
+/// finite checks and authentic resident allocation admission remain runtime-owned.
+pub(crate) fn preflight_catalog_inputs<'a>(
+    entry: &'static runmat_builtins::BuiltinCatalogEntry,
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+    values: impl IntoIterator<Item = &'a Value>,
+) -> BuiltinResult<()> {
+    let inference = runmat_builtins::infer_catalog_call(
+        entry,
+        &runmat_types::CallRequest {
+            arguments: values
+                .into_iter()
+                .map(crate::value_fact::value_fact)
+                .collect(),
+            literals: runmat_types::LiteralContext::default(),
+            outputs: runmat_types::OutputSelection::new(
+                runmat_types::RequestedOutputCount::Exactly(1),
+            ),
+        },
+    );
+    if let Some(diagnostic) = inference
+        .diagnostics
+        .into_iter()
+        .find(|diagnostic| diagnostic.severity == runmat_types::InferenceSeverity::Error)
+    {
+        let mut builder =
+            build_runtime_error(format!("{}: {}", entry.identity.name, diagnostic.message))
+                .with_builtin(entry.identity.name);
+        if let Some(identifier) = error.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        return Err(builder.build());
+    }
+    Ok(())
+}
+
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }

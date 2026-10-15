@@ -1206,7 +1206,7 @@ impl ContourCall {
         }
 
         if let SurfaceDataInput::Gpu(handle) = &z_input {
-            match build_contour_gpu_plot(
+            if let Some(contour) = build_contour_gpu_plot(
                 name,
                 &x_axis,
                 &y_axis,
@@ -1216,11 +1216,8 @@ impl ContourCall {
                 &level_spec,
                 &line_color,
             )? {
-                Some(contour) => {
-                    figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
-                    return Ok(());
-                }
-                None => {}
+                figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
+                return Ok(());
             }
         }
 

@@ -64,6 +64,16 @@ pub async fn histogram_counts(
     let scalar =
         ScalarType::from_is_f64(samples.precision == runmat_accelerate_api::ProviderPrecision::F64);
     let input = GpuInputBuffer::from(samples);
+    if count == 0 {
+        // Authenticate the exact source allocation/device even though there is
+        // no numerical work. A zero-length storage binding or dispatch is not
+        // needed to establish the numerical evidence.
+        access
+            .with_shared(|emission| input.buffer(emission).map(|_| ()))
+            .map_err(ProviderExecutionError::from_source)?
+            .map_err(ProviderExecutionError::from_source)?;
+        return ExactHistogramCounts::admit(vec![0; edges.bin_count()], 0);
+    }
     let allocated = std::cell::Cell::new(false);
     let result = async {
         let counts = access
@@ -119,13 +129,14 @@ pub async fn histogram_counts(
                 }
                 // Allocation begins only after live source/geometry/limit admission.
                 allocated.set(true);
-                let counts = WgpuBufferOwner::new(device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("histogram-exact-u32-counts"),
-                        contents: &vec![0u8; count_bytes],
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    },
-                ));
+                // WebGPU storage buffers are zero-initialized at creation. Do
+                // not make a second host zero allocation proportional to bins.
+                let counts = WgpuBufferOwner::new(device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("histogram-exact-u32-counts"),
+                    size: count_bytes as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                }));
                 let edge_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("histogram-binary64-edges"),
                     contents: &edge_bytes,

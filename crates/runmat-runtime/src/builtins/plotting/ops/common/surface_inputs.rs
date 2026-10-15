@@ -205,10 +205,6 @@ impl AxisSource {
             AxisSource::Gpu(h) => vector_len_from_shape(h.shape()),
         }
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 pub fn is_vector_like(tensor: &Tensor) -> bool {

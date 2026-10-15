@@ -295,7 +295,7 @@ fn validate_problem_size(variables: usize) -> BuiltinResult<()> {
             ),
         ));
     }
-    dense_len(variables)?;
+    algorithm::dense_len(variables)?;
     Ok(())
 }
 

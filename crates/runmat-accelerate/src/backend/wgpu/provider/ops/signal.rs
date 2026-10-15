@@ -3641,20 +3641,22 @@ mod tests {
                 })
                 .expect("upload");
             let output_shape = [2, 3];
-            let err = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+            let request = ProviderEnvelopeRequest {
                 input: &input,
                 channel_len: 2,
                 channel_count: 3,
                 output_shape: &output_shape,
                 method: ProviderEnvelopeMethod::Rms { window_len: 3 },
-            }))
-            .expect_err("layout mismatch should be rejected");
-
-            input.release().unwrap();
+            };
+            assert!(!provider.supports_signal_envelope(&request));
+            let err = pollster::block_on(provider.signal_envelope(&request))
+                .expect_err("layout mismatch should be rejected");
             assert!(
-                err.to_string().contains("input shape mismatch"),
-                "unexpected error: {err:#}"
+                err.is_unsupported(),
+                "expected pre-effect unsupported: {err}"
             );
+            input.allocation_lease().validate_live().unwrap();
+            input.release().unwrap();
         }) else {
             return;
         };

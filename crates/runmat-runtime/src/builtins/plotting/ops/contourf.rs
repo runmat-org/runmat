@@ -450,8 +450,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             )? {
                 let fill_plot = build_contour_fill_gpu_plot(
                     name,
-                    &x_axis,
-                    &y_axis,
+                    x_axis,
+                    y_axis,
                     handle,
                     &mut prepared,
                     color_map.clone(),
@@ -499,8 +499,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         .map_err(map_contourf_invalid_argument)?;
         let fill_plot = build_contour_fill_plot(
             name,
-            &x_axis,
-            &y_axis,
+            x_axis,
+            y_axis,
             &grid,
             color_map.clone(),
             base_z,
@@ -513,8 +513,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             Some(
                 build_contour_plot(
                     name,
-                    &x_axis,
-                    &y_axis,
+                    x_axis,
+                    y_axis,
                     &grid,
                     color_map,
                     base_z,

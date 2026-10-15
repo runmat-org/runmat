@@ -2802,9 +2802,12 @@ mod tests {
         let error = block_on(provider.cast_to_integer(&input, IntegerElementType::I16))
             .expect_err("f32 WebGPU device must not execute an f64 integer-cast kernel");
         assert!(error.is_unsupported());
-        assert!(error
-            .to_string()
-            .contains("cannot execute an f64 source kernel"));
+        input.allocation_lease().validate_live().unwrap();
+        assert_eq!(
+            provider.get_entry_raw(&input).unwrap().element_type,
+            runmat_accelerate_api::NumericElementType::F64,
+        );
+        input.release().unwrap();
     }
 
     #[test]

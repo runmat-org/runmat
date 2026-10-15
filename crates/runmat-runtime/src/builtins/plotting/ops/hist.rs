@@ -1460,7 +1460,7 @@ fn build_histogram_chart_with_bins(
         counts[bin_idx] += weight_for_sample(sample_idx);
     }
     apply_normalization(&mut counts, &bins.widths, normalization, total_weight);
-    build_hist_cpu_result(&bins, counts)
+    build_hist_cpu_result(bins, counts)
 }
 
 fn build_empty_histogram_chart(

@@ -44,7 +44,7 @@ pub const LSQNONLIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &LSQNONLIN_INTEGER_CAPABILITIES,
+    integer_capabilities: LSQNONLIN_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

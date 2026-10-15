@@ -445,12 +445,11 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .take()
             .unwrap_or_else(|| format!("Series {}", series_idx + 1));
         if let Some((xg, yg, zg)) = plan.data.gpu_handles() {
-            match build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await? {
-                Some(plot) => {
-                    plots.push(plot);
-                    continue;
-                }
-                None => {}
+            if let Some(plot) =
+                build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await?
+            {
+                plots.push(plot);
+                continue;
             }
         }
         let (x, y, z) = plan

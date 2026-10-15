@@ -213,6 +213,41 @@ fn readback_releases_access_and_mapping_for_reuse() {
             .unwrap();
         assert_eq!(allocation.probe.retirements(), 0);
     }
+    // The same actual-device fixture also covers an authenticated empty
+    // export: zero numerical evidence requires no zero-sized shader binding.
+    let empty_allocation = TestAllocationOwner::default()
+        .allocate_zeroed(vec![0], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let empty_source = access
+        .with_shared(|emission| {
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("histogram-empty-word-source"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            ))
+        })
+        .unwrap();
+    let empty_export = WgpuBufferRef::from_owned_buffer(
+        empty_source,
+        empty_allocation.handle.clone(),
+        access.clone(),
+    )
+    .unwrap();
+    let empty_edges = crate::gpu::histogram::ExactHistogramEdges::new(&[-1.0, 0.0, 1.0]).unwrap();
+    let empty_counts = crate::gpu::histogram::histogram_counts(&access, empty_export, &empty_edges)
+        .block_on()
+        .unwrap()
+        .into_double_counts();
+    assert_eq!(empty_counts, vec![0.0, 0.0]);
+    empty_allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(empty_allocation.probe.retirements(), 0);
     let samples = [
         f32::NEG_INFINITY,
         -2.0,

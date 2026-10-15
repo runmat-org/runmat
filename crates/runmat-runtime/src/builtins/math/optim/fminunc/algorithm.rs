@@ -567,7 +567,7 @@ fn emit_summary(
     }
 }
 
-fn dense_len(n: usize) -> BuiltinResult<usize> {
+pub(super) fn dense_len(n: usize) -> BuiltinResult<usize> {
     n.checked_mul(n).ok_or_else(|| {
         fminunc_error_with_detail(
             &FMINUNC_ERROR_INVALID_INPUT,
