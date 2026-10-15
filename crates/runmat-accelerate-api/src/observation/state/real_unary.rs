@@ -40,6 +40,10 @@ impl ProviderOperationReceipt {
         self.require_provider_execution(recipe.source().device_id(), operation);
         let identity = recipe.identity().ok();
         self.0.with(|state| {
+            let Some(identity) = identity else {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+                return;
+            };
             if state.registered != 0
                 || state.compound.is_some()
                 || state.conditional_host_fallback
@@ -48,12 +52,11 @@ impl ProviderOperationReceipt {
                 || state.failure.is_some()
                 || state.publication.is_some()
                 || state.taken
-                || identity.is_none()
             {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.compound = Some(CompoundObservation::RealUnary(RealUnaryObservation {
-                    recipe: identity.unwrap(),
+                    recipe: identity,
                     source: recipe.source().view_identity(),
                     continuations,
                     phase: Phase::Pending,

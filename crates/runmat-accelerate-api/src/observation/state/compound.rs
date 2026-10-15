@@ -52,6 +52,10 @@ impl ProviderOperationReceipt {
         let source_valid = projection.source_matches(source);
         let view = source.view_identity();
         self.0.with(|state| {
+            let Some(identity) = identity else {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+                return;
+            };
             if state.registered != 0
                 || state.compound.is_some()
                 || state.conditional_host_fallback
@@ -60,13 +64,12 @@ impl ProviderOperationReceipt {
                 || state.failure.is_some()
                 || state.publication.is_some()
                 || state.taken
-                || identity.is_none()
                 || !source_valid
             {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.compound = Some(CompoundObservation::PowerScalar(PowerScalarObservation {
-                    projection: identity.unwrap(),
+                    projection: identity,
                     source: view,
                     completed: false,
                 }));
@@ -86,6 +89,10 @@ impl ProviderOperationReceipt {
             .each_ref()
             .map(crate::GpuTensorHandle::view_identity);
         self.0.with(|state| {
+            let Some(identity) = identity else {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+                return;
+            };
             if state.registered != 0
                 || state.compound.is_some()
                 || state.conditional_host_fallback
@@ -94,12 +101,11 @@ impl ProviderOperationReceipt {
                 || state.failure.is_some()
                 || state.publication.is_some()
                 || state.taken
-                || identity.is_none()
             {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.compound = Some(CompoundObservation::PowerPair(PowerPairObservation {
-                    recipe: identity.unwrap(),
+                    recipe: identity,
                     sources,
                     completed: false,
                 }));

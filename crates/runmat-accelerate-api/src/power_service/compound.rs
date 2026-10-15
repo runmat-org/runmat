@@ -121,7 +121,7 @@ impl PowerPairCompound {
         };
         let executed = with_prior_effect(evaluation.execute(&evidence).await, true)?;
         let final_identity = with_prior_effect(self.identity().map_err(Into::into), true);
-        let completed = check_cancelled(cancellation, true).and_then(|()| final_identity);
+        let completed = check_cancelled(cancellation, true).and(final_identity);
         let recipe = match completed {
             Ok(recipe) => recipe,
             Err(primary) => {
