@@ -798,25 +798,25 @@ pub(crate) async fn flip_gpu_with(
             }
         }
     }
-    flip_gpu_fallback_with(builtin, provider, handle, dims).await
+    flip_gpu_fallback_with(builtin, provider, &handle, dims).await
 }
 
 /// Adapt only this already-owned input after certified hook absence.
 pub(crate) async fn flip_gpu_fallback_with(
     builtin: &'static str,
     provider: &dyn runmat_accelerate_api::AccelProvider,
-    handle: GpuTensorHandle,
+    handle: &GpuTensorHandle,
     dims: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, handle).await?;
     let mut output = match host {
         Value::Tensor(tensor) => {
             let tensor = flip_tensor_with(builtin, tensor, dims)?;
-            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[handle])?
         }
         Value::ComplexTensor(tensor) => {
             let tensor = flip_complex_tensor_with(builtin, tensor, dims)?;
-            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[&handle])?
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[handle])?
         }
         Value::LogicalArray(array) => {
             let array = flip_logical_array_with(builtin, array, dims)?;
@@ -826,7 +826,7 @@ pub(crate) async fn flip_gpu_fallback_with(
                     data: &array.data,
                     shape: &array.shape,
                 },
-                &[&handle],
+                &[handle],
             )
             .map_err(|cause| {
                 crate::build_runtime_error(format!("{builtin}: logical upload failed: {cause}"))
@@ -842,7 +842,7 @@ pub(crate) async fn flip_gpu_fallback_with(
             ))
         }
     };
-    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

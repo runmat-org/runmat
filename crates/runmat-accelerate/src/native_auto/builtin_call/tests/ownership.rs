@@ -101,6 +101,14 @@ impl AccelProvider for CounterProvider {
     ) -> runmat_accelerate_api::ProviderFeasibility {
         known_fixture_resources(query)
     }
+    fn estimate_cost(
+        &self,
+        _: &runmat_accelerate_api::ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        // These fixtures force a staging route to inspect allocation lifetime;
+        // the quote is not measured provider performance.
+        Some(fixture_quote())
+    }
 }
 fn provider(fail_on: Option<u64>) -> &'static CounterProvider {
     Box::leak(Box::new(CounterProvider {

@@ -658,18 +658,14 @@ async fn rot90_gpu_via_provider(
     } else {
         // Only the remaining flip is adapted. The completed permutation and
         // its lease stay owned; never replay the original rotation.
-        let value = super::flip::flip_gpu_fallback_with(
-            "rot90",
-            provider,
-            permuted.clone(),
-            &[axes[0] + 1],
-        )
-        .await
-        .map_err(|error| {
-            stage_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
-                error,
-            ))
-        })?;
+        let value =
+            super::flip::flip_gpu_fallback_with("rot90", provider, &permuted, &[axes[0] + 1])
+                .await
+                .map_err(|error| {
+                    stage_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        error,
+                    ))
+                })?;
         let Value::GpuTensor(output) = value else {
             return Err(rot90_error_with_message(
                 "rot90: flip adaptation lost residency",

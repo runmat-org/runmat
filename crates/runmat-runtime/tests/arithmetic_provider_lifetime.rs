@@ -41,6 +41,14 @@ impl AccelProvider for Provider {
     fn precision(&self) -> ProviderPrecision {
         self.inner.precision()
     }
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        // Retain the real owner's native integer admission while replacing
+        // only execution with pending/failing lifetime-test stages below.
+        self.inner.query_feasibility(query)
+    }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view).map(|output| self.observe(output))
     }
