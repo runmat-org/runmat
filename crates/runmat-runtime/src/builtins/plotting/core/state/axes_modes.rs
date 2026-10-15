@@ -5,34 +5,6 @@ use runmat_plot::plots::figure::{AxisLimitAxis, AxisLimitMethod, YDirection};
 #[path = "axes_modes/tests.rs"]
 mod tests;
 
-pub fn axis_limit_method_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    axis: AxisLimitAxis,
-) -> Result<AxisLimitMethod, FigureError> {
-    axis_limit_method_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        axis,
-    )
-}
-
-pub fn set_axis_limit_method_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    axis: AxisLimitAxis,
-    method: AxisLimitMethod,
-) -> Result<(), FigureError> {
-    set_axis_limit_method_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        axis,
-        method,
-    )
-}
-
 pub(crate) fn set_axis_limit_method_for_axes_for_property(
     property: &PropertyMutationTarget,
     handle: FigureHandle,
@@ -79,17 +51,6 @@ pub(super) fn color_limits_for_state_axes(
         return runmat_plot::plots::surface::ScalarColorRange::Known(lower, upper);
     }
     state.figure.axes_scalar_color_range(axes_index)
-}
-
-pub fn axis_displayed_color_limits_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<Option<(f64, f64)>, FigureError> {
-    axis_displayed_color_limits_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-    )
 }
 
 pub(super) fn displayed_color_limits(

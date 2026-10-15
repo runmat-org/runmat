@@ -42,6 +42,7 @@ pub(crate) use colorbar::{
 };
 pub(crate) use colormap::set_colormap_for_axes_for_property;
 pub use mode_properties::FigureTarget;
+#[cfg(test)]
 pub(crate) use property_mutation::current_axes_handle_for_figure_for_property;
 pub(crate) use property_mutation::current_axes_state_for_property;
 use property_mutation::PropertyLocation;
@@ -94,11 +95,10 @@ pub(crate) use property_mutation::{
     color_order_for_axes_for_property, color_order_for_figure_for_property,
 };
 pub(crate) use property_mutation::{
-    configure_subplot_for_property, set_axis_tick_angles_for_property,
-    set_axis_tick_formats_for_property, set_axis_tick_labels_for_property,
-    set_axis_ticks_for_property, set_color_order_for_axes_for_property,
+    configure_subplot_for_property, set_color_order_for_axes_for_property,
     set_color_order_for_figure_for_property,
 };
+#[cfg(test)]
 pub(crate) use property_mutation::{
     set_current_x_limits_for_property, set_current_y_limits_for_property,
 };
@@ -177,9 +177,8 @@ pub use graphics_receiver::{
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
 pub use axes_modes::{
-    axis_color_limits_snapshot_for_axes, axis_displayed_color_limits_for_axes,
-    axis_limit_method_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
-    set_axis_limit_method_for_axes, set_hidden_line_removal_for_axes, set_y_direction_for_axes,
+    axis_color_limits_snapshot_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
+    set_hidden_line_removal_for_axes, set_y_direction_for_axes,
 };
 #[cfg(test)]
 pub use colorbar::colorbar_handle_for_axes;
@@ -1645,17 +1644,7 @@ pub fn default_color_order() -> Vec<Vec4> {
     (0..8).map(|idx| theme.get_data_color(idx)).collect()
 }
 
-pub fn color_order_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<Vec<Vec4>, FigureError> {
-    color_order_for_axes_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
-}
-
-pub fn color_order_for_figure(handle: FigureHandle) -> Result<Vec<Vec4>, FigureError> {
-    color_order_for_figure_for_property(&PropertyMutationTarget::alias(), handle)
-}
-
+#[cfg(test)]
 pub fn set_color_order_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -1667,13 +1656,6 @@ pub fn set_color_order_for_axes(
         axes_index,
         colors,
     )
-}
-
-pub fn set_color_order_for_figure(
-    handle: FigureHandle,
-    colors: &[Vec4],
-) -> Result<(), FigureError> {
-    set_color_order_for_figure_for_property(&PropertyMutationTarget::alias(), handle, colors)
 }
 
 pub fn set_figure_title_for_axes(
@@ -2028,17 +2010,20 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
 
 /// Preserve the other axis while selecting and changing the current axis in
 /// one registry transaction. A vacant Figure starts with both axes in auto mode.
+#[cfg(test)]
 pub(crate) fn set_current_x_limits(limits: Option<(f64, f64)>) {
     set_current_x_limits_for_property(&PropertyMutationTarget::alias(), limits)
         .expect("active axes target should be valid");
 }
 
+#[cfg(test)]
 pub(crate) fn set_current_y_limits(limits: Option<(f64, f64)>) {
     set_current_y_limits_for_property(&PropertyMutationTarget::alias(), limits)
         .expect("active axes target should be valid");
 }
 
 /// Update an admitted axes target without making it the current axes.
+#[cfg(test)]
 pub fn set_axis_manual_limits_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -2220,180 +2205,6 @@ pub fn link_axes(
     Ok(())
 }
 
-pub fn set_axis_ticks(x: Option<Vec<f64>>, y: Option<Vec<f64>>) {
-    set_axis_ticks_for_property(&PropertyMutationTarget::alias(), x, y)
-        .expect("compatibility alias has a valid current axes")
-}
-
-pub fn set_axis_ticks_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x: Option<Vec<f64>>,
-    y: Option<Vec<f64>>,
-) -> Result<(), FigureError> {
-    set_axis_ticks_for_axes_for_property(&PropertyMutationTarget::alias(), handle, axes_index, x, y)
-}
-
-pub fn set_axis_tick_labels(x: Option<Vec<String>>, y: Option<Vec<String>>) {
-    set_axis_tick_labels_for_property(&PropertyMutationTarget::alias(), x, y)
-        .expect("compatibility alias has a valid current axes")
-}
-
-pub fn set_axis_tick_labels_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x: Option<Vec<String>>,
-    y: Option<Vec<String>>,
-) -> Result<(), FigureError> {
-    set_axis_tick_labels_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        x,
-        y,
-    )
-}
-
-pub fn set_axis_tick_formats(x: Option<String>, y: Option<String>) {
-    set_axis_tick_formats_for_property(&PropertyMutationTarget::alias(), x, y)
-        .expect("compatibility alias has a valid current axes")
-}
-
-pub fn set_axis_tick_formats_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x: Option<String>,
-    y: Option<String>,
-) -> Result<(), FigureError> {
-    set_axis_tick_formats_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        x,
-        y,
-    )
-}
-
-pub fn set_axis_tick_angles(x: Option<f64>, y: Option<f64>) {
-    set_axis_tick_angles_for_property(&PropertyMutationTarget::alias(), x, y)
-        .expect("compatibility alias has a valid current axes")
-}
-
-pub fn set_axis_tick_angles_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x: Option<f64>,
-    y: Option<f64>,
-) -> Result<(), FigureError> {
-    set_axis_tick_angles_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        x,
-        y,
-    )
-}
-
-pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    let meta = state
-        .figure
-        .axes_metadata(axes)
-        .cloned()
-        .unwrap_or_default();
-    (meta.x_ticks, meta.y_ticks)
-}
-
-pub fn axis_tick_labels_snapshot() -> AxisTickLabelSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    let meta = state
-        .figure
-        .axes_metadata(axes)
-        .cloned()
-        .unwrap_or_default();
-    (meta.x_tick_labels, meta.y_tick_labels)
-}
-
-pub fn axis_tick_formats_snapshot() -> AxisTickFormatSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    let meta = state
-        .figure
-        .axes_metadata(axes)
-        .cloned()
-        .unwrap_or_default();
-    (meta.x_tick_format, meta.y_tick_format)
-}
-
-pub fn axis_tick_angles_snapshot() -> AxisTickAngleSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes = state.active_axes;
-    let meta = state
-        .figure
-        .axes_metadata(axes)
-        .cloned()
-        .unwrap_or_default();
-    (meta.x_tick_label_rotation, meta.y_tick_label_rotation)
-}
-
-pub fn axis_ticks_snapshot_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<AxisTickSnapshot, FigureError> {
-    axis_ticks_snapshot_for_axes_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
-}
-
-pub fn axis_tick_labels_snapshot_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<AxisTickLabelSnapshot, FigureError> {
-    axis_tick_labels_snapshot_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-    )
-}
-
-pub fn axis_tick_formats_snapshot_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<AxisTickFormatSnapshot, FigureError> {
-    axis_tick_formats_snapshot_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-    )
-}
-
-pub fn axis_tick_angles_snapshot_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-) -> Result<AxisTickAngleSnapshot, FigureError> {
-    axis_tick_angles_snapshot_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-    )
-}
-
-pub fn axis_display_bounds_snapshot() -> AxisDisplayBoundsSnapshot {
-    let mut reg = registry();
-    let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
-    let axes_index = state.active_axes;
-    display_bounds_for_state_axes(state, axes_index)
-}
-
 pub fn axis_display_bounds_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -2402,21 +2213,6 @@ pub fn axis_display_bounds_snapshot_for_axes(
         &PropertyMutationTarget::alias(),
         handle,
         axes_index,
-    )
-}
-
-/// Query displayed limits when content supplies bounds, or explicit manual
-/// limits for an otherwise empty axes. Auto limits on empty axes remain absent.
-pub fn axis_displayed_limits_snapshot_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    axis: AxisLimitAxis,
-) -> Result<Option<(f64, f64)>, FigureError> {
-    axis_displayed_limits_snapshot_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        axis,
     )
 }
 
@@ -3112,19 +2908,6 @@ pub fn set_z_limits(limits: Option<(f64, f64)>) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
-pub fn set_axis_z_limits_preserving_selection(
-    handle: FigureHandle,
-    axes_index: usize,
-    limits: Option<(f64, f64)>,
-) -> Result<(), FigureError> {
-    set_axis_z_limits_preserving_selection_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        limits,
-    )
-}
-
 pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -3144,19 +2927,6 @@ pub fn set_color_limits_for_axes(
     limits: Option<(f64, f64)>,
 ) -> Result<(), FigureError> {
     set_color_limits_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        limits,
-    )
-}
-
-pub fn set_axis_color_limits_preserving_selection(
-    handle: FigureHandle,
-    axes_index: usize,
-    limits: Option<(f64, f64)>,
-) -> Result<(), FigureError> {
-    set_axis_color_limits_preserving_selection_for_property(
         &PropertyMutationTarget::alias(),
         handle,
         axes_index,
@@ -4493,6 +4263,7 @@ pub fn axes_metadata_snapshot(
     axes_metadata_snapshot_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
 }
 
+#[cfg(test)]
 pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, FigureError> {
     current_axes_handle_for_figure_for_property(&PropertyMutationTarget::alias(), handle)
 }

@@ -453,6 +453,7 @@ pub fn get_data_cursor_object_property(
     Ok(Some(value))
 }
 
+#[cfg(test)]
 pub fn set_data_cursor_object_properties(
     value: &Value,
     args: &[Value],

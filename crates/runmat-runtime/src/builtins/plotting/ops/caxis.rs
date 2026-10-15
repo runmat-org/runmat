@@ -17,6 +17,7 @@ pub fn caxis_builtin_registered(
     caxis_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn caxis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     caxis_with_runtime(None, args)
 }

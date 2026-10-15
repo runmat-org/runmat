@@ -50,7 +50,7 @@ pub(crate) async fn await_completion(
     cancelled: impl FnOnce(crate::execution::ExecutionServiceError) -> RuntimeError,
     missing: impl FnOnce() -> RuntimeError,
 ) -> Result<(GraphicsFlushReceipt, GraphicsFlushDisposition), RuntimeError> {
-    let mut cooperation = runtime.cpu_cooperation();
+    let cooperation = runtime.cpu_cooperation();
     let mut terminal = None;
     let race = cooperation
         .await_cancellable(async {

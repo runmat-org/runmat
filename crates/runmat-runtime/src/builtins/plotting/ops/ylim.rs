@@ -26,6 +26,7 @@ pub fn ylim_builtin_registered(
     ylim_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ylim_with_runtime(None, args)
 }

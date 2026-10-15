@@ -6298,6 +6298,7 @@ dependencies = [
  "toml 0.8.23",
  "ureq 2.12.1",
  "uuid",
+ "windows-sys 0.59.0",
  "zeroize",
 ]
 

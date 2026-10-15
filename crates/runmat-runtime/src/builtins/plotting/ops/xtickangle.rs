@@ -20,6 +20,7 @@ pub fn xtickangle_builtin_registered(
     xtickangle_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn xtickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     xtickangle_with_runtime(None, args)
 }

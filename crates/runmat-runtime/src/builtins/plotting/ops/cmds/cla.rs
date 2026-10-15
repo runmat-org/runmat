@@ -25,6 +25,7 @@ pub fn cla_builtin_registered(
     cla_builtin_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn cla_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     cla_builtin_with_runtime(None, args)
 }

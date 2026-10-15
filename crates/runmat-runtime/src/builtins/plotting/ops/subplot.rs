@@ -59,6 +59,7 @@ pub fn subplot_builtin_registered(
     subplot_with_runtime(runtime.as_ref(), rows, cols, position)
 }
 
+#[cfg(test)]
 pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> crate::BuiltinResult<f64> {
     subplot_with_runtime(None, rows, cols, position)
 }

@@ -140,6 +140,7 @@ async fn get_child_properties_from_source(
     }
 }
 
+#[cfg(test)]
 pub async fn set_properties_async(
     handle: PlotHandle,
     args: &[Value],

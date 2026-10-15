@@ -25,6 +25,7 @@ mod shading;
 mod view;
 mod drawnow;
 mod axes_controls;
+mod line;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
@@ -43,6 +44,7 @@ pub use self::get::*;
 pub use self::grid::*;
 pub use self::hidden::*;
 pub use self::hold::*;
+pub use self::line::*;
 pub use self::linkaxes::*;
 pub use self::palette_generators::*;
 pub use self::print::*;
@@ -76,4 +78,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(print::ENTRIES.iter().copied());
     values.extend(drawnow::ENTRIES.iter().copied());
     axes_controls::extend_entries(values);
+    line::extend_entries(values);
 }

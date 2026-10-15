@@ -20,6 +20,7 @@ pub fn xticklabels_builtin_registered(
     xticklabels_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn xticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     xticklabels_with_runtime(None, args)
 }

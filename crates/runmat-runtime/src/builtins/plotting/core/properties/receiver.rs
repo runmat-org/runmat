@@ -1,6 +1,7 @@
 //! Exact property admission at the existing get/set boundary.
 
 use super::super::state::{GraphicsPropertySelection, PropertyMutationTarget};
+use super::set_target::PropertyPresentation;
 use super::*;
 use runmat_value::GraphicsReceiverKind;
 

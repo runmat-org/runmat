@@ -198,6 +198,11 @@ impl RuntimeGraphicsPresentationService for NativeGraphicsAttachment {
         if !state::figure_scene_is_current(proposal.receiver(), proposal.scene()) {
             return Err(error("original property scene has retired"));
         }
+        // Refuse known immediate-presentation conflicts before the property
+        // plan writes; the operation still rechecks when it is polled.
+        if self.0.busy.get() {
+            return Err(error("native presentation is already flushing"));
+        }
         proposal
             .validate_retained_budget(self.0.maximum_snapshot_bytes)
             .map_err(|source| {

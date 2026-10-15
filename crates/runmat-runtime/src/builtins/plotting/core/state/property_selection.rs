@@ -87,10 +87,6 @@ impl GraphicsPropertySelection {
         &self.receiver
     }
 
-    pub(crate) fn scene(&self) -> &GraphicsSceneLease {
-        &self.scene
-    }
-
     pub(crate) fn figure_receiver(&self) -> &GraphicsReceiverRef {
         &self.figure_receiver
     }

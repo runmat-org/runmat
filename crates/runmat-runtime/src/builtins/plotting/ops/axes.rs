@@ -29,6 +29,7 @@ pub fn axes_builtin_registered(
     axes_builtin_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn axes_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     axes_builtin_with_runtime(None, args)
 }

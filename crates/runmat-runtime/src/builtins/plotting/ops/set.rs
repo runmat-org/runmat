@@ -58,6 +58,7 @@ pub async fn set_builtin_registered(
     set_builtin_with_runtime(runtime.as_ref(), args).await
 }
 
+#[cfg(test)]
 pub async fn set_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<String> {
     set_builtin_with_runtime(None, args).await
 }

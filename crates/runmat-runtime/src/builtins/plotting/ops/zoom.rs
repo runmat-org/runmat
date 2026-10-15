@@ -623,14 +623,6 @@ fn object_property_or_default(
     .map_err(|err| internal(err.to_string()))
 }
 
-pub fn set_zoom_object_properties(
-    value: &Value,
-    args: &[Value],
-    builtin: &'static str,
-) -> BuiltinResult<Option<()>> {
-    set_zoom_object_properties_in_context(None, value, args, builtin)
-}
-
 pub(crate) fn set_zoom_object_properties_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,

@@ -7,8 +7,8 @@ use std::borrow::Cow;
 
 #[path = "properties/async_readback.rs"]
 mod async_readback;
+pub use async_readback::get_properties_async;
 pub(crate) use async_readback::set_properties_async_with_runtime;
-pub use async_readback::{get_properties_async, set_properties_async};
 #[path = "properties/read_source.rs"]
 mod read_source;
 use read_source::PropertyReadSource;

@@ -20,6 +20,7 @@ pub fn yticklabels_builtin_registered(
     yticklabels_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn yticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     yticklabels_with_runtime(None, args)
 }

@@ -19,14 +19,13 @@ pub(crate) use axes_reads::{
 #[path = "property_mutation/current_axes.rs"]
 mod current_axes;
 #[path = "property_mutation/current_limits.rs"]
+#[cfg(test)]
 mod current_limits;
 pub(crate) use current_axes::axes_state_snapshot_for_property;
+#[cfg(test)]
 pub(crate) use current_axes::current_axes_handle_for_figure_for_property;
 pub(crate) use current_axes::current_axes_state_for_property;
-pub(crate) use current_axes::{
-    set_axis_tick_angles_for_property, set_axis_tick_formats_for_property,
-    set_axis_tick_labels_for_property, set_axis_ticks_for_property,
-};
+#[cfg(test)]
 pub(crate) use current_limits::{
     set_current_x_limits_for_property, set_current_y_limits_for_property,
 };

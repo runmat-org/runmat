@@ -26,6 +26,7 @@ pub fn xlim_builtin_registered(
     xlim_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn xlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     xlim_with_runtime(None, args)
 }

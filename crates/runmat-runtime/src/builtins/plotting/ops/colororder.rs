@@ -38,6 +38,7 @@ pub fn colororder_builtin_registered(
     colororder_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn colororder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     colororder_with_runtime(None, args)
 }

@@ -18,6 +18,7 @@ pub fn xtickformat_builtin_registered(
     xtickformat_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn xtickformat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     xtickformat_with_runtime(None, args)
 }

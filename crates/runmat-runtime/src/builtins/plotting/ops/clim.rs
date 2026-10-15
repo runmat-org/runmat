@@ -17,6 +17,7 @@ pub fn clim_builtin_registered(
     clim_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn clim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     clim_with_runtime(None, args)
 }

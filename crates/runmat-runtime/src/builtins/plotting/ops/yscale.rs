@@ -18,6 +18,7 @@ pub fn yscale_builtin_registered(
     yscale_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn yscale_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     yscale_with_runtime(None, args)
 }

@@ -18,6 +18,7 @@ pub fn xscale_builtin_registered(
     xscale_with_runtime(runtime.as_ref(), args)
 }
 
+#[cfg(test)]
 pub fn xscale_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     xscale_with_runtime(None, args)
 }

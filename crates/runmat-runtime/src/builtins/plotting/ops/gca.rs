@@ -32,6 +32,7 @@ pub fn gca_builtin_registered(
     gca_with_runtime(runtime.as_ref(), rest)
 }
 
+#[cfg(test)]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     gca_with_runtime(None, rest)
 }

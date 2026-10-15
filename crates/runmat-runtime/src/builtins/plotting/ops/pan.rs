@@ -483,14 +483,6 @@ pub fn get_pan_object_property(
     Ok(Some(value))
 }
 
-pub fn set_pan_object_properties(
-    value: &Value,
-    args: &[Value],
-    builtin: &'static str,
-) -> BuiltinResult<Option<()>> {
-    set_pan_object_properties_in_context(None, value, args, builtin)
-}
-
 pub(crate) fn set_pan_object_properties_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
