@@ -62,7 +62,9 @@ fn asinh_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asinh",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "asinh",
     shape: ShapeRequirements::BroadcastCompatible,

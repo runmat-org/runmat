@@ -60,7 +60,9 @@ fn tanh_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tanh",
     shape: ShapeRequirements::BroadcastCompatible,

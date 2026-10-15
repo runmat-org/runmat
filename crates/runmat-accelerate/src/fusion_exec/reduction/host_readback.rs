@@ -1,16 +1,18 @@
 //! Checked host preparation for a selected typed VM reduction CPU route.
 //! This is input ownership/resource admission, not a second placement policy.
+pub use super::super::host_readback::CpuReadbackFailure;
+pub(crate) use super::super::host_readback::CpuReadbackPlan;
+use super::super::host_readback::Source;
 use super::super::FusionExecutionRequest;
 use super::super::ResolvedReductionProgram;
 use runmat_accelerate_api::{
     checked_numeric_download_host_payload_bytes, handle_provenance, same_provider_instance,
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, NumericElementType,
+    AccelProvider, GpuHandleProvenance, GpuTensorStorage, NumericElementType,
 };
 use runmat_execution::{
     CandidateOutputPresentation, CandidateResourceDemand, ProviderReadbackDemand,
     ProviderReadbackDemands, ResourceByteBound,
 };
-use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_types::{FusionReductionOperation, NumericClass};
 use runmat_value::Value;
 use std::collections::HashSet;
@@ -25,33 +27,6 @@ pub(crate) struct CpuReadbackAdmission {
     pub(super) presentation: CandidateOutputPresentation,
     pub(super) resources: CandidateResourceDemand,
     pub(super) scratch_bytes: u64,
-}
-
-pub enum CpuReadbackFailure {
-    BeforeEffect(RuntimeError),
-    AfterEffect(RuntimeError),
-}
-
-struct Source {
-    handle: GpuTensorHandle,
-    owner: &'static dyn AccelProvider,
-    offsets: Vec<usize>,
-    payload_bytes: u64,
-    host_workspace: u64,
-    provider_scratch: ResourceByteBound,
-    queue_slots: u32,
-}
-
-pub(crate) struct CpuReadbackPlan {
-    sources: Vec<Source>,
-    stack_len: usize,
-    resident_offsets: HashSet<usize>,
-}
-
-fn unavailable(message: &'static str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier("RunMat:Placement:InvalidHostReadback")
-        .build()
 }
 
 fn shape_bytes(shape: &[usize], element_bytes: u64) -> Option<u64> {
@@ -112,28 +87,6 @@ fn checked_add_min_bindings<'a>(
         }
     }
     Some(shapes)
-}
-
-fn source_matches(source: &Source, stack: &[Value]) -> bool {
-    source.handle.allocation_lease().validate_live().is_ok()
-        && source.handle.view().validate(source.handle.physical()).is_ok()
-        && handle_provenance(&source.handle) == Some(GpuHandleProvenance::Automatic)
-        && checked_numeric_download_host_payload_bytes(&source.handle) == Some(source.payload_bytes)
-        && source.owner.download_numeric_host_workspace_bound(&source.handle)
-            == ResourceByteBound::Known(source.host_workspace)
-        && source.owner.download_numeric_provider_scratch_bound(&source.handle)
-            == source.provider_scratch
-        && source.owner.download_numeric_queue_slots(&source.handle) == source.queue_slots
-        && source.offsets.iter().all(|&offset| {
-            matches!(stack.get(offset), Some(Value::GpuTensor(actual))
-                if actual.view_identity() == source.handle.view_identity()
-                    && actual.wire_descriptor() == source.handle.wire_descriptor()
-                    && actual.allocation_lease().validate_live().is_ok()
-                    && actual.view().validate(actual.physical()).is_ok()
-                    && handle_provenance(actual) == Some(GpuHandleProvenance::Automatic)
-                    && runmat_runtime::builtins::common::gpu_helpers::exact_provider_for_handle(actual)
-                        .is_some_and(|owner| same_provider_instance(owner, source.owner)))
-        })
 }
 
 /// No readback is admitted from an ordinal merged stack-pattern binding. Every
@@ -301,6 +254,8 @@ pub(crate) fn admit(
             handle: handle.clone(),
             owner,
             offsets,
+            loads: Vec::new(),
+            capabilities: owner.capability_snapshot(),
             payload_bytes,
             host_workspace: workspace,
             provider_scratch,
@@ -352,77 +307,6 @@ pub(crate) fn admit(
         resources,
         scratch_bytes: host_peak,
     })))
-}
-
-impl CpuReadbackPlan {
-    fn covers_resident_slice(&self, stack: &[Value]) -> bool {
-        let occurrence_count: usize = self.sources.iter().map(|source| source.offsets.len()).sum();
-        self.resident_offsets.len() == occurrence_count
-            && stack.iter().enumerate().all(|(offset, value)| {
-                !runmat_runtime::dispatcher::value_contains_gpu(value)
-                    || self.resident_offsets.contains(&offset)
-            })
-    }
-
-    pub(crate) async fn prepare(
-        &self,
-        stack: &[Value],
-    ) -> Result<Vec<(usize, Value)>, CpuReadbackFailure> {
-        if stack.len() != self.stack_len
-            || !self.covers_resident_slice(stack)
-            || !self
-                .sources
-                .iter()
-                .all(|source| source_matches(source, stack))
-        {
-            return Err(CpuReadbackFailure::BeforeEffect(unavailable(
-                "selected host source no longer matches its compiler-certified stack",
-            )));
-        }
-        let mut collected = Vec::with_capacity(self.sources.len());
-        let mut prior_effect = false;
-        for source in &self.sources {
-            if !source_matches(source, stack) {
-                let error = unavailable("selected host source changed during readback");
-                return Err(if prior_effect {
-                    CpuReadbackFailure::AfterEffect(error)
-                } else {
-                    CpuReadbackFailure::BeforeEffect(error)
-                });
-            }
-            prior_effect = true;
-            let value = runmat_runtime::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-                source.owner,
-                &source.handle,
-            )
-            .await
-            .map_err(CpuReadbackFailure::AfterEffect)?;
-            collected.push(value);
-        }
-        if !self.covers_resident_slice(stack)
-            || !self
-                .sources
-                .iter()
-                .all(|source| source_matches(source, stack))
-        {
-            return Err(CpuReadbackFailure::AfterEffect(unavailable(
-                "selected host source changed before atomic operand publication",
-            )));
-        }
-        let mut replacements = Vec::new();
-        for (source, value) in self.sources.iter().zip(collected) {
-            let Some((&last, preceding)) = source.offsets.split_last() else {
-                return Err(CpuReadbackFailure::AfterEffect(unavailable(
-                    "selected host source lost its stack occurrences",
-                )));
-            };
-            for &offset in preceding {
-                replacements.push((offset, value.clone()));
-            }
-            replacements.push((last, value));
-        }
-        Ok(replacements)
-    }
 }
 
 #[cfg(test)]

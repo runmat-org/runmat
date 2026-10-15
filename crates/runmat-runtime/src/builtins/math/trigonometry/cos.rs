@@ -66,7 +66,9 @@ fn cos_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cos")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cos",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cos",
     shape: ShapeRequirements::BroadcastCompatible,

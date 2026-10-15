@@ -43,7 +43,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::ldivide"
+    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::ldivide",
+    host_resources = crate::builtins::math::host_resources::real_binary
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "ldivide",

@@ -146,6 +146,7 @@ struct TestProvider {
     reject_fusion: AtomicBool,
     fused_dispatches: AtomicU64,
     fail_next_fused_single: AtomicBool,
+    numeric_downloads: AtomicU64,
 }
 
 impl TestProvider {
@@ -160,6 +161,7 @@ impl TestProvider {
             reject_fusion: AtomicBool::new(false),
             fused_dispatches: AtomicU64::new(0),
             fail_next_fused_single: AtomicBool::new(false),
+            numeric_downloads: AtomicU64::new(0),
         }
     }
 
@@ -458,6 +460,7 @@ impl AccelProvider for TestProvider {
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
             suspension::pending_download_if_armed(handle).await;
+            self.numeric_downloads.fetch_add(1, Ordering::Relaxed);
             let (data, shape) = self.pull(handle)?;
             let data = match handle.descriptor().element_type {
                 Some(runmat_accelerate_api::NumericElementType::F32) => {
@@ -484,6 +487,69 @@ impl AccelProvider for TestProvider {
 
     fn device_info(&self) -> String {
         "test-provider".to_string()
+    }
+
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderFeasibility {
+        // The deterministic fixture's pull implements only its exact owned
+        // contiguous view, not arbitrary strided aliases.
+        if !query.matches_numeric_download(source)
+            || !matches!(
+                source.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::F32
+                    | runmat_accelerate_api::NumericElementType::F64
+            )
+            || !self
+                .buffers
+                .lock()
+                .unwrap()
+                .get(&source.buffer_id())
+                .is_some_and(|record| record.owns(source) && record.shape == source.shape())
+            || source.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous
+        {
+            return ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "test_provider.exact_native_download",
+            );
+        }
+        ProviderFeasibility::supported(ProviderResourceEstimate {
+            transient_bytes: Some(0),
+            output_bytes: runmat_accelerate_api::checked_numeric_download_host_payload_bytes(
+                source,
+            ),
+            dispatches: Some(0),
+        })
+    }
+
+    fn download_numeric_host_workspace_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        let bytes = source.shape().iter().try_fold(8_u64, |n, &extent| {
+            n.checked_mul(u64::try_from(extent).ok()?)
+        });
+        match bytes.and_then(|bytes| {
+            bytes.checked_add(
+                u64::try_from(source.shape().len())
+                    .ok()?
+                    .checked_mul(std::mem::size_of::<usize>() as u64)?,
+            )
+        }) {
+            Some(bytes) => runmat_execution::ResourceByteBound::Known(bytes),
+            None => runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound,
+            ),
+        }
+    }
+
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        _: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Known(0)
     }
 
     fn device_info_struct(&self) -> ApiDeviceInfo {

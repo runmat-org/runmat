@@ -22,7 +22,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::logarithms::log2"
+    builtin_path = "crate::builtins::math::elementwise::logarithms::log2",
+    host_resources = crate::builtins::math::host_resources::real_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log2",

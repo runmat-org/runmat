@@ -2,8 +2,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelNumericDownloadFuture, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostTensorView, ProviderPrecision,
+    AccelDownloadFuture, AccelNumericDownloadFuture, GpuTensorHandle, HostNumericDataOwned,
+    HostNumericDataView, HostNumericTensorOwned, HostTensorView, ProviderPrecision,
 };
 use std::future::Future;
 use std::sync::{
@@ -118,6 +118,8 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             handle,
             owner,
             offsets: vec![offset],
+            loads: Vec::new(),
+            capabilities: owner.capability_snapshot(),
             payload_bytes: 4,
             host_workspace: 4,
             provider_scratch: ResourceByteBound::Known(0),
@@ -144,6 +146,92 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             assert!(*offset < 2);
         }
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 2);
+        owner.downloads.store(0, Ordering::SeqCst);
+        let binding = crate::graph::VarBinding {
+            kind: crate::graph::VarKind::Global,
+            index: 0,
+        };
+        let mut repeated = source(first.clone(), 0);
+        repeated.loads = [17, 23]
+            .into_iter()
+            .map(|pc| crate::fusion_exec::VmHostLoadUse {
+                pc,
+                binding: binding.clone(),
+                value_id: 0,
+            })
+            .collect();
+        let prepared = block_on(
+            CpuReadbackPlan {
+                sources: vec![repeated],
+                stack_len: 1,
+                resident_offsets: HashSet::from([0]),
+            }
+            .prepare_inputs(&stack[..1]),
+        )
+        .unwrap_or_else(|_| panic!("one mirror for all exact load occurrences"));
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(prepared.entry.len(), 1);
+        for pc in [17, 23] {
+            let value = prepared
+                .substitute_load(pc, &binding, &stack[0])
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
+            );
+        }
+        assert!(prepared
+            .substitute_load(19, &binding, &stack[0])
+            .unwrap()
+            .is_none());
+        assert!(
+            prepared.substitute_load(23, &binding, &stack[1]).is_err(),
+            "normal refresh to another allocation cannot reuse a stale mirror"
+        );
+        let explicit = first
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        assert!(prepared
+            .substitute_load(23, &binding, &Value::GpuTensor(explicit.clone()))
+            .is_err());
+        assert!(
+            Source::admit(&explicit, owner, vec![0], Vec::new()).is_none(),
+            "explicit gpuArray intent cannot silently gather"
+        );
+        owner.workspace.store(8, Ordering::SeqCst);
+        assert!(prepared.substitute_load(23, &binding, &stack[0]).is_err());
+        owner.workspace.store(4, Ordering::SeqCst);
+        assert!(
+            matches!(&stack[0], Value::GpuTensor(handle) if handle.view_identity() == first.view_identity()),
+            "host mirrors do not replace the workspace or original operand source"
+        );
+        drop(prepared);
+        owner.downloads.store(0, Ordering::SeqCst);
+        let retiring = owner.resident();
+        let retirement = owner.probes.lock().unwrap().last().unwrap().clone();
+        let retiring_stack = [Value::GpuTensor(retiring.clone())];
+        let prepared = block_on(
+            CpuReadbackPlan {
+                sources: vec![source(retiring.clone(), 0)],
+                stack_len: 1,
+                resident_offsets: HashSet::from([0]),
+            }
+            .prepare_inputs(&retiring_stack),
+        )
+        .unwrap_or_else(|_| panic!("entry-only source remains leased through publication"));
+        drop(retiring_stack);
+        drop(retiring);
+        retirement.fail_retirement("checked selected CPU source cleanup");
+        assert!(
+            prepared.cleanup().is_err(),
+            "last-source cleanup failure cannot certify successful completion"
+        );
+        assert_eq!(
+            retirement.retirements(),
+            1,
+            "failed retirement is never replayed"
+        );
         owner.downloads.store(0, Ordering::SeqCst);
         let uncovered = [
             Value::GpuTensor(first.clone()),

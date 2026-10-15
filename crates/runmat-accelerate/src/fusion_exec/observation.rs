@@ -76,6 +76,7 @@ struct VmCpuCompletion {
     host_route: Option<VmFusionHostRoute>,
     runtime: Option<RuntimeContext>,
     readback: Option<CpuReadbackPlan>,
+    prepared: Option<super::host_readback::PreparedVmHostInputs>,
 }
 
 impl FusionCpuObservation {
@@ -99,10 +100,20 @@ impl FusionCpuObservation {
     }
 
     pub fn with_vm_host_operations(
+        self,
+        right: VmFusionCompletionRight,
+        runtime: Option<&RuntimeContext>,
+        operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
+    ) -> Self {
+        self.with_vm_host_operations_readback(right, runtime, operations, None)
+    }
+
+    pub(crate) fn with_vm_host_operations_readback(
         mut self,
         right: VmFusionCompletionRight,
         runtime: Option<&RuntimeContext>,
         operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
+        readback: Option<CpuReadbackPlan>,
     ) -> Self {
         let host_route = self
             .feedback
@@ -115,8 +126,9 @@ impl FusionCpuObservation {
         self.vm_completion = Some(Box::new(VmCpuCompletion {
             right,
             host_route,
-            runtime: None,
-            readback: None,
+            runtime: readback.as_ref().and_then(|_| runtime.cloned()),
+            readback,
+            prepared: None,
         }));
         self
     }
@@ -141,6 +153,7 @@ impl FusionCpuObservation {
             host_route,
             runtime: readback.as_ref().and_then(|_| runtime.cloned()),
             readback,
+            prepared: None,
         }));
         self
     }
@@ -154,6 +167,65 @@ impl FusionCpuObservation {
     /// Revalidate the exact selected right and feedback permit before the first
     /// readback. All stage results remain private until the VM atomically
     /// replaces its checked operand slice.
+    /// Called after an ordinary load has completed all normal refresh and
+    /// language checks. A refreshed source mismatch is a terminal post-effect
+    /// error, never permission to replay the already prepared region.
+    pub fn substitute_vm_host_load(
+        &self,
+        pc: usize,
+        binding: &crate::graph::VarBinding,
+        actual: &Value,
+    ) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
+        let Some(vm) = self.vm_completion.as_ref() else {
+            return Ok(None);
+        };
+        let Some(prepared) = vm.prepared.as_ref() else {
+            return Ok(None);
+        };
+        if !vm_readback_current(vm, self.feedback.as_deref()) {
+            return Err(runmat_runtime::build_runtime_error(
+                "selected host route expired at ordinary load",
+            )
+            .with_identifier("RunMat:Placement:StaleHostReadback")
+            .build());
+        }
+        prepared.substitute_load(pc, binding, actual)
+    }
+
+    pub async fn prepare_vm_host_inputs(
+        &mut self,
+        stack: &[Value],
+    ) -> Result<Option<Vec<(usize, Value)>>, CpuReadbackFailure> {
+        let Some(vm) = self.vm_completion.as_mut() else {
+            return Ok(None);
+        };
+        if vm.readback.is_none() {
+            return Ok(None);
+        }
+        let feedback = self.feedback.as_deref();
+        if !vm_readback_current(vm, feedback) {
+            return Err(CpuReadbackFailure::BeforeEffect(
+                runmat_runtime::build_runtime_error(
+                    "selected VM host route expired before input preparation",
+                )
+                .build(),
+            ));
+        }
+        let plan = vm.readback.take().expect("checked readback plan");
+        let mut inputs = plan.prepare_inputs(stack).await?;
+        if !vm_readback_current(vm, feedback) {
+            return Err(CpuReadbackFailure::AfterEffect(
+                runmat_runtime::build_runtime_error(
+                    "selected VM host route expired during input preparation",
+                )
+                .build(),
+            ));
+        }
+        let entry = std::mem::take(&mut inputs.entry);
+        vm.prepared = Some(inputs);
+        Ok(Some(entry))
+    }
+
     pub async fn prepare_vm_host_slice(
         &self,
         stack: &[Value],
@@ -164,22 +236,7 @@ impl FusionCpuObservation {
         let Some(plan) = vm.readback.as_ref() else {
             return Ok(None);
         };
-        let current = || {
-            vm.runtime.as_ref().is_some_and(|runtime| {
-                let revision = vm.right.planning_revision(runtime);
-                !runtime.is_cancelled()
-                    && vm
-                        .host_route
-                        .as_ref()
-                        .is_some_and(|route| route.current_for(runtime))
-                    && revision.is_some()
-                    && self.feedback.as_ref().is_none_or(|feedback| {
-                        feedback.is_current()
-                            && revision.as_ref() == Some(&feedback.signature.revision)
-                    })
-            })
-        };
-        if !current() {
+        if !vm_readback_current(vm, self.feedback.as_deref()) {
             return Err(CpuReadbackFailure::BeforeEffect(
                 runmat_runtime::build_runtime_error(
                     "selected VM host route or placement permit expired before readback",
@@ -189,7 +246,7 @@ impl FusionCpuObservation {
             ));
         }
         let replacements = plan.prepare(stack).await?;
-        if !current() {
+        if !vm_readback_current(vm, self.feedback.as_deref()) {
             return Err(CpuReadbackFailure::AfterEffect(
                 runmat_runtime::build_runtime_error(
                     "selected VM host route or placement permit expired during readback",
@@ -212,12 +269,34 @@ impl FusionCpuObservation {
             right,
             host_route,
             runtime: _,
-            readback: _,
+            readback,
+            prepared,
         } = *vm;
+        // The following ordinary store may have overwritten the last
+        // workspace reference to a resident source. Retire our retained
+        // references through the existing checked release owner before
+        // issuing any successful FullCall receipt. Never retry on failure.
+        let mut cleanup_succeeded = true;
+        if let Some(prepared) = prepared {
+            if let Err(error) = prepared.cleanup() {
+                log::warn!("VM host preparation cleanup failed: {error}");
+                cleanup_succeeded = false;
+            }
+        }
+        if let Some(readback) = readback {
+            if let Err(error) = readback.cleanup() {
+                log::warn!("VM host readback cleanup failed: {error}");
+                cleanup_succeeded = false;
+            }
+        }
         let (Some(route), Some(feedback)) = (host_route, self.feedback.take()) else {
             return;
         };
-        if !route.complete() || !feedback.is_current() || feedback.runtime.is_cancelled() {
+        if !cleanup_succeeded
+            || !route.complete()
+            || !feedback.is_current()
+            || feedback.runtime.is_cancelled()
+        {
             return;
         }
         let Some(_lease) = right.completion_lease(&feedback.runtime) else {
@@ -258,6 +337,21 @@ impl Drop for FusionCpuObservation {
             self.observe(false);
         }
     }
+}
+
+fn vm_readback_current(vm: &VmCpuCompletion, feedback: Option<&LocalPlacementFeedback>) -> bool {
+    vm.runtime.as_ref().is_some_and(|runtime| {
+        let revision = vm.right.planning_revision(runtime);
+        !runtime.is_cancelled()
+            && vm
+                .host_route
+                .as_ref()
+                .is_some_and(|route| route.current_for(runtime))
+            && revision.is_some()
+            && feedback.is_none_or(|feedback| {
+                feedback.is_current() && revision.as_ref() == Some(&feedback.signature.revision)
+            })
+    })
 }
 
 #[cfg(test)]

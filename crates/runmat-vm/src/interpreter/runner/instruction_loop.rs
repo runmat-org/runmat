@@ -104,6 +104,7 @@ fn boxed_fusion_execution<'a>(
     frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
 ) -> FusionExecutionFuture<'a> {
     #[cfg(test)]
     fusion_store_tests::record_fusion_execution_entry();
@@ -140,8 +141,16 @@ fn boxed_fusion_execution<'a>(
                 }
             }
         }
-        accel_fusion::try_execute_fusion_group(plan, graph, stack, vars, context, placement, right)
-            .await
+        accel_fusion::try_execute_fusion_group_with_inputs(
+            plan,
+            graph,
+            stack,
+            vars,
+            context,
+            placement,
+            accel_fusion::VmFusionInvocation { right, input_uses },
+        )
+        .await
     })
 }
 
@@ -313,6 +322,11 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         } else {
                             None
                         };
+                    let input_uses = fusion_installation.as_ref().and_then(|installation| {
+                        fusion_plan
+                            .as_ref()
+                            .and_then(|active| installation.host_input_uses(active, &plan))
+                    });
                     let fusion_future = boxed_fusion_execution(
                         &plan,
                         graph,
@@ -325,6 +339,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         },
                         Some(trace.correlation()),
                         right,
+                        input_uses,
                     );
                     let fusion_result = if let Some(exception) = active_catch.clone() {
                         catch_runtime
@@ -596,6 +611,15 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         {
             context.runtime = outer_runtime;
         }
+        #[cfg(feature = "native-accel")]
+        let dispatch_result = dispatch_result.and_then(|result| {
+            fusion_observations.substitute_loaded_input(
+                executed_pc,
+                &bytecode.instructions[executed_pc],
+                stack,
+            )?;
+            Ok(result)
+        });
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
             Err(err) => {

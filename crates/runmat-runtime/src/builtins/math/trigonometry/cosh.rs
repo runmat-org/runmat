@@ -61,7 +61,9 @@ fn cosh_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cosh",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "cosh",
     shape: ShapeRequirements::BroadcastCompatible,

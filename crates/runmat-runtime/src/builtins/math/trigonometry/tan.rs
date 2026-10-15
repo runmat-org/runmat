@@ -63,7 +63,9 @@ fn tan_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tan",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "tan",
     shape: ShapeRequirements::BroadcastCompatible,

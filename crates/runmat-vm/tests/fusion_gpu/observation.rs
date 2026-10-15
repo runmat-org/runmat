@@ -13,6 +13,107 @@ fn capturing_fusion_placement(
     })
 }
 
+#[test]
+fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_call() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        let provider = registered_provider().expect("test provider");
+        provider.reject_fusion.store(true, Ordering::Relaxed);
+        let _reject = RejectFusion(provider);
+        for single in [false, true] {
+            for decoded in [false, true] {
+                runmat_accelerate::placement::reset();
+                let expression = "exp(-x).*sin(4*x)+tanh(x).*tanh(x)";
+                let source = if decoded {
+                    format!("function y = resident_chain(x)\ny = {expression};\nend\nx = [0.25, 0.5, 0.75]; y = resident_chain(x);")
+                } else {
+                    format!("x = [0.25, 0.5, 0.75]; y = {expression};")
+                };
+                let mut bytecode = compile_semantic(&source);
+                if decoded {
+                    let encoded =
+                        runmat_vm::encode_interpreter_program_v2(&bytecode.function_registry())
+                            .unwrap();
+                    let registry = runmat_vm::decode_interpreter_program_v2(&encoded).unwrap();
+                    bytecode.bound_functions = registry.clone().into_functions();
+                    bytecode.function_registry = registry;
+                }
+                let values = [0.25, 0.5, 0.75];
+                let single_values = values.map(|value| value as f32);
+                let data = if single {
+                    HostNumericDataView::F32(&single_values)
+                } else {
+                    HostNumericDataView::F64(&values)
+                };
+                let handle = runmat_accelerate_api::upload_numeric_protecting(
+                    &**provider,
+                    &HostNumericTensorView {
+                        data,
+                        shape: &[1, 3],
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    },
+                    &[],
+                )
+                .unwrap()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
+                let resume = resume_after_input_store(&bytecode, Value::GpuTensor(handle.clone()));
+                let capture = capturing_fusion_placement(Rc::new(
+                    runmat_accelerate::placement::PlacementSession::default(),
+                ));
+                let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                ))
+                .with_service_ports(
+                    runmat_runtime::context::RuntimeServicePorts::default()
+                        .with_placement(capture.clone()),
+                );
+                let downloads = provider.numeric_downloads.load(Ordering::Relaxed);
+                let allocations = provider.next_id.load(Ordering::Relaxed);
+                let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
+                let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
+                    runmat_vm::interpret_resume_in_context(&bytecode, resume, None, runtime),
+                )
+                .expect("ordinary compiled resident-to-host FullCall route");
+                let vars = &completion.values;
+                let Value::Tensor(output) = &vars[fusion_var_index(&bytecode, "y")] else {
+                    panic!("automatic CPU selection must publish a host result");
+                };
+                assert_eq!(
+                    output.numeric_dtype(),
+                    if single {
+                        runmat_value::NumericDType::F32
+                    } else {
+                        runmat_value::NumericDType::F64
+                    }
+                );
+                for (actual, x) in output.materialize_f64().iter().zip(values) {
+                    let expected = (-x).exp() * (4.0 * x).sin() + x.tanh() * x.tanh();
+                    assert!((actual - expected).abs() < if single { 2e-6 } else { 1e-12 });
+                }
+                assert!(
+                    matches!(&vars[fusion_var_index(&bytecode, "x")], Value::GpuTensor(actual)
+                    if actual.view_identity() == handle.view_identity()
+                        && actual.wire_descriptor() == handle.wire_descriptor()),
+                    "workspace keeps its exact original resident source"
+                );
+                assert_eq!(
+                    provider.numeric_downloads.load(Ordering::Relaxed) - downloads,
+                    1,
+                    "all repeated ordinary loads share one exact logical-view readback"
+                );
+                assert_eq!(provider.next_id.load(Ordering::Relaxed), allocations);
+                assert_eq!(
+                    provider.fused_dispatches.load(Ordering::Relaxed),
+                    dispatches
+                );
+                assert_one_cpu_full_call(&capture);
+            }
+        }
+    });
+}
+
 fn assert_one_cpu_full_call(capture: &placement_feedback::FeedbackPlacement<()>) {
     let feedback = capture.delivered.lock().unwrap();
     let cpu = feedback

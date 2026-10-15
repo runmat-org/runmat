@@ -23,7 +23,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::exponentials::exp"
+    builtin_path = "crate::builtins::math::elementwise::exponentials::exp",
+    host_resources = crate::builtins::math::host_resources::real_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "exp",

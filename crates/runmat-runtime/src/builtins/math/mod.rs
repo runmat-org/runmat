@@ -3,6 +3,7 @@
 
 pub mod bitwise;
 pub(crate) mod host_route;
+pub mod host_resources;
 pub mod discrete;
 pub mod elementwise;
 pub mod fft;

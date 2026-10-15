@@ -12,6 +12,56 @@ use runmat_execution::{
 use runmat_runtime::context::{RuntimeContext, RuntimePlacementService, RuntimeServicePorts};
 use std::{cell::RefCell, rc::Rc};
 
+#[test]
+fn host_readback_phase_peak_and_retained_output_are_charged_once_at_exact_quota() {
+    use crate::placement::partition::{
+        single_candidate_resources_admitted, CandidateResourceFacts,
+    };
+    use runmat_execution::{
+        CandidateOutputPresentation, CandidateResourceDemand, PlacementResourceSnapshot,
+        ResourceByteBound,
+    };
+    for (preparation_peak, body_extra, total) in [(40, 20, 40), (10, 30, 42)] {
+        let scratch =
+            crate::fusion_exec::checked_extra_host_scratch(12, preparation_peak, body_extra)
+                .unwrap();
+        assert_eq!(12 + scratch, total);
+        let demand = CandidateResourceDemand {
+            cpu_millicores: 1_000,
+            retained_bytes: ResourceByteBound::Known(12),
+            scratch_bytes: ResourceByteBound::Known(scratch),
+            queue_slots: 0,
+            provider_host_workspace: None,
+            provider_input_stages: None,
+            peak_live: None,
+        };
+        for (available, expected) in [(total - 1, false), (total, true)] {
+            let snapshot = PlacementResourceSnapshot {
+                cpu_millicores_available: 1_000,
+                memory_available_bytes: Some(available),
+                ..Default::default()
+            };
+            assert_eq!(
+                single_candidate_resources_admitted(
+                    CandidateResourceFacts {
+                        location: CandidateExecutionLocation::Host,
+                        output_residency: CandidateOutputResidency::Host,
+                        presentation: &CandidateOutputPresentation::Direct,
+                        kind: runmat_execution::ExecutionCandidateKind::SharedRuntime,
+                        demand,
+                        transactional_results: false,
+                    },
+                    &snapshot,
+                    false
+                )
+                .is_ok(),
+                expected
+            );
+        }
+    }
+    assert!(crate::fusion_exec::checked_extra_host_scratch(u64::MAX, 0, 1).is_none());
+}
+
 struct Provider {
     output: Option<u64>,
     capacity: u64,

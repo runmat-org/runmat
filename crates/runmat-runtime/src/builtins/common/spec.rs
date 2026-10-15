@@ -2,6 +2,11 @@ use std::fmt;
 
 mod admission;
 mod canonical;
+mod host_resources;
+pub use host_resources::{
+    FusionHostResourceBound, FusionHostResourceCallback, FusionHostResourceInput,
+    FusionHostResourceQuery,
+};
 mod epilogue;
 mod reduction;
 mod reduction_sign;
@@ -273,6 +278,7 @@ pub struct FusionSpecInventory {
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
     pub reduction: Option<&'static FusionReductionDeclaration>,
+    pub host_resources: Option<FusionHostResourceCallback>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -295,6 +301,7 @@ pub(crate) struct FusionSpecRegistration {
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
     pub reduction: Option<&'static FusionReductionDeclaration>,
+    pub host_resources: Option<FusionHostResourceCallback>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -354,6 +361,7 @@ pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = Fusion
         structural: entry.structural,
         epilogue: entry.epilogue,
         reduction: entry.reduction,
+        host_resources: entry.host_resources,
         builtin_path: entry.builtin_path,
         declaration: entry.declaration,
         source_file: entry.source_file,

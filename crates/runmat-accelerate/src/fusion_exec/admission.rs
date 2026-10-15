@@ -35,6 +35,31 @@ pub(super) struct AdmittedBindings {
 }
 
 impl AdmittedBindings {
+    pub(super) fn host_resource_bound(
+        &self,
+        index: usize,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+        query: &runmat_runtime::builtins::common::spec::FusionHostResourceQuery<'_>,
+    ) -> Option<runmat_runtime::builtins::common::spec::FusionHostResourceBound> {
+        let operation = self.operations.get(index)?;
+        let binding = match &operation.identity {
+            Identity::Primitive(
+                op @ (PrimitiveOp::Neg | PrimitiveOp::UPlus | PrimitiveOp::Mul),
+            ) => {
+                return runmat_runtime::builtins::math::host_resources::intrinsic(
+                    op.operator_kind(),
+                    query,
+                );
+            }
+            Identity::Primitive(op) => selected_host_binding_for_primitive(*op, runtime)?,
+            Identity::Call {
+                binding: SelectedFusionIdentity::Canonical(binding),
+                ..
+            } => *binding,
+            Identity::Call { .. } => return None,
+        };
+        canonical_fusion_declaration(binding)?.host_resources?(query)
+    }
     /// Intrinsic VM numeric owners retain their operator identity. Unary minus
     /// also authenticates its real canonical `times` dependency; scalar matrix
     /// multiplication deliberately does not borrow a named mtimes override.
@@ -42,18 +67,34 @@ impl AdmittedBindings {
         &self,
         runtime: Option<&runmat_runtime::context::RuntimeContext>,
     ) -> Option<Vec<runmat_runtime::context::VmFusionHostOperation>> {
-        use runmat_runtime::context::VmFusionHostOperation as H;
         let mut operations = Vec::new();
+        self.visit_host_operations(runtime, |operation| operations.push(operation))?;
+        Some(operations)
+    }
+
+    pub(super) fn has_host_operations(
+        &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> bool {
+        self.visit_host_operations(runtime, |_| {}).is_some()
+    }
+
+    fn visit_host_operations(
+        &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+        mut visit: impl FnMut(runmat_runtime::context::VmFusionHostOperation),
+    ) -> Option<()> {
+        use runmat_runtime::context::VmFusionHostOperation as H;
         for operation in &self.operations {
             match &operation.identity {
                 Identity::Primitive(
                     op @ (PrimitiveOp::Neg | PrimitiveOp::UPlus | PrimitiveOp::Mul),
                 ) => {
-                    operations.push(H::Intrinsic(op.operator_kind()));
+                    visit(H::Intrinsic(op.operator_kind()));
                     if *op == PrimitiveOp::Neg {
                         let times =
                             runmat_types::OperatorKind::ElementwiseMultiply.overload_name()?;
-                        operations.push(H::Builtin(
+                        visit(H::Builtin(
                             crate::fusion::semantic_bindings::selected_canonical_host_binding(
                                 times.display_name(),
                                 runtime,
@@ -61,17 +102,17 @@ impl AdmittedBindings {
                         ));
                     }
                 }
-                Identity::Primitive(op) => operations.push(H::Builtin(
-                    selected_host_binding_for_primitive(*op, runtime)?,
-                )),
+                Identity::Primitive(op) => visit(H::Builtin(selected_host_binding_for_primitive(
+                    *op, runtime,
+                )?)),
                 Identity::Call {
                     binding: SelectedFusionIdentity::Canonical(binding),
                     ..
-                } => operations.push(H::Builtin(*binding)),
+                } => visit(H::Builtin(*binding)),
                 Identity::Call { .. } => return None,
             }
         }
-        Some(operations)
+        Some(())
     }
     /// Exact canonical implementations already captured for the selected
     /// fusion program. Legacy or opaque entries cannot certify a VM host

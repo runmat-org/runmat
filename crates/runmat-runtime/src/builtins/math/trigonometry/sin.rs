@@ -68,7 +68,9 @@ fn sin_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin",
+    host_resources = crate::builtins::math::host_resources::real_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sin",
     shape: ShapeRequirements::BroadcastCompatible,

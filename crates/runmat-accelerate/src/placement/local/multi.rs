@@ -53,6 +53,13 @@ pub(crate) enum LocalCpuAdmission {
     Legacy,
     /// A domain owner proved an executable host route and its complete demand.
     Exact(Box<CandidateResourceDemand>),
+    /// Exact sequential logical-view downloads. These replace, rather than
+    /// augment, the legacy residency-summary transfer prior.
+    ExactReadbacks {
+        resources: Box<CandidateResourceDemand>,
+        download_bytes: u64,
+        readback_count: u64,
+    },
     /// No executable host route was admitted; do not fabricate a CPU candidate.
     Unavailable,
 }
@@ -95,9 +102,18 @@ pub(crate) fn plan_local_multi(
         compare_profitability,
         runtime,
     } = request;
+    let exact_readbacks = match &cpu_admission {
+        LocalCpuAdmission::ExactReadbacks {
+            download_bytes,
+            readback_count,
+            ..
+        } => Some((*download_bytes, *readback_count)),
+        _ => None,
+    };
     let cpu_resources = match cpu_admission {
         LocalCpuAdmission::Legacy => Some(cpu_resource(&cpu)),
         LocalCpuAdmission::Exact(resources) => Some(*resources),
+        LocalCpuAdmission::ExactReadbacks { resources, .. } => Some(*resources),
         LocalCpuAdmission::Unavailable => None,
     };
     let inputs::SourcePreflight {
@@ -110,7 +126,18 @@ pub(crate) fn plan_local_multi(
         .values()
         .copied()
         .fold(0_u64, u64::saturating_add);
-    if resident_bytes > 0 {
+    if let Some((bytes, count)) = exact_readbacks {
+        cpu.cost.components.synchronization_ns = cpu
+            .cost
+            .components
+            .synchronization_ns
+            .saturating_add(5_000_u64.saturating_mul(count));
+        cpu.cost.components.download_ns = cpu
+            .cost
+            .components
+            .download_ns
+            .saturating_add(transfer_prior_ns(bytes));
+    } else if resident_bytes > 0 {
         cpu.cost.components.synchronization_ns =
             cpu.cost.components.synchronization_ns.saturating_add(5_000);
         cpu.cost.components.download_ns = cpu

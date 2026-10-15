@@ -29,6 +29,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod observation;
+mod host_readback;
+mod host_input_uses;
+pub use host_input_uses::{VmHostInputUses, VmHostLoadUse};
+pub(crate) use host_readback::checked_extra_host_scratch;
+pub use host_readback::PreparedVmHostInputs;
 mod provider_observation;
 use provider_observation::FusionPlacementSelection;
 mod admission;
@@ -57,6 +62,7 @@ mod image_stages;
 mod ownership_tests;
 pub use elementwise::{
     execute_elementwise, execute_elementwise_placed, execute_elementwise_placed_vm,
+    execute_elementwise_placed_vm_inputs,
 };
 pub use observation::{FusionCpuObservation, FusionExecutionOutcome, FusionProviderCompletion};
 
@@ -352,6 +358,24 @@ fn select_fusion_provider_with_contract_vm(
     contract: FusionProviderContract<'_>,
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
+    select_fusion_provider_with_contract_vm_cpu(
+        request,
+        bindings,
+        provider,
+        contract,
+        vm_right,
+        host_readback::CpuHostPlacement::Legacy,
+    )
+}
+
+fn select_fusion_provider_with_contract_vm_cpu(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    contract: FusionProviderContract<'_>,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    host: host_readback::CpuHostPlacement<'_>,
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
         elementwise_abi,
         input_indices,
@@ -468,7 +492,7 @@ fn select_fusion_provider_with_contract_vm(
         confidence: EstimateConfidence::Low,
         source: EstimateSource::StaticPrior,
     };
-    let cpu = ExecutionCandidateDescriptor {
+    let mut cpu = ExecutionCandidateDescriptor {
         identity: format!("cpu.shared.{operation}"),
         region: None,
         kind: ExecutionCandidateKind::SharedRuntime,
@@ -491,7 +515,26 @@ fn select_fusion_provider_with_contract_vm(
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };
-    match crate::placement::plan_local_vm(
+    let cpu_admission = match host {
+        host_readback::CpuHostPlacement::Legacy => crate::placement::LocalCpuAdmission::Legacy,
+        host_readback::CpuHostPlacement::Unavailable => {
+            crate::placement::LocalCpuAdmission::Unavailable
+        }
+        host_readback::CpuHostPlacement::Readbacks(exact) => {
+            cpu.presentation = exact.presentation.clone();
+            cpu.cost.scratch_bytes = Some(exact.scratch_bytes);
+            crate::placement::LocalCpuAdmission::ExactReadbacks {
+                resources: Box::new(exact.resources),
+                download_bytes: exact.download_bytes,
+                readback_count: exact.readback_count,
+            }
+        }
+    };
+    let host_unavailable = matches!(
+        cpu_admission,
+        crate::placement::LocalCpuAdmission::Unavailable
+    );
+    match crate::placement::plan_local_vm_cpu(
         provider,
         LocalPlacementRequest {
             operation,
@@ -547,11 +590,15 @@ fn select_fusion_provider_with_contract_vm(
         },
         PlacementPolicy::default(),
         vm_right,
+        cpu_admission,
     )
     .map_err(|error| ProviderExecutionError::from_source(*error))?
     {
         LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
+            if host_unavailable {
+                return Err(anyhow!("fusion has neither an admitted provider route nor a complete host readback bound").into());
+            }
             Ok(FusionExecutionOutcome::SharedRuntime(
                 FusionCpuObservation::new(feedback),
             ))

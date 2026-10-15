@@ -593,16 +593,24 @@ pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
-    execute_fusion_elementwise_vm(request, stack_guard, None).await
+    execute_fusion_elementwise_vm(request, stack_guard, None, None).await
 }
 
 async fn execute_fusion_elementwise_vm(
     request: FusionExecutionRequest<'_>,
-    stack_guard: StackSliceGuard<'_>,
+    mut stack_guard: StackSliceGuard<'_>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    input_uses: Option<&runmat_accelerate::fusion_exec::VmHostInputUses>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let execution = if let Some(right) = right {
-        runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right).await
+        if let Some(uses) = input_uses {
+            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_inputs(
+                request, right, uses,
+            )
+            .await
+        } else {
+            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right).await
+        }
     } else {
         execute_elementwise_placed(request)
             .await
@@ -627,7 +635,22 @@ async fn execute_fusion_elementwise_vm(
                 completion: result.completion,
             }))
         }
-        Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+        Ok(FusionExecutionOutcome::SharedRuntime(mut observation)) => {
+            match observation
+                .prepare_vm_host_inputs(stack_guard.slice())
+                .await
+            {
+                Ok(Some(replacements)) => stack_guard
+                    .replace_host_operands(replacements)
+                    .map_err(FusionAttemptError::Terminal)?,
+                Ok(None) => {}
+                Err(CpuReadbackFailure::BeforeEffect(error)) => {
+                    return Err(FusionAttemptError::Deopt(error))
+                }
+                Err(CpuReadbackFailure::AfterEffect(error)) => {
+                    return Err(FusionAttemptError::Terminal(error))
+                }
+            }
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
         Err(err) => {
@@ -775,6 +798,36 @@ pub async fn try_execute_fusion_group(
     placement: Option<PlacementCorrelationId>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    try_execute_fusion_group_with_inputs(
+        plan,
+        graph,
+        stack,
+        vars,
+        context,
+        placement,
+        VmFusionInvocation {
+            right,
+            input_uses: None,
+        },
+    )
+    .await
+}
+
+pub(crate) struct VmFusionInvocation<'a> {
+    pub right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    pub input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
+}
+
+pub(crate) async fn try_execute_fusion_group_with_inputs(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    graph: &runmat_accelerate::AccelGraph,
+    stack: &mut Vec<Value>,
+    vars: &mut [Value],
+    context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
+    invocation: VmFusionInvocation<'_>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    let VmFusionInvocation { right, input_uses } = invocation;
     let (stack_guard, request, _consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context, placement)
             .map_err(FusionAttemptError::Terminal)?;
@@ -793,7 +846,7 @@ pub async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise_vm(request, stack_guard, right).await
+        execute_fusion_elementwise_vm(request, stack_guard, right, input_uses).await
     } else if plan.group.kind.is_reduction() {
         execute_fusion_reduction(plan, request, stack_guard, right).await
     } else {

@@ -37,6 +37,49 @@ fn region_exit(span: &InstrSpan, executed_pc: usize, next_pc: usize) -> RegionEx
 }
 
 impl FusionRegionObservations {
+    /// Dispatch has already refreshed and checked the ordinary binding. Only
+    /// now may an exact certified load replace its pushed stack value with the
+    /// selected region's private host mirror.
+    pub(super) fn substitute_loaded_input(
+        &self,
+        pc: usize,
+        instruction: &crate::bytecode::Instr,
+        stack: &mut [runmat_value::Value],
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        use runmat_accelerate::graph::{VarBinding, VarKind};
+        let binding = match instruction {
+            crate::bytecode::Instr::LoadVar(index) => VarBinding {
+                kind: VarKind::Global,
+                index: *index,
+            },
+            crate::bytecode::Instr::LoadLocal(index) => VarBinding {
+                kind: VarKind::Local,
+                index: *index,
+            },
+            _ => return Ok(()),
+        };
+        let Some(observation) = self
+            .0
+            .iter()
+            .rev()
+            .find(|observation| observation.span.start <= pc && pc <= observation.span.end)
+        else {
+            return Ok(());
+        };
+        let Some(ticket) = observation.ticket.as_ref() else {
+            return Ok(());
+        };
+        let Some(actual) = stack.last_mut() else {
+            return Err(runmat_runtime::build_runtime_error(
+                "certified ordinary load produced no operand",
+            )
+            .build());
+        };
+        if let Some(value) = ticket.substitute_vm_host_load(pc, &binding, actual)? {
+            *actual = value;
+        }
+        Ok(())
+    }
     #[cfg(all(test, not(target_arch = "wasm32"), feature = "wgpu"))]
     pub(super) fn checked_publication_store_pending(
         &self,

@@ -23,6 +23,7 @@ pub struct CanonicalFusionDeclaration {
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
     pub reduction: Option<&'static super::FusionReductionDeclaration>,
+    pub host_resources: Option<super::FusionHostResourceCallback>,
 }
 
 impl std::fmt::Debug for CanonicalFusionDeclaration {
@@ -101,5 +102,6 @@ pub fn canonical_fusion_declaration(
         structural: registration.structural,
         epilogue: registration.epilogue,
         reduction: registration.reduction,
+        host_resources: registration.host_resources,
     })
 }

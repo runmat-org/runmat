@@ -26,6 +26,21 @@ pub(crate) struct AccelStore {
     pub binding: VarBinding,
 }
 
+/// A load occurrence from the same instruction walk as the graph value IDs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccelLoad {
+    pub pc: usize,
+    pub value_id: ValueId,
+    pub binding: VarBinding,
+}
+
+pub(crate) fn build_accel_graph_with_transcript(
+    instructions: &[Instr],
+    var_types: &[Type],
+) -> (AccelGraph, Vec<AccelStore>, Vec<AccelLoad>) {
+    GraphBuilder::new(instructions, var_types).build_with_transcript()
+}
+
 pub(crate) fn build_accel_graph_with_stores(
     instructions: &[Instr],
     var_types: &[Type],
@@ -49,6 +64,7 @@ struct GraphBuilder<'a> {
     var_bindings: HashMap<ValueId, VarBinding>,
     node_bindings: HashMap<NodeId, VarBinding>,
     stores: Option<Vec<AccelStore>>,
+    loads: Vec<AccelLoad>,
 }
 
 #[derive(Clone)]
@@ -127,6 +143,7 @@ impl<'a> GraphBuilder<'a> {
             var_bindings: HashMap::new(),
             node_bindings: HashMap::new(),
             stores: None,
+            loads: Vec::new(),
         }
     }
 
@@ -137,13 +154,19 @@ impl<'a> GraphBuilder<'a> {
         self.finish_graph()
     }
 
-    fn build_with_stores(mut self) -> (AccelGraph, Vec<AccelStore>) {
+    fn build_with_stores(self) -> (AccelGraph, Vec<AccelStore>) {
+        let (graph, stores, _) = self.build_with_transcript();
+        (graph, stores)
+    }
+
+    fn build_with_transcript(mut self) -> (AccelGraph, Vec<AccelStore>, Vec<AccelLoad>) {
         self.stores = Some(Vec::new());
         for (pc, instr) in self.instructions.iter().enumerate() {
             self.process_instr(pc, instr);
         }
         let stores = self.stores.take().expect("store recording selected");
-        (self.finish_graph(), stores)
+        let loads = std::mem::take(&mut self.loads);
+        (self.finish_graph(), stores, loads)
     }
 
     fn finish_graph(self) -> AccelGraph {
@@ -156,6 +179,31 @@ impl<'a> GraphBuilder<'a> {
     }
 
     fn process_instr(&mut self, pc: usize, instr: &Instr) {
+        self.process_instruction(pc, instr);
+        if self.stores.is_none() {
+            return;
+        }
+        let binding = match instr {
+            Instr::LoadVar(index) => VarBinding {
+                kind: VarKind::Global,
+                index: *index,
+            },
+            Instr::LoadLocal(index) => VarBinding {
+                kind: VarKind::Local,
+                index: *index,
+            },
+            _ => return,
+        };
+        if let Some(&value_id) = self.stack.last() {
+            self.loads.push(AccelLoad {
+                pc,
+                value_id,
+                binding,
+            });
+        }
+    }
+
+    fn process_instruction(&mut self, pc: usize, instr: &Instr) {
         match instr {
             Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
             Instr::LoadInt(value) => self.push_constant(Type::Int, Some(Value::Int(value.clone()))),

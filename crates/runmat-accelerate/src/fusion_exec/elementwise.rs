@@ -8,15 +8,24 @@ use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 mod effects;
 use effects::ElementwiseEffects;
 mod abi;
+#[path = "elementwise/host_readback.rs"]
+mod host_readback;
 
 #[cfg(test)]
 #[path = "elementwise/effect_tests.rs"]
 mod effect_tests;
 
+struct ElementwiseHostContinuation {
+    operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
+    readback: Option<super::host_readback::CpuReadbackPlan>,
+}
+
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    input_uses: Option<&super::VmHostInputUses>,
+    host_continuation: &mut Option<ElementwiseHostContinuation>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
     let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
@@ -209,7 +218,25 @@ async fn execute_elementwise_outputs(
         serde_json::to_vec(&(program.cache_identity()?, &shader, scalar_work_units))
             .map_err(anyhow::Error::from)?,
     );
-    let selection = select_fusion_provider_with_contract_vm(
+    let has_host_operations = bindings.has_host_operations(request.runtime.as_ref());
+    let has_resident = request
+        .inputs
+        .iter()
+        .chain(unbound_constant_values(request.plan))
+        .any(runmat_runtime::dispatcher::value_contains_gpu);
+    let admission = vm_right
+        .and(input_uses)
+        .filter(|_| has_host_operations)
+        .and_then(|uses| host_readback::admit(request, &program, &bindings, provider, uses));
+    let host = if has_resident && vm_right.is_some() {
+        admission.as_ref().map_or(
+            super::host_readback::CpuHostPlacement::Unavailable,
+            |admission| super::host_readback::CpuHostPlacement::Readbacks(&admission.resources),
+        )
+    } else {
+        super::host_readback::CpuHostPlacement::Legacy
+    };
+    let selection = select_fusion_provider_with_contract_vm_cpu(
         request,
         &bindings,
         provider,
@@ -226,11 +253,18 @@ async fn execute_elementwise_outputs(
             shader_requirements: Some(shader_requirements),
         },
         vm_right,
+        host,
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
-            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+            if vm_right.is_some() {
+                *host_continuation = Some(ElementwiseHostContinuation {
+                    operations: bindings.host_operations(request.runtime.as_ref()),
+                    readback: admission.map(|admission| admission.plan),
+                });
+            }
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
         }
     };
     let recorder = selection.recorder();
@@ -554,7 +588,7 @@ pub async fn execute_elementwise_placed(
     request: FusionExecutionRequest<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseExecutionResult>> {
     Ok(
-        match execute_elementwise_placed_inner(request, None).await? {
+        match execute_elementwise_placed_inner(request, None, None).await? {
             FusionExecutionOutcome::Executed(output) => {
                 FusionExecutionOutcome::Executed(output.result)
             }
@@ -569,12 +603,23 @@ pub async fn execute_elementwise_placed_vm(
     request: FusionExecutionRequest<'_>,
     right: runmat_runtime::context::VmFusionCompletionRight,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
-    execute_elementwise_placed_inner(request, Some(right)).await
+    execute_elementwise_placed_inner(request, Some(right), None).await
+}
+
+/// VM-only sibling retaining exact ordinary-load occurrences from the same
+/// installed bytecode plan. Direct APIs do not manufacture that transcript.
+pub async fn execute_elementwise_placed_vm_inputs(
+    request: FusionExecutionRequest<'_>,
+    right: runmat_runtime::context::VmFusionCompletionRight,
+    input_uses: &super::VmHostInputUses,
+) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
+    execute_elementwise_placed_inner(request, Some(right), Some(input_uses)).await
 }
 
 async fn execute_elementwise_placed_inner(
     request: FusionExecutionRequest<'_>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    input_uses: Option<&super::VmHostInputUses>,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
     let final_output = request
         .plan
@@ -586,20 +631,35 @@ async fn execute_elementwise_placed_inner(
             output_ids.push(store.value_id);
         }
     }
-    let (mut outputs, selection) =
-        match execute_elementwise_outputs(&request, &output_ids, right.as_ref()).await? {
-            FusionExecutionOutcome::Executed(outputs) => outputs,
-            FusionExecutionOutcome::SharedRuntime(observation) => {
-                let observation = if let Some(right) = right {
-                    let operations = AdmittedBindings::new(&request)
-                        .and_then(|bindings| bindings.host_operations(request.runtime.as_ref()));
-                    observation.with_vm_host_operations(right, request.runtime.as_ref(), operations)
-                } else {
-                    observation
-                };
-                return Ok(FusionExecutionOutcome::SharedRuntime(observation));
-            }
-        };
+    let mut host_continuation = None;
+    let (mut outputs, selection) = match execute_elementwise_outputs(
+        &request,
+        &output_ids,
+        right.as_ref(),
+        input_uses,
+        &mut host_continuation,
+    )
+    .await?
+    {
+        FusionExecutionOutcome::Executed(outputs) => outputs,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            let observation = if let Some(right) = right {
+                let continuation = host_continuation.unwrap_or(ElementwiseHostContinuation {
+                    operations: None,
+                    readback: None,
+                });
+                observation.with_vm_host_operations_readback(
+                    right,
+                    request.runtime.as_ref(),
+                    continuation.operations,
+                    continuation.readback,
+                )
+            } else {
+                observation
+            };
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     let final_value = outputs
         .remove(&final_output)
         .ok_or_else(|| anyhow!("fusion: final output materialization missing"))?;
