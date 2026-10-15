@@ -94,19 +94,25 @@ impl RuntimeLifecycleHost {
                 "onCleanup lifecycle dispatcher",
                 LocalTaskCommandOrigin::Unknown,
                 move |dispatcher_runtime| {
-                    let scoped_runtime = dispatcher_runtime.clone();
-                    Box::pin(scoped_runtime.scope(async move {
+                    Box::pin(async move {
                         while dispatcher_wake.next().await {
                             let Some(registry) = dispatcher_registry.upgrade() else {
                                 break;
                             };
+                            // The host starts before a program can install its
+                            // callable projection. Select its own live session
+                            // owner at this wake, not a construction-time
+                            // snapshot or an unrelated foreground projection.
+                            let _selected = super::RuntimeContextGuard::enter(
+                                dispatcher_runtime.clone(),
+                            );
                             crate::builtins::introspection::on_cleanup::lifecycle::dispatch::schedule_eligible(
                                 &dispatcher_runtime,
                                 &registry,
                                 &[],
                             );
                         }
-                    }))
+                    })
                 },
             )
             .map_err(|error| {

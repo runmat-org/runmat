@@ -72,6 +72,26 @@ fn compile_executor(
     GenericCompiler::compile_executor_with_resume_points(assembly, None, BTreeMap::new())
 }
 
+fn advance_after_suspended_work(
+    invocation: &mut runmat_native_executor::execute::NativeInvocation,
+) -> Result<runmat_native_executor::execute::NativeInvocationStep, NativeExecutorError> {
+    futures::executor::block_on(async {
+        loop {
+            match invocation.advance()? {
+                runmat_native_executor::execute::NativeInvocationStep::Suspended {
+                    continuation,
+                    generation,
+                } => {
+                    invocation
+                        .resume_suspension(continuation, generation)
+                        .await?
+                }
+                step => return Ok(step),
+            }
+        }
+    })
+}
+
 #[test]
 fn specialized_product_still_rejects_mismatched_selected_entry_profile() {
     let profile =
@@ -368,9 +388,13 @@ fn native_unary_arithmetic_uses_numeric_semantics_not_overload_names_as_builtins
             span,
         );
         let executor = compile_executor(assembly).unwrap();
-        let execution = executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap();
+        let execution = futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap();
         assert_eq!(execution.outputs, vec![expected]);
     }
 }
@@ -998,9 +1022,13 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
 #[test]
 fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
     let executor = compile_executor(branch_fixture()).unwrap();
-    let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(7.0)]);
 }
 
@@ -1008,17 +1036,25 @@ fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
 fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     let operator = compile_executor(binary_fixture()).unwrap();
     assert_eq!(
-        operator
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(operator.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(42.0)]
     );
 
     let range = compile_executor(range_fixture()).unwrap();
-    let execution = range
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(range.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::Tensor(range) = execution.outputs.first().unwrap() else {
         panic!("expected colon to produce a tensor")
     };
@@ -1026,16 +1062,25 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
 
     let call = compile_executor(call_fixture()).unwrap();
     assert_eq!(
-        call.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(call.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(9.0)]
     );
 
     let aggregate = compile_executor(aggregate_fixture()).unwrap();
-    let execution = aggregate
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(aggregate.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::Tensor(matrix) = execution.outputs.first().unwrap() else {
         panic!("expected a tensor aggregate")
     };
@@ -1141,19 +1186,27 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
 fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
     let short = compile_executor(short_circuit_fixture()).unwrap();
     assert_eq!(
-        short
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(short.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Bool(true)]
     );
 
     let switch = compile_executor(switch_fixture()).unwrap();
     assert_eq!(
-        switch
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(switch.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(20.0)]
     );
 }
@@ -1161,9 +1214,13 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
 #[test]
 fn generic_for_iterates_captured_columns_through_compiled_backedges() {
     let executor = compile_executor(for_fixture()).unwrap();
-    let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(6.0)]);
     assert_eq!(execution.loop_backedges.len(), 1);
     assert_eq!(execution.loop_backedges.values().sum::<u64>(), 3);
@@ -1208,7 +1265,9 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
             workspace: None,
         })
         .unwrap();
-    let transfer = invocation.advance().unwrap();
+    // The iterable's terminator-rvalue may suspend before the header's OSR
+    // checkpoint. Resume only those exact continuations, then inspect OSR.
+    let transfer = advance_after_suspended_work(&mut invocation).unwrap();
     assert!(matches!(
         transfer,
         runmat_native_executor::execute::NativeInvocationStep::Deoptimized { target, .. }
@@ -1216,7 +1275,7 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
     ));
     invocation.resume_optimization().unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-        invocation.advance().unwrap()
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("optimized continuation must complete")
     };
@@ -1230,19 +1289,27 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
 fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
     let indexing = compile_executor(index_fixture()).unwrap();
     assert_eq!(
-        indexing
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(indexing.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(20.0)]
     );
 
     let member = compile_executor(member_fixture()).unwrap();
     assert_eq!(
-        member
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(member.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(42.0)]
     );
 }
@@ -1250,18 +1317,26 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
 #[test]
 fn generic_index_and_member_mutations_publish_updated_root_values() {
     let indexing = compile_executor(index_assignment_fixture()).unwrap();
-    let execution = indexing
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(indexing.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::Tensor(updated) = execution.outputs.first().unwrap() else {
         panic!("expected updated tensor")
     };
     assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
 
     let member = compile_executor(member_assignment_fixture()).unwrap();
-    let execution = member
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(member.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::Struct(updated) = execution.outputs.first().unwrap() else {
         panic!("expected updated structure")
     };
@@ -1269,10 +1344,14 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
 
     let multi = compile_executor(multi_assignment_fixture()).unwrap();
     assert_eq!(
-        multi
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(multi.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(33.0)]
     );
 }
@@ -1416,10 +1495,14 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     ))
     .unwrap();
     assert_eq!(
-        global
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime.clone())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(global.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime.clone(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(42.0)]
     );
     futures::executor::block_on(runtime.scope(async {
@@ -1436,10 +1519,14 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     ))
     .unwrap();
     assert_eq!(
-        persistent
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime.clone())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(persistent.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime.clone(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(10.0)]
     );
     futures::executor::block_on(runtime.scope(async {
@@ -1482,7 +1569,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
         })
         .unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-        invocation.advance().unwrap()
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("interactive native invocation should complete")
     };
@@ -1509,17 +1596,25 @@ fn generic_workspace_first_static_property_prefers_named_local_binding() {
 fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape() {
     let scalar = compile_executor(end_scalar_fixture()).unwrap();
     assert_eq!(
-        scalar
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(scalar.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(30.0)]
     );
 
     let range = compile_executor(end_range_fixture()).unwrap();
-    let execution = range
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(range.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::Tensor(selected) = execution.outputs.first().unwrap() else {
         panic!("expected end-relative range selection to return a tensor")
     };
@@ -1915,10 +2010,14 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
 fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
     let success = compile_executor(branch_fixture()).unwrap();
     assert_eq!(
-        success
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(success.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(7.0)]
     );
 
@@ -1966,6 +2065,20 @@ fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
 }
 
 fn runtime_context() -> RuntimeContext {
+    // These native fixtures lower synthetic MIR whose functions all name
+    // ProgramSourceId(0). Issue that ordinal through the selected runtime;
+    // a bare context cannot authorize callsite provenance for native calls.
+    unbound_runtime_context()
+        .with_program_sources([runmat_runtime::source_context::ProgramSourceRecord {
+            ordinal: ProgramSourceId(0),
+            name: Arc::from("generic_execution_fixture.m"),
+            fullpath_name: None,
+            text: Arc::from("synthetic generic execution MIR fixture"),
+        }])
+        .expect("issue native fixture source ordinal")
+}
+
+fn unbound_runtime_context() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
 }
 
@@ -3018,7 +3131,12 @@ fn generic_native_omitted_input_can_be_initialized_before_member_assignment() {
             initialize, false, true,
         ))
         .unwrap();
-        let result = executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context());
+        let result = futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ));
         if initialize {
             let result = result.unwrap();
             let output = result.outputs.first().unwrap();
@@ -3038,9 +3156,13 @@ fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() 
     for (initialize, nested) in [(false, false), (false, true), (true, true)] {
         let executor =
             compile_executor(member_assignment_fixture_with_root(initialize, nested)).unwrap();
-        let execution = executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap();
+        let execution = futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap();
         let output = execution.outputs.first().unwrap();
         let Value::Struct(root) = output else {
             panic!("expected initialized structure")
@@ -4570,7 +4692,9 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
-                catch_scopes: Default::default(),
+                catch_scopes: [(BasicBlockId(2), vec![runmat_mir::CatchScopeId(0)])]
+                    .into_iter()
+                    .collect(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),

@@ -177,7 +177,9 @@ fn valid_optimized_osr_cancellation_releases_retained_code_without_entering_targ
             weak.upgrade().is_some(),
             "invocation owns admitted optimized code"
         );
-        let NativeInvocationStep::Deoptimized { target, .. } = invocation.advance().unwrap() else {
+        let NativeInvocationStep::Deoptimized { target, .. } =
+            advance_after_suspended_work(&mut invocation).unwrap()
+        else {
             panic!("generated loop must reach valid OSR boundary");
         };
         assert_eq!(
@@ -196,7 +198,9 @@ fn valid_optimized_osr_cancellation_releases_retained_code_without_entering_targ
                 weak.upgrade().is_some(),
                 "active optimized frame retains its code"
             );
-            let NativeInvocationStep::Completed(execution) = invocation.advance().unwrap() else {
+            let NativeInvocationStep::Completed(execution) =
+                advance_after_suspended_work(&mut invocation).unwrap()
+            else {
                 panic!("uncancelled optimized continuation must complete");
             };
             assert_eq!(execution.outputs, vec![Value::Num(6.0)]);

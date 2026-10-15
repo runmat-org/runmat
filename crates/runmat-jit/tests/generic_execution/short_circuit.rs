@@ -211,10 +211,14 @@ fn skipped_rhs_never_captures_or_invokes_calls() {
     drop(activation);
     let executor = compile_executor(capture_fixture(false, 3)).unwrap();
     assert_eq!(
-        executor
-            .invoke(ProgramFunctionId(0), vec![], 1, runtime)
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            vec![],
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Bool(false)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);

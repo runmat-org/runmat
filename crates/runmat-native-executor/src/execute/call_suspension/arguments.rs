@@ -40,7 +40,17 @@ pub(in crate::execute) fn take_completed_expanded_call_arguments(
         NativeExecutorError::Host("completed native call has no active site".into())
     })?;
     if completed.request != request || completed.embedded.as_ref() != embedded {
+        let descendant = completed.request == request
+            && completed
+                .embedded
+                .as_ref()
+                .is_some_and(|identity| identity.is_descendant_of(embedded));
         state.completed_call = Some(completed);
+        if descendant {
+            // The outer expansion re-entered its arguments. Preserve this
+            // exact child completion until its own embedded stage consumes it.
+            return Ok(None);
+        }
         return Err(NativeExecutorError::Host(
             "completed native call arguments do not match the exact resumed operation".into(),
         ));

@@ -566,13 +566,13 @@ pub fn call_feval_sequence_async_with_outputs(
     async move {
         let _input_roots = input_roots?;
         let _guard = crate::output_count::push_output_count(Some(requested_outputs));
-        crate::call::feval::invoke(
+        Box::pin(crate::call::feval::invoke(
             None,
             Some(requested_outputs),
             func_value,
             args.to_vec(),
             None,
-        )
+        ))
         .await
     }
 }

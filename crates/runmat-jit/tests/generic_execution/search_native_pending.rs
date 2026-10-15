@@ -197,7 +197,7 @@ fn begin_case(
         "function out = search_native_pending(text, pattern, option, control)\nout = {}(text, pattern, option, control);\nend",
         case.name()
     );
-    let runtime = runtime_context()
+    let runtime = unbound_runtime_context()
         .with_program_sources([ProgramSourceRecord {
             ordinal: ProgramSourceId(0),
             name: Arc::from("search_native_pending.m"),
@@ -271,10 +271,16 @@ fn compiled_search_resident_controls_suspend_resume_fail_and_drop_without_replay
         let before = provider.downloads.load(Ordering::SeqCst);
         let mut success = begin_case(&executor, case, &input);
         let (continuation, generation) = suspension(&mut success);
+        // Native entry installs an unpolled owned continuation. Poll the
+        // exact resume future once to observe the provider's Pending download.
+        let mut resume = Box::pin(success.resume_suspension(continuation, generation));
+        assert!(
+            futures::executor::block_on(async { futures::poll!(resume.as_mut()) }).is_pending()
+        );
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
         assert!(weak.acquire().is_some());
         provider.set_mode(DownloadMode::Ready);
-        futures::executor::block_on(success.resume_suspension(continuation, generation)).unwrap();
+        futures::executor::block_on(resume).unwrap();
         let NativeInvocationStep::Completed(execution) = success.advance().unwrap() else {
             panic!("native continuation must complete the exact selected search call");
         };
@@ -284,8 +290,13 @@ fn compiled_search_resident_controls_suspend_resume_fail_and_drop_without_replay
 
         provider.set_mode(DownloadMode::Pending);
         let mut cancelled = begin_case(&executor, case, &input);
-        suspension(&mut cancelled);
+        let (continuation, generation) = suspension(&mut cancelled);
+        let mut resume = Box::pin(cancelled.resume_suspension(continuation, generation));
+        assert!(
+            futures::executor::block_on(async { futures::poll!(resume.as_mut()) }).is_pending()
+        );
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 2);
+        drop(resume);
         drop(cancelled);
         provider.set_mode(DownloadMode::Ready);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 2);
@@ -294,10 +305,13 @@ fn compiled_search_resident_controls_suspend_resume_fail_and_drop_without_replay
         provider.set_mode(DownloadMode::Pending);
         let mut failed = begin_case(&executor, case, &input);
         let (continuation, generation) = suspension(&mut failed);
+        let mut resume = Box::pin(failed.resume_suspension(continuation, generation));
+        assert!(
+            futures::executor::block_on(async { futures::poll!(resume.as_mut()) }).is_pending()
+        );
         assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 3);
         provider.set_mode(DownloadMode::Fail);
-        let error = futures::executor::block_on(failed.resume_suspension(continuation, generation))
-            .unwrap_err();
+        let error = futures::executor::block_on(resume).unwrap_err();
         let NativeExecutorError::Runtime(runtime) = error else {
             panic!("native resumed failure must preserve typed RuntimeError");
         };
