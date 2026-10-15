@@ -283,10 +283,6 @@ fn existing_figure_handle(value: &Value) -> BuiltinResult<FigureHandle> {
     }
 }
 
-fn numeric_scalar(value: &Value) -> Option<f64> {
-    super::style::value_as_f64(value)
-}
-
 fn apply_option(figure: FigureHandle, option: &str) -> BuiltinResult<()> {
     match option.trim().to_ascii_lowercase().as_str() {
         "on" => set_data_cursor_enabled_for_figure(figure, true),
@@ -308,7 +304,10 @@ fn toggle_figure(figure: FigureHandle) -> BuiltinResult<()> {
 }
 
 fn object_from_snapshot(snapshot: DataCursorStateSnapshot) -> BuiltinResult<Value> {
-    let mut object = ObjectInstance::new(DATA_CURSOR_CLASS_NAME.to_string());
+    let mut object =
+        ObjectInstance::new(DATA_CURSOR_CLASS_NAME.to_string()).with_graphics_receiver(
+            super::state::mode_properties::receiver(snapshot.figure, BUILTIN_NAME)?,
+        );
     update_object_properties(&mut object, snapshot);
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
@@ -373,11 +372,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<DataCursorStateSnap
         if object.class_name != DATA_CURSOR_CLASS_NAME {
             return None;
         }
-        object
-            .properties
-            .get("Figure")
-            .and_then(numeric_scalar)
-            .map(|figure| FigureHandle::from(figure.round() as u32))
+        object.graphics_receiver().cloned()
     })
     .map_err(|err| internal(err.to_string()))?
     .ok_or_else(|| invalid("invalid datacursormode object"))?;
@@ -428,11 +423,11 @@ pub fn get_data_cursor_object_property(
             }
             value
         }
-        Some(name) => match canonical_property(name).as_deref() {
-            Some("Enable") => {
+        Some(name) => match canonical_property(name) {
+            Some(DataCursorProperty::Enable) => {
                 Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into())
             }
-            Some("SnapToDataVertex") => Value::String(
+            Some(DataCursorProperty::SnapToDataVertex) => Value::String(
                 if snapshot.mode.snap_to_data_vertex {
                     "on"
                 } else {
@@ -440,14 +435,14 @@ pub fn get_data_cursor_object_property(
                 }
                 .into(),
             ),
-            Some("DisplayStyle") => Value::String(snapshot.mode.display_style),
-            Some("UpdateFcn") => {
+            Some(DataCursorProperty::DisplayStyle) => Value::String(snapshot.mode.display_style),
+            Some(DataCursorProperty::UpdateFcn) => {
                 object_property_or_default(handle, "UpdateFcn", empty_update_fcn())?
             }
-            Some("Interpreter") => {
+            Some(DataCursorProperty::Interpreter) => {
                 object_property_or_default(handle, "Interpreter", Value::String("tex".into()))?
             }
-            Some("Figure") => Value::Num(snapshot.figure.as_u32() as f64),
+            Some(DataCursorProperty::Figure) => Value::Num(snapshot.figure.as_u32() as f64),
             _ => {
                 return Err(invalid(format!(
                     "unsupported datacursormode property '{name}'"
@@ -469,11 +464,11 @@ pub fn set_data_cursor_object_properties(
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(invalid("expected datacursormode property/value pairs"));
     }
-    let snapshot = snapshot_from_object(&handle)?;
+    snapshot_from_object(&handle)?;
     for pair in args.chunks_exact(2) {
         let name = super::properties::property_name_text(&pair[0], "set")
             .map_err(|_| invalid("datacursormode property names must be scalar text"))?;
-        apply_property(snapshot.figure, &name, &pair[1])?;
+        apply_property(mode_receiver(&handle)?, &name, &pair[1])?;
         write_object_property(&handle, &name, pair[1].clone())?;
     }
     let refreshed = snapshot_from_object(&handle)?;
@@ -486,15 +481,21 @@ pub fn set_data_cursor_object_properties(
     Ok(Some(()))
 }
 
-fn apply_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinResult<()> {
-    match canonical_property(name).as_deref() {
-        Some("Enable") => set_data_cursor_enabled_for_figure(figure, parse_enable(value)?)
-            .map_err(|err| invalid(err.to_string())),
-        Some("SnapToDataVertex") => {
+fn apply_property(
+    figure: impl Into<super::state::FigureTarget>,
+    name: &str,
+    value: &Value,
+) -> BuiltinResult<()> {
+    match canonical_property(name) {
+        Some(DataCursorProperty::Enable) => {
+            set_data_cursor_enabled_for_figure(figure, parse_enable(value)?)
+                .map_err(|err| invalid(err.to_string()))
+        }
+        Some(DataCursorProperty::SnapToDataVertex) => {
             set_data_cursor_snap_to_data_vertex_for_figure(figure, parse_snap(value)?)
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("DisplayStyle") => {
+        Some(DataCursorProperty::DisplayStyle) => {
             let style = super::style::value_as_string(value)
                 .ok_or_else(|| invalid("DisplayStyle must be 'datatip' or 'window'"))?;
             let normalized = match style.trim().to_ascii_lowercase().as_str() {
@@ -505,8 +506,8 @@ fn apply_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinRes
             set_data_cursor_display_style_for_figure(figure, normalized.to_string())
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("UpdateFcn") => validate_update_fcn(value),
-        Some("Interpreter") => {
+        Some(DataCursorProperty::UpdateFcn) => validate_update_fcn(value),
+        Some(DataCursorProperty::Interpreter) => {
             let interpreter = super::style::value_as_string(value)
                 .ok_or_else(|| invalid("Interpreter must be 'tex', 'latex', or 'none'"))?;
             match interpreter.trim().to_ascii_lowercase().as_str() {
@@ -514,7 +515,7 @@ fn apply_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinRes
                 _ => Err(invalid("Interpreter must be 'tex', 'latex', or 'none'")),
             }
         }
-        Some("Figure") => Err(invalid("Figure is read-only")),
+        Some(DataCursorProperty::Figure) => Err(invalid("Figure is read-only")),
         _ => Err(invalid(format!(
             "unsupported datacursormode property '{name}'"
         ))),
@@ -526,7 +527,18 @@ fn object_property_or_default(
     name: &str,
     default: Value,
 ) -> BuiltinResult<Value> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+    if let Some(key) = canonical_property(name).and_then(DataCursorProperty::persistent) {
+        return super::state::mode_properties::get(
+            &mode_receiver(handle)?,
+            key,
+            default,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(DataCursorProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value(&handle.target, |value| match value {
         Value::Object(object) => object.properties.get(&key).cloned().unwrap_or(default),
         _ => default,
@@ -535,7 +547,18 @@ fn object_property_or_default(
 }
 
 fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+    if let Some(key) = canonical_property(name).and_then(DataCursorProperty::persistent) {
+        return super::state::mode_properties::set(
+            &mode_receiver(handle)?,
+            key,
+            value,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(DataCursorProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value_mut(&handle.target, |target| {
         if let Value::Object(object) = target {
             object.properties.insert(key, value);
@@ -632,16 +655,57 @@ fn strict_numeric_on_off(value: &Value) -> Option<bool> {
     }
 }
 
-fn canonical_property(name: &str) -> Option<String> {
+#[derive(Clone, Copy)]
+enum DataCursorProperty {
+    Enable,
+    SnapToDataVertex,
+    DisplayStyle,
+    UpdateFcn,
+    Interpreter,
+    Figure,
+}
+impl DataCursorProperty {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Enable => "Enable",
+            Self::SnapToDataVertex => "SnapToDataVertex",
+            Self::DisplayStyle => "DisplayStyle",
+            Self::UpdateFcn => "UpdateFcn",
+            Self::Interpreter => "Interpreter",
+            Self::Figure => "Figure",
+        }
+    }
+    fn persistent(self) -> Option<super::state::mode_properties::ModeProperty> {
+        use super::state::mode_properties::ModeProperty as Property;
+        use crate::context::GraphicsCallbackKind as Kind;
+        match self {
+            Self::UpdateFcn => Some(Property::Callback(Kind::DataCursorUpdate)),
+            Self::Interpreter => Some(Property::DataCursorInterpreter),
+            _ => None,
+        }
+    }
+}
+fn canonical_property(name: &str) -> Option<DataCursorProperty> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "enable" => Some("Enable".into()),
-        "snaptodatavertex" => Some("SnapToDataVertex".into()),
-        "displaystyle" => Some("DisplayStyle".into()),
-        "updatefcn" => Some("UpdateFcn".into()),
-        "interpreter" => Some("Interpreter".into()),
-        "figure" => Some("Figure".into()),
+        "enable" => Some(DataCursorProperty::Enable),
+        "snaptodatavertex" => Some(DataCursorProperty::SnapToDataVertex),
+        "displaystyle" => Some(DataCursorProperty::DisplayStyle),
+        "updatefcn" => Some(DataCursorProperty::UpdateFcn),
+        "interpreter" => Some(DataCursorProperty::Interpreter),
+        "figure" => Some(DataCursorProperty::Figure),
         _ => None,
     }
+}
+
+fn mode_receiver(handle: &HandleRef) -> BuiltinResult<runmat_value::GraphicsReceiverRef> {
+    runmat_gc::gc_with_value(&handle.target, |value| match value {
+        Value::Object(object) if object.class_name == DATA_CURSOR_CLASS_NAME => {
+            object.graphics_receiver().cloned()
+        }
+        _ => None,
+    })
+    .map_err(|cause| internal(cause.to_string()))?
+    .ok_or_else(|| invalid("mode object has no exact Figure receiver"))
 }
 
 #[cfg(test)]

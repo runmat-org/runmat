@@ -23,6 +23,50 @@ pub enum GraphicsCallbackResult {
     DataTipText(Vec<String>),
 }
 
+/// Descriptive host selection, not authority minted by numeric coordinates.
+/// The Runtime owner must validate every exact lease before and after a call.
+#[derive(Clone, Debug)]
+pub enum GraphicsCallbackRolePayload {
+    Action {
+        figure: super::GraphicsReceiverRef,
+        scene: super::GraphicsSceneLease,
+        axes: super::GraphicsReceiverRef,
+    },
+    Filter {
+        figure: super::GraphicsReceiverRef,
+        scene: super::GraphicsSceneLease,
+        axes: super::GraphicsReceiverRef,
+        target: super::GraphicsReceiverRef,
+    },
+}
+
+impl GraphicsCallbackRolePayload {
+    pub fn figure_and_scene(&self) -> (&super::GraphicsReceiverRef, &super::GraphicsSceneLease) {
+        match self {
+            Self::Action { figure, scene, .. } | Self::Filter { figure, scene, .. } => {
+                (figure, scene)
+            }
+        }
+    }
+
+    pub fn matches_role(&self, kind: GraphicsCallbackKind) -> bool {
+        matches!(
+            (self, kind),
+            (
+                Self::Action { .. },
+                GraphicsCallbackKind::PanActionPre
+                    | GraphicsCallbackKind::PanActionPost
+                    | GraphicsCallbackKind::ZoomActionPre
+                    | GraphicsCallbackKind::ZoomActionPost
+            ) | (
+                Self::Filter { .. },
+                GraphicsCallbackKind::PanButtonDownFilter
+                    | GraphicsCallbackKind::ZoomButtonDownFilter
+            )
+        )
+    }
+}
+
 /// Host-visible result of an admitted request. Detailed RuntimeError and
 /// callable roots remain on the originating session lane.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -208,6 +208,112 @@ fn event(kind: GraphicsCallbackKind) -> GraphicsCallbackHostEvent {
 
 #[cfg(feature = "plot-core")]
 #[test]
+fn bound_property_payload_pins_scene_before_and_after_callback_effects() {
+    use crate::builtins::plotting::state::{
+        axes_graphics_receiver_for_scene, capture_figure_persistence_snapshot,
+        figure_graphics_receiver, reset_plot_state, select_figure, set_figure_name, FigureHandle,
+    };
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    for (change_before, change_during) in [(false, false), (true, false), (false, true)] {
+        reset_plot_state();
+        let figure = FigureHandle::from(38);
+        select_figure(figure);
+        let receiver = figure_graphics_receiver(figure).unwrap().unwrap();
+        let snapshot = capture_figure_persistence_snapshot(&[figure], 1, usize::MAX).unwrap();
+        let scene = snapshot.entries[0].scene_lease.clone();
+        let axes = axes_graphics_receiver_for_scene(&receiver, &scene, 0)
+            .unwrap()
+            .unwrap();
+        let base = selected();
+        let queue = RuntimeGraphicsCallbackQueue::new_for_selected(
+            &base,
+            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        );
+        let ports = base
+            .service_ports()
+            .clone()
+            .with_graphics_callback_queue(queue.downgrade());
+        let selected = base.with_service_ports(ports);
+        let calls = Rc::new(Cell::new(0));
+        let callback: Rc<GraphicsBoundCallbackResponder> = {
+            let calls = calls.clone();
+            Rc::new(move |_, _| {
+                calls.set(calls.get() + 1);
+                Box::pin(async move {
+                    if change_during {
+                        set_figure_name(figure, "callback changed scene".into()).unwrap();
+                        Err(build_runtime_error("original callback failure")
+                            .with_identifier("RunMat:test:OriginalCallbackFailure")
+                            .build())
+                    } else {
+                        Ok(GraphicsCallbackResult::Completed)
+                    }
+                })
+            })
+        };
+        let kind = GraphicsCallbackKind::PanActionPre;
+        let ingress = queue
+            .replace_graphics_bound_property_response(selected, receiver.clone(), kind, callback)
+            .unwrap();
+        let event = GraphicsCallbackHostEvent {
+            figure: figure.as_u32(),
+            kind,
+            position: None,
+        };
+        assert!(
+            ingress.request(event).is_err(),
+            "metadata alone cannot authorize a bound role"
+        );
+        let ticket = ingress
+            .request_bound(
+                event,
+                GraphicsCallbackRolePayload::Action {
+                    figure: receiver,
+                    scene,
+                    axes,
+                },
+            )
+            .unwrap();
+        if change_before {
+            set_figure_name(figure, "scene changed before dispatch".into()).unwrap();
+        }
+        let processed = futures::executor::block_on(queue.process());
+        if change_during {
+            assert_eq!(
+                processed.unwrap_err().identifier(),
+                Some("RunMat:test:OriginalCallbackFailure")
+            );
+            assert_eq!(
+                ticket.disposition(),
+                GraphicsCallbackDisposition::Indeterminate
+            );
+            assert_eq!(
+                futures::executor::block_on(ticket),
+                Err(GraphicsCallbackHostFailure::Indeterminate)
+            );
+            assert_eq!(ingress.revoke(), GraphicsCallbackDisposition::Indeterminate);
+            assert!(futures::executor::block_on(queue.process()).is_err());
+        } else {
+            processed.unwrap();
+            assert_eq!(
+                futures::executor::block_on(ticket),
+                if change_before {
+                    Err(GraphicsCallbackHostFailure::Retired)
+                } else {
+                    Ok(GraphicsCallbackResult::Completed)
+                }
+            );
+        }
+        assert_eq!(calls.get(), usize::from(!change_before));
+    }
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
 fn property_replacement_fences_queued_old_claim_and_reuses_bounded_slot() {
     use crate::builtins::plotting::state::{
         figure_graphics_receiver, reset_plot_state, select_figure, FigureHandle,

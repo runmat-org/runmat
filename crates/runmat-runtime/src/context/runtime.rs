@@ -17,6 +17,9 @@ use std::sync::{
 
 #[path = "runtime/source_selection.rs"]
 mod source_selection;
+mod background_callback;
+#[cfg(feature = "plot-core")]
+pub(crate) use background_callback::BackgroundCallbackAuthority;
 use source_selection::InvocationSourceSelection;
 pub use source_selection::ProgramSourceSelectionError;
 

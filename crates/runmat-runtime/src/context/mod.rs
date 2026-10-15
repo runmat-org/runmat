@@ -33,6 +33,8 @@ pub(crate) mod document_test_support;
 #[cfg(test)]
 pub(crate) mod physical_test_support;
 mod runtime;
+#[cfg(feature = "plot-core")]
+pub(crate) use runtime::BackgroundCallbackAuthority;
 mod super_constructor;
 mod scope;
 mod source_evaluation;
@@ -61,11 +63,12 @@ pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
 pub use graphics_callbacks::{
-    GraphicsCallbackDisposition, GraphicsCallbackHandler, GraphicsCallbackHostEvent,
-    GraphicsCallbackHostFailure, GraphicsCallbackHostTicket, GraphicsCallbackIngress,
-    GraphicsCallbackIngressError, GraphicsCallbackIngressFailure, GraphicsCallbackKind,
-    GraphicsCallbackRegistration, GraphicsCallbackResponder, GraphicsCallbackResult,
-    RuntimeGraphicsCallbackQueue, WeakRuntimeGraphicsCallbackQueue,
+    GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackHandler,
+    GraphicsCallbackHostEvent, GraphicsCallbackHostFailure, GraphicsCallbackHostTicket,
+    GraphicsCallbackIngress, GraphicsCallbackIngressError, GraphicsCallbackIngressFailure,
+    GraphicsCallbackKind, GraphicsCallbackRegistration, GraphicsCallbackResponder,
+    GraphicsCallbackResult, GraphicsCallbackRolePayload, RuntimeGraphicsCallbackQueue,
+    WeakRuntimeGraphicsCallbackQueue,
 };
 pub use graphics_presentation::{
     GraphicsCallbackPolicy, GraphicsCallbackReceipt, GraphicsFlushDisposition, GraphicsFlushRate,

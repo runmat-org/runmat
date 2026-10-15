@@ -29,6 +29,12 @@ use crate::{BuiltinResult, RuntimeError};
 
 #[path = "state/callbacks.rs"]
 pub(crate) mod callbacks;
+#[path = "state/mode_properties.rs"]
+pub(crate) mod mode_properties;
+pub use mode_properties::FigureTarget;
+#[path = "state/callback_payload.rs"]
+mod callback_payload;
+pub(crate) use callback_payload::callback_payload_valid;
 #[path = "state/shared_figure.rs"]
 mod shared_figure;
 #[path = "state/scene_mutation.rs"]
@@ -405,6 +411,10 @@ struct FigureState {
     last_enabled_pan_motion: ZoomMotion,
     pan_axes_modes: HashMap<usize, PanModeState>,
     data_cursor_mode: DataCursorModeState,
+    mode_properties: Vec<(
+        mode_properties::ModeProperty,
+        mode_properties::ModePropertyValue,
+    )>,
     waitbar: Option<WaitbarState>,
     revision: u64,
 }
@@ -435,6 +445,7 @@ impl FigureState {
             last_enabled_pan_motion: ZoomMotion::Both,
             pan_axes_modes: HashMap::new(),
             data_cursor_mode: DataCursorModeState::default(),
+            mode_properties: Vec::new(),
             waitbar: None,
             revision: 0,
         }
@@ -2908,10 +2919,13 @@ fn zoom_baseline_limits_for_state(state: &FigureState, axes_index: usize) -> Axi
 }
 
 pub fn zoom_state_snapshot(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     axes_index: Option<usize>,
 ) -> Result<ZoomStateSnapshot, FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let reg = registry();
+    target.validate(&reg)?;
     let state = reg
         .figures
         .get(&handle)
@@ -2968,11 +2982,14 @@ pub fn set_zoom_mode_for_axes(
 }
 
 pub fn set_zoom_motion_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     motion: ZoomMotion,
 ) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let figure_clone = {
         let mut reg = registry();
+        target.validate(&reg)?;
         let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.motion = motion;
         if state.zoom_mode.enabled {
@@ -2985,9 +3002,15 @@ pub fn set_zoom_motion_for_figure(
     Ok(())
 }
 
-pub fn set_zoom_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+pub fn set_zoom_enabled_for_figure(
+    handle: impl Into<FigureTarget>,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let figure_clone = {
         let mut reg = registry();
+        target.validate(&reg)?;
         let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.enabled = enabled;
         interaction_exclusivity::zoom_selected_for_figure(state, false);
@@ -2999,11 +3022,14 @@ pub fn set_zoom_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Resul
 }
 
 pub fn set_zoom_direction_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     direction: ZoomDirection,
 ) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let figure_clone = {
         let mut reg = registry();
+        target.validate(&reg)?;
         let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.direction = direction;
         state.revision = state.revision.wrapping_add(1);
@@ -3014,11 +3040,14 @@ pub fn set_zoom_direction_for_figure(
 }
 
 pub fn set_zoom_right_click_action_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     action: ZoomRightClickAction,
 ) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let figure_clone = {
         let mut reg = registry();
+        target.validate(&reg)?;
         let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.right_click_action = action;
         state.revision = state.revision.wrapping_add(1);
@@ -3028,9 +3057,15 @@ pub fn set_zoom_right_click_action_for_figure(
     Ok(())
 }
 
-pub fn set_zoom_legacy_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+pub fn set_zoom_legacy_for_figure(
+    handle: impl Into<FigureTarget>,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let figure_clone = {
         let mut reg = registry();
+        target.validate(&reg)?;
         let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.use_legacy_exploration_modes = enabled;
         state.revision = state.revision.wrapping_add(1);
@@ -3196,10 +3231,13 @@ fn apply_pan_mode_command(
 }
 
 pub fn pan_state_snapshot(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     axes_index: Option<usize>,
 ) -> Result<PanStateSnapshot, FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let mut reg = registry();
+    target.validate(&reg)?;
     let state = get_state_for_query(&mut reg, handle);
     if let Some(index) = axes_index {
         validate_axes_index(state, index)?;
@@ -3244,8 +3282,13 @@ pub fn set_pan_mode_for_axes(
     Ok(())
 }
 
-pub fn set_pan_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
+pub fn set_pan_enabled_for_figure(
+    handle: impl Into<FigureTarget>,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
+    let ((), figure_clone) = with_figure_mut(target, |state| {
         state.pan_mode.enabled = enabled;
         interaction_exclusivity::pan_selected_for_figure(state, false);
     })?;
@@ -3254,10 +3297,12 @@ pub fn set_pan_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result
 }
 
 pub fn set_pan_motion_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     motion: ZoomMotion,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
+    let target = handle.into();
+    let handle = target.coordinate();
+    let ((), figure_clone) = with_figure_mut(target, |state| {
         state.pan_mode.motion = motion;
         state.last_enabled_pan_motion = motion;
     })?;
@@ -3266,9 +3311,12 @@ pub fn set_pan_motion_for_figure(
 }
 
 pub fn data_cursor_state_snapshot(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
 ) -> Result<DataCursorStateSnapshot, FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let mut reg = registry();
+    target.validate(&reg)?;
     let state = get_state_for_query(&mut reg, handle);
     Ok(DataCursorStateSnapshot {
         figure: handle,
@@ -3277,10 +3325,12 @@ pub fn data_cursor_state_snapshot(
 }
 
 pub fn set_data_cursor_enabled_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
+    let target = handle.into();
+    let handle = target.coordinate();
+    let ((), figure_clone) = with_figure_mut(target, |state| {
         state.data_cursor_mode.enabled = enabled;
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -3288,10 +3338,12 @@ pub fn set_data_cursor_enabled_for_figure(
 }
 
 pub fn set_data_cursor_snap_to_data_vertex_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     enabled: bool,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
+    let target = handle.into();
+    let handle = target.coordinate();
+    let ((), figure_clone) = with_figure_mut(target, |state| {
         state.data_cursor_mode.snap_to_data_vertex = enabled;
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -3299,10 +3351,12 @@ pub fn set_data_cursor_snap_to_data_vertex_for_figure(
 }
 
 pub fn set_data_cursor_display_style_for_figure(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     style: String,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_figure_mut(handle, |state| {
+    let target = handle.into();
+    let handle = target.coordinate();
+    let ((), figure_clone) = with_figure_mut(target, |state| {
         state.data_cursor_mode.display_style = style;
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -5433,10 +5487,13 @@ fn with_axes_target_mut<R>(
 }
 
 fn with_figure_mut<R>(
-    handle: FigureHandle,
+    handle: impl Into<FigureTarget>,
     f: impl FnOnce(&mut FigureState) -> R,
 ) -> Result<(R, Figure), FigureError> {
+    let target = handle.into();
+    let handle = target.coordinate();
     let mut reg = registry();
+    target.validate(&reg)?;
     let state = get_state_mut(&mut reg, handle);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
