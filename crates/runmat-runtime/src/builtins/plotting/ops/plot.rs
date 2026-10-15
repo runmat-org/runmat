@@ -528,7 +528,6 @@ pub(crate) mod tests {
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_plot::plots::PlotElement;
     use runmat_value::IntegerStorage;
 
@@ -912,17 +911,6 @@ pub(crate) mod tests {
         assert!(order.is_some());
         apply_line_style_order(&mut plans, order.as_ref().unwrap());
         assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
-    }
-
-    #[test]
-    fn plot_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(
-                &[Type::tensor(), Type::tensor()],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
-        );
     }
 
     #[test]

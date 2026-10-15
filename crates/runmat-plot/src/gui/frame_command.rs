@@ -160,9 +160,25 @@ impl InFlightFrame {
 /// A producer may submit only to this already-created window event loop.
 #[derive(Clone)]
 pub struct FramePort {
-    proxy: EventLoopProxy<FrameCommand>,
+    sender: Arc<dyn FrameCommandSender>,
     window_id: WindowId,
     close_signal: Arc<std::sync::atomic::AtomicBool>,
+}
+
+// Keep the native event-loop transport behind its typed sending boundary.
+// Ports and receipts expose frame authority, not the renderer's type graph.
+trait FrameCommandSender: Send + Sync {
+    fn send(&self, command: FrameCommand) -> Result<(), FrameError>;
+}
+
+struct NativeFrameCommandSender(EventLoopProxy<FrameCommand>);
+
+impl FrameCommandSender for NativeFrameCommandSender {
+    fn send(&self, command: FrameCommand) -> Result<(), FrameError> {
+        self.0
+            .send_event(command)
+            .map_err(|_| FrameError::WindowClosed)
+    }
 }
 
 impl FramePort {
@@ -172,7 +188,7 @@ impl FramePort {
         close_signal: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         Self {
-            proxy,
+            sender: Arc::new(NativeFrameCommandSender(proxy)),
             window_id,
             close_signal,
         }
@@ -187,7 +203,7 @@ impl FramePort {
         let (result, receiver) = oneshot::channel();
         let state = Arc::new(FrameState::default());
         FrameTicket {
-            proxy: self.proxy.clone(),
+            sender: Arc::clone(&self.sender),
             command: Some(FrameCommand {
                 target: FrameTarget::Window {
                     id: self.window_id,
@@ -205,7 +221,7 @@ impl FramePort {
 
 /// Lazy frame request; dropping before host dispatch prevents a frame effect.
 pub struct FrameTicket {
-    proxy: EventLoopProxy<FrameCommand>,
+    sender: Arc<dyn FrameCommandSender>,
     command: Option<FrameCommand>,
     receiver: oneshot::Receiver<Result<(), FrameError>>,
     state: Arc<FrameState>,
@@ -226,9 +242,9 @@ impl Future for FrameTicket {
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         if let Some(command) = self.command.take() {
-            if self.proxy.send_event(command).is_err() {
+            if let Err(error) = self.sender.send(command) {
                 self.state.abandon();
-                return Poll::Ready(Err(FrameError::WindowClosed));
+                return Poll::Ready(Err(error));
             }
         }
         match Pin::new(&mut self.receiver).poll(context) {

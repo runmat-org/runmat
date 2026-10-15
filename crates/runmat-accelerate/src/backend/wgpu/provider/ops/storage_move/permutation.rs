@@ -22,19 +22,6 @@ impl WgpuProvider {
         )
     }
 
-    pub(in super::super) fn permute_buffer_exec(
-        &self,
-        entry: &BufferEntry,
-        order: &[usize],
-    ) -> Result<BufferEntry> {
-        self.permute_buffer_optional_exec(entry, order, &std::cell::Cell::new(false), &|_| Ok(()))?
-            .ok_or_else(|| {
-                runmat_accelerate_api::unsupported_provider_operation(
-                    "permute: unsupported physical request",
-                )
-            })
-    }
-
     pub(in super::super) fn permute_buffer_optional_exec(
         &self,
         entry: &BufferEntry,

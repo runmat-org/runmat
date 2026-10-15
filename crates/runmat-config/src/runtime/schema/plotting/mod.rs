@@ -189,6 +189,18 @@ fn default_gui_snapshot_bytes() -> NonZeroUsize {
     NonZeroUsize::new(256 * 1024 * 1024).expect("nonzero GUI default")
 }
 
+fn default_window_height() -> u32 {
+    800
+}
+
+fn default_dpi() -> u32 {
+    300
+}
+
+fn default_scene_budget_bytes() -> usize {
+    8 * 1024 * 1024
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,16 +228,4 @@ mod tests {
             );
         }
     }
-}
-
-fn default_window_height() -> u32 {
-    800
-}
-
-fn default_dpi() -> u32 {
-    300
-}
-
-fn default_scene_budget_bytes() -> usize {
-    8 * 1024 * 1024
 }

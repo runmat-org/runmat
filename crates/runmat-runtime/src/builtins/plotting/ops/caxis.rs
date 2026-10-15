@@ -39,6 +39,9 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
+    use runmat_builtins::{
+        BuiltinIntegerAuditKind, CAXIS_INTEGER_AUDIT, CLIM_INTEGER_LIMITS_EXTENSION,
+    };
     use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
@@ -112,7 +115,7 @@ mod tests {
                     .expect_err("MATLAB mode must reject typed integer color limits");
                 assert_eq!(
                     error.identifier(),
-                    super::super::clim::CLIM_INTEGER_LIMITS_EXTENSION.error_identifier
+                    CLIM_INTEGER_LIMITS_EXTENSION.error_identifier
                 );
             }
             {

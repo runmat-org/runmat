@@ -520,7 +520,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     let expected_len = x_len
         .checked_mul(y_len)
         .ok_or_else(|| plotting_error(name, format!("{name}: grid dimensions overflowed")))?;
-    if z_ref.len as usize != expected_len {
+    if z_ref.len != expected_len {
         return Err(plotting_error(
             name,
             format!(
@@ -565,7 +565,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
             let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
             })?;
-            if exported.len as usize != x_len {
+            if exported.len != x_len {
                 return Err(plotting_error(
                     name,
                     format!(
@@ -595,7 +595,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
             let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
             })?;
-            if exported.len as usize != y_len {
+            if exported.len != y_len {
                 return Err(plotting_error(
                     name,
                     format!(

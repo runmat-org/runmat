@@ -1862,7 +1862,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
             let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
             })?;
-            if exported.len as usize != x_axis.len() {
+            if exported.len != x_axis.len() {
                 return Err(plotting_error(
                     name,
                     format!("{name}: X axis length mismatch"),
@@ -1891,7 +1891,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
             let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
             })?;
-            if exported.len as usize != y_axis.len() {
+            if exported.len != y_axis.len() {
                 return Err(plotting_error(
                     name,
                     format!("{name}: Y axis length mismatch"),

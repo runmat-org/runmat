@@ -367,7 +367,7 @@ mod tests {
                 )
                 .expect("homogeneous value objects");
                 let mut structure = StructValue::new();
-                structure.insert("items".into(), Value::ObjectArray(array));
+                structure.insert("items", Value::ObjectArray(array));
                 Value::Cell(
                     runmat_value::CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap(),
                 )
