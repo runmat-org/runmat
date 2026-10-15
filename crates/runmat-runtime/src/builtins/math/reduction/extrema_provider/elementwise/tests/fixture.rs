@@ -14,6 +14,7 @@ pub(super) enum Mode {
     Normal,
     WrongValues,
     WrongFill,
+    AliasFill,
     WrongRepmat,
     AliasValues,
     PendingValues,
@@ -204,6 +205,9 @@ impl AccelProvider for Provider {
         self.fills.fetch_add(1, Ordering::SeqCst);
         if matches!(self.mode, Mode::UnsupportedFill) {
             return Ok(None);
+        }
+        if matches!(self.mode, Mode::AliasFill) {
+            return Ok(Some(input.clone()));
         }
         let shape = if matches!(self.mode, Mode::WrongFill) {
             vec![1, 1]

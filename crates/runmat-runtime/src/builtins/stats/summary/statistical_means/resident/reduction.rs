@@ -22,7 +22,7 @@ pub(super) fn selected_axes(shape: &[usize], axes: &Axes) -> Vec<usize> {
     }
 }
 
-fn protect_live_operands(
+pub(super) fn protect_live_operands(
     kind: ReductionKind,
     output: GpuTensorHandle,
     operands: &[&GpuTensorHandle],

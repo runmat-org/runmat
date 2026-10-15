@@ -48,6 +48,12 @@ pub(super) async fn run(
                     "resident constant constructor unavailable",
                 )?;
                 let zero = admitted_real(kind, provider, input, zero, input.shape(), precision)?;
+                let zero = reduction::protect_live_operands(
+                    kind,
+                    zero,
+                    &[input],
+                    "resident zero constructor aliased its input",
+                )?;
                 let nonnegative = provider
                     .elem_ge(input, &zero)
                     .await
@@ -59,6 +65,12 @@ pub(super) async fn run(
                     "resident constant constructor unavailable",
                 )?;
                 let nan = admitted_real(kind, provider, input, nan, input.shape(), precision)?;
+                let nan = reduction::protect_live_operands(
+                    kind,
+                    nan,
+                    &[input, &zero, &nonnegative],
+                    "resident NaN constructor aliased a live operand",
+                )?;
                 let output = provider
                     .select(&nonnegative, input, &nan)
                     .await
@@ -86,6 +98,12 @@ pub(super) async fn run(
                 "resident constant constructor unavailable",
             )?;
             let zero = admitted_real(kind, provider, input, zero, minimum.shape(), precision)?;
+            let zero = reduction::protect_live_operands(
+                kind,
+                zero,
+                &[input, &minimum],
+                "resident zero constructor aliased a live operand",
+            )?;
             let nonnegative = provider
                 .elem_ge(&minimum, &zero)
                 .await
@@ -120,6 +138,20 @@ pub(super) async fn run(
                 "resident constant constructor unavailable",
             )?;
             let nan = admitted_real(kind, provider, input, nan, minimum.shape(), precision)?;
+            let nan = reduction::protect_live_operands(
+                kind,
+                nan,
+                &[
+                    input,
+                    &minimum,
+                    &zero,
+                    &nonnegative,
+                    &logarithms,
+                    &average,
+                    &result,
+                ],
+                "resident NaN constructor aliased a live operand",
+            )?;
             provider
                 .select(&nonnegative, &result, &nan)
                 .await
@@ -158,7 +190,7 @@ pub(super) async fn run(
                     .observe(progress, kind)?;
                 admitted_real(kind, provider, input, filled, input.shape(), precision)?
             } else {
-                absolute
+                absolute.clone()
             };
             for axis in reduction::selected_axes(input.shape(), &options.axes) {
                 let next = provider
@@ -172,7 +204,8 @@ pub(super) async fn run(
                 );
                 scale = admitted_real(kind, provider, input, next, &expected, precision)?;
             }
-            let scale = super::usable_scale(kind, provider, input, scale, progress).await?;
+            let scale =
+                super::usable_scale(kind, provider, input, scale, &[&absolute], progress).await?;
             let scale = admitted_real(
                 kind,
                 provider,
@@ -274,7 +307,13 @@ pub(super) async fn run(
                 );
                 scale = admitted_real(kind, provider, input, result.values, &expected, precision)?;
             }
-            let scale = super::usable_scale(kind, provider, input, scale, progress).await?;
+            let protected = components
+                .as_ref()
+                .map_or([input, input, &absolute], |(real, imaginary)| {
+                    [real, imaginary, &absolute]
+                });
+            let scale =
+                super::usable_scale(kind, provider, input, scale, &protected, progress).await?;
             let scale = admitted_real(
                 kind,
                 provider,

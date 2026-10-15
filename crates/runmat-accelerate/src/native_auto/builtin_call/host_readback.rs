@@ -4,7 +4,8 @@ use super::*;
 use crate::fusion_exec::host_readback::{CpuHostResources, CpuReadbackPlan, Source};
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{
-    selected_fusion_binding, FusionHostResourceInput, FusionHostResourceQuery,
+    selected_fusion_binding, FusionHostOutputDomain, FusionHostResourceInput,
+    FusionHostResourceQuery,
 };
 use runmat_runtime::context::preparation::AdmittedBuiltinPreparation;
 use runmat_types::{CallRequest, NumericClass, NumericDomain, ValueKindFact};
@@ -82,11 +83,7 @@ pub(super) fn admit(
         return None;
     }
     let output = inferred.outputs.into_iter().next()?;
-    let all_facts = facts
-        .iter()
-        .chain(std::iter::once(&output))
-        .collect::<Vec<_>>();
-    let shapes = all_facts
+    let shapes = facts
         .iter()
         .map(|fact| {
             fact.shape
@@ -95,7 +92,7 @@ pub(super) fn admit(
                 .collect::<Option<Vec<_>>>()
         })
         .collect::<Option<Vec<_>>>()?;
-    let classes = all_facts
+    let classes = facts
         .iter()
         .map(|fact| match &fact.kind {
             ValueKindFact::Numeric(numeric)
@@ -107,7 +104,35 @@ pub(super) fn admit(
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
-    let inputs = shapes[..facts.len()]
+    let (output_shape, output_class, output_domain) = if matches!(
+        request.form().operation,
+        runmat_builtins::BuiltinPreparationOperation::RealUnary(_)
+            | runmat_builtins::BuiltinPreparationOperation::RealPower
+    ) {
+        let envelope = runmat_runtime::builtins::math::host_resources::promoting_output(
+            request.form().operation,
+            &facts,
+            &output,
+        )?;
+        (envelope.shape, envelope.class, envelope.domain)
+    } else {
+        let numeric = output.numeric()?;
+        if numeric.domain != NumericDomain::Real
+            || !matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+        {
+            return None;
+        }
+        (
+            output
+                .shape
+                .known_dims()?
+                .into_iter()
+                .collect::<Option<Vec<_>>>()?,
+            numeric.class,
+            FusionHostOutputDomain::Exact(numeric.domain),
+        )
+    };
+    let inputs = shapes
         .iter()
         .zip(&classes)
         .map(|(shape, &class)| FusionHostResourceInput { shape, class })
@@ -115,19 +140,18 @@ pub(super) fn admit(
     let bound = callback(&FusionHostResourceQuery {
         inputs: &inputs,
         output: FusionHostResourceInput {
-            shape: shapes.last()?,
-            class: *classes.last()?,
+            shape: &output_shape,
+            class: output_class,
         },
+        output_domain,
     })?;
-    let operand_metadata = shapes[..facts.len()]
-        .iter()
-        .try_fold(0_u64, |total, shape| {
-            total.checked_add(
-                u64::try_from(shape.len())
-                    .ok()?
-                    .checked_mul(std::mem::size_of::<usize>() as u64)?,
-            )
-        })?;
+    let operand_metadata = shapes.iter().try_fold(0_u64, |total, shape| {
+        total.checked_add(
+            u64::try_from(shape.len())
+                .ok()?
+                .checked_mul(std::mem::size_of::<usize>() as u64)?,
+        )
+    })?;
     let resources = crate::fusion_exec::host_readback::resources(
         &sources,
         bound.retained_bytes,
@@ -142,6 +166,7 @@ pub(super) fn admit(
         selected.requested_outputs,
         &facts,
         &output,
+        (&output_shape, output_class, output_domain),
         resources.resources,
     ))
     .ok()?;

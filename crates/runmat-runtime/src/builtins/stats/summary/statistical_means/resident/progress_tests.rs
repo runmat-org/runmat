@@ -18,12 +18,16 @@ enum Hook {
     Min,
     Abs,
     Mean,
+    ZeroConstant,
+    NanConstant,
+    OneConstant,
 }
 
 #[derive(Clone, Copy)]
 enum HookOutcome {
     Unsupported,
     Pending,
+    Alias,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +65,7 @@ struct Provider {
     calls: AtomicUsize,
     downloads: AtomicUsize,
     probes: Mutex<Vec<(u64, RetirementProbe)>>,
+    last_zero: Mutex<Option<runmat_accelerate_api::allocation::WeakGpuTensorHandle>>,
 }
 
 impl Provider {
@@ -77,6 +82,7 @@ impl Provider {
             calls: AtomicUsize::new(0),
             downloads: AtomicUsize::new(0),
             probes: Mutex::new(Vec::new()),
+            last_zero: Mutex::new(None),
         }))
     }
 
@@ -92,6 +98,7 @@ impl Provider {
                     Err(unsupported_provider_operation("resident stage fixture"))
                 }
                 HookOutcome::Pending => panic!("only the async abs hook may remain pending"),
+                HookOutcome::Alias => panic!("only constant hooks inject malformed aliases"),
             };
         }
         Ok(())
@@ -108,6 +115,39 @@ impl Provider {
             .unwrap()
             .push((allocated.handle.buffer_id(), allocated.probe));
         Ok(allocated.handle)
+    }
+
+    fn constant(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+        hook: Hook,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let ordinal = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.fail == hook && self.fail_on == ordinal {
+            assert!(matches!(self.outcome, HookOutcome::Alias));
+            // Zero aliases its prototype; NaN/one deliberately alias the
+            // earlier zero sibling, not merely their immediate prototype.
+            return if hook == Hook::ZeroConstant {
+                Ok(Some(prototype.clone()))
+            } else {
+                self.last_zero
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .expect("earlier zero")
+                    .acquire()
+                    .map(Some)
+                    .map_err(Into::into)
+            };
+        }
+        let output = self
+            .real(shape)
+            .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())?;
+        if hook == Hook::ZeroConstant {
+            *self.last_zero.lock().unwrap() = Some(output.downgrade());
+        }
+        Ok(Some(output))
     }
 
     fn logical(&self, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
@@ -199,15 +239,60 @@ impl AccelProvider for Provider {
 
     fn zeros_like(
         &self,
-        _: &GpuTensorHandle,
+        input: &GpuTensorHandle,
         shape: &[usize],
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
-        let result: anyhow::Result<GpuTensorHandle> = {
+        self.constant(input, shape, Hook::ZeroConstant)
+    }
+
+    fn fill_like(
+        &self,
+        input: &GpuTensorHandle,
+        value: f64,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        assert!(value.is_nan(), "this fixture only prepares NaN constants");
+        self.constant(input, input.shape(), Hook::NanConstant)
+    }
+
+    fn ones_like(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.constant(input, input.shape(), Hook::OneConstant)
+    }
+
+    fn logical_isfinite(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.logical(input.shape())
+    }
+
+    fn elem_ne<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            self.real(shape)
-        };
-        result.map(Some).map_err(|source| {
-            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            self.logical(input.shape()).map_err(Into::into)
+        })
+    }
+
+    fn logical_and(
+        &self,
+        input: &GpuTensorHandle,
+        _: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.logical(input.shape())
+    }
+
+    fn unary_exp<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.real(input.shape())
         })
     }
 
@@ -292,6 +377,7 @@ impl AccelProvider for Provider {
                         return Err(unsupported_provider_operation("resident stage fixture"));
                     }
                     HookOutcome::Pending => std::future::pending::<()>().await,
+                    HookOutcome::Alias => panic!("only constant hooks inject malformed aliases"),
                 }
             }
             self.real(input.shape())
@@ -308,6 +394,46 @@ fn assert_original_unsupported(error: &crate::RuntimeError) {
         source = source
             .source()
             .expect("original typed unsupported cause retained");
+    }
+}
+
+fn assert_constant_alias_rejected(
+    provider: &Provider,
+    borrowed: &[&GpuTensorHandle],
+    result: Result<GpuTensorHandle, super::Failure>,
+    ordinal: usize,
+) {
+    let super::Failure::Execution(error) =
+        result.expect_err("constant alias is not a capability miss")
+    else {
+        panic!("constant alias must be terminal");
+    };
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(error.message().contains("constructor aliased"));
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        ordinal,
+        "no downstream hook"
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    for handle in borrowed {
+        handle.allocation_lease().validate_live().unwrap();
+    }
+    let probes = provider.probes.lock().unwrap();
+    for (id, probe) in probes.iter() {
+        if let Some(input) = borrowed.iter().find(|input| input.buffer_id() == *id) {
+            assert_eq!(probe.retirements(), 0, "borrowed input remains live");
+            probe
+                .with_data(input, |data| {
+                    let HostNumericDataView::F64(data) = data else {
+                        panic!("native double fixture")
+                    };
+                    assert!(data.iter().all(|value| *value == 4.0));
+                })
+                .unwrap();
+        } else {
+            assert_eq!(probe.retirements(), 1, "owned intermediate retires once");
+        }
     }
 }
 
@@ -358,6 +484,67 @@ fn later_geomean_and_second_rmse_operand_unsupported_are_terminal() {
             .unwrap()
             .iter()
             .filter(|(id, _)| *id != left.buffer_id() && *id != right.buffer_id())
+            .all(|(_, probe)| probe.retirements() == 1));
+    }
+    // The four geometric constructor sites: zero aliases its prototype, and
+    // NaN aliases an earlier zero sibling. Neither may reach the next hook.
+    for (hook, ordinal, singleton) in [
+        (Hook::ZeroConstant, 1, true),
+        (Hook::NanConstant, 3, true),
+        (Hook::ZeroConstant, 3, false),
+        (Hook::NanConstant, 8, false),
+    ] {
+        let provider = Provider::with_outcome(hook, ordinal, HookOutcome::Alias);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider.source(vec![4.0, 4.0], vec![2, 1]);
+        let options = super::super::options::Options {
+            axes: if singleton {
+                super::super::options::Axes::Dims(vec![3])
+            } else {
+                super::super::options::Axes::Default
+            },
+            missing: super::super::options::MissingMode::Include,
+            weights: None,
+            typed_integer_control: false,
+        };
+        let result = block_on(super::numerics::run(
+            super::ReductionKind::Geometric,
+            provider,
+            &input,
+            &options,
+            &mut super::ResidentStageProgress::default(),
+        ));
+        assert_constant_alias_rejected(provider, &[&input], result, ordinal);
+        drop(input);
+        assert!(provider
+            .probes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(_, probe)| probe.retirements() == 1));
+    }
+    // The shared scale sites: a zero prototype alias and a one/zero sibling
+    // alias must be rejected for RMS/harmonic/RMSE before comparison/select.
+    for (hook, ordinal) in [(Hook::ZeroConstant, 2), (Hook::OneConstant, 5)] {
+        let provider = Provider::with_outcome(hook, ordinal, HookOutcome::Alias);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider.source(vec![4.0, 4.0], vec![2, 1]);
+        let scale = provider.source(vec![4.0], vec![1, 1]);
+        let result = block_on(super::usable_scale(
+            super::ReductionKind::RootMeanSquare,
+            provider,
+            &input,
+            scale.clone(),
+            &[],
+            &mut super::ResidentStageProgress::default(),
+        ));
+        assert_constant_alias_rejected(provider, &[&input, &scale], result, ordinal);
+        drop((input, scale));
+        assert!(provider
+            .probes
+            .lock()
+            .unwrap()
+            .iter()
             .all(|(_, probe)| probe.retirements() == 1));
     }
 }

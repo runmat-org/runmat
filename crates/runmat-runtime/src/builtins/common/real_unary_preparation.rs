@@ -32,14 +32,20 @@ where
         // The admitted host operand reaches the existing host-only numeric
         // body. Domain diagnostics and complex-result semantics stay there;
         // only provider-oriented preparation/promotion is bypassed.
+        let evidence = classify_value(&value, predicate);
         let output = body(value).await?;
-        route.confirm_host_branch(
+        route.confirm_numerical_host_branch(
             runtime.unwrap(),
             crate::context::VmFusionHostInstruction::ElementwiseCall,
+            evidence,
         );
         return Ok(output);
     }
-    if !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
+    let resident = matches!(&value, Value::GpuTensor(handle)
+        if runmat_accelerate_api::handle_provenance(handle) == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        && crate::builtins::math::host_route::real_floating_shape(&value).is_some());
+    if !resident
+        && !matches!(&value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
     {
         return body(value).await;
     }
@@ -56,34 +62,79 @@ where
         },
         vec![value],
     )?
-    .with_numerical_domain(|operands| {
-        let [Value::Tensor(tensor)] = operands else {
-            unreachable!("admitted floating operand")
-        };
-        Ok(NumericalDomainEvidence::RealUnary {
+    .with_numerical_domain(|operands| match operands {
+        [Value::Tensor(tensor)] => Ok(NumericalDomainEvidence::RealUnary {
             predicate,
             classification: classify(tensor, predicate),
-        })
+        }),
+        [Value::GpuTensor(_)] if resident => Ok(NumericalDomainEvidence::Unknown),
+        _ => unreachable!("admitted floating operand"),
     })?;
-    if !matches!(
-        request.numerical_domain(),
-        NumericalDomainEvidence::RealUnary {
-            classification: RealUnaryClassification::Inside,
-            ..
-        }
-    ) {
+    if !resident
+        && !matches!(
+            request.numerical_domain(),
+            NumericalDomainEvidence::RealUnary {
+                classification: RealUnaryClassification::Inside,
+                ..
+            }
+        )
+    {
         return request
             .into_operands()
             .with_owned_values_async(|mut values| body(values.remove(0)))
             .await;
     }
-    execute_request(runtime, request, |mut values| body(values.remove(0))).await
+    execute_request(runtime, request, |mut values| async move {
+        let value = values.remove(0);
+        let route = crate::builtins::math::host_route::canonical(
+            runtime,
+            crate::context::VmFusionHostInstruction::ElementwiseCall,
+            std::iter::once(&value),
+        );
+        let evidence = if route.is_some() {
+            Some(classify_value(&value, predicate))
+        } else {
+            None
+        };
+        let output = body(value).await?;
+        if let (Some(route), Some(evidence)) = (route, evidence) {
+            route.confirm_numerical_host_branch(
+                runtime.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseCall,
+                evidence,
+            );
+        }
+        Ok(output)
+    })
+    .await
 }
 
 fn classify(tensor: &Tensor, predicate: RealUnaryPredicate) -> RealUnaryClassification {
+    classify_values(
+        (0..tensor.len())
+            .map(|index| crate::builtins::common::tensor::tensor_value_f64(tensor, index)),
+        predicate,
+    )
+}
+
+fn classify_value(value: &Value, predicate: RealUnaryPredicate) -> NumericalDomainEvidence {
+    let classification = match value {
+        Value::Tensor(tensor) => classify(tensor, predicate),
+        Value::Num(value) => classify_values(std::iter::once(*value), predicate),
+        _ => unreachable!("canonical native floating host branch"),
+    };
+    NumericalDomainEvidence::RealUnary {
+        predicate,
+        classification,
+    }
+}
+
+fn classify_values(
+    values: impl Iterator<Item = f64>,
+    predicate: RealUnaryPredicate,
+) -> RealUnaryClassification {
     let mut result = RealUnaryClassification::Inside;
-    for index in 0..tensor.len() {
-        let value = crate::builtins::common::tensor::tensor_value_f64(tensor, index);
+    for value in values {
         if value.is_nan() {
             result = RealUnaryClassification::Indeterminate;
             continue;
