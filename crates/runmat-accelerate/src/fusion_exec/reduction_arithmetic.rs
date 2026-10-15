@@ -121,6 +121,19 @@ fn selected_source(
             | crate::fusion::FusionOp::Builtin { output, .. } => *output,
         };
         if let Some(output) = output {
+            // Unlike ordinary elementwise fusion, this reduction frame still
+            // stages every source leaf as data. It cannot yet omit an original
+            // Double control using its authenticated POWER receipt.
+            if program.power_arithmetic(output).is_some_and(|receipt| {
+                matches!(
+                    receipt.mode,
+                    runmat_accelerate_api::RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
+                )
+            }) {
+                return unavailable(anyhow::anyhow!(
+                    "selected reduction has no mixed POWER physical control projection"
+                ));
+            }
             if let Err(error) = program.require_ordinary_arithmetic(output, precision) {
                 return unavailable(error);
             }
