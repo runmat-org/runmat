@@ -41,7 +41,7 @@ fn conjugation_preserves_native_complex_bits_shape_and_independent_lifetimes() {
         let alias = input.clone();
         let error = block_on(other.unary_conj(&input)).unwrap_err();
         assert!(
-            !runmat_accelerate_api::is_unsupported_provider_operation(&error),
+            !error.is_unsupported(),
             "foreign ownership cannot turn into capability fallback"
         );
         drop(provider.unary_conj(&input));
@@ -49,7 +49,9 @@ fn conjugation_preserves_native_complex_bits_shape_and_independent_lifetimes() {
             provider.acquire_live(&source_wire).is_ok(),
             "unpolled cancellation retains borrowed input"
         );
-        let output = block_on(provider.unary_conj(&input)).unwrap();
+        let output = block_on(provider.unary_conj(&input))
+            .unwrap()
+            .expect("admitted conjugation");
         assert_eq!(output.shape(), &[1, 2, 2]);
         assert_eq!(
             output.physical().storage(),
@@ -126,7 +128,9 @@ fn conjugation_empty_complex_and_real_copy_preserve_class_and_shape() {
             let input = provider
                 .allocate_numeric_data(data, vec![2, 0, 3], storage)
                 .unwrap();
-            let output = block_on(provider.unary_conj(&input)).unwrap();
+            let output = block_on(provider.unary_conj(&input))
+                .unwrap()
+                .expect("admitted conjugation");
             assert_eq!(output.shape(), &[2, 0, 3]);
             assert_eq!(
                 output.physical().element_type(),
@@ -179,13 +183,10 @@ fn integer_complex_conjugation_is_explicitly_unsupported_without_touching_input(
             )
             .unwrap();
         let wire = input.wire_descriptor();
-        let failure = block_on(provider.unary_conj(&input)).unwrap_err();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &failure
-        ));
-        assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-            &block_on(other.unary_conj(&input)).unwrap_err()
-        ));
+        assert!(block_on(provider.unary_conj(&input)).unwrap().is_none());
+        assert!(!block_on(other.unary_conj(&input))
+            .unwrap_err()
+            .is_unsupported());
         assert!(provider.acquire_live(&wire).is_ok());
         drop(input);
         assert!(provider.acquire_live(&wire).is_err());

@@ -21,6 +21,7 @@ mod owning_routes;
 mod power;
 mod remainder;
 mod select;
+mod structural_move;
 mod unary;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
@@ -1811,15 +1812,28 @@ impl InProcessProvider {
         storage: GpuTensorStorage,
         logical: bool,
     ) -> Result<GpuTensorHandle> {
-        numeric_registry()
-            .stage(
-                self.next_allocation_identity()?,
-                data,
-                shape,
-                storage,
-                logical,
-            )?
-            .publish()
+        self.allocate_produced_observed(data, shape, storage, logical, None)
+    }
+
+    fn allocate_produced_observed(
+        &self,
+        data: InProcessNumericData,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+        logical: bool,
+        allocated: Option<&std::cell::Cell<bool>>,
+    ) -> Result<GpuTensorHandle> {
+        let staged = numeric_registry().stage(
+            self.next_allocation_identity()?,
+            data,
+            shape,
+            storage,
+            logical,
+        )?;
+        if let Some(allocated) = allocated {
+            allocated.set(true);
+        }
+        staged.publish()
     }
 
     fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> Result<GpuTensorHandle> {
@@ -2727,7 +2741,7 @@ fn permute_data<T: Copy + Default>(
         src_shape.extend(std::iter::repeat_n(1, rank - src_shape.len()));
     }
 
-    let total = product(&src_shape)
+    let total = logical_len_for_shape("permute", &src_shape)?
         .checked_mul(lane_factor)
         .ok_or_else(|| anyhow!("permute: shape/product exceeds supported size"))?;
     ensure!(
@@ -2740,6 +2754,9 @@ fn permute_data<T: Copy + Default>(
     let mut dst_shape = vec![0usize; rank];
     for (dst_dim, &src_dim) in order.iter().enumerate() {
         dst_shape[dst_dim] = src_shape[src_dim];
+    }
+    if total == 0 {
+        return Ok((Vec::new(), dst_shape));
     }
 
     let mut kernel_src_shape = Vec::with_capacity(rank + usize::from(lane_factor > 1));
@@ -3293,6 +3310,9 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 fn checked_total(shape: &[usize]) -> Result<usize> {
+    if shape.contains(&0) {
+        return Ok(0);
+    }
     shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim)
             .ok_or_else(|| anyhow!("repmat: requested output exceeds maximum size"))
@@ -3395,11 +3415,11 @@ fn repmat_integer_data(
     }
 }
 
-fn repmat_complex_interleaved(
-    data: &[f64],
+fn repmat_complex_interleaved<T: Copy>(
+    data: &[T],
     shape: &[usize],
     reps: &[usize],
-) -> Result<(Vec<f64>, Vec<usize>)> {
+) -> Result<(Vec<T>, Vec<usize>)> {
     ensure!(
         data.len().is_multiple_of(2),
         "repmat: complex-interleaved buffer has odd length"
@@ -3411,7 +3431,11 @@ fn repmat_complex_interleaved(
 
     let mut storage_reps = Vec::with_capacity(reps.len() + 1);
     storage_reps.push(1);
-    storage_reps.extend_from_slice(reps);
+    if reps.len() == 1 {
+        storage_reps.extend(std::iter::repeat_n(reps[0], shape.len().max(2)));
+    } else {
+        storage_reps.extend_from_slice(reps);
+    }
 
     let (tiled, mut storage_output_shape) = repmat_numeric(data, &storage_shape, &storage_reps)?;
     if !storage_output_shape.is_empty() {
@@ -6768,8 +6792,8 @@ impl AccelProvider for InProcessProvider {
     fn unary_conj<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_unary(a, unary::Unary::Conj) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move { self.conjugate_optional(a) })
     }
 
     fn unary_heaviside<'a>(
@@ -7491,36 +7515,12 @@ impl AccelProvider for InProcessProvider {
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { crate::iir_zero_phase::execute(self, request).await })
     }
-    fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            let data = integer_registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(handle)
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "permute: unknown integer tensor handle {}",
-                        handle.buffer_id()
-                    )
-                })?;
-            let (permuted, new_shape) = permute_integer_data(&data, handle.shape(), order)?;
-            return self.allocate_integer_tensor(permuted, new_shape);
-        }
-        let storage = runmat_accelerate_api::handle_storage(handle);
-        let lane_factor = match storage {
-            GpuTensorStorage::Real => 1usize,
-            GpuTensorStorage::ComplexInterleaved => 2usize,
-        };
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(handle)
-                .ok_or_else(|| anyhow!("permute: unknown tensor handle {}", handle.buffer_id()))?
-                .clone()
-        };
-        let (permuted, new_shape) = permute_data(&data, handle.shape(), order, lane_factor)?;
-        self.allocate_tensor_with_storage(permuted, new_shape, storage)
+    fn permute(
+        &self,
+        handle: &GpuTensorHandle,
+        order: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.permute_structural(handle, order)
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
@@ -7902,37 +7902,12 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
-    fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            let data = integer_registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(handle)
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "repmat: unknown integer tensor handle {}",
-                        handle.buffer_id()
-                    )
-                })?;
-            let (tiled, shape) = repmat_integer_data(&data, handle.shape(), reps)?;
-            return self.allocate_integer_tensor(tiled, shape);
-        }
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(handle)
-                .ok_or_else(|| anyhow!("repmat: unknown tensor handle {}", handle.buffer_id()))?
-                .clone()
-        };
-        let storage = runmat_accelerate_api::handle_storage(handle);
-        let (tiled, shape) = match storage {
-            GpuTensorStorage::Real => repmat_numeric(&data, handle.shape(), reps)?,
-            GpuTensorStorage::ComplexInterleaved => {
-                repmat_complex_interleaved(&data, handle.shape(), reps)?
-            }
-        };
-        self.allocate_tensor_with_storage(tiled, shape, storage)
+    fn repmat(
+        &self,
+        handle: &GpuTensorHandle,
+        reps: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.replicate_structural(handle, reps)
     }
 
     fn dot<'a>(
@@ -10196,10 +10171,16 @@ mod tests {
             })
             .expect("upload exact uint64");
 
-        let permuted = provider.permute(&input, &[1, 0]).expect("permute");
+        let permuted = provider
+            .permute(&input, &[1, 0])
+            .expect("permute")
+            .expect("supported");
         let flipped = provider.flip(&permuted, &[0]).expect("flip");
         let shifted = provider.circshift(&flipped, &[1, 0]).expect("circshift");
-        let tiled = provider.repmat(&shifted, &[1, 2]).expect("repmat");
+        let tiled = provider
+            .repmat(&shifted, &[1, 2])
+            .expect("repmat")
+            .expect("supported");
 
         for handle in [&permuted, &flipped, &shifted, &tiled] {
             assert_eq!(
@@ -10233,6 +10214,44 @@ mod tests {
                 7
             ])
         );
+        let complex = provider
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 7.0, 2.0, 8.0]),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .unwrap();
+        let tiled = provider.repmat(&complex, &[2]).unwrap().unwrap();
+        assert_eq!(tiled.shape(), &[2, 4]);
+        assert_eq!(tiled.physical().element_type(), NumericElementType::F32);
+        assert_eq!(
+            block_on(provider.download_numeric(&tiled)).unwrap().data,
+            HostNumericDataOwned::F32(vec![
+                1.0, 7.0, 1.0, 7.0, 2.0, 8.0, 2.0, 8.0, 1.0, 7.0, 1.0, 7.0, 2.0, 8.0, 2.0, 8.0
+            ])
+        );
+        let permuted = provider.permute(&complex, &[1, 0]).unwrap().unwrap();
+        assert_eq!(permuted.shape(), &[2, 1]);
+        assert_eq!(
+            block_on(provider.download_numeric(&permuted)).unwrap().data,
+            HostNumericDataOwned::F32(vec![1.0, 7.0, 2.0, 8.0])
+        );
+        let logical = provider
+            .upload_logical_raw(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        for output in [
+            provider.permute(&logical, &[1, 0]).unwrap().unwrap(),
+            provider.repmat(&logical, &[2, 1]).unwrap().unwrap(),
+        ] {
+            assert!(output.view().is_logical());
+            assert_eq!(
+                output.physical().element_type(),
+                logical.physical().element_type()
+            );
+        }
     }
 
     #[test]

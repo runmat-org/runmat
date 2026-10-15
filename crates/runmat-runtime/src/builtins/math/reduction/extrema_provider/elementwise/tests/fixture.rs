@@ -216,23 +216,28 @@ impl AccelProvider for Provider {
         &self,
         input: &GpuTensorHandle,
         repetitions: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        self.repeats.fetch_add(1, Ordering::SeqCst);
-        if matches!(self.mode, Mode::WrongRepmat) {
-            return Ok(input.clone());
-        }
-        let data = self.read(input)?;
-        assert_eq!(input.shape().len(), 2);
-        let rows = input.shape()[0];
-        let columns = input.shape()[1];
-        let shape = vec![rows * repetitions[0], columns * repetitions[1]];
-        let mut output = Vec::new();
-        for column in 0..shape[1] {
-            for row in 0..shape[0] {
-                output.push(data[(column % columns) * rows + row % rows]);
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result = (|| -> anyhow::Result<GpuTensorHandle> {
+            self.repeats.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.mode, Mode::WrongRepmat) {
+                return Ok(input.clone());
             }
-        }
-        Ok(self.allocate(output, shape).handle)
+            let data = self.read(input)?;
+            assert_eq!(input.shape().len(), 2);
+            let rows = input.shape()[0];
+            let columns = input.shape()[1];
+            let shape = vec![rows * repetitions[0], columns * repetitions[1]];
+            let mut output = Vec::new();
+            for column in 0..shape[1] {
+                for row in 0..shape[0] {
+                    output.push(data[(column % columns) * rows + row % rows]);
+                }
+            }
+            Ok(self.allocate(output, shape).handle)
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 pub(super) fn provider(mode: Mode) -> &'static Provider {

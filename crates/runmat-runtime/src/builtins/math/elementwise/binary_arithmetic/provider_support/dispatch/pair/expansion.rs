@@ -25,18 +25,33 @@ pub(super) fn expand_pair<'a>(
     };
     if left_repetitions.iter().any(|&count| count != 1) {
         expanded.left = match provider.repmat(left, left_repetitions) {
-            Ok(output) => output,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+            Ok(Some(output)) => output,
+            Ok(None) => return Ok(None),
             Err(error) => return Err(provider_error(operation, error)),
         };
         expanded.expanded_left = true;
+        let shape = gpu_helpers::replication_shape(left.shape(), left_repetitions);
+        if !shape.as_ref().is_some_and(|shape| {
+            gpu_helpers::replication_output_matches(left, &expanded.left, provider, shape)
+        }) || expanded.left.shares_allocation_with(right)
+        {
+            return Err(provider_contract_error(
+                operation,
+                "provider returned invalid left expansion",
+            ));
+        }
     }
     if right_repetitions.iter().any(|&count| count != 1) {
         expanded.right = match provider.repmat(right, right_repetitions) {
-            Ok(output) => output,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Ok(Some(output)) => output,
+            Ok(None) => {
                 return if expanded.expanded_left {
-                    Err(provider_error_after_effect(operation, error))
+                    Err(provider_error_after_effect(
+                        operation,
+                        anyhow::anyhow!(
+                            "required right expansion unavailable after left expansion"
+                        ),
+                    ))
                 } else {
                     Ok(None)
                 };
@@ -50,6 +65,17 @@ pub(super) fn expand_pair<'a>(
             }
         };
         expanded.expanded_right = true;
+        let shape = gpu_helpers::replication_shape(right.shape(), right_repetitions);
+        if !shape.as_ref().is_some_and(|shape| {
+            gpu_helpers::replication_output_matches(right, &expanded.right, provider, shape)
+        }) || expanded.right.shares_allocation_with(left)
+            || (expanded.expanded_left && expanded.right.shares_allocation_with(&expanded.left))
+        {
+            return Err(provider_contract_error(
+                operation,
+                "provider returned invalid right expansion",
+            ));
+        }
     }
     Ok(Some(expanded))
 }

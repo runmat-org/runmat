@@ -208,10 +208,48 @@ fn conjugation_is_real_and_retains_intermediates_until_pending_call_is_dropped()
         future::Future,
         task::{Context, Poll},
     };
+    for explicit in [false, true] {
+        let provider = Provider::new(Mode::ConjUnavailable);
+        let _active = ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .inner
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[
+                    1., 2., 3., -4., 5., 6., 7., -8., 9., 10., 11., -12.,
+                ]),
+                shape: &[2, 3],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .unwrap()
+            .with_provenance(if explicit {
+                GpuHandleProvenance::Explicit
+            } else {
+                GpuHandleProvenance::Automatic
+            })
+            .unwrap();
+        let result = invoke("ctranspose", &input).unwrap();
+        let Value::GpuTensor(output) = result.value() else {
+            panic!("completed-intermediate adaptation remains resident");
+        };
+        assert_eq!(handle_is_explicit(output), explicit);
+        assert_eq!(output.shape(), [3, 2]);
+        assert!(
+            matches!(block_on(provider.inner.download_numeric(output)).unwrap().data,
+            HostNumericDataOwned::F32(values) if values == [1., -2., 5., -6., 9., -10., 3., 4., 7., 8., 11., 12.])
+        );
+        assert_eq!(
+            provider.counts(),
+            (1, 1, 1, 1),
+            "conjugation adapts the completed transpose exactly once"
+        );
+        input.allocation_lease().validate_live().unwrap();
+    }
     for mode in [
         Mode::Normal,
         Mode::ConjAlias,
         Mode::ConjOriginal,
+        Mode::ConjUnavailable,
+        Mode::ConjFailure,
         Mode::Pending,
     ] {
         let provider = Provider::new(mode);
@@ -237,7 +275,10 @@ fn conjugation_is_real_and_retains_intermediates_until_pending_call_is_dropped()
             ));
             assert!(provider.produced.lock().unwrap()[0].acquire().is_some());
             drop(future);
-        } else if matches!(mode, Mode::ConjAlias | Mode::ConjOriginal) {
+        } else if matches!(
+            mode,
+            Mode::ConjAlias | Mode::ConjOriginal | Mode::ConjFailure
+        ) {
             assert_eq!(
                 invoke("ctranspose", &input).unwrap_err().gpu_gather_retry,
                 GpuGatherRetry::Never
@@ -253,7 +294,14 @@ fn conjugation_is_real_and_retains_intermediates_until_pending_call_is_dropped()
                 matches!(actual.data, HostNumericDataOwned::F64(values) if values == [1., -2., 5., -6., 9., -10., 3., 4., 7., 8., 11., 12.])
             );
         }
-        assert_eq!(provider.counts(), (1, 1, 0, 0));
+        assert_eq!(
+            provider.counts(),
+            if matches!(mode, Mode::ConjUnavailable) {
+                (1, 1, 1, 1)
+            } else {
+                (1, 1, 0, 0)
+            }
+        );
         assert!(provider
             .produced
             .lock()

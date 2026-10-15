@@ -348,7 +348,16 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
     }
 
     let mut dims = Vec::with_capacity(tokens.len());
-    let mut known_product: usize = 1;
+    // A known zero makes the complete product empty even when an earlier
+    // nonzero prefix cannot be represented. All tokens still get validated.
+    let mut known_product: usize = if tokens
+        .iter()
+        .any(|token| matches!(token, DimToken::Known(0)))
+    {
+        0
+    } else {
+        1
+    };
     let mut auto_index: Option<usize> = None;
 
     for (idx, token) in tokens.iter().enumerate() {
@@ -803,6 +812,20 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_accepts_zero_sized_dimension() {
+        let large = u32::MAX as usize;
+        assert_eq!(
+            finalize_dimensions(
+                vec![
+                    DimToken::Known(large),
+                    DimToken::Known(large),
+                    DimToken::Known(2),
+                    DimToken::Known(0)
+                ],
+                0
+            )
+            .unwrap(),
+            [large, large, 2, 0]
+        );
         let tensor = tensor_from_slice(&[], &[0, 1]);
         let result = reshape_builtin(
             Value::Tensor(tensor),

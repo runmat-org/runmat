@@ -9,6 +9,8 @@ use crate::RuntimeError;
 /// Shared input aliases keep their own references; no provider selection or
 /// protected-handle registry participates in retirement.
 pub(crate) fn reject_gpu_output(output: GpuTensorHandle, mut error: RuntimeError) -> RuntimeError {
+    // Invalid output is an attempted provider result, never capability absence.
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     if let Err(cleanup) = output.release() {
         error
             .message
@@ -74,6 +76,7 @@ mod tests {
         let error = reject_gpu_output(allocation.handle.clone(), error);
         assert_eq!(error.message(), "bad result");
         assert_eq!(error.identifier(), Some("RunMat:test"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(error.context.builtin.as_deref(), Some("test"));
         assert_eq!(allocation.probe.retirements(), 0);
         let _error = reject_gpu_output(allocation.handle, error);

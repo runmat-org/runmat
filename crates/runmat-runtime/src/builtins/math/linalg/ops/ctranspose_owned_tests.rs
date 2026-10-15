@@ -1,8 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, HostTensorView, NumericElementType,
-    ThreadProviderGuard,
+    AccelDownloadFuture, AccelProvider, HostTensorView, NumericElementType, ThreadProviderGuard,
 };
 use std::future::Future;
 use std::sync::Mutex;
@@ -41,10 +40,15 @@ impl AccelProvider for Provider {
     fn unary_conj<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
             if self.fail {
-                anyhow::bail!("conjugate execution failed");
+                return Err(
+                    runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                        "conjugate execution failed"
+                    ))
+                    .with_unproven_effects(),
+                );
             }
             futures::future::pending().await
         })

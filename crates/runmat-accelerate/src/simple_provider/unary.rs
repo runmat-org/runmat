@@ -13,6 +13,31 @@ pub(super) enum Unary {
 }
 
 impl InProcessProvider {
+    pub(super) fn conjugate_optional(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result = (|| -> Result<Option<GpuTensorHandle>> {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+                let data = guard
+                    .get(input)
+                    .ok_or_else(|| anyhow!("unary input is not a live owned allocation"))?;
+                if runmat_accelerate_api::handle_is_logical(input)
+                    || matches!(data, InProcessNumericData::Integer(_))
+                {
+                    return Ok(None);
+                }
+            }
+            self.native_unary(input, Unary::Conj).map(Some)
+        })();
+        result.map_err(|error| {
+            runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+        })
+    }
+
     pub(super) fn native_unary(
         &self,
         input: &GpuTensorHandle,

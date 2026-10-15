@@ -5,6 +5,21 @@ use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumer
 #[ignore = "requires actual WGPU device; execute explicitly for lazy-view permutation"]
 fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatch() {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let shape = [u32::MAX as usize, u32::MAX as usize, 2, 0];
+    let empty = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[]),
+            shape: &shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let permuted = provider.permute(&empty, &[3, 2, 1, 0]).unwrap().unwrap();
+    assert_eq!(
+        permuted.shape(),
+        [0, 2, u32::MAX as usize, u32::MAX as usize]
+    );
+    let tiled = provider.repmat(&empty, &[1, 1, 1, 1]).unwrap().unwrap();
+    assert_eq!(tiled.shape(), shape);
     let source = provider
         .upload_numeric_exec(&HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -17,7 +32,7 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
     assert!(runmat_accelerate_api::handle_is_transposed(&lazy));
     provider.reset_telemetry();
     let before = provider.telemetry_snapshot();
-    let inverse = provider.permute_exec(&lazy, &[1, 0]).unwrap();
+    let inverse = provider.permute(&lazy, &[1, 0]).unwrap().unwrap();
     assert_eq!(inverse.shape(), [3, 2]);
     assert!(!runmat_accelerate_api::handle_is_transposed(&inverse));
     assert!(inverse.shares_allocation_with(&source));
@@ -27,6 +42,49 @@ fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatc
         downloaded.data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     );
+    // The public optional hooks reject unsupported geometry before allocation,
+    // while the actual physical routine owns post-allocation failure cleanup.
+    let before = provider.telemetry_snapshot();
+    let order = (0..crate::backend::wgpu::params::PERMUTE_MAX_RANK + 1).collect::<Vec<_>>();
+    assert!(provider.permute(&source, &order).unwrap().is_none());
+    assert!(provider
+        .repmat(
+            &source,
+            &vec![1; crate::backend::wgpu::params::REPMAT_MAX_RANK + 1]
+        )
+        .unwrap()
+        .is_none());
+    assert_eq!(provider.telemetry_snapshot(), before);
+    for permutation in [true, false] {
+        let allocated = std::cell::Cell::new(false);
+        let retired = std::cell::RefCell::new(None);
+        let fault = |buffer: &runmat_accelerate_api::WgpuBufferOwner| -> Result<()> {
+            *retired.borrow_mut() = Some(runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer));
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "request-local structural allocation fault",
+            ))
+        };
+        let result = if permutation {
+            provider.permute_optional_exec(&source, &[1, 0], &allocated, &fault)
+        } else {
+            provider.repmat_optional_exec(&source, &[2, 1], &allocated, &fault)
+        };
+        let error = result
+            .map_err(|source| {
+                let source = runmat_accelerate_api::ProviderExecutionError::from(source);
+                if allocated.get() {
+                    source.after_effect()
+                } else {
+                    source.with_unproven_effects()
+                }
+            })
+            .unwrap_err();
+        assert!(allocated.get());
+        assert!(error.is_after_effect());
+        assert!(!error.is_unsupported());
+        assert!(retired.borrow().as_ref().unwrap().upgrade().is_none());
+        source.allocation_lease().validate_live().unwrap();
+    }
 }
 
 #[test]

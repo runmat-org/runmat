@@ -3227,8 +3227,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn unary_conj<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("unary_conj not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // None certifies no attempt; every Err remains an owning terminal failure.
+        Box::pin(async { Ok(None) })
     }
     fn unary_abs<'a>(
         &'a self,
@@ -3684,15 +3685,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("signal_hilbert not supported by provider").into())
         })
     }
-    /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
+    /// Reorder tensor dimensions according to zero-based `order`.
+    /// None certifies no attempt or provider effects; an error never authorizes
+    /// an implicit host replay, even when its cause reports Unsupported.
     fn permute(
         &self,
         _handle: &GpuTensorHandle,
         _order: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "permute not supported by provider",
-        ))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
     fn flip(&self, _handle: &GpuTensorHandle, _axes: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(unsupported_provider_operation(
@@ -3836,14 +3837,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn cat(&self, _dim: usize, _inputs: &[GpuTensorHandle]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cat not supported by provider"))
     }
+    /// Tile storage without changing its numerical class. None certifies that
+    /// no staging, allocation or submission was attempted for this request.
+    /// Failures retain their cause and effect phase; they are not no-attempt.
     fn repmat(
         &self,
         _handle: &GpuTensorHandle,
         _reps: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "repmat not supported by provider",
-        ))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {

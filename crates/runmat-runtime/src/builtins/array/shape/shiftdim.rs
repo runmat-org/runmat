@@ -595,21 +595,43 @@ async fn permute_gpu(handle: GpuTensorHandle, order: &[usize]) -> crate::Builtin
         return gpu_helpers::restore_class_preserving_value(&handle, permuted, NAME);
     }
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-        .ok_or_else(|| {
-            shiftdim_error(
-                &ERROR_UNSUPPORTED_INPUT,
-                "shiftdim: no acceleration provider owns the GPU input",
-            )
-        })?;
-    let order: Vec<usize> = order.iter().map(|dimension| dimension - 1).collect();
-    let output = provider.permute(&handle, &order).map_err(|error| {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         shiftdim_error(
             &ERROR_UNSUPPORTED_INPUT,
-            format!("shiftdim: GPU permutation failed: {error}"),
+            "shiftdim: no acceleration provider owns the GPU input",
         )
     })?;
+    let order: Vec<usize> = order.iter().map(|dimension| dimension - 1).collect();
+    let mut output = match provider.permute(&handle, &order) {
+        Ok(Some(output)) => output,
+        Ok(None) => {
+            let mut error = shiftdim_error(
+                &ERROR_UNSUPPORTED_INPUT,
+                "shiftdim: provider permutation is unavailable",
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+        Err(source) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                shiftdim_error(
+                    &ERROR_UNSUPPORTED_INPUT,
+                    format!("shiftdim: GPU permutation failed: {source}"),
+                ),
+                source,
+            ))
+        }
+    };
+    if !gpu_helpers::permutation_output_matches(&handle, &output, provider, &order) {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            shiftdim_error(
+                &ERROR_UNSUPPORTED_INPUT,
+                "shiftdim: invalid provider permutation output",
+            ),
+        ));
+    }
+    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
     wrap_gpu(output, complex, logical)
 }
 

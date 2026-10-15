@@ -372,16 +372,34 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     {
         let expected_shape = resident::shape(&handle);
         let transpose = if rank == 0 {
-            Ok(handle.clone())
+            Some(handle.clone())
         } else if rank <= 2 {
-            provider.transpose(&handle)
+            match provider.transpose(&handle) {
+                Ok(output) => Some(output),
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+                Err(error) => return Err(native_provider_error(error)),
+            }
         } else {
             let order = ctranspose_order(rank);
             let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
-            provider.permute(&handle, &zero_based)
+            let output = provider
+                .permute(&handle, &zero_based)
+                .map_err(native_provider_error)?;
+            if let Some(output) = output {
+                if !gpu_helpers::permutation_output_matches(&handle, &output, provider, &zero_based)
+                {
+                    return Err(reject_native_output(
+                        output,
+                        "invalid provider permutation output",
+                    ));
+                }
+                Some(output)
+            } else {
+                None
+            }
         };
         let transposed = match transpose {
-            Ok(output)
+            Some(output)
                 if native_ctranspose_output_matches(
                     &handle,
                     &output,
@@ -392,16 +410,15 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 // Transpose may lawfully return a lazy view of the same allocation.
                 Some(resident::live(output, native_provider_error)?)
             }
-            Ok(output) => return Err(reject_native_output(output, "malformed transpose output")),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
-            Err(error) => return Err(native_provider_error(error)),
+            Some(output) => return Err(reject_native_output(output, "malformed transpose output")),
+            None => None,
         };
         if let Some(transposed) = transposed {
             if !input_complex {
                 return resident::adopt(&handle, transposed, native_provider_error);
             }
             match provider.unary_conj(&transposed).await {
-                Ok(output)
+                Ok(Some(output))
                     if native_conjugate_output_matches(
                         &handle,
                         &transposed,
@@ -414,11 +431,47 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     // transpose annotation onto a materialized output is invalid.
                     return resident::adopt(&handle, output, native_provider_error);
                 }
-                Ok(output) => {
+                Ok(Some(output)) => {
                     return Err(reject_native_output(output, "malformed conjugate output"))
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-                Err(error) => return Err(native_provider_error(error)),
+                Ok(None) => {
+                    // The transpose has completed. Adapt only its conjugation;
+                    // never replay the original transpose or drop its lease.
+                    let failure = |source: runmat_accelerate_api::ProviderExecutionError| {
+                        native_provider_error(if transposed.shares_allocation_with(&handle) {
+                            source.with_unproven_effects()
+                        } else {
+                            source.after_effect()
+                        })
+                    };
+                    let host = gpu_helpers::download_value_preserving_residency_async(
+                        provider,
+                        &transposed,
+                    )
+                    .await
+                    .map_err(|error| {
+                        failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                            error,
+                        ))
+                    })?;
+                    let conjugated = crate::builtins::math::elementwise::complex_components::conj::conjugate_host_value(host)
+                        .map_err(|error| failure(runmat_accelerate_api::ProviderExecutionError::from_source(error)))?;
+                    return gpu_helpers::restore_class_preserving_value(&handle, conjugated, NAME)
+                        .map_err(|error| {
+                            failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                                error,
+                            ))
+                        });
+                }
+                Err(error) => {
+                    return Err(native_provider_error(
+                        if transposed.shares_allocation_with(&handle) {
+                            error.with_unproven_effects()
+                        } else {
+                            error.after_effect()
+                        },
+                    ))
+                }
             }
             // The intermediate owns its lease throughout the await and retires
             // here (also on error or cancellation), without freeing borrowed aliases.
@@ -473,10 +526,13 @@ fn reject_native_output(output: GpuTensorHandle, detail: &str) -> RuntimeError {
     gpu_helpers::reject_gpu_output(output, error)
 }
 
-fn native_provider_error(source: anyhow::Error) -> RuntimeError {
+fn native_provider_error(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let source = source.into();
     let mut error = internal_error(format!("ctranspose: provider failed: {source}"));
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    error = crate::runtime_error::with_provider_execution_source(error, source.into());
+    error = crate::runtime_error::with_provider_execution_source(error, source);
     error
 }
 

@@ -3,7 +3,10 @@ use super::{
     output::{like_contract, pair_contract},
     ExtremaKind,
 };
-use crate::{builtins::common::broadcast, BuiltinResult};
+use crate::{
+    builtins::common::{broadcast, gpu_helpers},
+    BuiltinResult,
+};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType};
 use runmat_value::Value;
 
@@ -42,14 +45,26 @@ impl ExtremaKind {
         let left_was_expanded = repeats_left.iter().any(|repeat| *repeat != 1);
         let right_was_expanded = repeats_right.iter().any(|repeat| *repeat != 1);
         let expanded_left = if left_was_expanded {
-            let Some(output) = self.optional("repmat", provider.repmat(left, &repeats_left))?
-            else {
-                return Ok(None);
+            let output = match provider.repmat(left, &repeats_left) {
+                Ok(Some(output)) => output,
+                Ok(None) => return Ok(None),
+                Err(source) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        self.contract_error(format!("provider repmat failed: {source}")),
+                        source,
+                    ))
+                }
             };
+            if !gpu_helpers::replication_output_matches(left, &output, provider, &shape) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    self.contract_error("invalid left expansion layout or class"),
+                ));
+            }
             self.admit_output(
                 provider,
                 left,
-                left,
+                right,
                 &like_contract(left, shape.clone()),
                 output,
             )?
@@ -58,18 +73,43 @@ impl ExtremaKind {
         };
         let expanded_right = if right_was_expanded {
             let repeat = provider.repmat(right, &repeats_right);
-            let Some(output) = (if left_was_expanded {
-                self.optional_after_effect("repmat", repeat)
-            } else {
-                self.optional("repmat", repeat)
-            })?
-            else {
-                return Ok(None);
+            let output = match repeat {
+                Ok(Some(output)) => output,
+                Ok(None) if !left_was_expanded => return Ok(None),
+                Ok(None) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        self.contract_error(
+                            "required right expansion unavailable after left expansion",
+                        ),
+                        runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                            "required repmat unavailable"
+                        ))
+                        .after_effect(),
+                    ))
+                }
+                Err(source) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        self.contract_error(format!("provider repmat failed: {source}")),
+                        if left_was_expanded {
+                            source.after_effect()
+                        } else {
+                            source
+                        },
+                    ))
+                }
             };
+            if !gpu_helpers::replication_output_matches(right, &output, provider, &shape)
+                || (left_was_expanded && output.shares_allocation_with(&expanded_left))
+            {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    self.contract_error("invalid right expansion layout, class or alias"),
+                ));
+            }
             self.admit_output(
                 provider,
                 right,
-                right,
+                left,
                 &like_contract(right, shape.clone()),
                 output,
             )?

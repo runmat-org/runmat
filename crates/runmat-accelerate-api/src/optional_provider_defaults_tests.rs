@@ -25,6 +25,9 @@ fn transpose_default_is_typed_unsupported_and_preserves_input_ownership() {
         .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     let error = Defaults.transpose(&input.handle).unwrap_err();
+    assert!(ready_default(Defaults.unary_conj(&input.handle))
+        .unwrap()
+        .is_none());
     assert!(error
         .downcast_ref::<UnsupportedProviderOperation>()
         .is_some());
@@ -50,12 +53,12 @@ fn extrema_composite_defaults_are_typed_unsupported_without_device_work() {
         Defaults.scalar_max(&input.handle, 1.0),
         Defaults.scalar_mul(&input.handle, -1.0),
         Defaults.scalar_add(&input.handle, 2.0),
-        Defaults.repmat(&input.handle, &[2, 1]),
     ] {
         assert!(is_unsupported_provider_operation(&result.unwrap_err()));
         input.handle.allocation_lease().validate_live().unwrap();
         assert_eq!(input.probe.retirements(), 0);
     }
+    assert!(Defaults.repmat(&input.handle, &[2, 1]).unwrap().is_none());
     for result in [
         ready_default(Defaults.elem_add(&input.handle, &input.handle)),
         ready_default(Defaults.elem_sub(&input.handle, &input.handle)),
@@ -363,9 +366,9 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
         provider.gradient_dim_with_coordinates(&input, 0, &input),
         provider.cumtrapz_dim(&input, 0, ProviderTrapezoidSpacing::Scalar(1.0)),
         provider.not_nan_mask(&input),
-        provider.permute(&input, &[1, 0]),
         Defaults.gather_linear(&input, &[0], &[1, 1]),
     ];
+    assert!(provider.permute(&input, &[1, 0]).unwrap().is_none());
     assert!(provider
         .map_nan_to_zero(&input)
         .unwrap_err()

@@ -15,6 +15,9 @@ enum Mode {
     Unsupported,
     Failed,
     Alias,
+    NoAttempt,
+    MissingSecond,
+    FailedExpansion,
 }
 #[derive(Debug)]
 struct DeviceFailure;
@@ -42,17 +45,40 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("no host fallback in expansion test") })
     }
-    fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        let shape = (0..handle.shape().len().max(reps.len()))
-            .map(|i| {
-                handle.shape().get(i).copied().unwrap_or(1) * reps.get(i).copied().unwrap_or(1)
-            })
-            .collect();
-        let allocation =
-            self.owner
-                .allocate_zeroed(shape, NumericElementType::F64, GpuTensorStorage::Real)?;
-        self.expanded.lock().unwrap().push(allocation.probe);
-        Ok(allocation.handle)
+    fn repmat(
+        &self,
+        handle: &GpuTensorHandle,
+        reps: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        if matches!(self.mode, Mode::NoAttempt)
+            || (matches!(self.mode, Mode::MissingSecond)
+                && !self.expanded.lock().unwrap().is_empty())
+        {
+            return Ok(None);
+        }
+        if matches!(self.mode, Mode::FailedExpansion) {
+            return Err(
+                runmat_accelerate_api::ProviderExecutionError::from_source(DeviceFailure)
+                    .with_unproven_effects(),
+            );
+        }
+        let result = (|| -> anyhow::Result<GpuTensorHandle> {
+            let shape = (0..handle.shape().len().max(reps.len()))
+                .map(|i| {
+                    handle.shape().get(i).copied().unwrap_or(1) * reps.get(i).copied().unwrap_or(1)
+                })
+                .collect();
+            let allocation = self.owner.allocate_zeroed(
+                shape,
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )?;
+            self.expanded.lock().unwrap().push(allocation.probe);
+            Ok(allocation.handle)
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn elem_add<'a>(
         &'a self,
@@ -68,6 +94,9 @@ impl AccelProvider for Provider {
                 .into()),
                 Mode::Failed => Err(anyhow::Error::new(DeviceFailure).into()),
                 Mode::Alias => Ok(left.with_view(left.view().clone())?),
+                Mode::NoAttempt | Mode::MissingSecond | Mode::FailedExpansion => {
+                    panic!("unavailable expansion must not invoke elementwise work")
+                }
             }
         })
     }
@@ -75,7 +104,15 @@ impl AccelProvider for Provider {
 
 #[test]
 fn expanded_owned_operands_retire_on_cancel_unsupported_and_rejected_alias() {
-    for mode in [Mode::Pending, Mode::Unsupported, Mode::Failed, Mode::Alias] {
+    for mode in [
+        Mode::Pending,
+        Mode::Unsupported,
+        Mode::Failed,
+        Mode::Alias,
+        Mode::NoAttempt,
+        Mode::MissingSecond,
+        Mode::FailedExpansion,
+    ] {
         let provider = Box::leak(Box::new(Provider {
             owner: TestAllocationOwner::new(),
             mode,
@@ -99,7 +136,27 @@ fn expanded_owned_operands_retire_on_cancel_unsupported_and_rejected_alias() {
         let waker = futures::task::noop_waker();
         match (mode, future.as_mut().poll(&mut Context::from_waker(&waker))) {
             (Mode::Pending, Poll::Pending) => {}
-            (Mode::Unsupported | Mode::Failed, Poll::Ready(Err(error))) => {
+            (Mode::NoAttempt, Poll::Ready(Ok(None))) => {}
+            (Mode::FailedExpansion, Poll::Ready(Err(error))) => {
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                let mut cause: &(dyn std::error::Error + 'static) = &error;
+                let mut saw_phase = false;
+                loop {
+                    if let Some(provider) =
+                        cause.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                    {
+                        assert!(!provider.is_after_effect());
+                        assert!(!provider.is_unsupported());
+                        saw_phase = true;
+                    }
+                    if cause.is::<DeviceFailure>() {
+                        assert!(saw_phase);
+                        break;
+                    }
+                    cause = cause.source().expect("original unproven expansion cause");
+                }
+            }
+            (Mode::Unsupported | Mode::Failed | Mode::MissingSecond, Poll::Ready(Err(error))) => {
                 assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
                 assert!(!runmat_accelerate_api::is_unsupported_provider_error(
                     &error
@@ -130,7 +187,14 @@ fn expanded_owned_operands_retire_on_cancel_unsupported_and_rejected_alias() {
         }
         drop(future);
         let expanded = provider.expanded.lock().unwrap();
-        assert_eq!(expanded.len(), 2);
+        assert_eq!(
+            expanded.len(),
+            match mode {
+                Mode::NoAttempt | Mode::FailedExpansion => 0,
+                Mode::MissingSecond => 1,
+                _ => 2,
+            }
+        );
         assert!(expanded.iter().all(|probe| probe.retirements() == 1));
         assert_eq!(left.probe.retirements(), 0);
         assert_eq!(right.probe.retirements(), 0);

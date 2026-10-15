@@ -58,6 +58,25 @@ fn polynomial_eligibility_keeps_complex_integration_and_authenticates_both_input
 #[test]
 fn structure_hooks_preserve_native_storage_or_request_typed_fallback() {
     let provider = InProcessProvider::new();
+    let shape = [u32::MAX as usize, u32::MAX as usize, 2, 0];
+    let empty = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[]),
+            shape: &shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let permuted = provider.permute(&empty, &[3, 2, 1, 0]).unwrap().unwrap();
+    assert_eq!(
+        permuted.shape(),
+        [0, 2, u32::MAX as usize, u32::MAX as usize]
+    );
+    let tiled = provider.repmat(&empty, &[1, 1, 1, 1]).unwrap().unwrap();
+    assert_eq!(tiled.shape(), shape);
+    assert_eq!(
+        block_on(provider.download_numeric(&tiled)).unwrap().data,
+        HostNumericDataOwned::F32(vec![])
+    );
     for (data, storage) in [
         (
             HostNumericDataView::F32(&[1.0, 0.0, 0.0, 1.0]),

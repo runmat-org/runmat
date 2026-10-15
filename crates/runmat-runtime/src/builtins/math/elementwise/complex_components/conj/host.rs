@@ -7,7 +7,7 @@ use crate::BuiltinResult;
 
 use super::{builtin_error_with_detail, CONJ_ERROR_INTERNAL, CONJ_ERROR_INVALID_INPUT};
 
-pub(super) fn execute(value: Value) -> BuiltinResult<Value> {
+pub(crate) fn execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(real, imaginary) => Ok(Value::Complex(real, -imaginary)),
         Value::ComplexTensor(tensor) => conjugate_complex_tensor(tensor),

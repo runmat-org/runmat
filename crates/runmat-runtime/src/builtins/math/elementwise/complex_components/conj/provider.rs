@@ -49,7 +49,7 @@ async fn try_provider(
     let result = provider.unary_conj(input).await;
     drop(metadata);
     match result {
-        Ok(mut output) if valid_output(&output, input, provider) => {
+        Ok(Some(mut output)) if valid_output(&output, input, provider) => {
             gpu_helpers::propagate_output_provenance(&mut output, [input])?;
             let value = if storage == GpuTensorStorage::ComplexInterleaved {
                 gpu_helpers::complex_gpu_value(output)
@@ -58,20 +58,20 @@ async fn try_provider(
             };
             value.map(Some)
         }
-        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+        Ok(Some(output)) => Err(gpu_helpers::reject_gpu_output(
             output,
             builtin_error_with_detail(
                 &CONJ_ERROR_INTERNAL,
                 "provider unary_conj returned malformed output",
             ),
         )),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Ok(None) => Ok(None),
         Err(source) => {
             let mut error = builtin_error_with_detail(
                 &CONJ_ERROR_INTERNAL,
                 format!("provider unary_conj failed: {source}"),
             );
-            error = crate::runtime_error::with_provider_execution_source(error, source.into());
+            error = crate::runtime_error::with_provider_execution_source(error, source);
             Err(error)
         }
     }

@@ -109,6 +109,12 @@ pub(crate) use adoption::propagate_output_provenance;
 pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 mod rejection;
 pub(crate) use rejection::{reject_gpu_output, reject_gpu_outputs};
+#[path = "gpu_helpers/structural.rs"]
+mod structural;
+pub(crate) use structural::{
+    permutation_output_matches, replication_output_matches, replication_shape,
+    reshape_output_matches,
+};
 
 #[cfg(test)]
 #[path = "gpu_helpers/owned_encoding_tests.rs"]
@@ -315,7 +321,7 @@ pub struct UnaryGpuOutputContract {
 pub fn unary_gpu_output_matches(
     output: &GpuTensorHandle,
     input: &GpuTensorHandle,
-    provider: &'static dyn AccelProvider,
+    provider: &dyn AccelProvider,
     contract: UnaryGpuOutputContract,
 ) -> bool {
     unary_gpu_output_matches_shape(output, input, provider, input.shape(), contract)
@@ -328,7 +334,7 @@ pub fn unary_gpu_output_matches(
 pub fn unary_gpu_output_matches_shape(
     output: &GpuTensorHandle,
     input: &GpuTensorHandle,
-    provider: &'static dyn AccelProvider,
+    provider: &dyn AccelProvider,
     shape: &[usize],
     contract: UnaryGpuOutputContract,
 ) -> bool {

@@ -85,7 +85,11 @@ async fn exercise() {
         &[1., 3., 2., 4.],
     )
     .await;
-    let conjugate = provider.unary_conj(&complex).await.unwrap();
+    let conjugate = provider
+        .unary_conj(&complex)
+        .await
+        .unwrap()
+        .expect("admitted conjugation");
     check(
         provider,
         &conjugate,

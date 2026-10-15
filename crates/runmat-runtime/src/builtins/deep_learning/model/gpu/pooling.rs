@@ -142,12 +142,17 @@ pub(super) async fn forward(
         let alias = presentation_alias_policy(source_axes, &planned);
         let reordered = provider
             .permute(&current, &planned.target_to_source)
+            .map_err(|source| source.after_effect())
+            .and_then(|output| {
+                output.ok_or_else(|| {
+                    runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                        "required pooled output presentation unavailable"
+                    ))
+                    .after_effect()
+                })
+            })
             .map_err(|error| {
-                provider_failure(
-                    function,
-                    "resident pooled output presentation",
-                    error.into(),
-                )
+                provider_failure(function, "resident pooled output presentation", error)
             })?;
         current = validate(
             reordered,

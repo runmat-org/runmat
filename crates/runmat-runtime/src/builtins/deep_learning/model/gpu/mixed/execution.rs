@@ -100,13 +100,21 @@ pub(super) async fn execute(
                 materialize,
             } => {
                 let output = (if materialize {
-                    provider.permute(&current, &[1, 0])
+                    provider.permute(&current, &[1, 0]).and_then(|output| {
+                        output.ok_or_else(|| {
+                            runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                                "required resident permutation unavailable"
+                            ))
+                            .with_unproven_effects()
+                        })
+                    })
                 } else {
-                    provider.transpose(&current)
+                    provider.transpose(&current).map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })
                 })
-                .map_err(|error| {
-                    provider_failure(function, "planned layout transpose", error.into())
-                })?;
+                .map_err(|error| provider_failure(function, "planned layout transpose", error))?;
                 let output = validate_layout_transpose(output, &current, provider, function)?;
                 if materialize
                     && current.shape().iter().all(|extent| *extent > 1)

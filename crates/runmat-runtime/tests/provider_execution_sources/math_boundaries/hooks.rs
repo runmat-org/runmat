@@ -95,7 +95,16 @@ impl AccelProvider for Provider {
     unary!(unary_log1p);
     unary!(unary_real);
     unary!(unary_imag);
-    unary!(unary_conj);
+    fn unary_conj<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            self.fail("unary_conj").map(Some).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
+    }
     unary!(complex_from_real);
     fn interp1<'a>(
         &'a self,
@@ -137,8 +146,15 @@ impl AccelProvider for Provider {
         shape.swap(0, 1);
         self.allocate(shape, handle_storage(input))
     }
-    fn permute(&self, _: &GpuTensorHandle, _: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        self.fail("permute")
+    fn permute(
+        &self,
+        _: &GpuTensorHandle,
+        _: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result = (|| -> anyhow::Result<GpuTensorHandle> { self.fail("permute") })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn scalar_mul(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.fail("scalar_mul")
