@@ -10,6 +10,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::BuiltinAsyncBehavior;
 use runmat_native_executor::execute::{NativeInvocation, NativeInvocationStep};
 use runmat_runtime::source_context::ProgramSourceRecord;
+use runmat_value::{CellArray, HandleRef, Tensor};
 use std::error::Error;
 use std::fmt;
 use std::sync::OnceLock;
@@ -188,6 +189,44 @@ fn quartet_builtin_fixture(case: SearchControlCase) -> runmat_native_codegen::Na
     )
 }
 
+fn pending_statement_output_fixture() -> runmat_native_codegen::NativeAssembly {
+    let first = Span { start: 0, end: 1 };
+    let second = Span { start: 2, end: 3 };
+    lower_body_with_inputs(
+        "pending_statement_output",
+        1,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Expr(MirRvalue::Use(MirOperand::Local(MirLocalId(0)))),
+                span: first,
+            },
+            MirStmt {
+                kind: MirStmtKind::StatementOutput(runmat_mir::MirStatementOutput {
+                    source: runmat_mir::MirStatementOutputSource::Expression,
+                    label: runmat_mir::MirStatementOutputLabel::Binding(BindingId(0)),
+                }),
+                span: first,
+            },
+            MirStmt {
+                kind: MirStmtKind::Expr(MirRvalue::Use(MirOperand::Constant(MirConstant::Number(
+                    "7".into(),
+                )))),
+                span: second,
+            },
+            MirStmt {
+                kind: MirStmtKind::StatementOutput(runmat_mir::MirStatementOutput {
+                    source: runmat_mir::MirStatementOutputSource::Expression,
+                    label: runmat_mir::MirStatementOutputLabel::Ans,
+                }),
+                span: second,
+            },
+        ],
+        MirOperand::Constant(MirConstant::Number("9".into())),
+        first,
+        vec![BindingId(0)],
+    )
+}
+
 fn begin_case(
     executor: &NativeExecutor,
     case: SearchControlCase,
@@ -333,4 +372,155 @@ fn compiled_search_resident_controls_suspend_resume_fail_and_drop_without_replay
     }
     drop(input);
     assert!(weak.acquire().is_none());
+}
+
+#[test]
+fn compiled_statement_output_orders_once_and_roots_pending_gather() {
+    static PROVIDER: OnceLock<PendingControlProvider> = OnceLock::new();
+    let provider = PROVIDER.get_or_init(|| PendingControlProvider {
+        inner: InProcessProvider::new(),
+        mode: AtomicUsize::new(DownloadMode::Pending as usize),
+        downloads: AtomicUsize::new(0),
+        wake: AtomicWaker::new(),
+    });
+    let executor = compile_executor(pending_statement_output_fixture()).unwrap();
+    for terminal in [
+        DownloadMode::Ready,
+        DownloadMode::Fail,
+        DownloadMode::Pending,
+    ] {
+        runmat_gc::gc_test_context(|| {
+            let _provider = ThreadProviderGuard::set(Some(provider));
+            provider.set_mode(DownloadMode::Pending);
+            let before = provider.downloads.load(Ordering::SeqCst);
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let lease = input.allocation_lease().downgrade();
+            let managed = runmat_gc::gc_allocate_rooted(Value::String("retained".into())).unwrap();
+            let target = managed.handle();
+            let handle = Value::HandleObject(HandleRef {
+                class_name: "OutputRootWitness".into(),
+                target,
+                valid: true,
+            });
+            let argument = Value::Cell(
+                CellArray::new(vec![Value::GpuTensor(input.clone()), handle.clone()], 1, 2)
+                    .unwrap(),
+            );
+            let cancellation = runmat_execution::cancellation::CancellationSource::new();
+            let runtime = runtime_context().with_cancellation_token(cancellation.token());
+            let console_runtime = runtime.clone();
+            let take_output = || {
+                let _scope = console_runtime.enter();
+                runmat_runtime::console::take_thread_buffer()
+            };
+            let mut invocation = executor
+                .begin_request(runmat_native_executor::NativeInvocationRequest {
+                    function: ProgramFunctionId(0),
+                    captures: Vec::new(),
+                    arguments: vec![argument],
+                    requested_outputs: 1,
+                    runtime,
+                    deoptimization: DeoptimizationPolicy::default(),
+                    osr_target: None,
+                    workspace: None,
+                })
+                .unwrap();
+            managed.unroot().unwrap();
+            drop(input);
+            let (continuation, generation) = suspension(&mut invocation);
+            let mut resume = Box::pin(invocation.resume_suspension(continuation, generation));
+            assert!(
+                futures::executor::block_on(async { futures::poll!(resume.as_mut()) }).is_pending()
+            );
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
+            assert!(take_output().is_empty());
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_ok());
+            assert!(lease.acquire().is_some());
+
+            match terminal {
+                DownloadMode::Ready => {
+                    provider.set_mode(DownloadMode::Ready);
+                    futures::executor::block_on(resume).unwrap();
+                    let NativeInvocationStep::Suspended {
+                        continuation,
+                        generation,
+                    } = invocation.advance().unwrap()
+                    else {
+                        panic!("second ordered statement output must suspend at its own site");
+                    };
+                    futures::executor::block_on(
+                        invocation.resume_suspension(continuation, generation),
+                    )
+                    .unwrap();
+                    let NativeInvocationStep::Completed(execution) = invocation.advance().unwrap()
+                    else {
+                        panic!("both statement outputs must complete exactly once");
+                    };
+                    assert_eq!(execution.outputs, vec![Value::Num(9.0)]);
+                    let expected_host = Value::Cell(
+                        CellArray::new(
+                            vec![
+                                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+                                handle,
+                            ],
+                            1,
+                            2,
+                        )
+                        .unwrap(),
+                    );
+                    let entries = take_output();
+                    assert_eq!(entries.len(), 2);
+                    assert_eq!(
+                        entries[0].stream,
+                        runmat_runtime::console::ConsoleStream::Stdout
+                    );
+                    assert_eq!(entries[0].text, format!("input0 =\n{expected_host}\n"));
+                    assert_eq!(
+                        entries[1].stream,
+                        runmat_runtime::console::ConsoleStream::Stdout
+                    );
+                    assert_eq!(entries[1].text, "ans = 7\n");
+                    assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
+                    drop(execution);
+                }
+                DownloadMode::Fail => {
+                    provider.set_mode(DownloadMode::Fail);
+                    let error = futures::executor::block_on(resume).unwrap_err();
+                    let NativeExecutorError::Runtime(runtime) = error else {
+                        panic!("failed output gather must retain its typed runtime error");
+                    };
+                    assert_eq!(runtime.identifier(), Some("RunMat:gather:DownloadFailed"));
+                    let mut source = Error::source(runtime.as_ref());
+                    let mut original_found = false;
+                    while let Some(cause) = source {
+                        original_found |= cause.is::<NativeDownloadFault>();
+                        source = cause.source();
+                    }
+                    assert!(original_found, "original provider failure must survive");
+                    assert!(take_output().is_empty());
+                    assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
+                }
+                DownloadMode::Pending => {
+                    cancellation.cancel(runmat_execution::CancellationReason::User);
+                    assert!(matches!(
+                        futures::executor::block_on(resume),
+                        Err(NativeExecutorError::Cancelled)
+                    ));
+                    assert!(take_output().is_empty());
+                    assert_eq!(provider.downloads.load(Ordering::SeqCst), before + 1);
+                }
+            }
+            drop(invocation);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_err());
+            assert!(lease.acquire().is_none());
+            assert!(take_output().is_empty());
+        });
+    }
 }
