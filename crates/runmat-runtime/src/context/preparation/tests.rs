@@ -434,6 +434,9 @@ struct Observation(Events);
 
 struct RejectedCompletion;
 impl BuiltinPreparationObservation for RejectedCompletion {
+    fn gpu_gather_retry_policy(&self) -> crate::GpuGatherRetry {
+        crate::GpuGatherRetry::Never
+    }
     fn finish(self: Box<Self>, _: Result<&Value, &RuntimeError>) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
             "result ownership could not be established",
@@ -444,12 +447,25 @@ impl BuiltinPreparationObservation for RejectedCompletion {
 
 #[test]
 fn failed_completion_does_not_publish_a_successful_body_result() {
-    let prepared = PreparedBuiltinOperands::new(vec![], Some(Box::new(RejectedCompletion)))
-        .expect("root prepared fixture");
-    let result = futures::executor::block_on(execute_prepared(prepared, |_| async {
-        owned(Value::Num(42.))
-    }));
-    assert!(result.is_err());
+    for fail_body in [false, true] {
+        let prepared = PreparedBuiltinOperands::new(vec![], Some(Box::new(RejectedCompletion)))
+            .expect("root prepared fixture");
+        let result = futures::executor::block_on(execute_prepared(prepared, |_| async {
+            if fail_body {
+                Err(crate::build_runtime_error("body failure")
+                    .with_identifier("RunMat:FixtureBodyFailure")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+                    .build())
+            } else {
+                owned(Value::Num(42.))
+            }
+        }));
+        let error = result.unwrap_err();
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        if fail_body {
+            assert_eq!(error.identifier(), Some("RunMat:FixtureBodyFailure"));
+        }
+    }
 }
 
 impl BuiltinPreparationObservation for Observation {

@@ -15,6 +15,10 @@ pub(crate) struct LocalCpuCandidate {
 }
 
 impl LocalCpuCandidate {
+    pub(crate) fn with_presentation(mut self, presentation: CandidateOutputPresentation) -> Self {
+        self.route.presentation = presentation;
+        self
+    }
     pub(crate) fn host(identity: String, cost: CandidateCostEvidence) -> Self {
         let guards = Vec::<RegionGuardId>::new();
         let route_facts =

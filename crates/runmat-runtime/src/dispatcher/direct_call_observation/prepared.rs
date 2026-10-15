@@ -17,9 +17,9 @@ pub(super) struct PreparedSelection {
 /// mode. It can deposit at most one cleaned-up, body-complete observation.
 /// There is no ambient slot to be borrowed by a sibling or nested call.
 pub struct PreparedCompletionRight {
-    state: Weak<RefCell<State>>,
-    authority: RegistrationAuthority,
-    binding: RuntimeBuiltinBinding,
+    pub(super) state: Weak<RefCell<State>>,
+    pub(super) authority: RegistrationAuthority,
+    pub(super) binding: RuntimeBuiltinBinding,
 }
 
 /// Session-local authority for a prepared observation. This is not installed
@@ -46,34 +46,25 @@ impl CallAdmissionSink {
         binding: BuiltinBindingIdentity,
         requested_outputs: Option<usize>,
     ) -> Option<PreparedCompletionRight> {
-        if self.binding.identity != binding
-            || self.requested_outputs != requested_outputs
-            || self.runtime.is_cancelled()
-            || !self.authority.certifies(self.binding)
-        {
-            return None;
-        }
-        let state = self.state.upgrade()?;
-        {
-            let mut state = state.borrow_mut();
-            if state.invalidated
-                || state.prepared_claimed
-                || state.selected.is_some()
-                || state.prepared.is_some()
-            {
-                return None;
-            }
-            state.prepared_claimed = true;
-        }
-        Some(PreparedCompletionRight {
-            state: self.state,
-            authority: self.authority,
-            binding: self.binding,
-        })
+        self.prepared_host_execution()?
+            .claim_right(binding, requested_outputs)
     }
 }
 
 impl PreparedCompletionRight {
+    /// Arm only the exact original call's selected preparation form. Numeric
+    /// operation owners, not the acceleration service, supply confirmation.
+    pub fn select_host_execution(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+        form: &'static runmat_builtins::BuiltinPreparationForm,
+    ) -> Option<super::PreparedHostExecution> {
+        let proof = runtime.prepared_host_execution()?.clone();
+        if !Weak::ptr_eq(&proof.state, &self.state) {
+            return None;
+        }
+        proof.select(form).then_some(proof)
+    }
     pub fn binding(&self) -> BuiltinBindingIdentity {
         self.binding.identity
     }

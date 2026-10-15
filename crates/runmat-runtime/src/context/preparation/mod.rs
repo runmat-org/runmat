@@ -6,7 +6,7 @@
 mod owned;
 mod request;
 pub use crate::dispatcher::direct_call_observation::{
-    PreparedBindingAuthority, PreparedCompletionRight,
+    PreparedBindingAuthority, PreparedCompletionRight, PreparedHostExecution,
 };
 pub use owned::{
     BuiltinPreparationObservation, PreparedBuiltinOperands, PreparedCallCompletion,
@@ -29,15 +29,21 @@ pub async fn prepare_admitted(
 ) -> Result<PreparedBuiltinOperands, RuntimeError> {
     let expected = request.operands().len();
     let prepared = match context.service_ports().acceleration() {
-        Some(service) => service.prepare_admitted(context.clone(), request).await?,
+        Some(service) => {
+            service
+                .prepare_admitted(context.clone(), request.with_selected_call(context))
+                .await?
+        }
         None => request
             .into_operands()
             .with_owned_values(PreparedBuiltinOperands::passthrough)?,
     };
     if prepared.operands().len() != expected {
-        return Err(request::invalid(
-            "preparation service changed the declared operand count",
-        ));
+        let mut error = request::invalid("preparation service changed the declared operand count");
+        if prepared.forbids_gpu_gather_retry() {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        }
+        return Err(error);
     }
     Ok(prepared)
 }
@@ -54,11 +60,18 @@ where
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let recorder = prepared.provider_recorder();
+    let no_replay = prepared.forbids_gpu_gather_retry();
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         prepared.begin_execution();
         let result = execute(prepared.take_operands()).await;
         let cleanup = prepared.finish(result.as_ref().map(|value| value.value()));
-        crate::runtime_error::complete_with_cleanup(result, cleanup)
+        let mut result = crate::runtime_error::complete_with_cleanup(result, cleanup);
+        if no_replay {
+            if let Err(error) = &mut result {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            }
+        }
+        result
     })
 }
 

@@ -5,7 +5,7 @@ use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinPreparationFormId};
-use runmat_value::{NumericDType, Value};
+use runmat_value::Value;
 use std::future::Future;
 
 pub(super) async fn execute<F, Fut>(
@@ -56,14 +56,11 @@ where
         }
     }
     let admitted = input_count == 2
-        && match (&left, &right) {
-            (Value::Tensor(a), Value::Tensor(b)) => {
-                matches!(a.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
-                    && matches!(b.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
-                    && BroadcastPlan::new(a.shape(), b.shape()).is_ok()
-            }
-            _ => false,
-        };
+        && crate::builtins::math::host_route::real_floating_shape(&left)
+            .zip(crate::builtins::math::host_route::real_floating_shape(
+                &right,
+            ))
+            .is_some_and(|(left, right)| BroadcastPlan::new(left, right).is_ok());
     if !admitted {
         // The owning implementation supplies its established error and handles
         // the other representations. In particular, invalid shapes never upload.
@@ -82,7 +79,21 @@ where
     let execute = |mut values: Vec<Value>| {
         let right = values.remove(1);
         let left = values.remove(0);
-        body(left, right)
+        let route = crate::builtins::math::host_route::canonical(
+            context,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            [&left, &right].into_iter(),
+        );
+        async move {
+            let output = body(left, right).await?;
+            if let Some(route) = route {
+                route.confirm_host_branch(
+                    context.unwrap(),
+                    crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                );
+            }
+            Ok(output)
+        }
     };
     execute_invocation(context, admission, vec![left, right], execute).await
 }

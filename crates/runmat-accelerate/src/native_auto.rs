@@ -1282,6 +1282,7 @@ impl NativeAutoOffload {
         Option<ProviderRejectionCode>,
         builtin_call::observation::BuiltinObservationPlan,
     )> {
+        let host = planning.host;
         let cpu_cost = evaluation
             .cpu_secs
             .and_then(seconds_to_ns)
@@ -1290,7 +1291,7 @@ impl NativeAutoOffload {
                     execution_ns: cpu_ns,
                     ..ExecutionCostComponents::default()
                 },
-                scratch_bytes: Some(0),
+                scratch_bytes: Some(host.map_or(0, |(resources, _)| resources.scratch_bytes)),
                 confidence: EstimateConfidence::Low,
                 source: EstimateSource::StaticPrior,
             })
@@ -1300,7 +1301,10 @@ impl NativeAutoOffload {
                 ),
                 runmat_execution::CandidateCostEvidence::Estimated,
             );
-        let cpu = LocalCpuCandidate::host(format!("cpu.shared.{operation}"), cpu_cost);
+        let mut cpu = LocalCpuCandidate::host(format!("cpu.shared.{operation}"), cpu_cost);
+        if let Some((host, _)) = host {
+            cpu = cpu.with_presentation(host.presentation.clone());
+        }
         let provider_kind = match family {
             ProviderOperationFamily::MatrixMultiply => ExecutionCandidateKind::ProviderLibrary,
             _ if evaluation.fusion_kind.is_some() => ExecutionCandidateKind::ProviderFusion,
@@ -1311,9 +1315,16 @@ impl NativeAutoOffload {
         );
         let sum_preparation_unknown = workload.sum.is_some();
         // These are the operation's data leaves, never unrelated controls.
-        // This synchronous boundary has no admitted resident-to-host route;
-        // VM-certified host overlays already arrive here as host values.
-        let cpu_admission = if values
+        // Synchronous callers have no admitted resident-to-host route. The
+        // async preparation owner may supply exact private readback evidence;
+        // VM-certified overlays already arrive here as host values.
+        let cpu_admission = if let Some((host, _)) = host {
+            LocalCpuAdmission::ExactReadbacks {
+                resources: Box::new(host.resources),
+                download_bytes: host.download_bytes,
+                readback_count: host.readback_count,
+            }
+        } else if values
             .iter()
             .any(|value| runmat_runtime::dispatcher::value_contains_gpu(value))
         {
@@ -1326,7 +1337,7 @@ impl NativeAutoOffload {
                 self.provider,
                 LocalPlacementRequest {
                     operation,
-                    semantic_identity: None,
+                    semantic_identity: host.map(|(_, identity)| identity),
                     observation_contract: if planning.prepared_authority.is_some() {
                         crate::placement::TotalCandidateObservationContract::FullCall
                     } else {

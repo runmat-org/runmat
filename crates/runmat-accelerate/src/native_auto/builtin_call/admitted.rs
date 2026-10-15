@@ -11,6 +11,8 @@ use runmat_runtime::context::{
     RuntimeAccelerationService, RuntimeServiceFuture,
 };
 use std::rc::Rc;
+mod host;
+pub(super) use host::prepare_async;
 
 /// Install the standard adapter only where the embedding host has not supplied one.
 /// The existing placement session and every other service remain unchanged.
@@ -88,13 +90,16 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                     .into_operands()
                     .with_owned_values(PreparedBuiltinOperands::passthrough);
             };
-            let prepared = prepare_with(&auto, &context, request).map_err(|error| *error)?;
+            let prepared = prepare_async(&auto, &context, request)
+                .await
+                .map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
         })
     }
 }
 
+#[cfg(test)]
 pub(super) fn prepare_with(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
@@ -107,7 +112,7 @@ pub(super) fn prepare_with(
     let input_root =
         runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
             .map_err(|error| Box::new(error.into_runtime_error()))?;
-    let prepared = prepare_with_inner(auto, context, request)?;
+    let prepared = prepare_with_inner(auto, context, request, None)?;
     Ok(prepared.with_request_input_root(input_root))
 }
 
@@ -115,6 +120,10 @@ fn prepare_with_inner(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
     mut request: AdmittedBuiltinPreparation,
+    host: Option<(
+        &crate::fusion_exec::host_readback::CpuHostResources,
+        runmat_execution::Digest,
+    )>,
 ) -> PreparationResult<PreparedBuiltinCall> {
     if request.form().operation == Operation::RuntimeOwned {
         return Ok(request
@@ -247,12 +256,13 @@ fn prepare_with_inner(
     };
     let completion = request.take_prepared_completion_right();
     let prepared = auto
-        .prepare_operation_with_completion(
+        .prepare_operation_with_host(
             request.admission().binding.builtin.name,
             request.operands(),
             Some(context),
             operation,
             completion,
+            host,
         )
         .map_err(preparation_error)?;
     Ok(prepared)
@@ -266,6 +276,18 @@ fn preparation_error(error: ProviderExecutionError) -> RuntimeError {
 }
 
 impl BuiltinPreparationObservation for BuiltinCallGuard {
+    fn gpu_gather_retry_policy(&self) -> runmat_runtime::GpuGatherRetry {
+        if self.readbacks.is_some()
+            || self
+                .uploads
+                .as_ref()
+                .is_some_and(ownership::OwnedUploads::has_uploads)
+        {
+            runmat_runtime::GpuGatherRetry::Never
+        } else {
+            runmat_runtime::GpuGatherRetry::Legacy
+        }
+    }
     fn provider_recorder(
         &self,
     ) -> Option<runmat_accelerate_api::observation::ProviderOperationRecorder> {

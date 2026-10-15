@@ -17,7 +17,7 @@ use runmat_types::{
 
 /// Preserve class, shape, storage, and aggregate facts without inventing host
 /// residency for foreign/remote/unknown representations.
-pub(crate) fn gathered_value_fact(input: &ValueFact) -> ValueFact {
+pub fn gathered_value_fact(input: &ValueFact) -> ValueFact {
     let mut output = input.clone();
     match &mut output.kind {
         ValueKindFact::Numeric(_) | ValueKindFact::Logical

@@ -116,7 +116,19 @@ where
                 .with_identifier(format!("RunMat:{}:Internal", identity.name))
                 .build());
             }
-            execute(value).await
+            let route = crate::builtins::math::host_route::canonical(
+                runtime,
+                crate::context::VmFusionHostInstruction::ElementwiseCall,
+                std::iter::once(&value),
+            );
+            let output = execute(value).await?;
+            if let Some(route) = route {
+                route.confirm_host_branch(
+                    runtime.unwrap(),
+                    crate::context::VmFusionHostInstruction::ElementwiseCall,
+                );
+            }
+            Ok(output)
         },
     )
     .await

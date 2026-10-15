@@ -200,6 +200,7 @@ pub struct RuntimeContext {
     // VM-owned, poll-local execution evidence. Clones may carry it only within
     // the selected instruction; nested invocations explicitly clear it.
     vm_fusion_host_route: Option<super::VmFusionHostRoute>,
+    prepared_host_execution: Option<super::preparation::PreparedHostExecution>,
     vm_fusion_selected_binding: Option<runmat_builtins::BuiltinBindingIdentity>,
     // Invocation-scoped, unlike shared session language state. Scoped guards
     // affect this invocation's clones, never an earlier/later generation.
@@ -274,6 +275,7 @@ impl RuntimeContext {
             #[cfg(not(target_arch = "wasm32"))]
             java_reentry: None,
             vm_fusion_host_route: None,
+            prepared_host_execution: None,
             vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
         };
@@ -938,6 +940,7 @@ impl RuntimeContext {
         }
         self.native_invocation_lineage = parent.native_invocation_lineage.clone();
         self.invocation_arity = None;
+        self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
         self.vm_fusion_selected_binding = None;
         #[cfg(not(target_arch = "wasm32"))]
@@ -973,6 +976,7 @@ impl RuntimeContext {
     /// their own invocation generation.
     pub fn with_cancellation_token(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = Rc::new(RefCell::new(cancellation));
+        self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
         self.vm_fusion_selected_binding = None;
         self
@@ -981,12 +985,14 @@ impl RuntimeContext {
     /// Install an exact VM-selected host route on one instruction's context.
     /// It never changes provider availability or a separate invocation.
     pub fn with_vm_fusion_host_route(mut self, route: Option<super::VmFusionHostRoute>) -> Self {
+        self.prepared_host_execution = None;
         self.vm_fusion_host_route = route;
         self.vm_fusion_selected_binding = None;
         self
     }
 
     pub fn without_vm_fusion_host_route(mut self) -> Self {
+        self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
         self.vm_fusion_selected_binding = None;
         self
@@ -996,12 +1002,27 @@ impl RuntimeContext {
         self.vm_fusion_host_route.as_ref()
     }
 
+    pub(crate) fn with_prepared_host_execution(
+        mut self,
+        proof: Option<super::preparation::PreparedHostExecution>,
+    ) -> Self {
+        self.prepared_host_execution = proof;
+        self
+    }
+
+    pub(crate) fn prepared_host_execution(
+        &self,
+    ) -> Option<&super::preparation::PreparedHostExecution> {
+        self.prepared_host_execution.as_ref()
+    }
+
     /// The dispatcher projects its actual selected canonical binding into
     /// the call context. Legacy invocations never inherit a sibling identity.
     pub(crate) fn with_vm_fusion_selected_binding(
         mut self,
         binding: Option<runmat_builtins::BuiltinBindingIdentity>,
     ) -> Self {
+        self.prepared_host_execution = None;
         if self.vm_fusion_selected_binding.is_some() {
             // An inner canonical invocation may select the same binding, but
             // it cannot certify the enclosing VM instruction's host branch.

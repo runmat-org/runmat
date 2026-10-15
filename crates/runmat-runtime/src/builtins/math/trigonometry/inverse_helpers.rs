@@ -6,7 +6,7 @@ use crate::{build_runtime_error, BuiltinResult};
 
 pub(super) mod resident_range;
 pub(super) mod fusion;
-pub(super) mod preparation;
+pub(crate) mod preparation;
 pub(super) mod like;
 pub(super) mod resident_complex;
 pub(super) mod real_fallback;
