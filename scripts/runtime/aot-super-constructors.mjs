@@ -5,11 +5,12 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export function verifyAotSuperConstructors({ directory, compile, invoke }) {
+export function verifyAotSuperConstructors({ directory, compile, invoke, packageOnly = false }) {
     function source(name, lines, parent = directory) {
         writeFileSync(join(parent, `${name}.m`), `${lines.join("\n")}\n`, { encoding: "utf8", flag: "wx" });
     }
     function execute(name, lines, expected, minimumRetained) {
+        if (packageOnly && name !== "aot_super_package") return;
         const planPath = join(directory, `${name}.plan.json`);
         const executable = compile(name, `${lines.join("\n")}\n`, ["--link-plan-json", planPath]);
         const plan = JSON.parse(readFileSync(planPath, "utf8"));

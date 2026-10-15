@@ -12,11 +12,12 @@ const binary = process.argv[2] && resolve(process.argv[2]);
 if (!binary || !existsSync(binary)) {
     throw new Error("pass an existing embedded-AOT runmat binary");
 }
-if (process.argv.length > 4 || (process.argv[3] && !["--java", "--java-only", "--super-only"].includes(process.argv[3]))) {
-    throw new Error("usage: node verify-aot-source-bindings.mjs <embedded-AOT runmat> [--java|--java-only|--super-only]");
+if (process.argv.length > 4 || (process.argv[3] && !["--java", "--java-only", "--super-only", "--super-package-only"].includes(process.argv[3]))) {
+    throw new Error("usage: node verify-aot-source-bindings.mjs <embedded-AOT runmat> [--java|--java-only|--super-only|--super-package-only]");
 }
 const javaOnly = process.argv[3] === "--java-only";
 const superOnly = process.argv[3] === "--super-only";
+const superPackageOnly = process.argv[3] === "--super-package-only";
 const javaRequested = process.argv[3] === "--java" || javaOnly;
 const javaHome = javaRequested && process.env.RUNMAT_TEST_JAVA_HOME;
 if (javaRequested && !javaHome) {
@@ -345,18 +346,28 @@ function verifyPureAotSources() {
     verifyAotSuperConstructors({ directory, compile, invoke });
 }
 
+let failed = false;
 try {
-    if (superOnly) verifyAotSuperConstructors({ directory, compile, invoke });
+    if (superOnly || superPackageOnly) verifyAotSuperConstructors({ directory, compile, invoke, packageOnly: superPackageOnly });
     else if (!javaOnly) verifyPureAotSources();
     if (javaRequested) verifyCapturedJavaPolicy();
 
-    console.log(superOnly
+    console.log(superPackageOnly
+        ? "linked AOT packaged superclass witness passed"
+        : superOnly
         ? "linked AOT superclass witnesses passed"
         : javaOnly
         ? "linked AOT captured Java policy witness passed"
         : javaRequested
         ? "linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, deal, superclass, and captured Java policy witnesses passed"
         : "linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, deal, and superclass witnesses passed");
+} catch (error) {
+    failed = true;
+    throw error;
 } finally {
-    rmSync(directory, { recursive: true, force: true });
+    if (failed && process.env.RUNMAT_AOT_RETAIN_FAILED_ARTIFACTS === "1") {
+        console.error(`retained failed linked AOT fixtures: ${directory}`);
+    } else {
+        rmSync(directory, { recursive: true, force: true });
+    }
 }
