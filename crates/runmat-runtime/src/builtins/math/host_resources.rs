@@ -2,9 +2,13 @@
 //! numeric implementations. Selection still requires their exact registration
 //! and actual host-branch confirmation; these calculators grant no authority.
 use crate::builtins::common::spec::{
-    FusionHostResourceBound, FusionHostResourceInput, FusionHostResourceQuery,
+    FusionHostOutputDomain, FusionHostResourceBound, FusionHostResourceInput,
+    FusionHostResourceQuery,
 };
-use runmat_types::{NumericClass, OperatorKind};
+use runmat_types::{NumericClass, NumericDomain, OperatorKind};
+
+mod envelope;
+pub use envelope::{promoting_output, PromotingOutput};
 
 fn width(class: NumericClass) -> Option<u64> {
     match class {
@@ -34,6 +38,13 @@ fn payload(input: FusionHostResourceInput<'_>) -> Option<u64> {
 /// the COW input, and the argument/shape-to-tensor adapters clone shape metadata.
 /// Borrowing trigonometric maps use no more than this same bound.
 pub fn real_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
+    if query.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real) {
+        return None;
+    }
+    map_bound(query)
+}
+
+fn map_bound(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
     let [input] = query.inputs else { return None };
     if input.shape != query.output.shape || input.class != query.output.class {
         return None;
@@ -44,11 +55,14 @@ pub fn real_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourc
     })
 }
 
-/// inverse_helpers::map_real_tensor_promoting consumes a possible native COW
-/// copy, materializes native (real,imag) pairs, then the separately counted real
-/// output. Only the semantically admitted real-output branch uses this bound.
+/// Native promoting maps may consume a COW input and collect native pairs.
+/// Real extraction may retain the pair capacity; complex publication retains
+/// the pairs directly. The bound covers either branch, not a domain proof.
 pub fn real_promoting_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
-    let mut bound = real_map(query)?;
+    let mut bound = match query.output_domain {
+        FusionHostOutputDomain::Exact(NumericDomain::Real | NumericDomain::Complex)
+        | FusionHostOutputDomain::RealOrComplex => map_bound(query)?,
+    };
     // Pair -> real collection may reuse the wider pair allocation. Bound
     // returned allocation capacity, not just the real vector's logical len.
     bound.retained_bytes = bound.retained_bytes.checked_add(payload(query.output)?)?;
@@ -62,6 +76,13 @@ pub fn real_promoting_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionH
 /// BroadcastPlan construction, argument shape clones, and the output-shape
 /// clone require at most ten vectors of the maximum input/output rank.
 pub fn real_binary(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
+    if query.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real) {
+        return None;
+    }
+    binary_bound(query)
+}
+
+fn binary_bound(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
     let [left, right] = query.inputs else {
         return None;
     };
@@ -91,7 +112,19 @@ pub fn real_binary(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostReso
 /// power::host::real holds native (real,imag) output pairs before extracting
 /// the real output. The latter is separately retained, so both buffers count.
 pub fn real_power(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
-    let mut bound = real_binary(query)?;
+    let [left, right] = query.inputs else {
+        return None;
+    };
+    if runmat_accelerate_api::RealPowerArithmeticMode::for_classes(left.class, right.class)?
+        .output_class()
+        != query.output.class
+    {
+        return None;
+    }
+    let mut bound = match query.output_domain {
+        FusionHostOutputDomain::Exact(NumericDomain::Real | NumericDomain::Complex)
+        | FusionHostOutputDomain::RealOrComplex => binary_bound(query)?,
+    };
     // finish_real_power may retain the wider pair allocation after extracting
     // its real components; do not assume collection shrinks its capacity.
     bound.retained_bytes = bound.retained_bytes.checked_add(payload(query.output)?)?;
@@ -122,6 +155,7 @@ pub fn intrinsic(
             real_binary(&FusionHostResourceQuery {
                 inputs: &operands,
                 output: query.output,
+                output_domain: query.output_domain,
             })
         }
         OperatorKind::MatrixMultiply
@@ -152,9 +186,21 @@ mod tests {
                 let unary = FusionHostResourceQuery {
                     inputs: &[input],
                     output: input,
+                    output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
                 };
                 let direct = real_map(&unary).unwrap();
                 let promoting = real_promoting_map(&unary).unwrap();
+                for domain in [
+                    FusionHostOutputDomain::Exact(NumericDomain::Complex),
+                    FusionHostOutputDomain::RealOrComplex,
+                ] {
+                    let alternative = FusionHostResourceQuery {
+                        output_domain: domain,
+                        ..unary
+                    };
+                    assert_eq!(real_promoting_map(&alternative), Some(promoting));
+                    assert!(real_map(&alternative).is_none());
+                }
                 assert_eq!(
                     promoting.retained_bytes - direct.retained_bytes,
                     payload(input).unwrap()
@@ -170,9 +216,21 @@ mod tests {
                 let binary = FusionHostResourceQuery {
                     inputs: &[scalar, input],
                     output: input,
+                    output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
                 };
                 let native = real_binary(&binary).unwrap();
                 let power = real_power(&binary).unwrap();
+                for domain in [
+                    FusionHostOutputDomain::Exact(NumericDomain::Complex),
+                    FusionHostOutputDomain::RealOrComplex,
+                ] {
+                    let alternative = FusionHostResourceQuery {
+                        output_domain: domain,
+                        ..binary
+                    };
+                    assert_eq!(real_power(&alternative), Some(power));
+                    assert!(real_binary(&alternative).is_none());
+                }
                 assert_eq!(
                     power.retained_bytes - native.retained_bytes,
                     payload(input).unwrap()
@@ -191,7 +249,8 @@ mod tests {
         };
         assert!(real_map(&FusionHostResourceQuery {
             inputs: &[huge],
-            output: huge
+            output: huge,
+            output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
         })
         .is_none());
         let integer = FusionHostResourceInput {
@@ -200,7 +259,8 @@ mod tests {
         };
         assert!(real_map(&FusionHostResourceQuery {
             inputs: &[integer],
-            output: integer
+            output: integer,
+            output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
         })
         .is_none());
         let matrix = FusionHostResourceInput {
@@ -211,7 +271,8 @@ mod tests {
             OperatorKind::MatrixMultiply,
             &FusionHostResourceQuery {
                 inputs: &[matrix, matrix],
-                output: matrix
+                output: matrix,
+                output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
             }
         )
         .is_none());

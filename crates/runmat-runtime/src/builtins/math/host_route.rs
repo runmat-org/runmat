@@ -10,6 +10,17 @@ pub(crate) enum NumericHostRoute {
 }
 
 impl NumericHostRoute {
+    pub(crate) fn confirm_numerical_host_branch(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        evidence: runmat_accelerate_api::NumericalDomainEvidence,
+    ) {
+        match self {
+            Self::Vm(route) => route.confirm_host_branch(runtime, instruction),
+            Self::Prepared(route) => route.confirm_numerical(runtime, instruction, evidence),
+        }
+    }
     pub(crate) fn confirm_host_branch(
         &self,
         runtime: &RuntimeContext,

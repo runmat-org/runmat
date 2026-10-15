@@ -1,6 +1,13 @@
 //! Optional physical allocation contract of one selected implementation.
 //! This grants neither semantic admission nor authority to run a host branch.
-use runmat_types::NumericClass;
+use runmat_types::{NumericClass, NumericDomain};
+
+/// Physical output alternatives, not numerical permission to execute a provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum FusionHostOutputDomain {
+    Exact(NumericDomain),
+    RealOrComplex,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct FusionHostResourceInput<'a> {
@@ -11,6 +18,7 @@ pub struct FusionHostResourceInput<'a> {
 pub struct FusionHostResourceQuery<'a> {
     pub inputs: &'a [FusionHostResourceInput<'a>],
     pub output: FusionHostResourceInput<'a>,
+    pub output_domain: FusionHostOutputDomain,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

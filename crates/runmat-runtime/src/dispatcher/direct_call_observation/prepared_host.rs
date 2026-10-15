@@ -12,7 +12,11 @@ use std::rc::{Rc, Weak};
 
 #[derive(Default)]
 pub(super) struct HostBranchState {
-    selected: Option<(BuiltinPreparationFormId, VmFusionHostInstruction)>,
+    selected: Option<(
+        BuiltinPreparationFormId,
+        BuiltinPreparationOperation,
+        VmFusionHostInstruction,
+    )>,
     confirmed: bool,
 }
 
@@ -138,7 +142,7 @@ impl PreparedHostExecution {
         if state.invalidated || !state.prepared_claimed || state.host_branch.selected.is_some() {
             return false;
         }
-        state.host_branch.selected = Some((form.id, instruction));
+        state.host_branch.selected = Some((form.id, form.operation, instruction));
         true
     }
 
@@ -176,15 +180,99 @@ impl PreparedHostExecution {
                 && state
                     .host_branch
                     .selected
-                    .is_some_and(|(_, expected)| expected == instruction)
+                    .is_some_and(|(_, _, expected)| expected == instruction)
         })
     }
 
     pub(crate) fn confirm(&self, runtime: &RuntimeContext, instruction: VmFusionHostInstruction) {
+        self.confirm_numerical(
+            runtime,
+            instruction,
+            runmat_accelerate_api::NumericalDomainEvidence::Unknown,
+        );
+    }
+
+    pub(crate) fn confirm_numerical(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        evidence: runmat_accelerate_api::NumericalDomainEvidence,
+    ) {
         if self.allows(runtime, instruction) {
             if let Some(state) = self.state.upgrade() {
-                state.borrow_mut().host_branch.confirmed = true;
+                let mut state = state.borrow_mut();
+                let Some((_, operation, _)) = state.host_branch.selected else {
+                    return;
+                };
+                if numerical_evidence_belongs(operation, evidence) {
+                    state.host_branch.confirmed = true;
+                }
             }
+        }
+    }
+}
+
+fn numerical_evidence_belongs(
+    operation: BuiltinPreparationOperation,
+    evidence: runmat_accelerate_api::NumericalDomainEvidence,
+) -> bool {
+    use runmat_accelerate_api::NumericalDomainEvidence as Evidence;
+    match (operation, evidence) {
+        (
+            BuiltinPreparationOperation::RealUnary(expected),
+            Evidence::RealUnary { predicate, .. },
+        ) => expected == predicate,
+        (BuiltinPreparationOperation::RealPower, Evidence::RealPower(_)) => true,
+        (BuiltinPreparationOperation::RealUnary(_) | BuiltinPreparationOperation::RealPower, _) => {
+            false
+        }
+        (_, Evidence::Unknown) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_accelerate_api::{NumericalDomainEvidence as Evidence, PowerResultDomain};
+    use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
+    #[test]
+    fn promoting_host_confirmation_requires_its_actual_operation_evidence() {
+        let unary = BuiltinPreparationOperation::RealUnary(RealUnaryPredicate::Nonnegative);
+        assert!(!numerical_evidence_belongs(unary, Evidence::Unknown));
+        assert!(!numerical_evidence_belongs(
+            BuiltinPreparationOperation::RealPower,
+            Evidence::Unknown
+        ));
+        for classification in [
+            RealUnaryClassification::Inside,
+            RealUnaryClassification::Outside,
+            RealUnaryClassification::Indeterminate,
+        ] {
+            assert!(numerical_evidence_belongs(
+                unary,
+                Evidence::RealUnary {
+                    predicate: RealUnaryPredicate::Nonnegative,
+                    classification
+                }
+            ));
+            assert!(!numerical_evidence_belongs(
+                unary,
+                Evidence::RealUnary {
+                    predicate: RealUnaryPredicate::AtLeastOne,
+                    classification
+                }
+            ));
+        }
+        for domain in [PowerResultDomain::Real, PowerResultDomain::Complex] {
+            assert!(numerical_evidence_belongs(
+                BuiltinPreparationOperation::RealPower,
+                Evidence::RealPower(domain)
+            ));
+            assert!(!numerical_evidence_belongs(
+                unary,
+                Evidence::RealPower(domain)
+            ));
         }
     }
 }

@@ -25,7 +25,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::roots::realsqrt"
+    builtin_path = "crate::builtins::math::elementwise::roots::realsqrt",
+    host_resources = crate::builtins::math::host_resources::real_promoting_map
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "realsqrt",

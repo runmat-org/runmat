@@ -6,8 +6,8 @@ pub use unary_math::unary_math_expression;
 mod canonical;
 mod host_resources;
 pub use host_resources::{
-    FusionHostResourceBound, FusionHostResourceCallback, FusionHostResourceInput,
-    FusionHostResourceQuery,
+    FusionHostOutputDomain, FusionHostResourceBound, FusionHostResourceCallback,
+    FusionHostResourceInput, FusionHostResourceQuery,
 };
 mod epilogue;
 mod reduction;

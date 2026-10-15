@@ -16,6 +16,26 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         .has_prepared_completion_right()
         .then(|| super::super::host_readback::admit(auto, context, &request))
         .flatten();
+    // A newly eligible promoting resident call has no provider-domain proof
+    // yet. Without an executable private-host envelope this optional route is
+    // not applicable: leave the original domain-owned implementation intact.
+    // This is before planning/resource admission; no rejection is caught here.
+    if admission.is_none()
+        && request.numerical_domain() == runmat_accelerate_api::NumericalDomainEvidence::Unknown
+        && matches!(
+            form.operation,
+            Operation::RealUnary(_) | Operation::RealPower
+        )
+        && request
+            .operands()
+            .iter()
+            .any(runmat_runtime::dispatcher::value_contains_gpu)
+    {
+        return Ok(request
+            .into_operands()
+            .with_owned_values(PreparedBuiltinCall::unobserved)
+            .with_request_input_root(root));
+    }
     let mut prepared = prepare_with_inner(
         auto,
         context,

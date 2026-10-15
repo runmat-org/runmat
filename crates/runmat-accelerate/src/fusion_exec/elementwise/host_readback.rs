@@ -173,6 +173,10 @@ fn admit_inputs(
             request.runtime.as_ref(),
             &FusionHostResourceQuery {
                 inputs: &args,
+                output_domain:
+                    runmat_runtime::builtins::common::spec::FusionHostOutputDomain::Exact(
+                        runmat_types::NumericDomain::Real,
+                    ),
                 output: FusionHostResourceInput {
                     shape: &output_shape,
                     class: program.floating_class(output).ok()?,

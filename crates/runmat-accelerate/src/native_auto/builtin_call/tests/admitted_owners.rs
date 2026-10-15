@@ -338,6 +338,191 @@ fn automatic_resident_calls_keep_private_native_mirrors_and_publish_real_host_fu
 }
 
 #[test]
+fn promoting_resident_calls_preserve_native_domains_errors_and_full_call_boundary() {
+    use runmat_accelerate_api::{GpuHandleProvenance, HostNumericDataView};
+    for single in [false, true] {
+        // One case per canonical boundary/engine; shared leaf adapters are not
+        // separate planners. Both sides of each actual domain are exercised.
+        for (operation, inside, outside) in [
+            ("log", 0.5, -0.5),
+            ("log1p", -0.5, -1.5),
+            ("sqrt", 0.5, -0.5),
+            ("realsqrt", 0.5, -0.5),
+            ("asin", 0.5, 1.5),
+            ("acosh", 1.5, 0.5),
+            ("atanh", 0.5, 1.5),
+        ] {
+            for value in [inside, outside] {
+                let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+                let data = [value, value, f64::NAN, value];
+                let native = data.map(|value| value as f32);
+                let input = if single {
+                    Value::Tensor(
+                        runmat_value::Tensor::from_f32(native.to_vec(), vec![1, 4]).unwrap(),
+                    )
+                } else {
+                    Value::Tensor(runmat_value::Tensor::new(data.to_vec(), vec![1, 4]).unwrap())
+                };
+                let source = provider
+                    .upload_numeric_raw(&HostNumericTensorView {
+                        data: if single {
+                            HostNumericDataView::F32(&native)
+                        } else {
+                            HostNumericDataView::F64(&data)
+                        },
+                        shape: &[1, 4],
+                        storage: GpuTensorStorage::Real,
+                    })
+                    .unwrap()
+                    .with_provenance(GpuHandleProvenance::Automatic)
+                    .unwrap();
+                let session = Rc::new(crate::placement::PlacementSession::default());
+                let ordinary = RuntimeContext::new(Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                ));
+                let context = ordinary.clone().with_service_ports(
+                    RuntimeServicePorts::default()
+                        .with_placement(session.clone())
+                        .with_acceleration(Rc::new(Adapter(provider, 0))),
+                );
+                let expected = futures::executor::block_on(ordinary.scope(
+                    runmat_runtime::dispatcher::call_builtin_async_in_context(
+                        &ordinary,
+                        operation,
+                        &[input],
+                    ),
+                ));
+                let args = [Value::GpuTensor(source.clone())];
+                let actual = futures::executor::block_on(context.scope(
+                    runmat_runtime::dispatcher::call_builtin_async_in_context(
+                        &context, operation, &args,
+                    ),
+                ));
+                match (&actual, &expected) {
+                    (Ok(actual), Ok(expected)) => assert_native_result(actual.value(), expected.value()),
+                    (Err(actual), Err(expected)) => {
+                        assert_eq!(actual.identifier(), expected.identifier());
+                        assert_eq!(actual.gpu_gather_retry, runmat_runtime::GpuGatherRetry::Never);
+                    }
+                    _ => panic!("{operation} native/private domain result disagrees: {actual:?} vs {expected:?}"),
+                }
+                assert_eq!(provider.downloads.load(Ordering::Relaxed), 1, "{operation}");
+                assert_eq!(
+                    provider.uploads.load(Ordering::Relaxed),
+                    1,
+                    "no restore/re-promotion"
+                );
+                assert!(source.allocation_lease().validate_live().is_ok());
+                let profile = session.profile_snapshot();
+                assert_eq!(profile.feedback.len(), 1, "{operation}");
+                assert_eq!(
+                    profile.feedback[0].kind,
+                    runmat_execution::ExecutionCandidateKind::SharedRuntime
+                );
+                assert_eq!(profile.feedback[0].failures, u64::from(actual.is_err()));
+                drop((actual, expected, args, source));
+                assert_eq!(provider.live_count(), 0);
+            }
+        }
+    }
+}
+
+fn assert_native_result(actual: &Value, expected: &Value) {
+    match (actual, expected) {
+        (Value::Tensor(actual), Value::Tensor(expected)) => {
+            assert_eq!(actual.numeric_dtype(), expected.numeric_dtype());
+            assert_eq!(actual.shape(), expected.shape());
+            assert_eq!(
+                actual
+                    .materialize_f64()
+                    .into_iter()
+                    .map(f64::to_bits)
+                    .collect::<Vec<_>>(),
+                expected
+                    .materialize_f64()
+                    .into_iter()
+                    .map(f64::to_bits)
+                    .collect::<Vec<_>>()
+            );
+        }
+        (Value::ComplexTensor(actual), Value::ComplexTensor(expected)) => {
+            assert_eq!(actual.numeric_dtype(), expected.numeric_dtype());
+            assert_eq!(actual.shape(), expected.shape());
+            let bits = |values: Vec<(f64, f64)>| {
+                values
+                    .into_iter()
+                    .map(|(real, imag)| (real.to_bits(), imag.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                bits(actual.materialize_f64()),
+                bits(expected.materialize_f64())
+            );
+        }
+        _ => panic!("native carrier/class changed: {actual:?} vs {expected:?}"),
+    }
+}
+
+#[test]
+fn mixed_power_private_host_route_keeps_double_arithmetic_and_single_publication() {
+    use runmat_accelerate_api::{GpuHandleProvenance, HostNumericDataView};
+    for base in [4.0_f32, -4.0] {
+        let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+        let data = [base, base];
+        let source = provider
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&data),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Automatic)
+            .unwrap();
+        let exponent =
+            Value::Tensor(runmat_value::Tensor::new(vec![0.5, 2.0], vec![1, 2]).unwrap());
+        let ordinary = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let session = Rc::new(crate::placement::PlacementSession::default());
+        let context = ordinary.clone().with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(session.clone())
+                .with_acceleration(Rc::new(Adapter(provider, 0))),
+        );
+        let expected = futures::executor::block_on(ordinary.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(
+                &ordinary,
+                "power",
+                &[
+                    Value::Tensor(
+                        runmat_value::Tensor::from_f32(data.to_vec(), vec![1, 2]).unwrap(),
+                    ),
+                    exponent.clone(),
+                ],
+            ),
+        ))
+        .unwrap();
+        let args = [Value::GpuTensor(source.clone()), exponent];
+        let actual = futures::executor::block_on(context.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "power", &args),
+        ))
+        .unwrap();
+        assert_native_result(actual.value(), expected.value());
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
+        assert_eq!(provider.uploads.load(Ordering::Relaxed), 1);
+        let profile = session.profile_snapshot();
+        assert_eq!(profile.feedback.len(), 1);
+        assert_eq!(
+            profile.feedback[0].kind,
+            runmat_execution::ExecutionCandidateKind::SharedRuntime
+        );
+        assert_eq!(profile.feedback[0].failures, 0);
+        drop((actual, expected, args, source));
+        assert_eq!(provider.live_count(), 0);
+    }
+}
+
+#[test]
 fn cancellation_during_private_call_readback_never_runs_or_publishes_the_body() {
     let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
     let source = provider

@@ -38,17 +38,30 @@ where
         ) {
             // The canonical power body still owns domain/class arithmetic;
             // only operand promotion is bypassed for the selected host route.
+            let evidence = classify_operands(&left, &right)?;
             let output = body(left, right).await?;
-            route.confirm_host_branch(
+            route.confirm_numerical_host_branch(
                 runtime.unwrap(),
                 crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                evidence,
             );
             return Ok(output);
         }
     }
-    let admitted = input_count == 2 && [&left, &right].into_iter().all(|value| {
-        matches!(value, Value::Tensor(t) if matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64))
-    });
+    let resident = [&left, &right]
+        .into_iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)));
+    let admitted = input_count == 2
+        && [&left, &right].into_iter().all(|value| match value {
+            Value::GpuTensor(handle) => {
+                runmat_accelerate_api::handle_provenance(handle)
+                    == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                    && crate::builtins::math::host_route::real_floating_shape(value).is_some()
+            }
+            Value::Tensor(t) => matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64),
+            Value::Num(_) => resident,
+            _ => false,
+        });
     if !admitted {
         return body(left, right).await;
     }
@@ -66,25 +79,58 @@ where
         vec![left, right],
     )?
     .with_numerical_domain(classify)?;
-    execute_request(runtime, request, |mut values| {
+    execute_request(runtime, request, |mut values| async move {
+        let route = crate::builtins::math::host_route::canonical(
+            runtime,
+            crate::context::VmFusionHostInstruction::ElementwiseBinary,
+            values.iter(),
+        );
+        let evidence = route.as_ref().map(|_| classify(&values)).transpose()?;
         let right = values.remove(1);
-        body(values.remove(0), right)
+        let output = body(values.remove(0), right).await?;
+        if let (Some(route), Some(evidence)) = (route, evidence) {
+            route.confirm_numerical_host_branch(
+                runtime.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                evidence,
+            );
+        }
+        Ok(output)
     })
     .await
 }
 
 fn classify(operands: &[Value]) -> BuiltinResult<NumericalDomainEvidence> {
-    let [Value::Tensor(left), Value::Tensor(right)] = operands else {
+    let [left, right] = operands else {
         return Err(super::builtin_error(
             "power: admitted real pair is not a tensor pair",
         ));
     };
-    let plan = BroadcastPlan::new(left.shape(), right.shape())
+    classify_operands(left, right)
+}
+
+fn classify_operands(left: &Value, right: &Value) -> BuiltinResult<NumericalDomainEvidence> {
+    let left_shape = crate::builtins::math::host_route::real_floating_shape(left)
+        .ok_or_else(|| super::builtin_error("power: nonnative admitted base"))?;
+    let right_shape = crate::builtins::math::host_route::real_floating_shape(right)
+        .ok_or_else(|| super::builtin_error("power: nonnative admitted exponent"))?;
+    let plan = BroadcastPlan::new(left_shape, right_shape)
         .map_err(|detail| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, detail))?;
+    if [left, right]
+        .into_iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Ok(NumericalDomainEvidence::Unknown);
+    }
+    let value_at = |value: &Value, index| match value {
+        Value::Tensor(tensor) => crate::builtins::common::tensor::tensor_value_f64(tensor, index),
+        Value::Num(value) => *value,
+        _ => unreachable!("admitted native floating pair"),
+    };
     let domain = super::domain::classify_pair(
         &plan,
-        |index| crate::builtins::common::tensor::tensor_value_f64(left, index),
-        |index| crate::builtins::common::tensor::tensor_value_f64(right, index),
+        |index| value_at(left, index),
+        |index| value_at(right, index),
     );
     Ok(NumericalDomainEvidence::RealPower(domain))
 }

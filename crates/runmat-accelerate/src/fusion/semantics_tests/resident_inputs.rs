@@ -78,6 +78,9 @@ fn exact_host_resources_keep_double_intermediates_beside_automatic_single_inputs
     .unwrap();
     let exp_bound = |program: &ResolvedProgram| {
         bindings[1].unwrap().declaration.host_resources.unwrap()(&FusionHostResourceQuery {
+            output_domain: runmat_runtime::builtins::common::spec::FusionHostOutputDomain::Exact(
+                runmat_types::NumericDomain::Real,
+            ),
             inputs: &[FusionHostResourceInput {
                 shape: &[1, 3],
                 class: program.floating_class(2).unwrap(),
