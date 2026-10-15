@@ -107,7 +107,6 @@ fn deal_retains_distributed_identity_and_pool_retirement() {
     }
 }
 
-#[cfg(feature = "jit")]
 fn assert_wide_aliases(left: &Value, right: &Value) {
     let (Value::Tensor(left), Value::Tensor(right)) = (left, right) else {
         panic!("deal must retain tensor class in both outputs");
