@@ -4,7 +4,9 @@ use super::{AdmittedBindings, FusionExecutionRequest};
 use crate::fusion::{semantics::ResolvedProgram, typed_producer::TypedProducer};
 use crate::graph::ValueId;
 use futures::FutureExt;
-use runmat_accelerate_api::scalar_program::ScalarProgram;
+use runmat_accelerate_api::scalar_program::{
+    EmittedScalarImplementation, ScalarProgram, ScalarTransport,
+};
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult, ProviderPrecision};
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{
@@ -33,9 +35,13 @@ pub struct ResolvedReductionProgram<'a> {
     body: String,
     preamble: String,
     expression: String,
+    word_expression: Option<String>,
     identity: Digest,
     data_classes: Vec<NumericClass>,
     execution_precision: ProviderPrecision,
+    producer_transport: ScalarTransport,
+    producer_implementations: Vec<EmittedScalarImplementation>,
+    exact_product_controls: Vec<(ValueId, u64)>,
     owner_precision: ProviderPrecision,
     producer_work_units: u64,
     checked_scalar: Option<ScalarProgram>,
@@ -59,6 +65,9 @@ impl<'a> ResolvedReductionProgram<'a> {
     pub fn producer_expression(&self) -> &str {
         &self.expression
     }
+    pub fn producer_word_expression(&self) -> Option<&str> {
+        self.word_expression.as_deref()
+    }
     pub fn identity(&self) -> Digest {
         self.identity
     }
@@ -69,6 +78,37 @@ impl<'a> ResolvedReductionProgram<'a> {
     }
     pub fn execution_precision(&self) -> ProviderPrecision {
         self.execution_precision
+    }
+    pub fn producer_transport(&self) -> ScalarTransport {
+        self.producer_transport
+    }
+    pub fn producer_implementations(&self) -> &[EmittedScalarImplementation] {
+        &self.producer_implementations
+    }
+    pub(super) fn require_current_controls(
+        &self,
+        request: &FusionExecutionRequest<'_>,
+    ) -> anyhow::Result<()> {
+        use runmat_runtime::builtins::common::spec::FusionScalarControl;
+        for &(id, bits) in &self.exact_product_controls {
+            let value = request
+                .plan
+                .inputs
+                .iter()
+                .position(|&candidate| candidate == id)
+                .and_then(|slot| request.inputs.get(slot))
+                .or_else(|| request.plan.const_values.get(&id));
+            anyhow::ensure!(
+                crate::fusion::semantics::exact_scalar_control(value)
+                    == Some(FusionScalarControl::DoubleBits(bits))
+                    && value.is_some_and(|value| runmat_runtime::value_fact::value_fact(value)
+                        .shape
+                        .element_count()
+                        == Some(1)),
+                "selected reduction original scalar control changed"
+            );
+        }
+        Ok(())
     }
     pub fn owner_precision(&self) -> ProviderPrecision {
         self.owner_precision
@@ -214,17 +254,24 @@ async fn resolve<'a>(
         controls,
         precision: producer_precision,
         expressions,
-    } = physical::Projection::derive(&mapped, &program, precision);
+        words,
+    } = physical::Projection::derive(&mapped, &program, precision)?;
     let scalar = match producer_precision {
         ProviderPrecision::F32 => ScalarType::F32,
         ProviderPrecision::F64 => ScalarType::F64,
     };
-    let producer = match TypedProducer::emit(
+    let producer_transport = if words.is_empty() {
+        ScalarTransport::NativeFloat
+    } else {
+        ScalarTransport::Binary32Words
+    };
+    let producer = match TypedProducer::emit_with_words(
         &mapped.producer,
         &program,
         scalar,
         expressions,
         Some(&[mapped.root]),
+        words,
     ) {
         Ok(producer) => producer,
         Err(_) => return Ok(None),
@@ -232,6 +279,25 @@ async fn resolve<'a>(
     // Only the checked stream actually used for WGSL emission can authorize
     // portable provider execution. A legacy-only lowering remains unbound.
     let checked_scalar = producer.checked_program().cloned();
+    let mut producer_implementations = producer.implementations().to_vec();
+    if producer_transport == ScalarTransport::Binary32Words
+        && !contract.identity
+        && contract.accumulator_class == NumericClass::Double
+    {
+        producer_implementations.push(crate::wgsl::ieee_words::binary32_widening_implementation(
+            mapped.root,
+        ));
+    }
+    let exact_product_controls = mapped
+        .data
+        .iter()
+        .filter(|input| controls.contains(&input.value_id))
+        .filter_map(|input| {
+            program
+                .exact_product_control_bits(input.value_id)
+                .map(|bits| (input.value_id, bits))
+        })
+        .collect();
     let expression = producer
         .expression(mapped.root)
         .map_err(ProviderExecutionError::from)?
@@ -239,6 +305,7 @@ async fn resolve<'a>(
     let preamble = producer
         .preamble(&program)
         .map_err(ProviderExecutionError::from)?;
+    let word_expression = producer.word_expression(mapped.root).map(str::to_owned);
     let mapping: Vec<_> = mapped
         .data
         .iter()
@@ -247,7 +314,7 @@ async fn resolve<'a>(
         .collect();
     let semantic = Digest::sha256(
         serde_json::to_vec(&(
-            "typed-reduction-program-v1",
+            "typed-reduction-program-v2",
             program.cache_identity()?,
             declaration.revision,
             &contract,
@@ -255,7 +322,10 @@ async fn resolve<'a>(
             &producer.body,
             &preamble,
             &expression,
+            &word_expression,
             checked_scalar.as_ref().map(ScalarProgram::identity),
+            producer_transport,
+            &producer_implementations,
         ))
         .map_err(ProviderExecutionError::from_source)?,
     );
@@ -330,9 +400,13 @@ async fn resolve<'a>(
         body: producer.body,
         preamble,
         expression,
+        word_expression,
         identity,
         data_classes,
         execution_precision: producer_precision,
+        producer_transport,
+        producer_implementations,
+        exact_product_controls,
         owner_precision: precision,
         producer_work_units,
         checked_scalar,

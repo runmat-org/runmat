@@ -52,6 +52,14 @@ impl RealFloatingRecipe {
         {
             return None;
         }
+        let operator = if operator == OperatorKind::MatrixMultiply {
+            if left.shape.element_count() != Some(1) && right.shape.element_count() != Some(1) {
+                return None;
+            }
+            OperatorKind::ElementwiseMultiply
+        } else {
+            operator
+        };
         let left = left.numeric()?;
         let right = right.numeric()?;
         if left.domain != NumericDomain::Real || right.domain != NumericDomain::Real {

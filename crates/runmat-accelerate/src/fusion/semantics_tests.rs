@@ -3,6 +3,9 @@ use crate::fusion::{FusionGroup, FusionKernelSpec, FusionKind};
 use crate::graph::{InstrSpan, ShapeInfo};
 use runmat_runtime::builtins::common::spec::ScalarType;
 
+#[path = "semantics_tests/exact_product.rs"]
+mod exact_product_tests;
+
 fn plan(operations: Vec<FusionOp>, output: ValueId) -> FusionGroupPlan {
     // Direct fusion fixtures bypass the runtime entrypoint that initializes
     // browser declarations; native inventory initializes them automatically.

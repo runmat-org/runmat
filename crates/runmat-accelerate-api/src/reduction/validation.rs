@@ -26,6 +26,15 @@ pub(super) fn recipe(
     let p = d.partial;
     let w = &d.work;
     semantic(d)?;
+    if d.producer_transport == crate::scalar_program::ScalarTransport::Binary32Words {
+        ensure!(
+            d.execution_precision == crate::ProviderPrecision::F32
+                && d.inputs
+                    .iter()
+                    .all(|input| input.precision == crate::ProviderPrecision::F32),
+            "binary32 word transport requires actual Single data ABI"
+        );
+    }
     ensure!(
         c.workgroup_size.is_power_of_two() && c.workgroup_size <= c.max_workgroup_size,
         "invalid reduction workgroup size"

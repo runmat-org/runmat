@@ -9,6 +9,7 @@ pub(super) struct Projection {
     pub controls: HashSet<ValueId>,
     pub precision: ProviderPrecision,
     pub expressions: HashMap<ValueId, String>,
+    pub words: HashMap<ValueId, String>,
 }
 
 impl Projection {
@@ -16,8 +17,14 @@ impl Projection {
         mapped: &Inputs<'_>,
         program: &ResolvedProgram,
         owner: ProviderPrecision,
-    ) -> Self {
-        let controls = program.embedded_power_controls(&mapped.producer, &[mapped.root]);
+    ) -> anyhow::Result<Self> {
+        // A word recipe may omit only authenticated metadata controls. All
+        // actual Double data/interior nodes still require their native owner.
+        let mut controls = program.embedded_controls_for_precision(
+            &mapped.producer,
+            &[mapped.root],
+            ProviderPrecision::F32,
+        );
         // Preserve all genuine Double data/interior operations. The buffer
         // choice cannot grant arithmetic admission or narrow a source fact.
         let single_operations = mapped.producer.operations.iter().all(|operation| {
@@ -40,20 +47,52 @@ impl Projection {
         } else {
             owner
         };
+        if precision != ProviderPrecision::F32 {
+            controls = program.embedded_controls_for_precision(
+                &mapped.producer,
+                &[mapped.root],
+                precision,
+            );
+        }
+        let word_storage = precision == ProviderPrecision::F32
+            && crate::fusion::typed_producer::TypedProducer::requires_binary32_word_transport(
+                &mapped.producer,
+                program,
+                Some(&[mapped.root]),
+            )?;
+        let words = mapped
+            .data
+            .iter()
+            .filter(|input| !controls.contains(&input.value_id))
+            .enumerate()
+            .filter(|_| word_storage)
+            .map(|(slot, input)| (input.value_id, format!("input{slot}.data[i{slot}]")))
+            .collect();
         let expressions = mapped
             .data
             .iter()
             .filter(|input| !controls.contains(&input.value_id))
             .enumerate()
-            .map(|(slot, input)| (input.value_id, format!("input{slot}.data[i{slot}]")))
+            .map(|(slot, input)| {
+                let load = format!("input{slot}.data[i{slot}]");
+                (
+                    input.value_id,
+                    if word_storage {
+                        format!("bitcast<f32>({load})")
+                    } else {
+                        load
+                    },
+                )
+            })
             // Dependency markers only: checked POWER embeds original bits and
             // never reads or casts these strings into a physical expression.
             .chain(controls.iter().map(|&id| (id, String::new())))
             .collect();
-        Self {
+        Ok(Self {
             controls,
             precision,
             expressions,
-        }
+            words,
+        })
     }
 }

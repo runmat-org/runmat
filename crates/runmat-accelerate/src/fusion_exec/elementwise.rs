@@ -145,6 +145,8 @@ async fn execute_elementwise_outputs(
         }
     };
     let physical_precision = generated_shader.abi().precision();
+    let exact_product_words = generated_shader.uses_exact_product_words();
+    let emitted_implementations = generated_shader.implementations().to_vec();
     let scalar_type = match physical_precision {
         ProviderPrecision::F32 => runmat_runtime::builtins::common::spec::ScalarType::F32,
         ProviderPrecision::F64 => runmat_runtime::builtins::common::spec::ScalarType::F64,
@@ -223,8 +225,14 @@ async fn execute_elementwise_outputs(
         }
     };
     let semantic_identity = runmat_execution::Digest::sha256(
-        serde_json::to_vec(&(program.cache_identity()?, &shader, scalar_work_units))
-            .map_err(anyhow::Error::from)?,
+        serde_json::to_vec(&(
+            program.cache_identity()?,
+            &shader,
+            exact_product_words,
+            &emitted_implementations,
+            scalar_work_units,
+        ))
+        .map_err(anyhow::Error::from)?,
     );
     let has_host_operations = bindings.has_host_operations(request.runtime.as_ref());
     let has_resident = request
@@ -279,6 +287,7 @@ async fn execute_elementwise_outputs(
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         let mut effects = ElementwiseEffects::default();
         let result: ExecutionResult<_> = async {
+        program.require_exact_product_controls(request.plan, &request.inputs)?;
         if let Some(work) = typed_abi { abi::validate_inputs(request.plan, &program, &input_indices, &request.inputs, work)?; }
         let observer = selection.observer;
         let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);

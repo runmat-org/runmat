@@ -2,6 +2,7 @@
 use super::*;
 use crate::fusion::typed_producer::TypedProducer;
 use crate::graph::ValueId;
+use runmat_accelerate_api::scalar_program::ScalarTransport;
 use runmat_runtime::builtins::common::spec::ScalarType;
 use std::collections::HashMap;
 
@@ -23,6 +24,7 @@ pub(super) fn sources(
         program.producer_preamble(),
         program.producer_body(),
         program.producer_expression(),
+        program.producer_word_expression(),
     )
 }
 
@@ -38,21 +40,55 @@ pub(super) fn validate_lowered_sources(recipe: &ProviderReductionRecipe) -> Resu
         ProviderPrecision::F32 => ScalarType::F32,
         ProviderPrecision::F64 => ScalarType::F64,
     };
+    let words: HashMap<ValueId, String> =
+        if recipe.descriptor().producer_transport == ScalarTransport::Binary32Words {
+            recipe
+                .scalar_inputs()
+                .iter()
+                .enumerate()
+                .map(|(slot, &id)| (id, format!("input{slot}.data[i{slot}]")))
+                .collect()
+        } else {
+            HashMap::new()
+        };
     let expressions: HashMap<ValueId, String> = recipe
         .scalar_inputs()
         .iter()
         .enumerate()
-        .map(|(slot, &id)| (id, format!("input{slot}.data[i{slot}]")))
+        .map(|(slot, &id)| {
+            let load = format!("input{slot}.data[i{slot}]");
+            (
+                id,
+                if words.contains_key(&id) {
+                    format!("bitcast<f32>({load})")
+                } else {
+                    load
+                },
+            )
+        })
         .collect();
-    let producer = TypedProducer::lower_checked_wgsl(checked, scalar, expressions)?
+    let producer = TypedProducer::lower_checked_with_words(checked, scalar, expressions, words)?
         .ok_or_else(|| anyhow!("checked reduction producer has no WGSL lowering"))?;
     let preamble = producer.checked_preamble()?;
+    let mut implementations = producer.implementations().to_vec();
+    if recipe.descriptor().producer_transport == ScalarTransport::Binary32Words
+        && recipe.descriptor().partial.precision == ProviderPrecision::F64
+    {
+        implementations.push(crate::wgsl::ieee_words::binary32_widening_implementation(
+            checked.wire().root,
+        ));
+    }
+    ensure!(
+        implementations == recipe.descriptor().producer_implementations,
+        "checked reduction implementations differ from actual lowering"
+    );
     let expected = render(
         recipe.descriptor(),
         recipe.semantic_identity(),
         &preamble,
         &producer.body,
         producer.expression(checked.wire().root)?,
+        producer.word_expression(checked.wire().root),
     )?;
     ensure!(
         recipe.sources().single == expected.0
@@ -69,37 +105,71 @@ fn render(
     preamble: &str,
     body: &str,
     expression: &str,
+    word_expression: Option<&str>,
 ) -> Result<(String, String, String)> {
     let contract = &descriptor.contract;
     let inputs = &descriptor.inputs;
     let geometry = &descriptor.geometry;
     let partial = descriptor.partial;
     let config = descriptor.config;
-    let state = state::source(contract, partial, geometry)?;
+    let word_identity = descriptor.producer_transport == ScalarTransport::Binary32Words
+        && contract.identity
+        && partial.precision == ProviderPrecision::F32
+        && descriptor.output_precision == ProviderPrecision::F32;
+    let mut state = state::source(contract, partial, geometry, word_identity)?;
     let indices = indexing::source(contract, inputs)?;
     let mut producer = indices;
     producer.push_str(&format!(
         "fn rr_value(slice: u32, r: u32) -> {} {{\n",
-        scalar(partial.precision)
+        if word_identity {
+            "u32"
+        } else {
+            scalar(partial.precision)
+        }
     ));
     for slot in 0..inputs.len() {
         producer.push_str(&format!("  let i{slot} = rr_index{slot}(slice, r);\n"));
     }
     producer.push_str(body);
-    producer.push_str(&format!(
-        "  return {}({});\n}}\n",
-        scalar(partial.precision),
-        expression
-    ));
+    let word_widening = descriptor.producer_transport == ScalarTransport::Binary32Words
+        && partial.precision == ProviderPrecision::F64;
+    if word_identity {
+        let bits = word_expression
+            .ok_or_else(|| anyhow!("word identity root has no captured Single result"))?;
+        producer.push_str(&format!("  return {bits};\n}}\n"));
+    } else if word_widening {
+        state = crate::wgsl::ieee_words::inject(&state);
+        // Decode the actual represented Single result, never a potentially
+        // flushing f32-to-f64 conversion at this transport boundary.
+        let bits = word_expression
+            .ok_or_else(|| anyhow!("word reduction root has no captured Single result"))?;
+        producer.push_str(&format!("  return runmat_f32_words_to_f64({bits});\n}}\n"));
+    } else {
+        producer.push_str(&format!(
+            "  return {}({});\n}}\n",
+            scalar(partial.precision),
+            expression
+        ));
+    }
+    let preamble = if word_widening {
+        format!(
+            "{preamble}\n{}",
+            crate::wgsl::ieee_words::binary32_widening()
+        )
+    } else {
+        preamble.to_owned()
+    };
     let context = Shader {
         contract,
         identity,
-        preamble,
+        preamble: &preamble,
         inputs,
         geometry,
         config,
         state: &state,
         producer: &producer,
+        word_storage: descriptor.producer_transport == ScalarTransport::Binary32Words,
+        word_identity,
     };
     Ok((
         context.emit(Pass::Single)?,
@@ -117,10 +187,16 @@ struct Shader<'a> {
     config: ReductionRecipeConfig,
     state: &'a str,
     producer: &'a str,
+    word_storage: bool,
+    word_identity: bool,
 }
 impl Shader<'_> {
     fn emit(&self, pass: Pass) -> Result<String> {
-        let output = scalar(precision_of_output(self.contract)?);
+        let output = if self.word_identity {
+            "u32"
+        } else {
+            scalar(precision_of_output(self.contract)?)
+        };
         let wg = self.config.workgroup_size;
         let mut source = format!(
             "// typed reduction semantic receipt {:?}\n{}",
@@ -132,7 +208,12 @@ impl Shader<'_> {
         } else {
             source.push_str(self.preamble);
             for (slot, input) in self.inputs.iter().enumerate() {
-                source.push_str(&format!("struct RRInput{slot} {{ data: array<{}>, }};\n@group(0) @binding({slot}) var<storage, read> input{slot}: RRInput{slot};\n", scalar(input.precision)));
+                let storage = if self.word_storage {
+                    "u32"
+                } else {
+                    scalar(input.precision)
+                };
+                source.push_str(&format!("struct RRInput{slot} {{ data: array<{storage}>, }};\n@group(0) @binding({slot}) var<storage, read> input{slot}: RRInput{slot};\n"));
             }
             source.push_str(self.producer);
             self.inputs.len()

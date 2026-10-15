@@ -109,6 +109,8 @@ fn descriptor() -> ReductionRecipeDescriptor {
             ties: FusionReductionTies::NotApplicable,
         },
         execution_precision: ProviderPrecision::F64,
+        producer_transport: crate::scalar_program::ScalarTransport::NativeFloat,
+        producer_implementations: Vec::new(),
         config: ReductionRecipeConfig {
             workgroup_size: 8,
             chunk_elements: 2,

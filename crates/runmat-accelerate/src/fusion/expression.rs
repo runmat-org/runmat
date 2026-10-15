@@ -71,9 +71,21 @@ pub(super) fn structural_operation_support(
             let [binding] = entry.bindings else {
                 return false;
             };
-            canonical_fusion_declaration(entry.binding_identity(binding))
-                .and_then(|declaration| declaration.spec.elementwise.as_ref())
-                .is_some_and(|template| !template.scalar_precisions.is_empty())
+            canonical_fusion_declaration(entry.binding_identity(binding)).is_some_and(
+                |declaration| {
+                    declaration
+                        .spec
+                        .elementwise
+                        .as_ref()
+                        .is_some_and(|template| !template.scalar_precisions.is_empty())
+                        || declaration
+                            .semantics
+                            .and_then(|semantics| semantics.scalar_operation)
+                            == Some(runmat_types::ScalarOperation::Operator(
+                                runmat_types::OperatorKind::MatrixMultiply,
+                            ))
+                },
+            )
         }
     }
 }

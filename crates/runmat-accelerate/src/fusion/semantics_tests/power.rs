@@ -51,7 +51,8 @@ fn certified_power_fusion_embeds_original_double_controls_before_operand_casts()
                 requirements,
                 runmat_accelerate_api::ProviderShaderRequirements::Basic
             );
-            assert!(shader.contains("bitcast<f32>(rm_exact_power_"));
+            assert!(shader.contains(": u32 = rm_exact_power_"));
+            assert!(shader.contains("struct Tensor { data: array<u32>"));
             assert!(!shader.contains("var<storage, read> input1"));
             assert!(!shader.contains("fn rm_power_f32("));
             assert!(!shader.contains("f64"));
@@ -154,8 +155,10 @@ fn certified_exponent_fanout_cannot_be_omitted_from_physical_data_inputs() {
         PrecisionPolicy::Exact,
     )
     .unwrap();
-    assert!(program.embedded_power_controls(&source, &[3]).is_empty());
-    assert!(program.embedded_power_controls(&source, &[1, 2]).is_empty());
+    assert!(program.embedded_scalar_controls(&source, &[3]).is_empty());
+    assert!(program
+        .embedded_scalar_controls(&source, &[1, 2])
+        .is_empty());
     assert!(
         source
             .prepare_typed_shader_with_inputs(&[3], &program, ScalarType::F32, &[0])

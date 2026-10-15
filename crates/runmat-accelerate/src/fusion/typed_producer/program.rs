@@ -64,7 +64,15 @@ impl TypedProducer {
         let mut leaf_ids: Vec<_> = leaf_ids.into_iter().collect();
         leaf_ids.sort_unstable();
         let mut nodes = Vec::new();
-        let controls = program.embedded_power_controls(plan, &[root]);
+        let controls = program.embedded_controls_for_precision(
+            plan,
+            &[root],
+            if buffer_type == ScalarType::F32 {
+                runmat_accelerate_api::ProviderPrecision::F32
+            } else {
+                runmat_accelerate_api::ProviderPrecision::F64
+            },
+        );
         for id in leaf_ids {
             if !leaves.contains_key(&id) {
                 return Err(anyhow!("scalar producer has an unbound leaf"));
@@ -86,6 +94,7 @@ impl TypedProducer {
                                 _ => None,
                             })
                     })
+                    .or_else(|| program.exact_product_control_bits(id))
                     .ok_or_else(|| anyhow!("certified control lost its original Double bits"))?;
                 nodes.push(ScalarNode::Literal {
                     id,
@@ -145,13 +154,26 @@ impl TypedProducer {
         .map(Some)
     }
 
+    #[cfg(test)]
     pub(crate) fn lower_checked_wgsl(
         checked: &ScalarProgram,
         buffer_type: ScalarType,
+        expressions: HashMap<ValueId, String>,
+    ) -> Result<Option<Self>> {
+        Self::lower_checked_with_words(checked, buffer_type, expressions, HashMap::new())
+    }
+
+    pub(crate) fn lower_checked_with_words(
+        checked: &ScalarProgram,
+        buffer_type: ScalarType,
         mut expressions: HashMap<ValueId, String>,
+        mut word_expressions: HashMap<ValueId, String>,
     ) -> Result<Option<Self>> {
         let mut body = String::new();
         let mut exact_power = false;
+        let mut exact_product = false;
+        let mut implementations = Vec::new();
+        let capture_words = !word_expressions.is_empty();
         let metadata_controls = checked.metadata_control_ids();
         for node in &checked.wire().nodes {
             match node {
@@ -165,7 +187,7 @@ impl TypedProducer {
                 // because the portable receipt retains its exact bits. The
                 // established WGSL constant path remains in charge for now.
                 ScalarNode::Literal { id, .. } => {
-                    if !metadata_controls.contains(id) {
+                    if buffer_type != ScalarType::F32 || !metadata_controls.contains(id) {
                         return Ok(None);
                     }
                 }
@@ -177,6 +199,20 @@ impl TypedProducer {
                     operands,
                 } => {
                     require_provider_class(*class, buffer_type)?;
+                    if buffer_type == ScalarType::F32 {
+                        if let Some((base, _, exact)) = checked.exact_product(*id) {
+                            let bits = word_expressions.get(&base).ok_or_else(|| {
+                                anyhow!("exact product requires word-preserving Single data")
+                            })?;
+                            let temporary = format!("typed{source_index}_bits");
+                            body.push_str(&format!("    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);\n", exact.binary32_bits()));
+                            expressions.insert(*id, format!("bitcast<f32>({temporary})"));
+                            word_expressions.insert(*id, temporary);
+                            exact_product = true;
+                            implementations.push(super::product_implementation(*id));
+                            continue;
+                        }
+                    }
                     if *operation == ScalarOperation::Operator(OperatorKind::ElementwisePower) {
                         if buffer_type != ScalarType::F32 {
                             return Ok(None);
@@ -199,14 +235,26 @@ impl TypedProducer {
                             })
                             .and_then(runmat_accelerate_api::ExactSingleBasePower::for_control)
                             .ok_or_else(|| anyhow!("certified POWER control is unavailable"))?;
-                        let base = expressions
+                        let base_bits = word_expressions
                             .get(base)
+                            .cloned()
+                            .or_else(|| {
+                                expressions
+                                    .get(base)
+                                    .map(|value| format!("bitcast<u32>({value})"))
+                            })
                             .ok_or_else(|| anyhow!("missing certified POWER base"))?;
                         let name = crate::kernel_math::power_exact::entrypoint(control);
-                        let temporary = format!("typed{source_index}");
-                        body.push_str(&format!("    let {temporary}: f32 = bitcast<f32>({name}(bitcast<u32>({base})));\n"));
-                        expressions.insert(*id, temporary);
+                        let temporary = format!("typed{source_index}_bits");
+                        body.push_str(&format!(
+                            "    let {temporary}: u32 = {name}({base_bits});\n"
+                        ));
+                        expressions.insert(*id, format!("bitcast<f32>({temporary})"));
+                        word_expressions.insert(*id, temporary);
                         exact_power = true;
+                        implementations.push(crate::kernel_math::power_exact::implementation(
+                            control, *id,
+                        ));
                         continue;
                     }
                     let scalar = match class {
@@ -247,6 +295,15 @@ impl TypedProducer {
                     };
                     let temporary = format!("typed{source_index}");
                     body.push_str(&format!("    let {temporary}: {name} = {expression};\n"));
+                    if capture_words && scalar == ScalarType::F32 {
+                        // Bits of the existing native result, not an accuracy
+                        // certificate for the operation which produced it.
+                        let bits = format!("{temporary}_bits");
+                        body.push_str(&format!(
+                            "    let {bits}: u32 = bitcast<u32>({temporary});\n"
+                        ));
+                        word_expressions.insert(*id, bits);
+                    }
                     expressions.insert(*id, temporary);
                 }
             }
@@ -257,6 +314,9 @@ impl TypedProducer {
             helpers: Vec::new(),
             checked_program: Some(checked.clone()),
             exact_power,
+            exact_product,
+            word_expressions,
+            implementations,
         }))
     }
 }
@@ -286,6 +346,7 @@ fn primitive_operation(op: PrimitiveOp) -> Option<ScalarOperation> {
     if !matches!(
         op,
         PrimitiveOp::Add
+            | PrimitiveOp::Mul
             | PrimitiveOp::Sub
             | PrimitiveOp::ElemMul
             | PrimitiveOp::ElemDiv
@@ -331,11 +392,19 @@ pub(super) fn resolved_operation(
             NumericClass::Double => ScalarType::F64,
             _ => return Err(anyhow!("scalar operation has no floating precision")),
         };
-        if !declaration
-            .spec
-            .elementwise
-            .as_ref()
-            .is_some_and(|template| template.scalar_precisions.contains(&precision))
+        let scalar_matrix_product = declaration
+            .semantics
+            .and_then(|semantics| semantics.scalar_operation)
+            == Some(ScalarOperation::Operator(OperatorKind::MatrixMultiply))
+            && matches!(inputs.as_slice(), [left, right]
+                if runmat_types::RealFloatingRecipe::for_facts(OperatorKind::MatrixMultiply,
+                    program.fact(*left)?, program.fact(*right)?).is_some());
+        if !scalar_matrix_product
+            && !declaration
+                .spec
+                .elementwise
+                .as_ref()
+                .is_some_and(|template| template.scalar_precisions.contains(&precision))
         {
             return Err(anyhow!("binding has no matching scalar template"));
         }
@@ -354,6 +423,7 @@ pub(super) fn resolved_operation(
         if matches!(
             operator,
             OperatorKind::Add
+                | OperatorKind::MatrixMultiply
                 | OperatorKind::Subtract
                 | OperatorKind::ElementwiseMultiply
                 | OperatorKind::ElementwiseDivide

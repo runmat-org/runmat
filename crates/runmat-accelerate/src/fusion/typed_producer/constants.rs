@@ -24,7 +24,15 @@ pub(super) fn seed(
     // Complete multi-output emission receives requested constant outputs as
     // placeholders from its indexing owner; they need no producer operation.
     used.extend(expressions.keys().copied());
-    let controls = program.embedded_power_controls(plan, roots.unwrap_or_default());
+    let controls = program.embedded_controls_for_precision(
+        plan,
+        roots.unwrap_or_default(),
+        if buffer_type == ScalarType::F32 {
+            runmat_accelerate_api::ProviderPrecision::F32
+        } else {
+            runmat_accelerate_api::ProviderPrecision::F64
+        },
+    );
     let mut ids = plan
         .const_values
         .keys()
@@ -34,7 +42,7 @@ pub(super) fn seed(
     ids.sort_unstable();
     let mut body = String::new();
     for id in ids {
-        // Only an authenticated, exclusively metadata exponent can omit its
+        // Only an authenticated, exclusively metadata scalar can omit its
         // Double representation. Complete callers identify omitted controls
         // by an empty expression; sliced callers supply their exact roots.
         if controls.contains(&id)

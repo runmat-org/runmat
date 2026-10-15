@@ -10,6 +10,11 @@ use runmat_execution::Digest;
 use runmat_types::{NumericClass, ScalarOperation};
 use serde::{Deserialize, Serialize};
 
+mod exact_product;
+pub use exact_product::ExactBinary32Product;
+mod implementation;
+pub use implementation::{EmittedScalarImplementation, ScalarImplementation, ScalarTransport};
+
 pub const SCALAR_PROGRAM_REVISION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,11 +198,52 @@ impl ScalarProgram {
         &self.wire
     }
 
+    /// Structural physical equivalent, not source/provenance authority. The
+    /// whole program must still match the captured source before submission.
+    pub fn exact_product(&self, output: u32) -> Option<(u32, u32, ExactBinary32Product)> {
+        let ScalarNode::Apply {
+            operation: ScalarOperation::RealArithmetic(recipe),
+            operands,
+            class,
+            ..
+        } = self.wire.nodes.iter().find(|node| node.id() == output)?
+        else {
+            return None;
+        };
+        if recipe.operator() != runmat_types::OperatorKind::ElementwiseMultiply
+            || recipe.computation_class() != NumericClass::Double
+            || *class != NumericClass::Single
+        {
+            return None;
+        }
+        for (base, control) in [(operands[0], operands[1]), (operands[1], operands[0])] {
+            let base_class = self
+                .wire
+                .nodes
+                .iter()
+                .find(|node| node.id() == base)?
+                .class();
+            if base_class != NumericClass::Single {
+                continue;
+            }
+            if let Some(ScalarNode::Literal {
+                value: ScalarLiteral::F64Bits(bits),
+                ..
+            }) = self.wire.nodes.iter().find(|node| node.id() == control)
+            {
+                if let Some(exact) = ExactBinary32Product::for_double_bits(*bits) {
+                    return Some((base, control, exact));
+                }
+            }
+        }
+        None
+    }
+
     pub fn identity(&self) -> Digest {
         self.identity
     }
 
-    /// Literal controls whose every use is a checked certified exponent. This
+    /// Literal controls whose every use is a checked exact implementation. This
     /// describes source metadata; it does not authenticate live allocations.
     pub fn metadata_control_ids(&self) -> HashSet<u32> {
         let mut controls = self
@@ -214,6 +260,12 @@ impl ScalarProgram {
                 _ => None,
             })
             .collect::<HashSet<_>>();
+        controls.extend(
+            self.wire
+                .nodes
+                .iter()
+                .filter_map(|node| self.exact_product(node.id()).map(|(_, control, _)| control)),
+        );
         controls.remove(&self.wire.root);
         for node in &self.wire.nodes {
             if let ScalarNode::Apply {
@@ -223,12 +275,15 @@ impl ScalarProgram {
             } = node
             {
                 for (position, operand) in operands.iter().enumerate() {
-                    if position != 1
-                        || *operation
-                            != ScalarOperation::Operator(
+                    let power = position == 1
+                        && *operation
+                            == ScalarOperation::Operator(
                                 runmat_types::OperatorKind::ElementwisePower,
-                            )
-                    {
+                            );
+                    let product = self
+                        .exact_product(node.id())
+                        .is_some_and(|(_, control, _)| control == *operand);
+                    if !power && !product {
                         controls.remove(operand);
                     }
                 }

@@ -1,6 +1,75 @@
 use super::*;
 
 #[test]
+fn exact_product_control_preserves_original_words_and_omits_no_data_use() {
+    use runmat_types::{OperatorKind, RealFloatingRecipe};
+    for scalar in [4.0_f64, -4.0, 0.0, -0.0, f64::from(f32::from_bits(1))] {
+        let exact = ExactBinary32Product::for_double_bits(scalar.to_bits()).unwrap();
+        assert_eq!(exact.original_double_bits(), scalar.to_bits());
+        assert_eq!(
+            exact.evaluate(-0.0).to_bits(),
+            ((-0.0_f64 * scalar) as f32).to_bits()
+        );
+        let recipe = RealFloatingRecipe::for_classes(
+            OperatorKind::ElementwiseMultiply,
+            NumericClass::Single,
+            NumericClass::Double,
+        )
+        .unwrap();
+        let mut nodes = vec![
+            ScalarNode::Input {
+                id: 0,
+                class: NumericClass::Single,
+            },
+            ScalarNode::Literal {
+                id: 1,
+                value: ScalarLiteral::F64Bits(scalar.to_bits()),
+            },
+            ScalarNode::Apply {
+                id: 2,
+                source_index: 0,
+                class: NumericClass::Single,
+                operation: ScalarOperation::RealArithmetic(recipe),
+                operands: vec![0, 1],
+            },
+        ];
+        let program =
+            ScalarProgram::new(source(), SCALAR_PROGRAM_REVISION, nodes.clone(), 2).unwrap();
+        assert_eq!(program.metadata_control_ids(), HashSet::from([1]));
+        assert_eq!(program.exact_product(2), Some((0, 1, exact)));
+        nodes.push(ScalarNode::Apply {
+            id: 3,
+            source_index: 1,
+            class: NumericClass::Single,
+            operation: ScalarOperation::RealArithmetic(
+                RealFloatingRecipe::for_classes(
+                    OperatorKind::Add,
+                    NumericClass::Single,
+                    NumericClass::Double,
+                )
+                .unwrap(),
+            ),
+            operands: vec![2, 1],
+        });
+        assert!(
+            ScalarProgram::new(source(), SCALAR_PROGRAM_REVISION, nodes, 3)
+                .unwrap()
+                .metadata_control_ids()
+                .is_empty()
+        );
+    }
+    for scalar in [
+        0.1_f64,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+        f64::from_bits(4.0_f64.to_bits() + 1),
+    ] {
+        assert!(ExactBinary32Product::for_double_bits(scalar.to_bits()).is_none());
+    }
+}
+
+#[test]
 fn certified_power_wire_retains_double_bits_and_rejects_nonliteral_or_wider_controls() {
     for exponent in [0.0_f64, -0.0, 1.0, 2.0] {
         let nodes = vec![

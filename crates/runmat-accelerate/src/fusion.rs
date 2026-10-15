@@ -1626,7 +1626,7 @@ impl FusionGroupPlan {
         include_ieee_helpers: bool,
     ) -> String {
         self.build_wgsl_shader_with_inputs(
-            (self.inputs.len(), scalar_ty),
+            (self.inputs.len(), scalar_ty, scalar_ty),
             output_bindings,
             params_binding_idx,
             body,
@@ -1637,21 +1637,23 @@ impl FusionGroupPlan {
 
     fn build_wgsl_shader_with_inputs(
         &self,
-        input_abi: (usize, &str),
+        input_abi: (usize, &str, &str),
         output_bindings: &str,
         params_binding_idx: usize,
         body: &str,
         final_writes: &str,
         include_ieee_helpers: bool,
     ) -> String {
-        let (input_count, scalar_ty) = input_abi;
+        let (input_count, scalar_ty, storage_ty) = input_abi;
         let mut shader = String::new();
 
         // ── type definitions ──────────────────────────────────────────────────
         shader.push_str("const MAX_RANK: u32 = 128u;\n");
         shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
         shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
-        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
+        shader.push_str(&format!(
+            "struct Tensor {{ data: array<{storage_ty}>, }};\n"
+        ));
 
         // Broadcast-aware Params: len, offset, rank, pad, out_shape and per-input shape/stride
         shader.push_str(

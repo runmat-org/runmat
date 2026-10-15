@@ -22,7 +22,7 @@ pub(super) fn select_shader(
     let abi = Abi::BroadcastReal {
         precision: ProviderPrecision::F32,
     };
-    let controls = program.embedded_power_controls(plan, outputs);
+    let controls = program.embedded_scalar_controls(plan, outputs);
     let indices = plan
         .inputs
         .iter()

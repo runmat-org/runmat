@@ -30,6 +30,7 @@ pub(super) async fn selected(
         return Err(anyhow!("typed reduction selection changed before execution").into());
     }
     let prepared_effects = plan.has_physical_effects();
+    program.require_current_controls(request)?;
     let current = AdmittedBindings::new(request)
         .ok_or_else(|| anyhow!("selected reduction binding changed before preparation"))?;
     if current.identity(None)? != selected_identity

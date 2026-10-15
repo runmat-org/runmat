@@ -19,7 +19,19 @@ pub(super) fn source(
     contract: &FusionReductionContract,
     partial: ReductionPartialLayout,
     geometry: &ReductionGeometry,
+    word_identity: bool,
 ) -> Result<String> {
+    if word_identity {
+        ensure!(
+            contract.identity
+                && partial.precision == ProviderPrecision::F32
+                && precision_of_output(contract)? == ProviderPrecision::F32,
+            "word identity requires an unchanged Single result"
+        );
+        // Same 4+4+4-byte partial layout, with no floating round trip in either
+        // strategy. An identity is transport, not new arithmetic permission.
+        return Ok("struct RRPartial { value: u32, count: u32, flags: u32, };\nfn rr_sample(value: u32) -> RRPartial { return RRPartial(value, 1u, 1u); }\nfn rr_finish(a: RRPartial) -> u32 { return a.value; }\n".to_owned());
+    }
     let acc = scalar(partial.precision);
     let out = scalar(precision_of_output(contract)?);
     let (nan, negative) = match partial.precision {

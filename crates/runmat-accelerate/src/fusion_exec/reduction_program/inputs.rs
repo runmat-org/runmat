@@ -35,9 +35,7 @@ pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<
     }
     for (&id, value) in &plan.const_values {
         // Never let a cached constant overwrite an actual invocation operand.
-        if leaves.insert(id, (None, value)).is_some() {
-            return None;
-        }
+        leaves.entry(id).or_insert((None, value));
     }
     let mut definitions = HashSet::new();
     let mut terminal = None;
@@ -109,7 +107,7 @@ pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<
     }
     let mut constant_ids: Vec<_> = used
         .iter()
-        .filter(|id| plan.const_values.contains_key(*id))
+        .filter(|id| plan.const_values.contains_key(*id) && !plan.inputs.contains(id))
         .copied()
         .collect();
     constant_ids.sort_unstable();

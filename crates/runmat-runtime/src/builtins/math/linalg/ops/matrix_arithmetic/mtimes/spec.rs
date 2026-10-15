@@ -32,13 +32,15 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
         builtin: runmat_builtins::MTIMES_CATALOG_ENTRY.identity,
         variant: "default",
     },
-    revision: 1,
+    revision: 2,
     admit: None,
     admit_static: None,
     required_real_unary: None,
     required_arithmetic: None,
     helpers: &[],
-    scalar_operation: None,
+    scalar_operation: Some(runmat_types::ScalarOperation::Operator(
+        runmat_types::OperatorKind::MatrixMultiply,
+    )),
 };
 
 #[runmat_macros::register_fusion_spec(

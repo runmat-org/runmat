@@ -3,6 +3,32 @@
 //! This is not general binary64 emulation.
 use runmat_accelerate_api::ExactSingleBasePower;
 
+pub(crate) fn implementation(
+    operation: ExactSingleBasePower,
+    output: u32,
+) -> runmat_accelerate_api::scalar_program::EmittedScalarImplementation {
+    use runmat_accelerate_api::scalar_program::{
+        EmittedScalarImplementation, ScalarImplementation,
+    };
+    let (implementation, units) = match operation {
+        // Same four-limb/CLZ/round48/classify/assemble/normalize/pack stages as
+        // the general product. This is a structural prior, not measured time.
+        ExactSingleBasePower::Square => (
+            ScalarImplementation::Binary32Square48RneV1,
+            super::product_exact::work_prior().algorithmic_units(),
+        ),
+        // Classify and select/pack; no native pow or floating conversion.
+        ExactSingleBasePower::Identity => (ScalarImplementation::Binary32IdentityWordsV1, 1 + 1),
+        ExactSingleBasePower::Zero => (ScalarImplementation::Binary32ZeroPowerWordsV1, 1 + 1),
+    };
+    EmittedScalarImplementation {
+        output,
+        implementation,
+        invocations_per_element: 1,
+        algorithmic_units_per_invocation: units,
+    }
+}
+
 pub(crate) fn entrypoint(operation: ExactSingleBasePower) -> &'static str {
     match operation {
         ExactSingleBasePower::Zero => "rm_exact_power_zero_bits",

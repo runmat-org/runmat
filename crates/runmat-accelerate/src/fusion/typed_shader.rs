@@ -15,11 +15,25 @@ pub(crate) struct GeneratedElementwiseShader {
     requirements: ProviderShaderRequirements,
     input_indices: Vec<usize>,
     abi: runmat_accelerate_api::ProviderFusedElementwiseAbi,
+    exact_product_words: bool,
+    implementations: Vec<runmat_accelerate_api::scalar_program::EmittedScalarImplementation>,
 }
 
 impl GeneratedElementwiseShader {
+    #[cfg(test)]
+    pub(crate) fn input_indices(&self) -> &[usize] {
+        &self.input_indices
+    }
     pub(crate) fn abi(&self) -> runmat_accelerate_api::ProviderFusedElementwiseAbi {
         self.abi
+    }
+    pub(crate) fn uses_exact_product_words(&self) -> bool {
+        self.exact_product_words
+    }
+    pub(crate) fn implementations(
+        &self,
+    ) -> &[runmat_accelerate_api::scalar_program::EmittedScalarImplementation] {
+        &self.implementations
     }
     pub(crate) fn source(&self) -> &str {
         &self.source
@@ -56,7 +70,15 @@ impl FusionGroupPlan {
         program: &ResolvedProgram,
         buffer_type: ScalarType,
     ) -> Result<GeneratedElementwiseShader> {
-        let controls = program.embedded_power_controls(self, outputs);
+        let controls = program.embedded_controls_for_precision(
+            self,
+            outputs,
+            if buffer_type == ScalarType::F32 {
+                runmat_accelerate_api::ProviderPrecision::F32
+            } else {
+                runmat_accelerate_api::ProviderPrecision::F64
+            },
+        );
         let input_indices = self
             .inputs
             .iter()
@@ -77,8 +99,22 @@ impl FusionGroupPlan {
         input_indices: &[usize],
     ) -> Result<GeneratedElementwiseShader> {
         let buffer_name = scalar_name(buffer_type)?;
+        let checked_root = self.complete_single_output_root(outputs);
+        let roots = checked_root.as_ref().map(std::slice::from_ref);
+        let word_storage = buffer_type == ScalarType::F32
+            && TypedProducer::requires_binary32_word_transport(self, program, roots)?;
+        let storage_name = if word_storage { "u32" } else { buffer_name };
         let mut expressions = HashMap::new();
-        let allowed_controls = program.embedded_power_controls(self, outputs);
+        let mut words = HashMap::new();
+        let allowed_controls = program.embedded_controls_for_precision(
+            self,
+            outputs,
+            if buffer_type == ScalarType::F32 {
+                runmat_accelerate_api::ProviderPrecision::F32
+            } else {
+                runmat_accelerate_api::ProviderPrecision::F64
+            },
+        );
         if input_indices
             .iter()
             .any(|&index| index >= self.inputs.len())
@@ -98,9 +134,17 @@ impl FusionGroupPlan {
             ));
         }
         for (binding, &index) in input_indices.iter().enumerate() {
+            let load = format!("input{binding}.data[i{binding}]");
+            if word_storage {
+                words.insert(self.inputs[index], load.clone());
+            }
             expressions.insert(
                 self.inputs[index],
-                format!("input{binding}.data[i{binding}]"),
+                if word_storage {
+                    format!("bitcast<f32>({load})")
+                } else {
+                    load
+                },
             );
         }
         for id in controls {
@@ -117,9 +161,8 @@ impl FusionGroupPlan {
         // A single public result may use checked lowering only when it covers
         // every source operation. A partial slice could hide an effect or an
         // invalid operation that complete elementwise emission must report.
-        let checked_root = self.complete_single_output_root(outputs);
-        let roots = checked_root.as_ref().map(std::slice::from_ref);
-        let producer = TypedProducer::emit(self, program, buffer_type, expressions, roots)?;
+        let producer =
+            TypedProducer::emit_with_words(self, program, buffer_type, expressions, roots, words)?;
         // Checked scalar programs lower only arithmetic operators and casts;
         // legacy templates conservatively retain the IEEE/hypot helpers.
         let include_ieee_helpers = producer.checked_program().is_none();
@@ -139,15 +182,21 @@ impl FusionGroupPlan {
             bindings.push_str(&format!(
                 "@group(0) @binding({binding}) var<storage, read_write> output{index}: Tensor;\n"
             ));
-            writes.push_str(&format!(
-                "    output{index}.data[g] = {buffer_name}({expression});\n"
-            ));
+            let stored = if word_storage {
+                producer
+                    .word_expression(*id)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("bitcast<u32>({expression})"))
+            } else {
+                format!("{buffer_name}({expression})")
+            };
+            writes.push_str(&format!("    output{index}.data[g] = {stored};\n"));
         }
         let preamble = producer.preamble(program)?;
         let source = format!(
             "{preamble}{}",
             self.build_wgsl_shader_with_inputs(
-                (input_indices.len(), buffer_name),
+                (input_indices.len(), buffer_name, storage_name),
                 &bindings,
                 input_indices.len() + outputs.len(),
                 &producer.body,
@@ -166,6 +215,8 @@ impl FusionGroupPlan {
             source,
             requirements,
             input_indices: input_indices.to_vec(),
+            exact_product_words: producer.uses_exact_product_words(),
+            implementations: producer.implementations().to_vec(),
         })
     }
 

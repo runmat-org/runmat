@@ -14,6 +14,8 @@ pub struct ReductionRecipeDescriptor {
     /// Scalar producer/data lowering precision, independent of partial
     /// accumulator precision, public output precision and provider default.
     pub execution_precision: ProviderPrecision,
+    pub producer_transport: crate::scalar_program::ScalarTransport,
+    pub producer_implementations: Vec<crate::scalar_program::EmittedScalarImplementation>,
     pub config: ReductionRecipeConfig,
     pub inputs: Vec<ReductionInputBinding>,
     pub iteration_shape: Vec<usize>,
@@ -132,7 +134,7 @@ impl ProviderReductionRecipe {
             anyhow::ensure!(scalar_inputs.is_empty(), "unbound reduction scalar inputs");
         }
         let identity = Digest::sha256(serde_json::to_vec(&(
-            "typed-reduction-physical-v3",
+            "typed-reduction-physical-v4",
             semantic_identity,
             &descriptor,
             &sources,

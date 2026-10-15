@@ -24,7 +24,7 @@ use super::semantic_bindings::{self, SemanticBinding};
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::{FusionCallOrigin, PrimitiveOp, ValueId};
 
-fn exact_scalar_control(
+pub(crate) fn exact_scalar_control(
     value: Option<&Value>,
 ) -> Option<runmat_runtime::builtins::common::spec::FusionScalarControl> {
     use runmat_runtime::builtins::common::spec::FusionScalarControl;
@@ -46,6 +46,10 @@ pub(crate) use constant_identity::exact_constant_digest;
 #[path = "semantics/invocation_leaves.rs"]
 pub(super) mod invocation_leaves;
 use invocation_leaves::FusionInvocationLeaves;
+
+#[path = "semantics/exact_product.rs"]
+mod exact_product;
+pub(crate) use exact_product::ExactProductReceipt;
 #[path = "semantics/assembly.rs"]
 mod assembly;
 #[path = "semantics/request_literals.rs"]
@@ -197,6 +201,7 @@ pub(crate) struct ResolvedProgram {
     evidence: BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
     sign: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
     arithmetic: BTreeMap<ValueId, FusionArithmeticEvidence>,
+    exact_products: BTreeMap<ValueId, ExactProductReceipt>,
     admission_work: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
 }
 
@@ -565,12 +570,22 @@ impl ResolvedProgram {
         ExactSingleBasePower::for_control(receipt.exponent_scalar?)
     }
 
-    /// Controls are omitted only if every use is an authenticated exponent.
+    /// Controls are omitted only if every use is an authenticated exact scalar
+    /// implementation (POWER exponent or binary32-equivalent product).
     /// They remain source inputs and original-bit semantic identity facts.
-    pub fn embedded_power_controls(
+    pub fn embedded_scalar_controls(
         &self,
         plan: &FusionGroupPlan,
         outputs: &[ValueId],
+    ) -> HashSet<ValueId> {
+        self.embedded_controls_for_precision(plan, outputs, ProviderPrecision::F32)
+    }
+
+    pub(crate) fn embedded_controls_for_precision(
+        &self,
+        plan: &FusionGroupPlan,
+        outputs: &[ValueId],
+        precision: ProviderPrecision,
     ) -> HashSet<ValueId> {
         let mut controls = plan
             .operations
@@ -589,6 +604,11 @@ impl ResolvedProgram {
                     && !outputs.contains(id)
             })
             .collect::<HashSet<_>>();
+        if precision == ProviderPrecision::F32 {
+            controls.extend(self.exact_products.values().filter_map(|receipt| {
+                (!outputs.contains(&receipt.control)).then_some(receipt.control)
+            }));
+        }
         for operation in &plan.operations {
             let (inputs, output) = match operation {
                 FusionOp::Primitive { inputs, output, .. }
@@ -596,12 +616,65 @@ impl ResolvedProgram {
             };
             let exact = output.and_then(|output| self.exact_single_base_power(output));
             for (position, input) in inputs.iter().enumerate() {
-                if position != 1 || exact.is_none() {
+                let product = precision == ProviderPrecision::F32
+                    && output
+                        .and_then(|id| self.exact_products.get(&id))
+                        .is_some_and(|receipt| receipt.control == *input);
+                if (position != 1 || exact.is_none()) && !product {
                     controls.remove(input);
                 }
             }
         }
         controls
+    }
+
+    pub(crate) fn exact_product(&self, output: ValueId) -> Option<ExactProductReceipt> {
+        self.exact_products.get(&output).copied()
+    }
+
+    pub(crate) fn exact_product_control_bits(&self, control: ValueId) -> Option<u64> {
+        self.exact_products
+            .values()
+            .find(|receipt| receipt.control == control)
+            .map(|receipt| receipt.exact.original_double_bits())
+    }
+
+    pub(crate) fn require_exact_product_controls(
+        &self,
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+    ) -> Result<()> {
+        if self.exact_products.is_empty() {
+            return Ok(());
+        }
+        self.require_source_plan(plan)?;
+        if inputs.len() != plan.inputs.len() {
+            return Err(anyhow!("exact product input count changed"));
+        }
+        for receipt in self.exact_products.values() {
+            let value = plan
+                .inputs
+                .iter()
+                .position(|&id| id == receipt.control)
+                .and_then(|index| inputs.get(index))
+                .or_else(|| plan.const_values.get(&receipt.control));
+            if exact_scalar_control(value)
+                != Some(
+                    runmat_runtime::builtins::common::spec::FusionScalarControl::DoubleBits(
+                        receipt.exact.original_double_bits(),
+                    ),
+                )
+            {
+                return Err(anyhow!("exact product original scalar control changed"));
+            }
+            let fact = value
+                .map(value_fact)
+                .ok_or_else(|| anyhow!("exact product control disappeared"))?;
+            if fact.shape.element_count() != Some(1) {
+                return Err(anyhow!("exact product scalar shape changed"));
+            }
+        }
+        Ok(())
     }
 
     pub fn uses_implicit_downcast_for(&self, inputs: &[usize]) -> bool {
@@ -706,11 +779,12 @@ impl ResolvedProgram {
             signs:
                 &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
             arithmetic: &'a BTreeMap<ValueId, FusionArithmeticEvidence>,
+            exact_products: &'a BTreeMap<ValueId, ExactProductReceipt>,
             work:
                 &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
         }
         Ok(Digest::sha256(serde_json::to_vec(&(
-            "typed-fusion-v5",
+            "typed-fusion-v6",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             &self.source_operations,
             &self.source_input_ids,
@@ -727,6 +801,7 @@ impl ResolvedProgram {
                 domains: &self.evidence,
                 signs: &self.sign,
                 arithmetic: &self.arithmetic,
+                exact_products: &self.exact_products,
                 work: &self.admission_work,
             },
         ))?))

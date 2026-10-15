@@ -5,7 +5,9 @@ use super::{expression::admitted_expression, primitive_expr, semantics::Resolved
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::ValueId;
 use anyhow::{anyhow, Result};
-use runmat_accelerate_api::scalar_program::ScalarProgram;
+use runmat_accelerate_api::scalar_program::{
+    EmittedScalarImplementation, ScalarImplementation, ScalarProgram,
+};
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
 use std::collections::{HashMap, HashSet};
@@ -21,8 +23,44 @@ pub(crate) struct TypedProducer {
     helpers: Vec<(FusionMathHelper, ScalarType)>,
     checked_program: Option<ScalarProgram>,
     exact_power: bool,
+    exact_product: bool,
+    word_expressions: HashMap<ValueId, String>,
+    implementations: Vec<EmittedScalarImplementation>,
 }
 impl TypedProducer {
+    /// Select transport from the same producer slice the emitter will visit,
+    /// never from unrelated receipts held by the larger resolved program.
+    pub(crate) fn requires_binary32_word_transport(
+        plan: &FusionGroupPlan,
+        program: &ResolvedProgram,
+        roots: Option<&[ValueId]>,
+    ) -> Result<bool> {
+        program.require_source_plan(plan)?;
+        let selected = if let Some(roots) = roots {
+            let leaves = plan
+                .inputs
+                .iter()
+                .chain(plan.const_values.keys())
+                .map(|&id| (id, String::new()))
+                .collect();
+            Some(producer_indices(plan, &leaves, roots)?)
+        } else {
+            None
+        };
+        Ok(plan
+            .operations
+            .iter()
+            .enumerate()
+            .any(|(index, operation)| {
+                selected
+                    .as_ref()
+                    .is_none_or(|indices| indices.contains(&index))
+                    && operands(operation).1.is_some_and(|output| {
+                        program.exact_product(output).is_some()
+                            || program.exact_single_base_power(output).is_some()
+                    })
+            }))
+    }
     pub fn checked_program(&self) -> Option<&ScalarProgram> {
         self.checked_program.as_ref()
     }
@@ -33,8 +71,26 @@ impl TypedProducer {
         plan: &FusionGroupPlan,
         program: &ResolvedProgram,
         buffer_type: ScalarType,
+        expressions: HashMap<ValueId, String>,
+        roots: Option<&[ValueId]>,
+    ) -> Result<Self> {
+        Self::emit_with_words(
+            plan,
+            program,
+            buffer_type,
+            expressions,
+            roots,
+            HashMap::new(),
+        )
+    }
+
+    pub(crate) fn emit_with_words(
+        plan: &FusionGroupPlan,
+        program: &ResolvedProgram,
+        buffer_type: ScalarType,
         mut expressions: HashMap<ValueId, String>,
         roots: Option<&[ValueId]>,
+        mut word_expressions: HashMap<ValueId, String>,
     ) -> Result<Self> {
         program.require_source_plan(plan)?;
         // Captured constants are leaves even when the physical indexing owner
@@ -103,9 +159,12 @@ impl TypedProducer {
         // path until their exact numerical policy is represented there too.
         if let Some(&[root]) = roots {
             if let Some(checked) = Self::emit_checked_program(plan, program, buffer_type, root)? {
-                if let Some(lowered) =
-                    Self::lower_checked_wgsl(&checked, buffer_type, expressions.clone())?
-                {
+                if let Some(lowered) = Self::lower_checked_with_words(
+                    &checked,
+                    buffer_type,
+                    expressions.clone(),
+                    word_expressions.clone(),
+                )? {
                     return Ok(lowered);
                 }
             }
@@ -113,6 +172,9 @@ impl TypedProducer {
         let mut body = constant_body;
         let mut helpers = Vec::new();
         let mut exact_power = false;
+        let mut exact_product = false;
+        let mut implementations = Vec::new();
+        let capture_words = !word_expressions.is_empty();
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()
@@ -125,6 +187,27 @@ impl TypedProducer {
                 | FusionOp::Builtin { inputs, output, .. } => (inputs, output),
             };
             let output = output.ok_or_else(|| anyhow!("fusion operation has no output"))?;
+            if buffer_type == ScalarType::F32 {
+                if let Some(receipt) = program.exact_product(output).filter(|receipt| {
+                    expressions
+                        .get(&receipt.control)
+                        .is_some_and(String::is_empty)
+                }) {
+                    let bits = word_expressions.get(&receipt.base).ok_or_else(|| {
+                        anyhow!("exact product requires word-preserving Single data")
+                    })?;
+                    let temporary = format!("typed{index}_bits");
+                    body.push_str(&format!(
+                        "    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);\n",
+                        receipt.exact.binary32_bits()
+                    ));
+                    expressions.insert(output, format!("bitcast<f32>({temporary})"));
+                    word_expressions.insert(output, temporary);
+                    exact_product = true;
+                    implementations.push(product_implementation(output));
+                    continue;
+                }
+            }
             if let Some(operation) = program.exact_single_base_power(output) {
                 // The certified implementation reads original binary32 words.
                 // The legacy F64 fusion ABI stages Single data as doubles;
@@ -137,16 +220,26 @@ impl TypedProducer {
                 let [base, _] = inputs.as_slice() else {
                     return Err(anyhow!("certified POWER arity changed"));
                 };
-                let base = expressions
+                let base_bits = word_expressions
                     .get(base)
+                    .cloned()
+                    .or_else(|| {
+                        expressions
+                            .get(base)
+                            .map(|value| format!("bitcast<u32>({value})"))
+                    })
                     .ok_or_else(|| anyhow!("missing certified POWER base"))?;
                 let name = crate::kernel_math::power_exact::entrypoint(operation);
-                let temporary = format!("typed{index}");
+                let temporary = format!("typed{index}_bits");
                 body.push_str(&format!(
-                    "    let {temporary}: f32 = bitcast<f32>({name}(bitcast<u32>({base})));\n"
+                    "    let {temporary}: u32 = {name}({base_bits});\n"
                 ));
-                expressions.insert(output, temporary);
+                expressions.insert(output, format!("bitcast<f32>({temporary})"));
+                word_expressions.insert(output, temporary);
                 exact_power = true;
+                implementations.push(crate::kernel_math::power_exact::implementation(
+                    operation, output,
+                ));
                 continue;
             }
             let operation_type = match program.floating_class(output)? {
@@ -227,6 +320,15 @@ impl TypedProducer {
             body.push_str(&format!(
                 "    let {temporary}: {operation_name} = {expression};\n"
             ));
+            if capture_words && operation_type == ScalarType::F32 {
+                // Capture the already-admitted native Single result. This is
+                // not a stronger accuracy/FTZ promise for that native operation.
+                let bits = format!("{temporary}_bits");
+                body.push_str(&format!(
+                    "    let {bits}: u32 = bitcast<u32>({temporary});\n"
+                ));
+                word_expressions.insert(output, bits);
+            }
             expressions.insert(output, temporary);
         }
 
@@ -250,7 +352,19 @@ impl TypedProducer {
             helpers,
             checked_program: None,
             exact_power,
+            exact_product,
+            word_expressions,
+            implementations,
         })
+    }
+    pub(crate) fn word_expression(&self, id: ValueId) -> Option<&str> {
+        self.word_expressions.get(&id).map(String::as_str)
+    }
+    pub(crate) fn uses_exact_product_words(&self) -> bool {
+        self.exact_product
+    }
+    pub(crate) fn implementations(&self) -> &[EmittedScalarImplementation] {
+        &self.implementations
     }
     pub fn expression(&self, id: ValueId) -> Result<&str> {
         self.expressions
@@ -264,8 +378,11 @@ impl TypedProducer {
         // arithmetic, so representation contracts do not share a stale key.
         let identity = program.cache_identity()?;
         let mut math = String::new();
-        if self.exact_power {
+        if self.exact_power || self.exact_product {
             math.push_str(crate::kernel_math::power_exact::functions());
+        }
+        if self.exact_product {
+            math.push_str(crate::kernel_math::product_exact::functions());
         }
         for &(helper, precision) in &self.helpers {
             let precision = match precision {
@@ -293,12 +410,23 @@ impl TypedProducer {
             .checked_program
             .as_ref()
             .ok_or_else(|| anyhow!("producer has no checked scalar program"))?;
-        let math = if self.exact_power {
-            crate::kernel_math::power_exact::functions()
-        } else {
-            ""
-        };
+        let mut math = String::new();
+        if self.exact_power || self.exact_product {
+            math.push_str(crate::kernel_math::power_exact::functions());
+        }
+        if self.exact_product {
+            math.push_str(crate::kernel_math::product_exact::functions());
+        }
         Ok(format!("// {}\n{math}\n", checked.wire().source_identity))
+    }
+}
+fn product_implementation(output: ValueId) -> EmittedScalarImplementation {
+    EmittedScalarImplementation {
+        output,
+        implementation: ScalarImplementation::Binary32Product48RneV1,
+        invocations_per_element: 1,
+        algorithmic_units_per_invocation: crate::kernel_math::product_exact::work_prior()
+            .algorithmic_units(),
     }
 }
 pub(crate) fn producer_indices(

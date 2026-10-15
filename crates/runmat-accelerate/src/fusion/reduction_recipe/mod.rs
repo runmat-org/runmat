@@ -158,6 +158,8 @@ pub fn build(
     let descriptor = ReductionRecipeDescriptor {
         contract: contract.clone(),
         execution_precision: program.execution_precision(),
+        producer_transport: program.producer_transport(),
+        producer_implementations: program.producer_implementations().to_vec(),
         config,
         inputs: inputs
             .iter()

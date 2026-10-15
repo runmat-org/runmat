@@ -5,6 +5,7 @@ use super::*;
 use runmat_runtime::builtins::common::spec::{FusionAdmissionEvidence, FusionAdmissionWork};
 
 pub(super) struct InferredOperation<'a> {
+    pub operation: &'a FusionOp,
     pub input_ids: &'a [ValueId],
     pub output: Option<ValueId>,
     pub arguments: Vec<ValueFact>,
@@ -98,6 +99,7 @@ pub(super) fn source_assembly<'a>(
             evidence: BTreeMap::new(),
             sign: BTreeMap::new(),
             arithmetic: BTreeMap::new(),
+            exact_products: BTreeMap::new(),
             admission_work: BTreeMap::new(),
         },
         leaves,
@@ -145,6 +147,7 @@ pub(super) fn inferred_operation<'a>(
         primitive_fact(*op, &arguments)?
     };
     Ok(InferredOperation {
+        operation,
         input_ids,
         output,
         arguments,
@@ -281,6 +284,13 @@ pub(super) fn record_operation(
         program.declarations.insert(output, snapshot);
     }
     program.facts.insert(output, inferred.fact);
+    exact_product::record(
+        program,
+        inferred.operation,
+        output,
+        inferred.input_ids,
+        values,
+    )?;
     Ok(())
 }
 
