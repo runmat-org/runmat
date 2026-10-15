@@ -12,6 +12,7 @@ use super::PlacementPolicy;
 mod multi;
 pub(crate) use multi::{
     plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
+    LocalProviderAdmission,
 };
 mod rejected;
 mod session_facts;
@@ -217,6 +218,24 @@ pub(crate) fn plan_local_vm_cpu(
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
     cpu_admission: multi::LocalCpuAdmission,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    plan_local_vm_cpu_with_provider(
+        provider,
+        request,
+        policy,
+        vm_right,
+        cpu_admission,
+        LocalProviderAdmission::Available,
+    )
+}
+
+pub(crate) fn plan_local_vm_cpu_with_provider(
+    provider: &dyn AccelProvider,
+    request: LocalPlacementRequest<'_>,
+    policy: PlacementPolicy,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    cpu_admission: multi::LocalCpuAdmission,
+    implementation: LocalProviderAdmission,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let LocalPlacementRequest {
         operation,
         semantic_identity,
@@ -238,7 +257,7 @@ pub(crate) fn plan_local_vm_cpu(
         compare_profitability,
         runtime,
     } = request;
-    let outcome = multi::plan_local_multi(
+    let outcome = multi::plan_local_multi_with_provider(
         provider,
         multi::LocalMultiPlacementRequest {
             operation,
@@ -270,6 +289,7 @@ pub(crate) fn plan_local_vm_cpu(
             runtime,
         },
         policy,
+        implementation,
     )?;
     if let LocalPlacementOutcome::Selected { provider_index, .. } = &outcome {
         debug_assert!(provider_index.is_none_or(|index| index == 0));

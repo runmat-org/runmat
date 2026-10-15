@@ -1,5 +1,8 @@
 //! Physical candidate-set fixtures, separate from legacy one-record resource tests.
-use super::super::multi::{plan_local_multi, LocalMultiPlacementRequest, LocalPhysicalCandidate};
+use super::super::multi::{
+    plan_local_multi_with_provider, LocalMultiPlacementRequest, LocalPhysicalCandidate,
+    LocalProviderAdmission,
+};
 use super::*;
 use crate::placement::tensor_representation;
 use runmat_accelerate_api::test_support::TestAllocationOwner;
@@ -133,11 +136,29 @@ fn try_plan_physical_set<'a>(
     cpu_ns: u64,
     physical: Vec<LocalPhysicalCandidate<'a>>,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    try_plan_physical_set_with_admission(
+        provider,
+        capture,
+        cpu_ns,
+        physical,
+        LocalCpuAdmission::Legacy,
+        LocalProviderAdmission::Available,
+    )
+}
+
+fn try_plan_physical_set_with_admission<'a>(
+    provider: &MultiProvider,
+    capture: &Rc<Capture>,
+    cpu_ns: u64,
+    physical: Vec<LocalPhysicalCandidate<'a>>,
+    cpu_admission: LocalCpuAdmission,
+    implementation: LocalProviderAdmission,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let runtime = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()));
-    plan_local_multi(
+    plan_local_multi_with_provider(
         provider,
         LocalMultiPlacementRequest {
             operation: "fusion.reduction",
@@ -157,13 +178,86 @@ fn try_plan_physical_set<'a>(
                 presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 guards: vec![],
             },
-            cpu_admission: LocalCpuAdmission::Legacy,
+            cpu_admission,
             physical,
             compare_profitability: true,
             runtime: Some(&runtime),
         },
         PlacementPolicy::default(),
+        implementation,
     )
+}
+
+#[test]
+fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_identity() {
+    use runmat_execution::{CandidateResourceDemand, ResourceByteBound};
+    let mut identities = Vec::new();
+    for implementation in [
+        LocalProviderAdmission::Available,
+        LocalProviderAdmission::ImplementationUnavailable,
+    ] {
+        for retained in [12, 16] {
+            let provider = MultiProvider {
+                device: 0,
+                owner: None,
+                reject: Some(7),
+                queries: AtomicUsize::new(0),
+            };
+            let capture = Rc::new(Capture::default());
+            let demand = CandidateResourceDemand {
+                cpu_millicores: 1_000,
+                retained_bytes: ResourceByteBound::Known(retained),
+                scratch_bytes: ResourceByteBound::Known(30),
+                queue_slots: 0,
+                provider_host_workspace: None,
+                provider_input_stages: None,
+                peak_live: None,
+            };
+            let outcome = try_plan_physical_set_with_admission(
+                &provider,
+                &capture,
+                1_000,
+                vec![physical(7, 1, CandidatePreparationState::Unknown)],
+                LocalCpuAdmission::ExactReadbacks {
+                    resources: Box::new(demand),
+                    download_bytes: 12,
+                    readback_count: 1,
+                },
+                implementation,
+            )
+            .unwrap();
+            assert!(matches!(
+                outcome,
+                LocalPlacementOutcome::ProviderRejected {
+                    feedback: Some(_),
+                    ..
+                }
+            ));
+            assert_eq!(
+                provider.queries.load(Ordering::SeqCst),
+                usize::from(matches!(implementation, LocalProviderAdmission::Available))
+            );
+            let requests = capture.requests.borrow();
+            assert_eq!(requests.len(), 1, "one canonical host-only selection");
+            let candidates = &requests[0].graph.nodes[0].candidates;
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].resources, demand);
+            assert_eq!(
+                candidates[0].descriptor.kind,
+                ExecutionCandidateKind::SharedRuntime
+            );
+            assert_eq!(
+                candidates[0].descriptor.cost.components.download_ns,
+                super::super::transfer_prior_ns(12)
+            );
+            assert_eq!(
+                candidates[0].descriptor.cost.components.synchronization_ns,
+                5_000
+            );
+            assert!(!identities.contains(&requests[0].signature.runtime_facts));
+            identities.push(requests[0].signature.runtime_facts);
+        }
+    }
 }
 
 #[test]

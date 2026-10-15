@@ -10,6 +10,8 @@ use effects::ElementwiseEffects;
 mod abi;
 #[path = "elementwise/host_readback.rs"]
 mod host_readback;
+#[path = "elementwise/host_candidate.rs"]
+mod host_candidate;
 
 #[cfg(test)]
 #[path = "elementwise/effect_tests.rs"]
@@ -131,9 +133,15 @@ async fn execute_elementwise_outputs(
                 "typed_representation_unsupported",
                 None,
             );
-            return Ok(FusionExecutionOutcome::SharedRuntime(
-                FusionCpuObservation::new(None),
-            ));
+            return host_candidate::without_shader(
+                request,
+                output_ids,
+                &bindings,
+                provider,
+                vm_right,
+                input_uses,
+                host_continuation,
+            );
         }
     };
     let physical_precision = generated_shader.abi().precision();

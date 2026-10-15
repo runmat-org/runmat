@@ -64,6 +64,14 @@ pub(crate) enum LocalCpuAdmission {
     Unavailable,
 }
 
+/// Source implementation admission is separate from provider feasibility.
+/// A valid host candidate does not imply that a shader implementation exists.
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) enum LocalProviderAdmission {
+    Available,
+    ImplementationUnavailable,
+}
+
 pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) operation: &'a str,
     pub(crate) semantic_identity: Option<Digest>,
@@ -89,6 +97,15 @@ pub(crate) fn plan_local_multi(
     request: LocalMultiPlacementRequest<'_>,
     policy: PlacementPolicy,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    plan_local_multi_with_provider(provider, request, policy, LocalProviderAdmission::Available)
+}
+
+pub(super) fn plan_local_multi_with_provider(
+    provider: &dyn AccelProvider,
+    request: LocalMultiPlacementRequest<'_>,
+    policy: PlacementPolicy,
+    implementation: LocalProviderAdmission,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let LocalMultiPlacementRequest {
         operation,
         semantic_identity,
@@ -102,6 +119,17 @@ pub(crate) fn plan_local_multi(
         compare_profitability,
         runtime,
     } = request;
+    let semantic_identity = match implementation {
+        LocalProviderAdmission::Available => semantic_identity,
+        LocalProviderAdmission::ImplementationUnavailable => Some(
+            Digest::sha256_serialized(&(
+                "local-source-implementation-v1",
+                semantic_identity,
+                implementation,
+            ))
+            .expect("implementation admission serializes"),
+        ),
+    };
     let exact_readbacks = match &cpu_admission {
         LocalCpuAdmission::ExactReadbacks {
             download_bytes,
@@ -188,8 +216,14 @@ pub(crate) fn plan_local_multi(
                     .build(),
             ));
         }
-        let feasibility = match candidate.shader_requirements {
-            Some(requirements) if !provider.supports_shader_requirements(requirements) => {
+        let feasibility = match (implementation, candidate.shader_requirements) {
+            (LocalProviderAdmission::ImplementationUnavailable, _) => {
+                ProviderFeasibility::rejected(
+                    ProviderRejectionCode::UnsupportedOperation,
+                    "selected_implementation_unavailable",
+                )
+            }
+            (_, Some(requirements)) if !provider.supports_shader_requirements(requirements) => {
                 ProviderFeasibility::rejected(
                     ProviderRejectionCode::UnsupportedElementType,
                     "selected_shader_requirements_unavailable",
@@ -372,6 +406,7 @@ pub(crate) fn plan_local_multi(
                 query,
                 code: *code,
                 cpu: &cpu,
+                cpu_resources: cpu_resources.as_ref().expect("checked host candidate"),
                 residency: &residency,
                 policy,
             },

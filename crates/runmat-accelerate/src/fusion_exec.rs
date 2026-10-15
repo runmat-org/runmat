@@ -376,6 +376,26 @@ fn select_fusion_provider_with_contract_vm_cpu(
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
     host: host_readback::CpuHostPlacement<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
+    select_fusion_provider_with_implementation(
+        request,
+        bindings,
+        provider,
+        contract,
+        vm_right,
+        host,
+        crate::placement::LocalProviderAdmission::Available,
+    )
+}
+
+fn select_fusion_provider_with_implementation(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    contract: FusionProviderContract<'_>,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    host: host_readback::CpuHostPlacement<'_>,
+    implementation: crate::placement::LocalProviderAdmission,
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
         elementwise_abi,
         input_indices,
@@ -453,6 +473,15 @@ fn select_fusion_provider_with_contract_vm_cpu(
         None
     };
     if request.placement.is_none() {
+        if matches!(
+            implementation,
+            crate::placement::LocalProviderAdmission::ImplementationUnavailable
+        ) {
+            observer.provider_rejected(ProviderRejectionCode::UnsupportedOperation);
+            return Ok(FusionExecutionOutcome::SharedRuntime(
+                FusionCpuObservation::new(None),
+            ));
+        }
         if shader_requirements
             .is_some_and(|required| !provider.supports_shader_requirements(required))
         {
@@ -534,7 +563,7 @@ fn select_fusion_provider_with_contract_vm_cpu(
         cpu_admission,
         crate::placement::LocalCpuAdmission::Unavailable
     );
-    match crate::placement::plan_local_vm_cpu(
+    match crate::placement::plan_local_vm_cpu_with_provider(
         provider,
         LocalPlacementRequest {
             operation,
@@ -591,6 +620,7 @@ fn select_fusion_provider_with_contract_vm_cpu(
         PlacementPolicy::default(),
         vm_right,
         cpu_admission,
+        implementation,
     )
     .map_err(|error| ProviderExecutionError::from_source(*error))?
     {

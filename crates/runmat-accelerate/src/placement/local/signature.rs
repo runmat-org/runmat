@@ -12,6 +12,15 @@ const PREPARED_BODY_CLEANUP_CONTRACT: &[u8] =
     b"runmat-local-total-candidate-preparation-body-cleanup-v2";
 const FULL_CALL_CONTRACT: &[u8] = b"runmat-local-total-candidate-outer-fence-v3";
 
+pub(super) fn with_cpu_candidate(
+    facts: Digest,
+    cpu: &runmat_execution::ExecutionCandidateDescriptor,
+    resources: &runmat_execution::CandidateResourceDemand,
+) -> Digest {
+    Digest::sha256_serialized(&("local-rejected-host-demand-v1", facts, cpu, resources))
+        .expect("CPU candidate demand serializes")
+}
+
 pub(super) fn with_total_candidate_observation_contract(
     facts: Digest,
     contract: super::TotalCandidateObservationContract,

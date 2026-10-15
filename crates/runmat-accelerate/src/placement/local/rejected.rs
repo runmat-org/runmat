@@ -4,7 +4,7 @@ use runmat_accelerate_api::{AccelProvider, ProviderFeasibilityQuery, ProviderRej
 use runmat_execution::{
     CandidateResourceDemand, Digest, ExecutionCandidateDescriptor, PlacementGraph,
     PlacementGraphCandidate, PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
-    PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
+    PlacementSignature,
 };
 use runmat_runtime::context::RuntimeContext;
 
@@ -27,6 +27,7 @@ pub(super) struct RejectedCpuFeedbackRequest<'a> {
     pub(super) query: &'a ProviderFeasibilityQuery,
     pub(super) code: ProviderRejectionCode,
     pub(super) cpu: &'a ExecutionCandidateDescriptor,
+    pub(super) cpu_resources: &'a CandidateResourceDemand,
     pub(super) residency: &'a ResidencySummary,
     pub(super) policy: PlacementPolicy,
 }
@@ -54,13 +55,17 @@ pub(super) fn rejected_cpu_feedback(
         operation: request.operation.into(),
         runtime_facts: signature::with_total_candidate_observation_contract(
             signature::with_semantic_identity(
-                signature::rejected_runtime_facts(
-                    request.query,
-                    request.code,
-                    request.cpu.preparation,
-                    request.residency,
-                    &resources,
-                    host_epoch,
+                signature::with_cpu_candidate(
+                    signature::rejected_runtime_facts(
+                        request.query,
+                        request.code,
+                        request.cpu.preparation,
+                        request.residency,
+                        &resources,
+                        host_epoch,
+                    ),
+                    request.cpu,
+                    request.cpu_resources,
                 ),
                 observation_semantic_identity(
                     request.observation_contract,
@@ -78,20 +83,7 @@ pub(super) fn rejected_cpu_feedback(
         nodes: vec![PlacementGraphNode {
             identity: request.operation.into(),
             candidates: vec![PlacementGraphCandidate {
-                resources: CandidateResourceDemand {
-                    cpu_millicores: 1_000,
-                    retained_bytes: ResourceByteBound::Unavailable(
-                        ResourceBoundUnavailable::NoRetainedValueBound,
-                    ),
-                    scratch_bytes: request.cpu.cost.scratch_bytes.map_or(
-                        ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-                        Into::into,
-                    ),
-                    queue_slots: 0,
-                    provider_host_workspace: None,
-                    provider_input_stages: None,
-                    peak_live: None,
-                },
+                resources: *request.cpu_resources,
                 descriptor: request.cpu.clone(),
                 output_facts: None,
                 transactional_results: true,

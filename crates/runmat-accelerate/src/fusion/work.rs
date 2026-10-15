@@ -8,6 +8,38 @@ use runmat_types::NumericClass;
 use super::{semantics::ResolvedProgram, FusionGroupPlan, FusionOp};
 
 impl ResolvedProgram {
+    /// Ordinary bytecode materializes each operation at its own result shape;
+    /// no final-shape broadcast or GPU scalar program is needed to price it.
+    pub(crate) fn host_scalar_work_units(&self, plan: &FusionGroupPlan) -> Result<u64> {
+        total_work(
+            1,
+            plan.operations.iter().map(|operation| {
+                let output = match operation {
+                    FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
+                }
+                .ok_or_else(|| anyhow!("host work requires a resolved output"))?;
+                let elements = self
+                    .fact(output)?
+                    .shape
+                    .element_count()
+                    .and_then(|n| u64::try_from(n).ok())
+                    .ok_or_else(|| anyhow!("host work requires a bounded output shape"))?;
+                let precision = match self.floating_class(output)? {
+                    NumericClass::Single => ProviderPrecision::F32,
+                    NumericClass::Double => ProviderPrecision::F64,
+                    _ => return Err(anyhow!("host work requires a floating class")),
+                };
+                let helpers = self
+                    .declaration(output)
+                    .and_then(|declaration| declaration.semantics)
+                    .map_or(&[][..], |semantics| semantics.helpers);
+                elements
+                    .checked_mul(operation_units(precision, helpers))
+                    .ok_or_else(|| anyhow!("host scalar work overflows"))
+            }),
+        )
+    }
+
     pub(crate) fn scalar_work_units(&self, plan: &FusionGroupPlan, elements: u64) -> Result<u64> {
         let operations = plan.operations.iter().map(|operation| {
             let output = match operation {

@@ -14,6 +14,7 @@ use std::collections::HashSet;
 pub(super) struct Admission {
     pub plan: CpuReadbackPlan,
     pub resources: CpuHostResources,
+    pub program: crate::fusion::semantics::ResolvedProgram,
 }
 
 fn shape(program: &crate::fusion::semantics::ResolvedProgram, id: ValueId) -> Option<Vec<usize>> {
@@ -31,6 +32,27 @@ pub(super) fn admit(
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     uses: &VmHostInputUses,
+) -> Option<Admission> {
+    admit_inputs(request, bindings, provider, uses, false)
+}
+
+/// A shader-unavailable route also needs an exact bound for entirely host
+/// inputs; the normal shader path keeps its existing host-only fast path.
+pub(super) fn admit_host(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    uses: &VmHostInputUses,
+) -> Option<Admission> {
+    admit_inputs(request, bindings, provider, uses, true)
+}
+
+fn admit_inputs(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    uses: &VmHostInputUses,
+    allow_host_only: bool,
 ) -> Option<Admission> {
     // This route executes ordinary host operators. Provider-effective facts
     // may narrow Double under an opted F32 policy and cannot bound its host
@@ -112,7 +134,7 @@ pub(super) fn admit(
     // Resident captured constants have no ordinary-load identity; never invent
     // a mirror from their buffer or bypass the exact input transcript.
     if unbound_constant_values(request.plan).any(runmat_runtime::dispatcher::value_contains_gpu)
-        || sources.is_empty()
+        || (!allow_host_only && sources.is_empty())
     {
         return None;
     }
@@ -197,13 +219,20 @@ pub(super) fn admit(
         .checked_add(operand_metadata)?;
     let scratch_bytes =
         crate::fusion_exec::checked_extra_host_scratch(retained_outputs, host_peak, body_extra)?;
-    let readbacks = ProviderReadbackDemands::sequential(demands)?;
+    let presentation = if sources.is_empty() {
+        CandidateOutputPresentation::Direct
+    } else {
+        CandidateOutputPresentation::ProviderReadbacksHost {
+            readbacks: Box::new(ProviderReadbackDemands::sequential(demands)?),
+        }
+    };
     let resident_offsets = sources
         .iter()
         .flat_map(|source| source.offsets.iter().copied())
         .collect();
     let readback_count = u64::try_from(sources.len()).ok()?;
     Some(Admission {
+        program: host_program,
         plan: CpuReadbackPlan {
             sources,
             stack_len: layout.required_stack_operands,
@@ -221,9 +250,7 @@ pub(super) fn admit(
                 provider_input_stages: None,
                 peak_live: None,
             },
-            presentation: CandidateOutputPresentation::ProviderReadbacksHost {
-                readbacks: Box::new(readbacks),
-            },
+            presentation,
             scratch_bytes,
             download_bytes,
             readback_count,
