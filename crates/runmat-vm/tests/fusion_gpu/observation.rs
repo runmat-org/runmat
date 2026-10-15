@@ -115,8 +115,8 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
                 assert_eq!(
                     provider.numeric_downloads.load(Ordering::Relaxed) - downloads,
                     1,
-                    "all repeated ordinary loads share one exact logical-view readback: single={single}, decoded={decoded}, precision={:?}, script_regions={:?}, feedback={:?}",
-                    provider.precision(), bytecode.runtime_fusion_groups(), capture.delivered.lock().unwrap(),
+                    "all repeated ordinary loads share one exact logical-view readback: single={single}, decoded={decoded}, precision={:?}",
+                    provider.precision(),
                 );
                 assert_eq!(provider.next_id.load(Ordering::Relaxed), allocations);
                 assert_eq!(
