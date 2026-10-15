@@ -52,7 +52,7 @@ fn validate_object(bytes: &[u8], target: &NativeTargetIdentity) -> AotResult<()>
         && object::FileKind::parse(bytes).map_err(invalid)? == object::FileKind::CoffImport
     {
         let import = object::read::coff::ImportFile::parse(bytes).map_err(invalid)?;
-        if import.architecture() != architecture {
+        if import.architecture() != architecture || import.sub_architecture().is_some() {
             return Err(invalid(
                 "import object architecture differs from selected target",
             ));
@@ -66,8 +66,10 @@ fn validate_object(bytes: &[u8], target: &NativeTargetIdentity) -> AotResult<()>
         NativeObjectFormat::Coff => object::BinaryFormat::Coff,
     };
     if object.architecture() != architecture
+        || object.sub_architecture().is_some()
         || object.format() != format
-        || !object.is_64()
+        // COFF's header width is independent of its checked machine type.
+        || (format != object::BinaryFormat::Coff && !object.is_64())
         || !object.is_little_endian()
         || object.kind() != object::ObjectKind::Relocatable
     {
@@ -115,6 +117,7 @@ fn validate_image<'data, R: object::ReadRef<'data>>(
         NativeObjectFormat::Coff => object::BinaryFormat::Pe,
     };
     if image.architecture() != architecture
+        || image.sub_architecture().is_some()
         || image.format() != format
         || !image.is_64()
         || !image.is_little_endian()

@@ -47,13 +47,9 @@ fn object_with_relocation(
         SectionKind::ReadOnlyData,
     );
     let offset = object.append_section_data(section, bytes, 1);
-    let name = if format == BinaryFormat::MachO {
-        format!("_{NATIVE_ABI_PROBE_SYMBOL}")
-    } else {
-        NATIVE_ABI_PROBE_SYMBOL.to_string()
-    };
     let symbol = object.add_symbol(Symbol {
-        name: name.into_bytes(),
+        // Object's format-specific mangler adds the Mach-O global prefix.
+        name: NATIVE_ABI_PROBE_SYMBOL.as_bytes().to_vec(),
         value: offset,
         size: NATIVE_ABI_PROBE_BYTES as u64,
         kind: SymbolKind::Data,

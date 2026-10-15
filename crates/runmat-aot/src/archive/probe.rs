@@ -89,8 +89,11 @@ pub fn read_native_abi_probe(archive: &[u8]) -> AotResult<NativeAbiProbe> {
                     | (object::BinaryFormat::Coff, NativeOperatingSystem::Windows)
             );
             if probe.architecture != architecture
+                || file.sub_architecture().is_some()
                 || !compatible_format
-                || !file.is_64()
+                // COFF has a 32-bit container header even for the checked
+                // 64-bit machine architectures; ELF/Mach-O encode width.
+                || (file.format() != object::BinaryFormat::Coff && !file.is_64())
                 || !file.is_little_endian()
             {
                 return Err(invalid(

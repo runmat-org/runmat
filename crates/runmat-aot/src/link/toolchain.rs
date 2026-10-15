@@ -165,6 +165,7 @@ fn validate_host_image(bytes: &[u8], host: &NativeLinkExecutionHost) -> AotResul
         NativeOperatingSystem::Windows => object::BinaryFormat::Pe,
     };
     if image.architecture() != architecture
+        || image.sub_architecture().is_some()
         || image.format() != format
         || image.is_64() != (host.pointer_width == 64)
         || image.is_little_endian() != (host.endianness == NativeEndianness::Little)

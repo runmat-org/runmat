@@ -82,7 +82,12 @@ fn physical_installation_survives_preparation_drop_and_explicit_pointer_replacem
     let pointer: InstallationPointer =
         serde_json::from_slice(&std::fs::read(root.path().join(slot.as_str())).unwrap()).unwrap();
     assert_eq!(pointer.installation, identity);
-    assert_eq!(root.path().join(pointer.generation.as_str()), first);
+    assert_eq!(
+        std::fs::canonicalize(root.path())
+            .unwrap()
+            .join(pointer.generation.as_str()),
+        first
+    );
     let second_source = ordinary_payload();
     let second_tree = second_source.resolve(&storage).unwrap();
     let second = materialize(
