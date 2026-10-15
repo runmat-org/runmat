@@ -14,3 +14,8 @@ pub fn compute_pipeline_hash_bytes(
     }
     hasher.finish()
 }
+
+pub fn has_unresolved_launch_tokens(source: &[u8]) -> bool {
+    source.windows(b"@WG@".len()).any(|part| part == b"@WG@")
+        || source.windows(b"@MT@".len()).any(|part| part == b"@MT@")
+}

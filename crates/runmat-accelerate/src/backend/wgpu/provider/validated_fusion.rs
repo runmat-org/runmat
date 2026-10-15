@@ -770,6 +770,12 @@ impl WgpuProvider {
                 "validated pipeline layout identity changed before preparation"
             )));
         }
+        if crate::backend::wgpu::cache::key::has_unresolved_launch_tokens(recipe.shader.as_bytes())
+        {
+            return Err(ProviderExecutionError::from(anyhow::anyhow!(
+                "validated pipeline source has unresolved launch tokens"
+            )));
+        }
         let key = recipe.key();
         let observation = super::pipeline_observation::PipelineObservation::begin();
         let cached = self

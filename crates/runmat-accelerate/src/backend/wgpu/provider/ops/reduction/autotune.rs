@@ -65,6 +65,14 @@ impl WgpuProvider {
                 tile_bytes
             ));
         }
+        // This exact selected launch source is what the shader module, cache
+        // key, and persisted warmup record must all consume. The generic
+        // module helper's late token fallback cannot authenticate a raw key.
+        let shader = crate::wgsl::substitute_tokens(
+            shader,
+            workgroup_size,
+            self.workgroup_config.matmul_tile,
+        );
         let tuning_key =
             ReductionAutotuneKey::new(self.precision, requirements, num_slices, reduce_len);
         if self.reduction_autotune.is_enabled() {
@@ -73,7 +81,7 @@ impl WgpuProvider {
                     &tuning,
                     inputs,
                     output_shape,
-                    shader,
+                    shader.as_ref(),
                     reduce_len,
                     num_slices,
                     workgroup_size,
@@ -84,7 +92,7 @@ impl WgpuProvider {
                 &tuning_key,
                 inputs,
                 output_shape,
-                shader,
+                shader.as_ref(),
                 reduce_len,
                 num_slices,
                 workgroup_size,
@@ -97,7 +105,7 @@ impl WgpuProvider {
                     &tuning,
                     inputs,
                     output_shape,
-                    shader,
+                    shader.as_ref(),
                     reduce_len,
                     num_slices,
                     workgroup_size,
@@ -112,7 +120,7 @@ impl WgpuProvider {
             &fallback_tuning,
             inputs,
             output_shape,
-            shader,
+            shader.as_ref(),
             reduce_len,
             num_slices,
             workgroup_size,

@@ -37,7 +37,12 @@ pub fn warmup_from_disk<FHash, FCompile>(
         };
         let meta: PipelineMeta = match serde_json::from_slice(&meta_bytes) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(error) => {
+                log::warn!("warmup: removing malformed pipeline metadata {stem}: {error}");
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(dir.join(format!("{stem}.wgsl")));
+                continue;
+            }
         };
         // Skip stale or incompatible cache entries silently
         if meta.version.unwrap_or(0) != PIPELINE_CACHE_VERSION {
@@ -64,7 +69,12 @@ pub fn warmup_from_disk<FHash, FCompile>(
         };
         let wgsl_str = match std::str::from_utf8(&wgsl_bytes) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(error) => {
+                log::warn!("warmup: removing non-UTF8 cached shader {stem}: {error}");
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(&wgsl_path);
+                continue;
+            }
         };
         let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
         if stem != format!("{key:016x}") {
@@ -76,9 +86,18 @@ pub fn warmup_from_disk<FHash, FCompile>(
             let _ = std::fs::remove_file(&wgsl_path);
             continue;
         }
-        if let Err(error) = shader::validate(wgsl_str, device_features) {
-            log::warn!("warmup: rejecting cached pipeline {stem}: {error}");
-            continue;
+        match shader::validate(wgsl_str, device_features) {
+            Ok(()) => {}
+            Err(shader::CachedShaderAdmissionError::InvalidSource(error)) => {
+                log::warn!("warmup: removing invalid cached pipeline {stem}: {error}");
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(&wgsl_path);
+                continue;
+            }
+            Err(shader::CachedShaderAdmissionError::IncompatibleAdapter(error)) => {
+                log::debug!("warmup: retaining cache entry {stem} for another adapter: {error}");
+                continue;
+            }
         }
         // Parsing/IO stay outside device access. The owner validates driver
         // construction before publishing or reporting a successfully warmed entry.
@@ -91,11 +110,10 @@ pub fn warmup_from_disk<FHash, FCompile>(
             }
             Ok(false) => continue,
             Err(error) => {
-                log::warn!(
-                    "warmup: failed to precompile pipeline {stem}; removing incompatible cache entry: {error}"
-                );
-                let _ = std::fs::remove_file(&path);
-                let _ = std::fs::remove_file(&wgsl_path);
+                // Naga already proved source validity independently of this
+                // adapter. Scoped driver failures can be capability, limit,
+                // memory, or device failures; none proves disk corruption.
+                log::warn!("warmup: could not precompile retained pipeline {stem}: {error}");
                 continue;
             }
         }
@@ -105,5 +123,81 @@ pub fn warmup_from_disk<FHash, FCompile>(
             "warmup: precompiled {} pipelines from on-disk cache",
             compiled
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::wgpu::cache::{key, persist};
+    use std::cell::Cell;
+    use std::path::PathBuf;
+
+    struct OwnedCacheDirectory(PathBuf);
+
+    impl OwnedCacheDirectory {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "runmat-warmup-admission-{}-{nonce}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create isolated warmup cache");
+            Self(path)
+        }
+    }
+
+    impl Drop for OwnedCacheDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn invalid_source_is_evicted_but_valid_adapter_incompatible_source_is_retained() {
+        let cache = OwnedCacheDirectory::new();
+        let tag = "runmat-fill-layout";
+        let invalid = "@compute @workgroup_size(@WG@) fn main() {}";
+        let incompatible = "@compute @workgroup_size(1) fn main() { let x = f64(1.0); }";
+        let write = |source: &str| {
+            let key = key::compute_pipeline_hash_bytes(source.as_bytes(), tag, Some(1));
+            persist::persist_pipeline_meta(
+                &cache.0,
+                key,
+                "warmup-admission-test",
+                Some(tag),
+                Some(1),
+                NumericPrecision::F32,
+                Some(source.as_bytes()),
+            );
+            key
+        };
+        let invalid_key = write(invalid);
+        let incompatible_key = write(incompatible);
+        let compiled = Cell::new(0);
+        warmup_from_disk(
+            Some(&cache.0),
+            NumericPrecision::F32,
+            wgpu::Features::empty(),
+            key::compute_pipeline_hash_bytes,
+            |_, _, _, _, _| {
+                compiled.set(compiled.get() + 1);
+                Ok(true)
+            },
+        );
+        assert_eq!(compiled.get(), 0);
+        for extension in ["json", "wgsl"] {
+            assert!(!cache
+                .0
+                .join(format!("{invalid_key:016x}.{extension}"))
+                .exists());
+            assert!(cache
+                .0
+                .join(format!("{incompatible_key:016x}.{extension}"))
+                .exists());
+        }
     }
 }

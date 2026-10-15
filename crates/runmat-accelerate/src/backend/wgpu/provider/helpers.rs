@@ -681,6 +681,17 @@ impl WgpuProvider {
         persist_workgroup_size: Option<u32>,
         create: impl FnOnce() -> wgpu::ComputePipeline,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
+        if let (Some(source), Some(layout_tag)) = (persist_wgsl_src, persist_layout_tag) {
+            ensure!(
+                !cache_key::has_unresolved_launch_tokens(source),
+                "{label}: persisted shader source has unresolved launch tokens"
+            );
+            ensure!(
+                hash_key
+                    == self.compute_pipeline_hash_bytes(source, layout_tag, persist_workgroup_size),
+                "{label}: persisted shader source does not match its pipeline cache key"
+            );
+        }
         let observation = super::pipeline_observation::PipelineObservation::begin();
         let cached = match self.fused_pipeline_cache.lock() {
             Ok(guard) => guard.get(&hash_key).cloned(),
@@ -697,7 +708,10 @@ impl WgpuProvider {
         }
         crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
         self.metrics.inc_miss();
-        // Persist WGSL + meta for warmup on next run
+        // Cache lock is released before any driver/compiler callback.
+        let p = Arc::new(create());
+        // A failed or panicking driver construction must not leave a new
+        // warmup record. Source/key identity was checked before cache lookup.
         self.persist_pipeline_meta(
             hash_key,
             label,
@@ -705,8 +719,6 @@ impl WgpuProvider {
             persist_workgroup_size,
             persist_wgsl_src,
         );
-        // Cache lock is released before any driver/compiler callback.
-        let p = Arc::new(create());
         match self.fused_pipeline_cache.lock() {
             Ok(mut guard) => {
                 guard.insert(hash_key, p.clone());

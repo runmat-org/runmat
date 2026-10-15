@@ -1,10 +1,43 @@
 //! Persisted WGSL is untrusted input, even when its content hash matches.
-use anyhow::{anyhow, Result};
+use std::fmt;
 use wgpu::naga;
 
-pub(super) fn validate(source: &str, features: wgpu::Features) -> Result<()> {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CachedShaderAdmissionError {
+    InvalidSource(String),
+    IncompatibleAdapter(String),
+}
+
+impl fmt::Display for CachedShaderAdmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSource(detail) => write!(f, "invalid cached WGSL: {detail}"),
+            Self::IncompatibleAdapter(detail) => {
+                write!(
+                    f,
+                    "cached WGSL exceeds enabled adapter capabilities: {detail}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for CachedShaderAdmissionError {}
+
+pub(super) fn validate(
+    source: &str,
+    features: wgpu::Features,
+) -> Result<(), CachedShaderAdmissionError> {
     let module = naga::front::wgsl::parse_str(source)
-        .map_err(|error| anyhow!("cached WGSL parse failed: {}", error.emit_to_string(source)))?;
+        .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.emit_to_string(source)))?;
+    // Validate source semantics independently of this adapter first. A valid
+    // shader needing another device's optional capability is not corruption.
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.to_string()))?;
     // Warmup is optional: admit only the baseline compute language and the
     // numeric extensions explicitly enabled on this device. Other extensions
     // can still be prepared through their owning runtime recipe.
@@ -17,7 +50,7 @@ pub(super) fn validate(source: &str, features: wgpu::Features) -> Result<()> {
     }
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
         .validate(&module)
-        .map_err(|error| anyhow!("cached WGSL validation failed: {error}"))?;
+        .map_err(|error| CachedShaderAdmissionError::IncompatibleAdapter(error.to_string()))?;
     Ok(())
 }
 
@@ -30,16 +63,23 @@ mod tests {
         let single = "@compute @workgroup_size(1) fn main() { let x = f32(1.0); }";
         assert!(validate(single, wgpu::Features::empty()).is_ok());
         let double = "@compute @workgroup_size(1) fn main() { let x = f64(1.0); }";
-        assert!(validate(double, wgpu::Features::empty()).is_err());
+        assert!(matches!(
+            validate(double, wgpu::Features::empty()),
+            Err(CachedShaderAdmissionError::IncompatibleAdapter(_))
+        ));
         assert!(validate(double, wgpu::Features::SHADER_F64).is_ok());
         for invalid in [
+            "@compute @workgroup_size(@WG@) fn main() {}",
             "@compute @workgroup_size(1) fn main() { let x = 1.0 / 0.0; }",
             "@compute @workgroup_size(1) fn main() { let x = 0.0 / 0.0; }",
             "@compute @workgroup_size(1) fn main() { let x = 3.402823669209385e38f; }",
             "@compute @workgroup_size(0) fn main() {}",
         ] {
             assert!(
-                validate(invalid, wgpu::Features::empty()).is_err(),
+                matches!(
+                    validate(invalid, wgpu::Features::empty()),
+                    Err(CachedShaderAdmissionError::InvalidSource(_))
+                ),
                 "{invalid}"
             );
         }
