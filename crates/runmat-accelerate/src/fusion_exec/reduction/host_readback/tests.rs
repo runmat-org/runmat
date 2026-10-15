@@ -158,6 +158,68 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             assert!(*offset < 2);
         }
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 2);
+        // A missing comparative price must not revoke an independently
+        // authenticated VM route or turn its retained readback into feedback.
+        for operations in [false, true] {
+            use runmat_runtime::context::{
+                RuntimeContext, RuntimeServicePorts, VmFusionHostOperation,
+                VmFusionInstalledRegion, VmFusionSemanticIdentity,
+            };
+            use std::rc::Rc;
+            let session = Rc::new(crate::placement::PlacementSession::default());
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(RuntimeServicePorts::default().with_placement(session.clone()));
+            let installed = VmFusionInstalledRegion::install(
+                &runtime,
+                VmFusionSemanticIdentity::from_validated_digest(runmat_execution::Digest::sha256(
+                    b"unpriced-authenticated-host-readback",
+                )),
+                0,
+                0,
+                0,
+            )
+            .unwrap();
+            let handle = owner.resident();
+            let stack = [Value::GpuTensor(handle.clone())];
+            let readback = CpuReadbackPlan {
+                sources: vec![Source::admit(&handle, owner, vec![0], Vec::new()).unwrap()],
+                stack_len: 1,
+                resident_offsets: HashSet::from([0]),
+            };
+            let entry = &runmat_builtins::PLUS_CATALOG_ENTRY;
+            let binding = entry.binding_identity(&entry.bindings[0]);
+            let right = installed.right(&runtime).unwrap();
+            let observation = crate::fusion_exec::FusionCpuObservation::new(None);
+            let mut observation = if operations {
+                observation.with_vm_host_operations_readback(
+                    right,
+                    Some(&runtime),
+                    Some(vec![VmFusionHostOperation::Builtin(binding)]),
+                    Some(readback),
+                )
+            } else {
+                observation.with_vm_host_route_readback(
+                    right,
+                    Some(&runtime),
+                    Some(&[binding]),
+                    Some(readback),
+                )
+            };
+            assert!(observation.vm_host_route().is_some());
+            let before = owner.downloads.load(Ordering::SeqCst);
+            let prepared = block_on(observation.prepare_vm_host_inputs(&stack))
+                .unwrap_or_else(|_| panic!("unpriced route retains its authenticated readback"))
+                .unwrap();
+            assert_eq!(owner.downloads.load(Ordering::SeqCst), before + 1);
+            assert!(matches!(&prepared[..], [(0, Value::Tensor(tensor))]
+                if tensor.as_f32_slice() == Some(&[0.0][..])));
+            assert!(matches!(&stack[0], Value::GpuTensor(original)
+                if original.view_identity() == handle.view_identity()));
+            observation.complete_vm(runmat_time::Instant::now());
+            assert!(session.profile_snapshot().feedback.is_empty());
+        }
         owner.downloads.store(0, Ordering::SeqCst);
         let binding = crate::graph::VarBinding {
             kind: crate::graph::VarKind::Global,

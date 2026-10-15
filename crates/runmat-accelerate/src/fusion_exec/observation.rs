@@ -115,11 +115,14 @@ impl FusionCpuObservation {
         operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
         readback: Option<CpuReadbackPlan>,
     ) -> Self {
-        let host_route = self
-            .feedback
-            .as_ref()
-            .filter(|feedback| feedback.is_current())
-            .and(runtime)
+        // The VM right authenticates execution. A missing price/measurement
+        // permit suppresses feedback, not an already admitted host readback.
+        let host_route = runtime
+            .filter(|_| {
+                self.feedback
+                    .as_ref()
+                    .is_none_or(|feedback| feedback.is_current())
+            })
             .and_then(|runtime| {
                 operations.and_then(|operations| right.host_route_operations(runtime, operations))
             });
@@ -140,11 +143,12 @@ impl FusionCpuObservation {
         bindings: Option<&[runmat_builtins::BuiltinBindingIdentity]>,
         readback: Option<CpuReadbackPlan>,
     ) -> Self {
-        let host_route = self
-            .feedback
-            .as_ref()
-            .filter(|feedback| feedback.is_current())
-            .and(runtime)
+        let host_route = runtime
+            .filter(|_| {
+                self.feedback
+                    .as_ref()
+                    .is_none_or(|feedback| feedback.is_current())
+            })
             .and_then(|runtime| {
                 bindings.and_then(|bindings| right.host_route(runtime, bindings.to_vec()))
             });
@@ -164,8 +168,8 @@ impl FusionCpuObservation {
             .and_then(|vm| vm.host_route.clone())
     }
 
-    /// Revalidate the exact selected right and feedback permit before the first
-    /// readback. All stage results remain private until the VM atomically
+    /// Revalidate the exact selected right and any feedback permit before the
+    /// first readback. All stage results remain private until the VM atomically
     /// replaces its checked operand slice.
     /// Called after an ordinary load has completed all normal refresh and
     /// language checks. A refreshed source mismatch is a terminal post-effect

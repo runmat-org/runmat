@@ -115,8 +115,7 @@ impl TypedProducer {
             &mut expressions,
             selected.as_ref(),
             roots,
-            &mut word_expressions,
-            capture_words,
+            capture_words.then_some(&mut word_expressions),
         )?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected

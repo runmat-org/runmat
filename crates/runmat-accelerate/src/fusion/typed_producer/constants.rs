@@ -10,8 +10,7 @@ pub(super) fn seed(
     expressions: &mut HashMap<ValueId, String>,
     selected: Option<&HashSet<usize>>,
     roots: Option<&[ValueId]>,
-    words: &mut HashMap<ValueId, String>,
-    capture_words: bool,
+    mut words: Option<&mut HashMap<ValueId, String>>,
 ) -> Result<String> {
     let mut used = roots
         .unwrap_or_default()
@@ -56,7 +55,10 @@ pub(super) fn seed(
         let literal = program::literal(&plan.const_values[&id])
             .ok_or_else(|| anyhow!("typed fusion has an unsupported captured scalar"))?;
         let class = program.represented_constant_class(id, literal.class())?;
-        if capture_words && class == NumericClass::Single {
+        if let Some(words) = words
+            .as_deref_mut()
+            .filter(|_| class == NumericClass::Single)
+        {
             let bits = match literal {
                 ScalarLiteral::F32Bits(bits) => bits,
                 // Only the existing explicit precision-policy owner can have
