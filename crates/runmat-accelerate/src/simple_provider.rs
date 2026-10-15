@@ -7969,6 +7969,18 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn real_sum_native_dim_supported(&self, precision: ProviderPrecision) -> bool {
+        matches!(precision, ProviderPrecision::F32 | ProviderPrecision::F64)
+    }
+
+    fn reduce_real_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.native_real_sum_dim(a, dim).map_err(Into::into) })
+    }
+
     fn reduce_integer_sum_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

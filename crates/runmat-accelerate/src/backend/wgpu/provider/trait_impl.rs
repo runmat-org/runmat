@@ -2588,6 +2588,41 @@ impl AccelProvider for WgpuProvider {
             result
         })
     }
+    fn real_sum_native_dim_supported(&self, precision: ProviderPrecision) -> bool {
+        matches!(
+            (self.precision, precision),
+            (
+                crate::backend::wgpu::types::NumericPrecision::F32,
+                ProviderPrecision::F32
+            ) | (
+                crate::backend::wgpu::types::NumericPrecision::F64,
+                ProviderPrecision::F64
+            )
+        ) && self.pipelines.reduce_dim_sum_mean.preflight().is_ok()
+    }
+    fn reduce_real_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let entry = self
+                .get_entry_raw(a)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            if entry.storage != GpuTensorStorage::Real
+                || entry.integer_type().is_some()
+                || runmat_accelerate_api::handle_is_logical(a)
+                || entry.precision != self.precision
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "native real sum requires the provider's real floating precision",
+                )
+                .into());
+            }
+            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
+    }
     fn reduce_integer_sum_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

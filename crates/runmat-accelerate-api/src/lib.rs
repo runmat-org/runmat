@@ -3883,6 +3883,23 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("reduce_sum_dim not supported by provider").into())
         })
     }
+    /// Pure admission for the real, signal-precision dimensional sum used by
+    /// resident adjoints. This is not MATLAB's F64-accumulating public sum.
+    fn real_sum_native_dim_supported(&self, _precision: ProviderPrecision) -> bool {
+        false
+    }
+    /// Sum a real floating tensor along a zero-based dimension, retaining its
+    /// F32 or F64 physical class and the reduced singleton axis. Providers
+    /// must return a distinct live allocation when the shape changes.
+    fn reduce_real_sum_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("native real sum not supported by provider").into())
+        })
+    }
     /// Reduce a native integer gpuArray while preserving its exact element
     /// class. This is intentionally separate from `reduce_sum`, whose MATLAB
     /// default output semantics are floating point for integer inputs.

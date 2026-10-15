@@ -103,10 +103,28 @@ impl InProcessProvider {
         input: &GpuTensorHandle,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        self.native_additive_dim(input, dim)
+        self.native_additive_dim(input, dim, true)
     }
 
-    fn native_additive_dim(&self, input: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
+    pub(super) fn native_real_sum_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            !runmat_accelerate_api::handle_is_logical(input)
+                && runmat_accelerate_api::handle_integer_type(input).is_none(),
+            "native real sum requires floating storage"
+        );
+        self.native_additive_dim(input, dim, false)
+    }
+
+    fn native_additive_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        divide_by_extent: bool,
+    ) -> Result<GpuTensorHandle> {
         ensure!(
             dim < input.shape().len(),
             "reduce_sum_dim: dimension out of bounds"
@@ -147,6 +165,13 @@ impl InProcessProvider {
             };
             let output = match data {
                 InProcessNumericData::F32(values) => {
+                    if !divide_by_extent {
+                        ensure!(
+                            runmat_accelerate_api::handle_precision(input)
+                                == Some(runmat_accelerate_api::ProviderPrecision::F32),
+                            "native real sum: floating class differs from payload"
+                        );
+                    }
                     ensure!(
                         !runmat_accelerate_api::handle_is_logical(input),
                         "reduce_sum_dim: logical storage requires its canonical double payload"
@@ -156,19 +181,30 @@ impl InProcessProvider {
                         "reduce_sum_dim: payload extent mismatch"
                     );
                     let mut reduced = sum_typed(values, rows, cols, dim, layout);
-                    for value in &mut reduced {
-                        *value /= input.shape()[dim] as f32;
+                    if divide_by_extent {
+                        for value in &mut reduced {
+                            *value /= input.shape()[dim] as f32;
+                        }
                     }
                     InProcessNumericData::F32(reduced)
                 }
                 InProcessNumericData::F64(values) => {
+                    if !divide_by_extent {
+                        ensure!(
+                            runmat_accelerate_api::handle_precision(input)
+                                == Some(runmat_accelerate_api::ProviderPrecision::F64),
+                            "native real sum: floating class differs from payload"
+                        );
+                    }
                     ensure!(
                         values.len() == count,
                         "reduce_sum_dim: payload extent mismatch"
                     );
                     let mut reduced = sum_typed(values, rows, cols, dim, layout);
-                    for value in &mut reduced {
-                        *value /= input.shape()[dim] as f64;
+                    if divide_by_extent {
+                        for value in &mut reduced {
+                            *value /= input.shape()[dim] as f64;
+                        }
                     }
                     InProcessNumericData::F64(reduced)
                 }

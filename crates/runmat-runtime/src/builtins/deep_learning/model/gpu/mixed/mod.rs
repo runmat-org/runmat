@@ -90,7 +90,15 @@ pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
                         }
                     }
                 }
-                if !provider.resident_network_adjoint_supported(&reverse_stages, precision) {
+                if (reverse_stages.iter().any(|stage| {
+                    matches!(
+                        stage,
+                        ProviderResidentAdjointStage::Dense
+                            | ProviderResidentAdjointStage::SoftmaxRows
+                    )
+                }) && !provider.real_sum_native_dim_supported(precision))
+                    || !provider.resident_network_adjoint_supported(&reverse_stages, precision)
+                {
                     return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
                 }
             }

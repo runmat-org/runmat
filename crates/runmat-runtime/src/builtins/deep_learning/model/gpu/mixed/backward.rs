@@ -79,7 +79,7 @@ fn checked_reduction(
     }
 }
 
-async fn checked_sum_reduction(
+fn checked_native_sum_reduction(
     result: GpuTensorHandle,
     input: &GpuTensorHandle,
     provider: &'static dyn AccelProvider,
@@ -96,13 +96,10 @@ async fn checked_sum_reduction(
         shape,
         UnaryGpuOutputContract {
             storage: GpuTensorStorage::Real,
-            precision: Some(runmat_accelerate_api::ProviderPrecision::F64),
+            precision: runmat_accelerate_api::handle_precision(input),
             integer: None,
             logical: false,
-            alias: if shape == input.shape()
-                && runmat_accelerate_api::handle_precision(input)
-                    == Some(runmat_accelerate_api::ProviderPrecision::F64)
-            {
+            alias: if shape == input.shape() {
                 GpuOutputAliasPolicy::AllowInput
             } else {
                 GpuOutputAliasPolicy::RequireDistinctAllocation
@@ -115,33 +112,10 @@ async fn checked_sum_reduction(
             result,
             deep_learning_error(
                 "dlgradient",
-                "dlgradient: provider returned a malformed double sum stage",
+                "dlgradient: provider returned a malformed native sum stage",
             ),
         ));
     }
-    let result = if runmat_accelerate_api::handle_precision(input)
-        == Some(runmat_accelerate_api::ProviderPrecision::F32)
-    {
-        let cast = provider_result(
-            provider
-                .unary_single(&result)
-                .await
-                .map_err(runmat_accelerate_api::ProviderExecutionError::after_effect),
-            "resident adjoint sum class adaptation",
-        )?;
-        if cast.shares_allocation_with(&result) || cast.shares_allocation_with(input) {
-            return Err(reject_gpu_output(
-                cast,
-                deep_learning_error(
-                    "dlgradient",
-                    "dlgradient: resident sum cast aliased its double stage",
-                ),
-            ));
-        }
-        cast
-    } else {
-        result
-    };
     checked_reduction(result, input, provider, shape)
 }
 
@@ -286,12 +260,16 @@ pub(in crate::builtins::deep_learning) async fn reverse(
                     provider_result(provider.transpose(&dw), "resident dense weight shape")?;
                 let dw = validate_layout_transpose(transposed, &dw, provider, "dlgradient")?;
                 let db = provider_result(
-                    provider.reduce_sum_dim(&gradient, 0).await,
+                    provider.reduce_real_sum_native_dim(&gradient, 0).await,
                     "resident dense bias adjoint",
                 )?;
                 cancel()?;
-                let db = checked_sum_reduction(db, &gradient, provider, &[1, gradient.shape()[1]])
-                    .await?;
+                let db = checked_native_sum_reduction(
+                    db,
+                    &gradient,
+                    provider,
+                    &[1, gradient.shape()[1]],
+                )?;
                 let reshaped = provider_result(
                     provider.reshape(&db, &[gradient.shape()[1], 1]),
                     "resident dense bias shape",
@@ -359,13 +337,16 @@ pub(in crate::builtins::deep_learning) async fn reverse(
                     stage.output.shape(),
                 )?;
                 let sum = provider_result(
-                    provider.reduce_sum_dim(&weighted, 1).await,
+                    provider.reduce_real_sum_native_dim(&weighted, 1).await,
                     "resident softmax row reduction",
                 )?;
                 cancel()?;
-                let sum =
-                    checked_sum_reduction(sum, &weighted, provider, &[stage.output.shape()[0], 1])
-                        .await?;
+                let sum = checked_native_sum_reduction(
+                    sum,
+                    &weighted,
+                    provider,
+                    &[stage.output.shape()[0], 1],
+                )?;
                 let centered = provider_result(
                     provider.elem_sub(&gradient, &sum).await,
                     "resident softmax centered seed",

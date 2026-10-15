@@ -223,7 +223,7 @@ fn single_dense_bias_adjoint_restores_parameter_precision_without_download() {
 }
 
 #[test]
-fn single_adjoint_rejects_a_single_reduction_disguised_as_double() {
+fn single_adjoint_rejects_a_double_reduction_disguised_as_single() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let upload = |values: &[f32], shape: &[usize]| {
             provider
@@ -235,15 +235,17 @@ fn single_adjoint_rejects_a_single_reduction_disguised_as_double() {
                 .unwrap()
         };
         let input = upload(&[1.0, 2.0], &[2, 1]);
-        let malformed = upload(&[3.0], &[1, 1]);
+        let malformed = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[3.0]),
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
         provider.reset_telemetry();
-        assert!(block_on(checked_sum_reduction(
-            malformed.clone(),
-            &input,
-            provider,
-            &[1, 1],
-        ))
-        .is_err());
+        assert!(
+            checked_native_sum_reduction(malformed.clone(), &input, provider, &[1, 1],).is_err()
+        );
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         input.allocation_lease().validate_live().unwrap();
         malformed.allocation_lease().validate_live().unwrap();
