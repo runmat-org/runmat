@@ -42,8 +42,13 @@ use serde::{Deserialize, Serialize};
 
 mod builtin_call;
 mod calibration_cleanup;
+mod calibration_identity;
+mod refresh;
+pub use calibration_identity::{CalibrationSource, CalibrationUnitPolicy};
+pub use refresh::refresh_auto_offload_calibration;
 mod host_route;
 mod state;
+mod original_work;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
 pub use host_route::promote_binary_in_context;
 pub use state::AutoOffloadHandle;
@@ -54,7 +59,7 @@ const DEFAULT_CPU_MATMUL_PER_FLOP: f64 = 2.5e-11;
 const SMALL_BATCH_DEFAULT_MAX_DIM: usize = 8;
 const SMALL_BATCH_DEFAULT_MIN_ELEMS: usize = 1_048_576;
 const DECISION_LOG_CAPACITY: usize = 128;
-const CALIBRATION_VERSION: u32 = 1;
+const CALIBRATION_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
@@ -133,11 +138,11 @@ pub enum DecisionReason {
     FusionOverride,
     Residency,
     SmallBatchGuard,
-    ProfileModel,
     Threshold,
     Disabled,
     ProviderRejected,
     CostModel,
+    CostUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -362,11 +367,11 @@ fn decision_reason_token(reason: DecisionReason) -> &'static str {
         DecisionReason::FusionOverride => "legacy_fusion_override",
         DecisionReason::Residency => "legacy_residency",
         DecisionReason::SmallBatchGuard => "legacy_small_batch_guard",
-        DecisionReason::ProfileModel => "legacy_profile_model",
         DecisionReason::Threshold => "legacy_threshold",
         DecisionReason::Disabled => "legacy_disabled",
         DecisionReason::ProviderRejected => "provider_feasibility_rejected",
         DecisionReason::CostModel => "unified_cost_model",
+        DecisionReason::CostUnavailable => "comparison_cost_unavailable",
     }
 }
 
@@ -455,6 +460,12 @@ struct CalibrationSuiteSection {
 #[derive(Debug, Clone, Deserialize)]
 struct CalibrationSample {
     #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
+    precision: Option<ProviderPrecision>,
+    #[serde(default)]
+    unit_policy: Option<calibration_identity::CalibrationUnitPolicy>,
+    #[serde(default)]
     runs: usize,
     #[serde(default, rename = "cpu_time_ms")]
     cpu_time: CalibrationTimes,
@@ -497,7 +508,10 @@ struct CalibrationProviderInfo {
 
 #[derive(Debug, Serialize)]
 pub struct AutoOffloadCalibrationOutcome {
-    pub runs: usize,
+    pub schema_version: u32,
+    pub precision: ProviderPrecision,
+    pub runs: Option<usize>,
+    pub source: CalibrationSource,
     pub before: ThresholdSnapshot,
     pub after: ThresholdSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -598,32 +612,38 @@ pub fn apply_auto_offload_calibration_from_file(
         .ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let device_info = provider.device_info_struct();
 
-    if let Some(ref prov) = sample.provider {
-        if prov.name != device_info.name
-            || prov.vendor != device_info.vendor
-            || prov.backend.as_deref() != device_info.backend.as_deref()
-            || prov.device_id != device_info.device_id
-        {
-            warn!(
-                "Calibration provider mismatch: sample='{} ({})' device='{} ({})'",
-                prov.name, prov.vendor, device_info.name, device_info.vendor
-            );
-        }
-        if sample.provider_conflict {
-            warn!("Calibration sample reported provider conflict across cases");
-        }
-    }
-
-    let (mut cfg, _) = load_cached_thresholds(&device_info)
+    let (mut cfg, _) = load_cached_thresholds(&device_info, provider.precision())
         .unwrap_or_else(|| (ThresholdConfig::default(), PathBuf::new()));
     let before_cfg = cfg.clone();
+    if sample.unit_policy != Some(CalibrationUnitPolicy::OriginalScanMacV1) {
+        if commit {
+            return Err(anyhow!("residual telemetry is diagnostic, not original CPU calibration; use accel-calibrate --refresh to measure the current provider's authoritative templates"));
+        }
+        return Ok(AutoOffloadCalibrationOutcome {
+            schema_version: CALIBRATION_VERSION,
+            precision: provider.precision(),
+            runs: Some(sample.runs),
+            source: CalibrationSource::ResidualDiagnostic,
+            before: threshold_snapshot(&cfg),
+            after: threshold_snapshot(&cfg),
+            delta: None,
+            persisted_to: None,
+            provider: Some(cached_provider_info(&device_info)),
+            commit: false,
+        });
+    }
+    sample.require_current(&device_info, provider.precision())?;
 
     let delta = apply_calibration_sample(&mut cfg, &sample)
         .ok_or_else(|| anyhow!("calibration sample did not produce coefficient updates"))?;
 
     let mut persisted_to: Option<PathBuf> = None;
     if commit {
-        persisted_to = Some(persist_thresholds(&device_info, &cfg)?);
+        persisted_to = Some(persist_thresholds(
+            &device_info,
+            &cfg,
+            provider.precision(),
+        )?);
     }
 
     if let Some(state_mutex) = AUTO_STATE.get() {
@@ -642,7 +662,10 @@ pub fn apply_auto_offload_calibration_from_file(
     }
 
     Ok(AutoOffloadCalibrationOutcome {
-        runs: sample.runs,
+        schema_version: CALIBRATION_VERSION,
+        precision: provider.precision(),
+        runs: Some(sample.runs),
+        source: CalibrationSource::ImportedOriginalTemplates,
         before: threshold_snapshot(&before_cfg),
         after: threshold_snapshot(&cfg),
         delta: Some(delta),
@@ -670,18 +693,17 @@ fn cpu_estimate(per_unit: f64, units: usize) -> Option<f64> {
 }
 
 fn seconds_to_ns(seconds: f64) -> Option<u64> {
+    // Preserve a known positive stage below clock granularity as one tick,
+    // rather than round it into a claimed zero-cost nonempty operation.
     milliseconds_to_nanoseconds(seconds * 1_000.0)
+        .map(|ns| if seconds > 0.0 { ns.max(1) } else { ns })
 }
 
 fn ns_to_seconds(nanoseconds: u64) -> f64 {
     nanoseconds as f64 / 1_000_000_000.0
 }
 
-fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
-    let cpu_ns = evaluation
-        .cpu_secs
-        .and_then(seconds_to_ns)
-        .unwrap_or(u64::MAX / 4);
+fn provider_prior(evaluation: &DecisionEvaluation, cpu_ns: u64) -> ExecutionCostEstimate {
     let modeled_execution = evaluation.gpu_secs.and_then(seconds_to_ns);
     let execution_ns = modeled_execution.unwrap_or_else(|| {
         if evaluation.recommend_gpu {
@@ -713,13 +735,22 @@ fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
+        Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => Some(&[1, 1]),
         Value::Tensor(t) => Some(t.shape()),
+        Value::ComplexTensor(t) => Some(t.shape()),
+        Value::LogicalArray(array) => Some(&array.shape),
+        Value::CharArray(array) => Some(array.shape()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     }
 }
 
 fn batch_dimension_from_value(value: &Value) -> Option<usize> {
+    // Geometry is not numeric admission. Preserve the existing batch heuristic
+    // boundary when other admitted callers borrow logical/complex/text shapes.
+    if !matches!(value, Value::Tensor(_) | Value::GpuTensor(_)) {
+        return None;
+    }
     let shape = value_shape(value)?;
     if shape.len() < 3 {
         return None;
@@ -766,7 +797,6 @@ pub struct NativeAutoOffload {
 }
 
 static GLOBAL_INIT_LOCK: Lazy<AsyncMutex<()>> = Lazy::new(|| AsyncMutex::new(()));
-static PROFILE_MODEL: OnceCell<Option<ProfileCostModel>> = OnceCell::new();
 
 fn env_bool(key: &str) -> Option<bool> {
     env::var(key).ok().and_then(|v| parse_bool(&v))
@@ -888,7 +918,9 @@ async fn initialize_async(provider: &'static dyn AccelProvider) -> Option<Native
     let refresh_calibration = calibrate_refresh_enabled();
 
     if !refresh_calibration {
-        if let Some((cached, path)) = load_cached_thresholds_async(&device_info).await {
+        if let Some((cached, path)) =
+            load_cached_thresholds_async(&device_info, provider.precision()).await
+        {
             info!(
                 "Native auto-offload: loaded cached calibration for '{}' from {}",
                 device_info.name, path
@@ -906,7 +938,7 @@ async fn initialize_async(provider: &'static dyn AccelProvider) -> Option<Native
             Ok(()) => {
                 calibrate_duration_ms = Some(start.elapsed().as_millis());
                 base_source = ThresholdBase::Calibrated;
-                match persist_thresholds_async(&device_info, &config).await {
+                match persist_thresholds_async(&device_info, &config, provider.precision()).await {
                     Ok(path) => {
                         cache_path = Some(path.clone());
                         info!(
@@ -926,11 +958,7 @@ async fn initialize_async(provider: &'static dyn AccelProvider) -> Option<Native
     }
 
     let env_overrides_applied = apply_env_overrides(&mut config);
-    let model_status = if profile_cost_model().is_some() {
-        "profile"
-    } else {
-        "fallback"
-    };
+    let model_status = "canonical-placement-session; cold-priors";
     info!(
         "Native auto-offload thresholds: unary={} binary={} reduction={} matmul_flops={} small_batch_dim={} small_batch_min_elems={} (model: {}, source: {}, env_overrides={})",
         config.unary_min_elems,
@@ -1138,8 +1166,11 @@ impl NativeAutoOffload {
                     if ca != rb {
                         return Ok((a.clone(), b.clone()));
                     }
-                    let flops = ra.saturating_mul(ca).saturating_mul(cb);
-                    let eval = self.evaluate_matmul(flops);
+                    let Some(flops) = ra.checked_mul(ca).and_then(|n| n.checked_mul(cb)) else {
+                        return Ok((a.clone(), b.clone()));
+                    };
+                    let mut eval = self.evaluate_matmul(flops);
+                    eval.cpu_secs = original_work::matrix(self, ra, ca, cb);
                     let (eval, rejection) = self.enforce_provider_feasibility(
                         eval,
                         "legacy.matmul",
@@ -1281,12 +1312,18 @@ impl NativeAutoOffload {
         Option<ProviderRejectionCode>,
         builtin_call::observation::BuiltinObservationPlan,
     ) {
+        let Some(cpu_ns) = evaluation.cpu_secs.and_then(seconds_to_ns) else {
+            // Missing comparative evidence does not invalidate ordinary
+            // execution or turn it into an infinitely expensive CPU route.
+            // Return unchanged operands through the existing preparation path,
+            // without minting a numerical candidate or feedback authority.
+            evaluation.recommend_gpu = false;
+            evaluation.reason = DecisionReason::CostUnavailable;
+            return (evaluation, None, Default::default());
+        };
         let cpu_cost = ExecutionCostEstimate {
             components: ExecutionCostComponents {
-                execution_ns: evaluation
-                    .cpu_secs
-                    .and_then(seconds_to_ns)
-                    .unwrap_or(u64::MAX),
+                execution_ns: cpu_ns,
                 ..ExecutionCostComponents::default()
             },
             scratch_bytes: Some(0),
@@ -1309,7 +1346,7 @@ impl NativeAutoOffload {
             _ if evaluation.fusion_kind.is_some() => ExecutionCandidateKind::ProviderFusion,
             _ => ExecutionCandidateKind::ProviderOperation,
         };
-        let provider_fallback = provider_prior(&evaluation);
+        let provider_fallback = provider_prior(&evaluation, cpu_ns);
         let sum_preparation_unknown = workload.sum.is_some();
         match plan_local(
             self.provider,
@@ -1442,23 +1479,6 @@ impl NativeAutoOffload {
             };
         }
 
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_elemwise(elements) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.binary_min_elems),
-                    fusion_kind,
-                    batch,
-                };
-            }
-        }
-
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.binary_min_elems,
             reason: DecisionReason::Threshold,
@@ -1472,22 +1492,6 @@ impl NativeAutoOffload {
 
     fn evaluate_matmul(&self, flops: usize) -> DecisionEvaluation {
         let cpu_secs = cpu_estimate(self.thresholds.cpu_matmul_per_flop, flops);
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_matmul_flops(flops) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.matmul_min_flops),
-                    fusion_kind: None,
-                    batch: None,
-                };
-            }
-        }
 
         DecisionEvaluation {
             recommend_gpu: flops >= self.thresholds.matmul_min_flops,
@@ -1502,23 +1506,12 @@ impl NativeAutoOffload {
 
     fn evaluate_reduction(&self, elements: usize) -> DecisionEvaluation {
         let fusion_kind = active_fusion().map(|f| f.kind.clone());
-        let cpu_secs = cpu_estimate(self.thresholds.cpu_reduction_per_elem, elements);
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_reduction(elements) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.reduction_min_elems),
-                    fusion_kind,
-                    batch: None,
-                };
-            }
-        }
+        // Input cardinality alone cannot tell whether an empty reduction
+        // produces empty output or a nonempty fill. Admitted Sum supplies its
+        // checked publication geometry; unadmitted legacy calls stay ordinary.
+        let cpu_secs = (elements != 0)
+            .then(|| cpu_estimate(self.thresholds.cpu_reduction_per_elem, elements))
+            .flatten();
 
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.reduction_min_elems,
@@ -1559,26 +1552,6 @@ impl NativeAutoOffload {
         }
 
         let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
-        if let Some(model) = profile_cost_model() {
-            let gpu_duration = match op {
-                UnaryOp::Transpose => model.estimate_transpose(elements),
-                UnaryOp::Generic => model.estimate_elemwise(elements),
-            };
-            if let Some(gpu_duration) = gpu_duration {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.unary_min_elems),
-                    fusion_kind,
-                    batch,
-                };
-            }
-        }
 
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.unary_min_elems,
@@ -2140,6 +2113,7 @@ struct CalibrationRecord {
     recorded_at: u64,
     provider: CalibrationProviderDetails,
     thresholds: ThresholdConfig,
+    precision: ProviderPrecision,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2151,21 +2125,27 @@ struct CalibrationProviderDetails {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn calibration_cache_key(info: &ApiDeviceInfo) -> String {
+fn calibration_cache_key(info: &ApiDeviceInfo, precision: ProviderPrecision) -> String {
     let vendor = slugify(&info.vendor);
     let name = slugify(&info.name);
     let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
-    format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id)
+    format!(
+        "v2-{}-{}-{}-{}-{:?}.json",
+        vendor, name, backend, info.device_id, precision
+    )
 }
 
-async fn load_cached_thresholds_async(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, String)> {
+async fn load_cached_thresholds_async(
+    info: &ApiDeviceInfo,
+    precision: ProviderPrecision,
+) -> Option<(ThresholdConfig, String)> {
     #[cfg(target_arch = "wasm32")]
     {
-        let key = calibration_cache_key(info);
+        let key = calibration_cache_key(info, precision);
         let contents = crate::web_auto_offload_store::load(&key).await?;
         match serde_json::from_str::<CalibrationRecord>(&contents) {
             Ok(record) => {
-                if record.version != CALIBRATION_VERSION {
+                if !record.matches(info, precision) {
                     debug!(
                         "Native auto-offload calibration cache version mismatch (found {}, expected {})",
                         record.version,
@@ -2187,15 +2167,20 @@ async fn load_cached_thresholds_async(info: &ApiDeviceInfo) -> Option<(Threshold
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        load_cached_thresholds(info).map(|(cfg, path)| (cfg, path.display().to_string()))
+        load_cached_thresholds(info, precision).map(|(cfg, path)| (cfg, path.display().to_string()))
     }
 }
 
-async fn persist_thresholds_async(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<String> {
+async fn persist_thresholds_async(
+    info: &ApiDeviceInfo,
+    cfg: &ThresholdConfig,
+    precision: ProviderPrecision,
+) -> Result<String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let key = calibration_cache_key(info);
+        let key = calibration_cache_key(info, precision);
         let record = CalibrationRecord {
+            precision,
             version: CALIBRATION_VERSION,
             recorded_at: system_time_now()
                 .duration_since(UNIX_EPOCH)
@@ -2217,16 +2202,19 @@ async fn persist_thresholds_async(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        persist_thresholds(info, cfg).map(|path| path.display().to_string())
+        persist_thresholds(info, cfg, precision).map(|path| path.display().to_string())
     }
 }
 
-fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, PathBuf)> {
-    let path = calibration_cache_file(info)?;
+fn load_cached_thresholds(
+    info: &ApiDeviceInfo,
+    precision: ProviderPrecision,
+) -> Option<(ThresholdConfig, PathBuf)> {
+    let path = calibration_cache_file(info, precision)?;
     let contents = fs::read_to_string(&path).ok()?;
     match serde_json::from_str::<CalibrationRecord>(&contents) {
         Ok(record) => {
-            if record.version != CALIBRATION_VERSION {
+            if !record.matches(info, precision) {
                 debug!(
                     "Native auto-offload calibration cache version mismatch (found {}, expected {})",
                     record.version,
@@ -2247,13 +2235,18 @@ fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, Path
     }
 }
 
-fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<PathBuf> {
-    let path = calibration_cache_file(info)
+fn persist_thresholds(
+    info: &ApiDeviceInfo,
+    cfg: &ThresholdConfig,
+    precision: ProviderPrecision,
+) -> Result<PathBuf> {
+    let path = calibration_cache_file(info, precision)
         .ok_or_else(|| anyhow!("unable to determine calibration cache directory"))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| anyhow!(e.to_string()))?;
     }
     let record = CalibrationRecord {
+        precision,
         version: CALIBRATION_VERSION,
         recorded_at: system_time_now()
             .duration_since(UNIX_EPOCH)
@@ -2272,12 +2265,15 @@ fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<Pat
     Ok(path)
 }
 
-fn calibration_cache_file(info: &ApiDeviceInfo) -> Option<PathBuf> {
+fn calibration_cache_file(info: &ApiDeviceInfo, precision: ProviderPrecision) -> Option<PathBuf> {
     let mut dir = calibration_cache_dir()?;
     let vendor = slugify(&info.vendor);
     let name = slugify(&info.name);
     let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
-    let file = format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id);
+    let file = format!(
+        "v2-{}-{}-{}-{}-{:?}.json",
+        vendor, name, backend, info.device_id, precision
+    );
     dir.push(file);
     Some(dir)
 }
@@ -2376,17 +2372,6 @@ async fn compare_elemwise(
     });
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_elemwise(elements) {
-            trace!(
-                "Elemwise calibration ({} elems): cpu={:?}, gpu_est={:?}",
-                elements,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
@@ -2440,17 +2425,6 @@ async fn compare_reduction(
     let cpu_time = time_cpu(|| std::hint::black_box(cpu_data.iter().sum::<f64>()));
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_reduction(elements) {
-            trace!(
-                "Reduction calibration ({} elems): cpu={:?}, gpu_est={:?}",
-                elements,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
@@ -2529,17 +2503,6 @@ async fn compare_matmul(
     });
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_matmul(n, n, n) {
-            trace!(
-                "Matmul calibration ({}^3 flops): cpu={:?}, gpu_est={:?}",
-                n,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let data_a = ta.materialize_f64();
     let data_b = tb.materialize_f64();
     let view_a = HostTensorView {
@@ -2605,202 +2568,6 @@ pub fn sequence_threshold_hint() -> Option<usize> {
 
 pub fn reset_auto_offload_log() {
     clear_decisions();
-}
-
-#[derive(Clone, Deserialize, Debug)]
-struct ProfileDurationSummary {
-    #[serde(default)]
-    avg_ms: f64,
-}
-
-#[derive(Clone, Deserialize, Debug)]
-struct ProfileReport {
-    category: String,
-    #[serde(default)]
-    input_shapes: Vec<Vec<usize>>,
-    total_ms: ProfileDurationSummary,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-struct LinearModel {
-    slope: f64,
-    intercept: f64,
-}
-
-impl LinearModel {
-    fn estimate(&self, x: f64) -> Option<Duration> {
-        if !self.slope.is_finite() || self.slope <= 0.0 {
-            return None;
-        }
-        let total = self.intercept + self.slope * x;
-        if total.is_finite() && total > 0.0 {
-            Some(Duration::from_secs_f64(total))
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Default)]
-struct ProfileCostModel {
-    elem: Option<LinearModel>,
-    reduction: Option<LinearModel>,
-    transpose: Option<LinearModel>,
-    matmul: Option<LinearModel>,
-}
-
-impl ProfileCostModel {
-    fn from_reports(reports: &[ProfileReport]) -> Self {
-        let mut elem_samples = Vec::<(f64, f64)>::new();
-        let mut reduction_samples = Vec::<(f64, f64)>::new();
-        let mut transpose_samples = Vec::<(f64, f64)>::new();
-        let mut matmul_samples = Vec::<(f64, f64)>::new();
-
-        for report in reports {
-            let total_secs = report.total_ms.avg_ms / 1_000.0;
-            match report.category.as_str() {
-                "elementwise" | "reduction" | "transpose" => {
-                    if let Some(shape) = report.input_shapes.first() {
-                        let elems: usize = shape.iter().copied().product();
-                        if elems == 0 {
-                            continue;
-                        }
-                        let sample = (elems as f64, total_secs);
-                        match report.category.as_str() {
-                            "elementwise" => elem_samples.push(sample),
-                            "reduction" => reduction_samples.push(sample),
-                            "transpose" => transpose_samples.push(sample),
-                            _ => {}
-                        }
-                    }
-                }
-                "matmul" => {
-                    if report.input_shapes.len() >= 2 {
-                        let a = &report.input_shapes[0];
-                        let b = &report.input_shapes[1];
-                        if a.len() == 2 && b.len() == 2 {
-                            let m = a[0];
-                            let k = a[1];
-                            let n = b[1];
-                            let flops = m.checked_mul(k).and_then(|val| val.checked_mul(n));
-                            if let Some(flops) = flops {
-                                matmul_samples.push((flops as f64, total_secs));
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        ProfileCostModel {
-            elem: fit_linear_model(&elem_samples),
-            reduction: fit_linear_model(&reduction_samples),
-            transpose: fit_linear_model(&transpose_samples),
-            matmul: fit_linear_model(&matmul_samples),
-        }
-    }
-
-    fn estimate_elemwise(&self, elements: usize) -> Option<Duration> {
-        self.elem.and_then(|model| model.estimate(elements as f64))
-    }
-
-    fn estimate_reduction(&self, elements: usize) -> Option<Duration> {
-        self.reduction
-            .and_then(|model| model.estimate(elements as f64))
-    }
-
-    fn estimate_matmul(&self, m: usize, k: usize, n: usize) -> Option<Duration> {
-        let flops = m.checked_mul(k)?.checked_mul(n)?;
-        self.matmul.and_then(|model| model.estimate(flops as f64))
-    }
-
-    fn estimate_matmul_flops(&self, flops: usize) -> Option<Duration> {
-        self.matmul.and_then(|model| model.estimate(flops as f64))
-    }
-
-    fn estimate_transpose(&self, elements: usize) -> Option<Duration> {
-        self.transpose
-            .and_then(|model| model.estimate(elements as f64))
-    }
-}
-
-fn fit_linear_model(samples: &[(f64, f64)]) -> Option<LinearModel> {
-    if samples.is_empty() {
-        return None;
-    }
-    if samples.len() == 1 {
-        let (x, y) = samples[0];
-        if x > 0.0 {
-            return Some(LinearModel {
-                slope: (y / x).max(0.0),
-                intercept: 0.0,
-            });
-        }
-        return None;
-    }
-
-    let sum_x: f64 = samples.iter().map(|(x, _)| *x).sum();
-    let sum_y: f64 = samples.iter().map(|(_, y)| *y).sum();
-    let sum_xx: f64 = samples.iter().map(|(x, _)| x * x).sum();
-    let sum_xy: f64 = samples.iter().map(|(x, y)| x * y).sum();
-    let n = samples.len() as f64;
-    let denom = (n * sum_xx) - (sum_x * sum_x);
-    if denom.abs() < f64::EPSILON {
-        return None;
-    }
-    let slope = ((n * sum_xy) - (sum_x * sum_y)) / denom;
-    let mean_x = sum_x / n;
-    let mean_y = sum_y / n;
-    let mut intercept = mean_y - slope * mean_x;
-    if intercept < 0.0 {
-        intercept = 0.0;
-    }
-    if !slope.is_finite() || slope <= 0.0 {
-        return None;
-    }
-    Some(LinearModel { slope, intercept })
-}
-
-fn profile_cost_model() -> Option<&'static ProfileCostModel> {
-    PROFILE_MODEL.get_or_init(load_profile_cost_model).as_ref()
-}
-
-fn load_profile_cost_model() -> Option<ProfileCostModel> {
-    let mut candidates = Vec::new();
-    if let Ok(path) = env::var("RUNMAT_ACCEL_PROFILE") {
-        candidates.push(PathBuf::from(path));
-    }
-    if let Some(path) = auto_offload_options().profile_path.clone() {
-        candidates.push(path);
-    }
-    candidates.push(PathBuf::from("benchmarks/wgpu_profile/mac_m2.json"));
-    candidates.push(PathBuf::from("wgpu_profile.json"));
-
-    for path in candidates {
-        if !path.exists() {
-            continue;
-        }
-        match fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<Vec<ProfileReport>>(&contents) {
-                Ok(reports) => {
-                    debug!(
-                        "Loaded {} GPU profile reports from {}",
-                        reports.len(),
-                        path.display()
-                    );
-                    return Some(ProfileCostModel::from_reports(&reports));
-                }
-                Err(err) => {
-                    debug!("Failed to parse GPU profile {}: {err}", path.display());
-                }
-            },
-            Err(err) => {
-                debug!("Failed to read GPU profile {}: {err}", path.display());
-            }
-        }
-    }
-    None
 }
 
 pub async fn promote_binary(

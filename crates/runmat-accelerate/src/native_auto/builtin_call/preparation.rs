@@ -84,7 +84,7 @@ impl ArgumentOperation {
             elements: u64::try_from(elements).ok(),
             ..Default::default()
         };
-        let (evaluation, family) = match self {
+        let (mut evaluation, family) = match self {
             Self::ElementwiseNary {
                 data_arity,
                 requested_outputs,
@@ -137,11 +137,15 @@ impl ArgumentOperation {
                 if inner != other_inner {
                     return None;
                 }
-                let flops = rows.saturating_mul(inner).saturating_mul(cols);
+                let flops = rows.checked_mul(inner)?.checked_mul(cols)?;
                 workload.elements = None;
                 workload.flops = u64::try_from(flops).ok();
                 (
-                    auto.evaluate_matmul(flops),
+                    {
+                        let mut evaluation = auto.evaluate_matmul(flops);
+                        evaluation.cpu_secs = original_work::matrix(auto, rows, inner, cols);
+                        evaluation
+                    },
                     ProviderOperationFamily::MatrixMultiply,
                 )
             }
@@ -151,6 +155,7 @@ impl ArgumentOperation {
             route,
         } = self
         {
+            evaluation.cpu_secs = original_work::sum(auto, &args[0], route);
             workload.requested_outputs = *requested_outputs;
             workload.sum = Some(route.clone());
         }

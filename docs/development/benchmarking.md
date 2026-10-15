@@ -80,9 +80,15 @@ The benchmark harness can capture RunMat acceleration telemetry by setting `RUNM
 runmat accel-info
 runmat accel-info --json --reset
 runmat accel-calibrate benchmarks/results/suite_results.json --dry-run --json
+runmat accel-calibrate --refresh --dry-run --json
+runmat accel-calibrate --refresh --json
 ```
 
 Use telemetry when deciding whether a benchmark is measuring the intended execution path. For GPU work, verify provider selection, offload decisions, residency behavior, and fallback counts before interpreting raw timings.
+
+Suite residual CPU-time/category allocations are diagnostic estimates, not isolated CPU measurements. The harness marks them with schema 2 and `diagnostic-residual-v1`; importing them with `--dry-run` reports unchanged coefficients and `residual-diagnostic` provenance. They cannot be committed as calibration. `--auto-calibrate` now invokes `accel-calibrate --refresh`, which reuses the runtime's existing original CPU templates, provider comparisons, and cleanup owner. `--dry-run` measures without persisting; a committed refresh writes the provider/precision-specific v2 cache. Automatic sample counts are not fabricated: the refresh outcome has `runs: null` because that owner does not export a sample census. Input files and `--refresh` are mutually exclusive.
+
+Qualified original-template imports require schema 2, the closed `original-scan-mac-v1` unit policy, exact provider identity, and `F32`/`F64` precision. Historical scan/MAC denominators are unchanged. Output publication/conversion is separately identified cold-prior work, not a relabeled template measurement. Legacy category profile fitting, `RUNMAT_ACCEL_PROFILE`, and auto-offload `profile_path` no longer participate in decisions or calibration. `wgpu_profile` remains a diagnostic benchmark; matched whole-call observations belong to the canonical PlacementSession owner.
 
 GPU submission time measures how long the host takes to enqueue work; it does not measure completed device execution. Fusion placement traces report successful submission as a queue event, without a completion event or a successful execution-cost sample. Measure device completion and any required transfers or synchronization when comparing CPU and GPU latency. A CPU-selected fusion region records completion only after its bytecode reaches the region's normal exit; errors, cancellation, and abandoned execution do not contribute successful timing samples.
 

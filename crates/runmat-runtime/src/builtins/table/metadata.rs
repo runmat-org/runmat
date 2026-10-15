@@ -3,6 +3,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+pub use runmat_builtins::{PARQUETINFO_DESCRIPTOR, PARQUETREAD_DESCRIPTOR};
 pub(super) use runmat_builtins::{
     TABLE_ERROR_INVALID_ARGUMENT, TABLE_ERROR_INVALID_INDEX, TABLE_ERROR_INVALID_VARIABLE,
     TABLE_ERROR_IO, TABLE_ERROR_UNSUPPORTED_FILE,
@@ -92,36 +93,6 @@ const DETECT_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
         description: "Detection overrides such as Delimiter, Range, Sheet, Encoding, or TextType.",
     },
 ];
-const PARQUETREAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parquet file path.",
-}];
-const PARQUETREAD_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Parquet file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Options such as SelectedVariableNames, RowGroups, or OutputType.",
-    },
-];
-const PARQUETINFO_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parquet file path to inspect.",
-}];
 const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "variables",
     ty: BuiltinParamType::Any,
@@ -299,23 +270,6 @@ const DICTIONARY_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         outputs: &ANY_OUTPUT,
     },
 ];
-const PARQUETREAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "T = parquetread(filename)",
-        inputs: &PARQUETREAD_INPUTS_FILENAME,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "T = parquetread(filename, nameValuePairs...)",
-        inputs: &PARQUETREAD_INPUTS_NAME_VALUE,
-        outputs: &ANY_OUTPUT,
-    },
-];
-const PARQUETINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "info = parquetinfo(filename)",
-    inputs: &PARQUETINFO_INPUTS,
-    outputs: &ANY_OUTPUT,
-}];
 const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "T = table(variables...)",
@@ -376,18 +330,6 @@ pub const DETECT_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescripto
 };
 pub const DICTIONARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DICTIONARY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const PARQUETREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PARQUETREAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const PARQUETINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PARQUETINFO_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

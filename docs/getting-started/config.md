@@ -293,9 +293,10 @@ The isolated extension host contains crashes and can be terminated on cancellati
 | Key            | Type    | Default   | Notes                                                    |
 | -------------- | ------- | --------- | -------------------------------------------------------- |
 | `enabled`      | boolean | `true`    | Enables auto-offload planner.                            |
-| `calibrate`    | boolean | `true`    | Enables calibration mode for planner profile generation. |
-| `profile_path` | string  | unset     | Optional profile cache path.                             |
+| `calibrate`    | boolean | `true`    | Enables the runtime's automatic calibration templates.    |
 | `log_level`    | string  | `"trace"` | `off`, `info`, `trace`.                                  |
+
+The former `profile_path` setting is removed; delete it from existing configuration files. Category-only GPU profile JSON and `RUNMAT_ACCEL_PROFILE` are not placement authorities. Matched measurements use the canonical placement session; `runmat accel-calibrate --refresh` refreshes the current provider/precision's calibration cache.
 
 
 ### `[runtime.plotting]`
@@ -492,7 +493,6 @@ wgpu_force_fallback_adapter = false
 [runtime.accelerate.auto_offload]
 enabled = true
 calibrate = true
-profile_path = ".runmat/auto_offload.json"
 log_level = "trace"
 
 [runtime.plotting]

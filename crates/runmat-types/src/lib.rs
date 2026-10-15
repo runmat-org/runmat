@@ -7,6 +7,8 @@ pub mod fact;
 pub mod geometry;
 pub mod identity;
 pub mod integer_literal;
+mod matrix_work;
+pub use matrix_work::MatrixWorkGeometry;
 pub mod rules;
 pub mod scalar_program;
 pub mod real_unary;

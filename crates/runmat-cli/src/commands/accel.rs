@@ -252,13 +252,22 @@ pub async fn show_accel_info(json: bool, _reset: bool) -> Result<()> {
 
 #[cfg(feature = "wgpu")]
 pub async fn execute_accel_calibrate(
-    input: std::path::PathBuf,
+    input: Option<std::path::PathBuf>,
+    refresh: bool,
     dry_run: bool,
     json: bool,
 ) -> Result<()> {
     let commit = !dry_run;
-    let outcome = runmat_accelerate::apply_auto_offload_calibration_from_file(&input, commit)
-        .with_context(|| format!("failed to apply calibration from {}", input.display()))?;
+    let outcome = match (refresh, input.as_ref()) {
+        (true, None) => runmat_accelerate::refresh_auto_offload_calibration(commit)
+            .await
+            .context("failed to refresh current calibration templates")?,
+        (false, Some(input)) => {
+            runmat_accelerate::apply_auto_offload_calibration_from_file(input, commit)
+                .with_context(|| format!("failed to apply calibration from {}", input.display()))?
+        }
+        _ => anyhow::bail!("choose exactly one calibration input or --refresh"),
+    };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&outcome)?);
@@ -271,7 +280,12 @@ pub async fn execute_accel_calibrate(
     println!(
         "{} {}",
         styles.label("Input:"),
-        styles.path(input.display())
+        styles.path(
+            input
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "current automatic templates".into())
+        )
     );
     if let Some(provider) = &outcome.provider {
         println!(
@@ -281,7 +295,10 @@ pub async fn execute_accel_calibrate(
             provider.device_id
         );
     }
-    println!("Runs considered: {}", outcome.runs);
+    println!("Source: {:?}", outcome.source);
+    if let Some(runs) = outcome.runs {
+        println!("Imported runs considered: {runs}");
+    }
     println!(
         "{} {}",
         styles.label("Mode:"),
@@ -350,6 +367,8 @@ pub async fn execute_accel_calibrate(
             "{}",
             styles.help("Restart RunMat sessions to load the updated thresholds.")
         );
+    } else if outcome.source == runmat_accelerate::CalibrationSource::ResidualDiagnostic {
+        println!("Residual telemetry is diagnostic only; use --refresh for measured calibration.");
     } else {
         println!(
             "\n{}",

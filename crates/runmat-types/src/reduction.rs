@@ -12,6 +12,8 @@ mod fusion_contract;
 pub use fusion_contract::*;
 mod fusion_work;
 pub use fusion_work::*;
+mod sum_work;
+pub use sum_work::*;
 
 /// Public entrypoint whose already-admitted numerical work uses the sum
 /// reduction. The alias retains its own binding, errors and feedback identity.

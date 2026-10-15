@@ -104,9 +104,10 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         #[cfg(feature = "wgpu")]
         Commands::AccelCalibrate {
             input,
+            refresh,
             dry_run,
             json,
-        } => accel::execute_accel_calibrate(input, dry_run, json).await,
+        } => accel::execute_accel_calibrate(input, refresh, dry_run, json).await,
         Commands::Gc { gc_command } => gc::execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,

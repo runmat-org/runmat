@@ -315,40 +315,33 @@ pub(crate) async fn readtable_builtin(path: Value, rest: Vec<Value>) -> BuiltinR
 
 #[runtime_builtin(
     name = "parquetread",
-    category = "io/tabular",
-    summary = "Read Parquet columnar data into a table.",
-    keywords = "parquetread,parquet,table,SelectedVariableNames,RowGroups,OutputType",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::table::PARQUETREAD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn parquetread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PARQUETREAD_DESCRIPTOR,
+        &TABLE_ERROR_INVALID_ARGUMENT,
+        "parquetread",
+    )?;
     ensure_table_class_registered();
-    let path_value = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let args = gather_values(&rest).await?;
-    let options = ParquetReadOptions::parse(&args)?;
-    let resolved = resolve_path(&path_value)?;
+    let resolved = resolve_path(&path)?;
+    let options = ParquetReadOptions::parse(&rest).await?;
     read_parquet_table(&resolved, &options).await
 }
 
 #[runtime_builtin(
     name = "parquetinfo",
-    category = "io/tabular",
-    summary = "Inspect Parquet file schema and row-group metadata.",
-    keywords = "parquetinfo,parquet,schema,row groups,metadata",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::table::PARQUETINFO_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn parquetinfo_builtin(path: Value) -> BuiltinResult<Value> {
-    let path_value = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let resolved = resolve_path(&path_value)?;
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PARQUETINFO_DESCRIPTOR,
+        &TABLE_ERROR_INVALID_ARGUMENT,
+        "parquetinfo",
+    )?;
+    let resolved = resolve_path(&path)?;
     parquet_file_info(&resolved).await
 }
 

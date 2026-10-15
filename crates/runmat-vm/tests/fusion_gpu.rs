@@ -2012,7 +2012,6 @@ fn ensure_provider_registered() {
     configure_auto_offload(AutoOffloadOptions {
         enabled: true,
         calibrate: false,
-        profile_path: None,
         log_level: AutoOffloadLogLevel::Trace,
     });
 }
@@ -2026,7 +2025,6 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
     configure_auto_offload(AutoOffloadOptions {
         enabled: false,
         calibrate: false,
-        profile_path: None,
         log_level: AutoOffloadLogLevel::Trace,
     });
     runmat_accelerate_api::set_thread_provider(None);
@@ -2064,7 +2062,6 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
         configure_auto_offload(AutoOffloadOptions {
             enabled: false,
             calibrate: false,
-            profile_path: None,
             log_level: AutoOffloadLogLevel::Trace,
         });
         let provider = registered_provider().expect("test provider");

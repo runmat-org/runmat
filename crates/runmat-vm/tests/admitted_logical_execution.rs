@@ -237,7 +237,6 @@ fn canonical_logical_forms_execute_through_vm_with_real_provider_feasibility() {
         runmat_accelerate::configure_auto_offload(runmat_accelerate::AutoOffloadOptions {
             enabled: true,
             calibrate: false,
-            profile_path: None,
             log_level: runmat_accelerate::AutoOffloadLogLevel::Trace,
         });
         let cases: [(&str, &[u8]); 10] = [

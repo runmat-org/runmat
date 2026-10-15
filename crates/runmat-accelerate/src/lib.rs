@@ -8,7 +8,6 @@
 
 use once_cell::sync::Lazy;
 use runmat_value::{Tensor, Value};
-use std::path::PathBuf;
 use std::sync::RwLock;
 
 pub mod backend;
@@ -36,10 +35,11 @@ pub use graph::*;
 pub use native_auto::{
     apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
     promote_binary, promote_binary_in_context, promote_reduction_args, promote_unary,
-    reset_auto_offload_log, AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary,
-    AutoOffloadDecisionEntry, AutoOffloadDisposition, AutoOffloadReport, BinaryOp,
-    CachedProviderInfo, DecisionReason, ReductionOp, ThresholdBase, ThresholdDelta,
-    ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
+    refresh_auto_offload_calibration, reset_auto_offload_log, AutoOffloadCalibrationOutcome,
+    AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry, AutoOffloadDisposition,
+    AutoOffloadReport, BinaryOp, CachedProviderInfo, CalibrationSource, CalibrationUnitPolicy,
+    DecisionReason, ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry,
+    ThresholdSnapshot, UnaryOp,
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
@@ -107,11 +107,10 @@ pub enum AutoOffloadLogLevel {
 
 /// Configuration passed to the native auto-offload planner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AutoOffloadOptions {
     pub enabled: bool,
     pub calibrate: bool,
-    #[serde(default)]
-    pub profile_path: Option<PathBuf>,
     #[serde(default)]
     pub log_level: AutoOffloadLogLevel,
 }
@@ -121,7 +120,6 @@ impl Default for AutoOffloadOptions {
         Self {
             enabled: true,
             calibrate: true,
-            profile_path: None,
             log_level: AutoOffloadLogLevel::Trace,
         }
     }

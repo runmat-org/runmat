@@ -1,71 +1,8 @@
 use super::*;
 use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
-#[derive(Clone, Default)]
-pub(in crate::builtins::table) struct ParquetReadOptions {
-    selected_variable_names: Option<Vec<String>>,
-    row_groups: Option<Vec<usize>>,
-    output_type: ParquetOutputType,
-    row_times: Option<String>,
-    row_filter: Option<Value>,
-}
-
-impl ParquetReadOptions {
-    pub(in crate::builtins::table) fn parse(args: &[Value]) -> BuiltinResult<Self> {
-        let mut options = Self::default();
-        let mut idx = 0usize;
-        while idx < args.len() {
-            if idx + 1 >= args.len() {
-                return Err(invalid_argument(
-                    "parquetread: name-value options must be provided in pairs",
-                ));
-            }
-            let name = scalar_text(&args[idx], "parquetread option")?;
-            options.apply(&name, &args[idx + 1])?;
-            idx += 2;
-        }
-        Ok(options)
-    }
-
-    fn apply(&mut self, name: &str, value: &Value) -> BuiltinResult<()> {
-        if name.eq_ignore_ascii_case("SelectedVariableNames") {
-            self.selected_variable_names = Some(string_list(value)?);
-        } else if name.eq_ignore_ascii_case("RowGroups") {
-            self.row_groups = Some(one_based_indices(value, "RowGroups")?);
-        } else if name.eq_ignore_ascii_case("OutputType") {
-            self.output_type = ParquetOutputType::parse(value)?;
-        } else if name.eq_ignore_ascii_case("RowTimes") {
-            self.row_times = Some(scalar_text(value, "RowTimes")?);
-        } else if name.eq_ignore_ascii_case("RowFilter") {
-            self.row_filter = Some(value.clone());
-        } else {
-            return Err(invalid_argument(format!(
-                "parquetread: unsupported option '{name}'"
-            )));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum ParquetOutputType {
-    #[default]
-    Table,
-    Timetable,
-}
-
-impl ParquetOutputType {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "OutputType")?;
-        match text.trim().to_ascii_lowercase().as_str() {
-            "table" => Ok(Self::Table),
-            "timetable" => Ok(Self::Timetable),
-            other => Err(invalid_argument(format!(
-                "parquetread: unsupported OutputType '{other}'"
-            ))),
-        }
-    }
-}
+mod controls;
+pub(in crate::builtins::table) use controls::ParquetReadOptions;
 
 pub(in crate::builtins::table) async fn read_parquet_table(
     path: &Path,
@@ -112,30 +49,15 @@ async fn read_parquet_table_impl(
     };
     use arrow_schema::DataType;
 
-    if options.output_type == ParquetOutputType::Timetable {
-        return Err(invalid_argument(
-            "parquetread: OutputType 'timetable' requires timetable row-time synthesis and is not supported yet",
-        ));
-    }
-    if options.row_times.is_some() {
-        return Err(invalid_argument(
-            "parquetread: RowTimes is only valid with OutputType 'timetable'",
-        ));
-    }
-    if options.row_filter.is_some() {
-        return Err(invalid_argument(
-            "parquetread: RowFilter is not supported until rowfilter predicate execution is available",
-        ));
-    }
-
     let bytes = bytes::Bytes::from(read_file_bytes(path).await?);
     let builder = ParquetRecordBatchReaderBuilder::try_new(bytes).map_err(|err| {
-        table_error(
+        table_error_with_source(
             &TABLE_ERROR_UNSUPPORTED_FILE,
             format!(
                 "parquetread: unable to read parquet schema '{}': {err}",
                 path.display()
             ),
+            err,
         )
     })?;
     let schema = builder.schema().clone();
@@ -149,28 +71,37 @@ async fn read_parquet_table_impl(
         .with_row_groups(row_groups)
         .build()
         .map_err(|err| {
-            table_error(
+            table_error_with_source(
                 &TABLE_ERROR_UNSUPPORTED_FILE,
                 format!(
                     "parquetread: unable to decode parquet file '{}': {err}",
                     path.display()
                 ),
+                err,
             )
         })?;
 
     let mut columns = selected_names
         .iter()
-        .map(|name| ParquetColumnBuilder::new(name.clone()))
-        .collect::<Vec<_>>();
+        .map(|name| {
+            let (_, field) = schema.column_with_name(name).ok_or_else(|| {
+                invalid_variable(format!(
+                    "parquetread: schema is missing projected column '{name}'"
+                ))
+            })?;
+            ParquetColumnBuilder::from_arrow(field.data_type())
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
 
     for batch in batch_reader {
         let batch = batch.map_err(|err| {
-            table_error(
+            table_error_with_source(
                 &TABLE_ERROR_UNSUPPORTED_FILE,
                 format!(
                     "parquetread: unable to decode record batch '{}': {err}",
                     path.display()
                 ),
+                err,
             )
         })?;
         append_record_batch(&batch, &selected_names, &mut columns)?;
@@ -421,12 +352,13 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
     let file_size = bytes.len() as f64;
     let builder =
         ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes)).map_err(|err| {
-            table_error(
+            table_error_with_source(
                 &TABLE_ERROR_UNSUPPORTED_FILE,
                 format!(
                     "parquetinfo: unable to open parquet file '{}': {err}",
                     path.display()
                 ),
+                err,
             )
         })?;
     let metadata = builder.metadata();
@@ -538,20 +470,54 @@ enum ParquetColumnBuilder {
     Logical { values: Vec<u8> },
     Text { values: Vec<String> },
     DateTime { values: Vec<f64> },
-    Empty,
 }
 
 impl ParquetColumnBuilder {
-    fn new(_name: String) -> Self {
-        Self::Empty
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_arrow(data_type: &arrow_schema::DataType) -> BuiltinResult<Self> {
+        use arrow_schema::DataType;
+        let integer = match data_type {
+            DataType::Int8 => Some(IntValue::I8(0)),
+            DataType::Int16 => Some(IntValue::I16(0)),
+            DataType::Int32 => Some(IntValue::I32(0)),
+            DataType::Int64 => Some(IntValue::I64(0)),
+            DataType::UInt8 => Some(IntValue::U8(0)),
+            DataType::UInt16 => Some(IntValue::U16(0)),
+            DataType::UInt32 => Some(IntValue::U32(0)),
+            DataType::UInt64 => Some(IntValue::U64(0)),
+            _ => None,
+        };
+        if let Some(prototype) = integer {
+            return Ok(Self::Integer {
+                storage: empty_integer_storage_for(&prototype),
+            });
+        }
+        Ok(match data_type {
+            DataType::Float32 | DataType::Float64 => Self::Number { values: Vec::new() },
+            DataType::Boolean => Self::Logical { values: Vec::new() },
+            DataType::Utf8 | DataType::LargeUtf8 => Self::Text { values: Vec::new() },
+            DataType::Dictionary(key, value)
+                if matches!(key.as_ref(), DataType::Int32)
+                    && matches!(value.as_ref(), DataType::Utf8) =>
+            {
+                Self::Text { values: Vec::new() }
+            }
+            DataType::Date32 | DataType::Date64 | DataType::Timestamp(_, _) => {
+                Self::DateTime { values: Vec::new() }
+            }
+            other => {
+                return Err(invalid_variable(format!(
+                    "parquetread: unsupported parquet column type {other:?}"
+                )))
+            }
+        })
     }
 
     fn push_number(&mut self, value: Option<f64>) {
-        self.push_as(ParquetColumnKind::Number, value.map(ParquetCell::Number));
+        self.push_cell(value.map(ParquetCell::Number));
     }
 
     fn push_integer(&mut self, value: Option<IntValue>, missing: &IntValue) {
-        self.ensure_integer(missing);
         let value = value.unwrap_or_else(|| missing.clone());
         match self {
             Self::Integer { storage } => push_integer_value(storage, value),
@@ -561,42 +527,25 @@ impl ParquetColumnBuilder {
 
     fn ensure_integer(&mut self, prototype: &IntValue) {
         match self {
-            Self::Empty => {
-                *self = Self::Integer {
-                    storage: empty_integer_storage_for(prototype),
-                };
-            }
-            Self::Integer { .. } => {}
+            Self::Integer { storage } if storage.numeric_dtype() == prototype.numeric_dtype() => {}
             _ => unreachable!("parquetread column kind changed within one Arrow array"),
         }
     }
 
     fn push_bool(&mut self, value: Option<bool>) {
-        self.push_as(ParquetColumnKind::Logical, value.map(ParquetCell::Logical));
+        self.push_cell(value.map(ParquetCell::Logical));
     }
 
     fn push_text(&mut self, value: Option<String>) {
-        self.push_as(ParquetColumnKind::Text, value.map(ParquetCell::Text));
+        self.push_cell(value.map(ParquetCell::Text));
     }
 
     fn push_datetime(&mut self, value: Option<f64>) {
-        self.push_as(
-            ParquetColumnKind::DateTime,
-            value.map(ParquetCell::DateTime),
-        );
+        self.push_cell(value.map(ParquetCell::DateTime));
     }
 
-    fn push_as(&mut self, kind: ParquetColumnKind, cell: Option<ParquetCell>) {
+    fn push_cell(&mut self, cell: Option<ParquetCell>) {
         match self {
-            Self::Empty => {
-                *self = match kind {
-                    ParquetColumnKind::Number => Self::Number { values: Vec::new() },
-                    ParquetColumnKind::Logical => Self::Logical { values: Vec::new() },
-                    ParquetColumnKind::Text => Self::Text { values: Vec::new() },
-                    ParquetColumnKind::DateTime => Self::DateTime { values: Vec::new() },
-                };
-                self.push_as(kind, cell);
-            }
             Self::Number { values, .. } => match cell {
                 Some(ParquetCell::Number(value)) => values.push(value),
                 None => values.push(f64::NAN),
@@ -648,19 +597,8 @@ impl ParquetColumnBuilder {
                     "yyyy-MM-dd HH:mm:ss",
                 )
             }
-            Self::Empty => Tensor::new(Vec::new(), vec![0, 1])
-                .map(Value::Tensor)
-                .map_err(|err| invalid_variable(format!("parquetread: {err}"))),
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum ParquetColumnKind {
-    Number,
-    Logical,
-    Text,
-    DateTime,
 }
 
 enum ParquetCell {
@@ -705,13 +643,8 @@ fn selected_columns<'a>(
     let Some(selected) = &options.selected_variable_names else {
         return Ok(((0..all_names.len()).collect(), all_names));
     };
-    let mut requested = HashSet::new();
+    let requested = selected.iter().cloned().collect::<HashSet<_>>();
     for name in selected {
-        if !requested.insert(name.clone()) {
-            return Err(invalid_argument(format!(
-                "parquetread: SelectedVariableNames contains duplicate variable '{name}'"
-            )));
-        }
         if !all_names.iter().any(|candidate| candidate == name) {
             return Err(invalid_argument(format!(
                 "parquetread: SelectedVariableNames contains unknown variable '{name}'"

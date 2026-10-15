@@ -224,6 +224,11 @@ fn object(value: Value) -> ObjectInstance {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_sample_parquet(path: &Path) {
+    write_sample_parquet_with_rows(path, true);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_sample_parquet_with_rows(path: &Path, include_rows: bool) {
     use arrow_array::{
         BooleanArray, Float64Array, Int32Array, RecordBatch, StringArray as ArrowStringArray,
     };
@@ -258,13 +263,15 @@ fn write_sample_parquet(path: &Path) {
         ],
     )
     .expect("create parquet batch");
-    writer.write(&batch).expect("write parquet batch");
+    if include_rows {
+        writer.write(&batch).expect("write parquet batch");
+    }
     writer.close().expect("close parquet writer");
     fs::write(path, bytes).expect("write parquet sample");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn write_integer_parquet(path: &Path) {
+fn write_integer_parquet(path: &Path, include_rows: bool) {
     use arrow_array::{
         Int16Array, Int32Array, Int64Array, Int8Array, RecordBatch, UInt16Array, UInt32Array,
         UInt64Array, UInt8Array,
@@ -304,7 +311,9 @@ fn write_integer_parquet(path: &Path) {
         ],
     )
     .expect("create parquet batch");
-    writer.write(&batch).expect("write parquet batch");
+    if include_rows {
+        writer.write(&batch).expect("write parquet batch");
+    }
     writer.close().expect("close parquet writer");
     fs::write(path, bytes).expect("write parquet integer sample");
 }
@@ -400,74 +409,119 @@ fn parquetread_imports_common_column_types() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parquetread_preserves_all_integer_physical_column_classes() {
-    let path = unique_path("parquetread_integer_columns").with_extension("parquet");
-    write_integer_parquet(&path);
-
-    let table = object(
-        block_on(parquetread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("parquetread"),
-    );
-
-    let cases = [
-        ("I8", IntegerStorage::I8(vec![i8::MIN, 0])),
-        ("I16", IntegerStorage::I16(vec![i16::MIN, 0])),
-        ("I32", IntegerStorage::I32(vec![i32::MIN, 0])),
-        ("I64", IntegerStorage::I64(vec![i64::MIN, 0])),
-        ("U8", IntegerStorage::U8(vec![u8::MAX, 0])),
-        ("U16", IntegerStorage::U16(vec![u16::MAX, 0])),
-        ("U32", IntegerStorage::U32(vec![u32::MAX, 0])),
-        ("U64", IntegerStorage::U64(vec![u64::MAX, 0])),
-    ];
-    for (name, expected) in cases {
-        let Value::Tensor(column) = table_member_get(&table, &Value::from(name)).unwrap() else {
-            panic!("expected tensor column for {name}");
+    let directory = tempfile::tempdir().expect("owned integer Parquet fixture");
+    let path = directory.path().join("integers.parquet");
+    for (include_rows, empty_selection) in [(true, false), (true, true), (false, false)] {
+        write_integer_parquet(&path, include_rows);
+        let options = if empty_selection {
+            vec![
+                Value::from("RowGroups"),
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap()),
+            ]
+        } else {
+            Vec::new()
         };
-        assert_eq!(column.shape(), &[2, 1], "{name}");
-        assert_eq!(column.integer_storage(), Some(&expected), "{name}");
+        let table = object(
+            block_on(parquetread_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                options,
+            ))
+            .expect("parquetread"),
+        );
+        let cases = [
+            ("I8", IntegerStorage::I8(vec![i8::MIN, 0])),
+            ("I16", IntegerStorage::I16(vec![i16::MIN, 0])),
+            ("I32", IntegerStorage::I32(vec![i32::MIN, 0])),
+            ("I64", IntegerStorage::I64(vec![i64::MIN, 0])),
+            ("U8", IntegerStorage::U8(vec![u8::MAX, 0])),
+            ("U16", IntegerStorage::U16(vec![u16::MAX, 0])),
+            ("U32", IntegerStorage::U32(vec![u32::MAX, 0])),
+            ("U64", IntegerStorage::U64(vec![u64::MAX, 0])),
+        ];
+        for (name, expected) in cases {
+            let Value::Tensor(column) = table_member_get(&table, &Value::from(name)).unwrap()
+            else {
+                panic!("expected tensor column for {name}");
+            };
+            if include_rows && !empty_selection {
+                assert_eq!(column.shape(), &[2, 1], "{name}");
+                assert_eq!(column.integer_storage(), Some(&expected), "{name}");
+            } else {
+                assert_eq!(column.shape(), &[0, 1], "{name}");
+                assert_eq!(column.numeric_dtype(), expected.numeric_dtype(), "{name}");
+                assert_eq!(column.integer_storage().unwrap().len(), 0, "{name}");
+            }
+        }
     }
-
-    let _ = fs::remove_file(&path);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parquetread_supports_selected_variables_and_row_groups() {
-    let path = unique_path("parquetread_projection").with_extension("parquet");
-    write_sample_parquet(&path);
-
-    let selected = StringArray::new(vec!["Group".to_string(), "Score".to_string()], vec![1, 2])
+    let directory = tempfile::tempdir().expect("owned mixed Parquet fixture");
+    let path = directory.path().join("mixed.parquet");
+    for (include_rows, empty_selection) in [(true, false), (true, true), (false, true)] {
+        write_sample_parquet_with_rows(&path, include_rows);
+        let names = ["Group", "Passed", "Score", "Name"];
+        let selected = StringArray::new(
+            names.iter().map(|name| (*name).into()).collect(),
+            vec![1, 4],
+        )
         .expect("selected variables");
-    let table = object(
-        block_on(parquetread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![
-                Value::from("SelectedVariableNames"),
-                Value::StringArray(selected),
-                Value::from("RowGroups"),
-                Value::Num(2.0),
-            ],
-        ))
-        .expect("parquetread selected"),
-    );
-    assert_eq!(
-        table_variable_names_from_object(&table).unwrap(),
-        vec!["Group".to_string(), "Score".to_string()]
-    );
-    match table_member_get(&table, &Value::from("Group")).unwrap() {
-        Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape(), &[1, 1]);
-            assert_eq!(
-                tensor.integer_storage(),
-                Some(&IntegerStorage::I32(vec![2]))
-            );
+        let table = object(
+            block_on(parquetread_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![
+                    Value::from("SelectedVariableNames"),
+                    Value::StringArray(selected),
+                    Value::from("RowGroups"),
+                    if empty_selection {
+                        Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap())
+                    } else {
+                        Value::Num(2.0)
+                    },
+                ],
+            ))
+            .expect("parquetread selected"),
+        );
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            names
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<Vec<_>>()
+        );
+        match table_member_get(&table, &Value::from("Group")).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape(), &[usize::from(!empty_selection), 1]);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::I32(if empty_selection {
+                        Vec::new()
+                    } else {
+                        vec![2]
+                    }))
+                );
+            }
+            other => panic!("expected tensor column, got {other:?}"),
         }
-        other => panic!("expected tensor column, got {other:?}"),
+        let score = table_member_get(&table, &Value::from("Score")).unwrap();
+        assert!(
+            matches!(score, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64
+            && tensor.shape() == [usize::from(!empty_selection), 1]
+            && (empty_selection || tensor.materialize_f64()[0].is_nan()))
+        );
+        let name = table_member_get(&table, &Value::from("Name")).unwrap();
+        assert!(
+            matches!(name, Value::StringArray(array) if array.shape == [usize::from(!empty_selection), 1]
+            && array.data == if empty_selection { Vec::new() } else { vec!["item-c".to_string()] })
+        );
+        let passed = table_member_get(&table, &Value::from("Passed")).unwrap();
+        assert!(
+            matches!(passed, Value::LogicalArray(array) if array.shape == [usize::from(!empty_selection), 1]
+            && array.data == if empty_selection { Vec::new() } else { vec![0] })
+        );
     }
-
-    let _ = fs::remove_file(&path);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -507,6 +561,70 @@ fn parquetinfo_reports_schema_and_row_groups() {
     }
 
     let _ = fs::remove_file(&path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn canonical_parquet_example_bytes_have_authentic_schema_and_selected_values() {
+    use runmat_builtins::{BuiltinExampleFixture, BuiltinFilesystemEntry, BuiltinFixtureContent};
+    let BuiltinExampleFixture::Filesystem(fixture) = runmat_builtins::PARQUETREAD_CATALOG_ENTRY
+        .documentation
+        .examples[0]
+        .fixture
+    else {
+        panic!("typed filesystem fixture");
+    };
+    let BuiltinFilesystemEntry::File {
+        content: BuiltinFixtureContent::Bytes(bytes),
+        ..
+    } = fixture.entries[0]
+    else {
+        panic!("actual ArrowWriter bytes");
+    };
+    let directory = tempfile::tempdir().expect("owned fixture directory");
+    let path = directory.path().join("measurements.parquet");
+    fs::write(&path, bytes).expect("owned example fixture");
+    let run = || {
+        let text = path.to_string_lossy().to_string();
+        let path_value = Value::CharArray(
+            CharArray::new_with_shape(text.chars().collect(), vec![1, 1, text.chars().count()])
+                .unwrap(),
+        );
+        let Value::Struct(info) = block_on(parquetinfo_builtin(path_value.clone())).unwrap() else {
+            panic!("metadata struct");
+        };
+        for (name, count) in [
+            ("NumRows", 4.0),
+            ("NumRowGroups", 2.0),
+            ("NumVariables", 2.0),
+        ] {
+            assert!(matches!(info.fields.get(name), Some(Value::Num(actual)) if *actual == count));
+        }
+        let table = object(
+            block_on(parquetread_builtin(
+                path_value,
+                vec![
+                    Value::from("SelectedVariableNames"),
+                    Value::StringArray(
+                        runmat_value::StringArray::new(
+                            vec!["time".into(), "value".into()],
+                            vec![1, 2],
+                        )
+                        .unwrap(),
+                    ),
+                    Value::from("RowGroups"),
+                    Value::Num(2.0),
+                ],
+            ))
+            .unwrap(),
+        );
+        for (name, expected) in [("time", vec![3.0, 4.0]), ("value", vec![30.0, 40.0])] {
+            let value = table_member_get(&table, &Value::from(name)).unwrap();
+            assert!(matches!(value, Value::Tensor(tensor) if tensor.materialize_f64() == expected));
+        }
+    };
+    run();
+    fs::remove_file(path).expect("remove owned example fixture");
 }
 
 #[cfg(not(target_arch = "wasm32"))]

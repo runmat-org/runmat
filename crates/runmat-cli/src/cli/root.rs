@@ -317,11 +317,15 @@ pub enum Commands {
         #[arg(long)]
         reset: bool,
     },
-    /// Apply auto-offload calibration from suite telemetry results
+    /// Refresh authoritative calibration or inspect imported calibration data
     #[cfg(feature = "wgpu")]
     AccelCalibrate {
-        /// Path to suite results JSON produced by the benchmark harness
-        input: PathBuf,
+        /// Optional original-template input or diagnostic suite results JSON
+        #[arg(required_unless_present = "refresh", conflicts_with = "refresh")]
+        input: Option<PathBuf>,
+        /// Measure current original CPU templates using the existing calibration owner
+        #[arg(long)]
+        refresh: bool,
         /// Preview updates without persisting the calibration cache
         #[arg(long)]
         dry_run: bool,
@@ -464,6 +468,30 @@ mod tests {
     use super::{Cli, Commands};
     use crate::cli::{AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg};
     use clap::Parser;
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn calibration_refresh_and_input_are_exclusive_and_dry_run_is_preserved() {
+        let cli =
+            Cli::try_parse_from(["runmat", "accel-calibrate", "--refresh", "--dry-run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::AccelCalibrate {
+                input: None,
+                refresh: true,
+                dry_run: true,
+                ..
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["runmat", "accel-calibrate", "results.json", "--refresh"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["runmat", "accel-calibrate"]).is_err());
+        assert!(
+            Cli::try_parse_from(["runmat", "accel-calibrate", "results.json", "--dry-run"]).is_ok()
+        );
+    }
 
     #[test]
     fn removed_startup_snapshot_flag_is_rejected() {
