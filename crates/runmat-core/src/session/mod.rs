@@ -61,6 +61,7 @@ mod executable;
 #[cfg(not(target_arch = "wasm32"))]
 mod host_driver;
 mod host_services;
+pub use host_services::SessionGraphicsHost;
 mod http_host;
 mod init;
 mod input;
@@ -222,6 +223,7 @@ impl RunMatSession {
     /// Stop and release local callback jobs before host disposal. Idempotent;
     /// subsequent scheduling reports a stable closed-session error.
     pub fn shutdown_local_tasks(&self) {
+        self.retire_graphics_host();
         #[cfg(not(target_arch = "wasm32"))]
         if self.mex_runtime.has_unretired_work() {
             self.mex_runtime.force_abandon();
@@ -415,6 +417,7 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        self.retire_graphics_host();
         if let Some(callbacks) = self.graphics_callbacks.take() {
             callbacks.close();
         }

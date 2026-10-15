@@ -135,13 +135,23 @@ fn remap_indices(child: &mut PlotChildHandleState, mapping: &[Option<usize>]) ->
     }
 }
 
+#[cfg(test)]
 pub fn clear_axes_target(
     handle: FigureHandle,
     axes_index: usize,
     reset: bool,
 ) -> Result<(), FigureError> {
+    clear_axes_target_for_property(&PropertyMutationTarget::alias(), handle, axes_index, reset)
+}
+
+pub(crate) fn clear_axes_target_for_property(
+    property: &PropertyMutationTarget,
+    handle: FigureHandle,
+    axes_index: usize,
+    reset: bool,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let state = reg
             .figures
             .get(&handle)
@@ -161,7 +171,7 @@ pub fn clear_axes_target(
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 

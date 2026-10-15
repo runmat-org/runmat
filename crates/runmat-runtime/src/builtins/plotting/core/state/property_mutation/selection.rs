@@ -94,7 +94,34 @@ pub(crate) fn select_axes_for_figure_for_property(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<(), FigureError> {
+    select_axes(property, handle, axes_index, None)
+}
+
+pub(crate) fn select_axes_receiver_for_property(
+    property: &PropertyMutationTarget,
+    receiver: &GraphicsReceiverRef,
+) -> Result<(), FigureError> {
+    let GraphicsReceiverKind::Axes { figure, index } = receiver.kind() else {
+        return Err(FigureError::InvalidAxesHandle);
+    };
+    select_axes(property, FigureHandle::from(figure), index, Some(receiver))
+}
+
+fn select_axes(
+    property: &PropertyMutationTarget,
+    handle: FigureHandle,
+    axes_index: usize,
+    source: Option<&GraphicsReceiverRef>,
+) -> Result<(), FigureError> {
     let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
+    if source.is_some_and(|source| {
+        !reg.figures
+            .get(&handle)
+            .and_then(|state| state.axes_receivers.get(&axes_index))
+            .is_some_and(|receiver| receiver.shares_lease(source))
+    }) {
+        return Err(FigureError::StalePlotSnapshot);
+    }
     let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {

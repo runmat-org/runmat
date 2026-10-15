@@ -67,6 +67,25 @@ pub(crate) fn graphics_callback_payload_valid(
     }
 }
 
+pub(crate) fn graphics_callback_payload_valid_at_scene(
+    receiver: &runmat_value::GraphicsReceiverRef,
+    kind: runmat_value::GraphicsCallbackKind,
+    payload: &runmat_value::GraphicsCallbackRolePayload,
+    scene: &runmat_value::GraphicsSceneLease,
+) -> bool {
+    #[cfg(feature = "plot-core")]
+    {
+        crate::builtins::plotting::state::callback_payload_valid_at_scene(
+            receiver, kind, payload, scene,
+        )
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = (receiver, kind, payload, scene);
+        false
+    }
+}
+
 pub(crate) fn graphics_receiver_class(
     receiver: &runmat_value::GraphicsReceiverRef,
 ) -> Option<runmat_types::StaticClassIdentity> {

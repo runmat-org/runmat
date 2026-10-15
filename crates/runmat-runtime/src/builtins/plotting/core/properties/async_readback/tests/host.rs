@@ -205,17 +205,65 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
     let id = host_line();
     let (child, _, _) = plot_child_element_snapshot(id).unwrap();
     let figure = child.figure_axes().0;
+    let (_, other_axes) = state::create_axes_for_figure(Some(figure)).unwrap();
+    state::set_text_properties_for_axes_for_property(
+        &state::PropertyMutationTarget::alias(),
+        figure,
+        other_axes,
+        state::PlotObjectKind::Title,
+        Some("x".repeat(4096)),
+        None,
+    )
+    .unwrap();
+    state::select_axes_for_figure(figure, 0).unwrap();
     let receiver = state::figure_graphics_receiver(figure).unwrap().unwrap();
     let selection = state::GraphicsPropertySelection::capture(receiver.clone()).unwrap();
-    let outcome = block_on(super::super::super::receiver::set_selected_properties(
-        selection,
+    use super::super::super::figure_plan::PreparedFigureProperties;
+    let original_axes = state::axes_graphics_receiver(figure, 0).unwrap().unwrap();
+    let original_axes_object = state::graphics_receiver_object(original_axes.clone())
+        .unwrap()
+        .unwrap();
+    let admitted = PreparedFigureProperties::new(
+        figure,
         &[
             Value::String("Name".into()),
             Value::String("retained".into()),
+            Value::String("CurrentAxes".into()),
+            original_axes_object,
         ],
         "set",
-    ))
+    )
     .unwrap();
+    let proposal = admitted.proposal(&selection, "set").unwrap();
+    let budget = std::num::NonZeroUsize::new(proposal.retained_byte_upper_bound()).unwrap();
+    let before = state::current_figure_revision(figure);
+    for edits in [
+        vec![
+            Value::String("Name".into()),
+            Value::String("y".repeat(4096)),
+            Value::String("Name".into()),
+            Value::String("retained".into()),
+        ],
+        vec![
+            Value::String("CurrentAxes".into()),
+            Value::Num(state::encode_axes_handle(figure, other_axes)),
+            Value::String("CurrentAxes".into()),
+            Value::Num(state::encode_axes_handle(figure, 0)),
+        ],
+    ] {
+        let rejected = PreparedFigureProperties::new(figure, &edits, "set").unwrap();
+        let proposal = rejected.proposal(&selection, "set").unwrap();
+        assert!(matches!(
+            proposal.validate_retained_budget(budget),
+            Err(state::FigurePersistenceSnapshotError::BudgetExceeded { .. })
+        ));
+        assert_eq!(state::current_figure_revision(figure), before);
+        selection.ensure_current().unwrap();
+    }
+    proposal.validate_retained_budget(budget).unwrap();
+    let authority = state::PropertyMutationTarget::selected(selection);
+    let outcome = admitted.apply(&authority, figure, "set").unwrap();
+    assert!(state::graphics_receiver_valid(&original_axes));
     let PropertySetOutcome::Presentation(PropertyPresentation::Selected {
         selection,
         figure: retained,
@@ -226,6 +274,9 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
     assert!(selection.figure_receiver().shares_lease(&receiver));
     selection.ensure_current().unwrap();
     assert_eq!(retained.name.as_deref(), Some("retained"));
+    let actual =
+        crate::context::RuntimeGraphicsScene::from_property(&selection, &retained).unwrap();
+    assert!(actual.retained_byte_upper_bound().unwrap() <= budget.get());
     let axes = state::axes_graphics_receiver(figure, 0).unwrap().unwrap();
     let object = state::graphics_receiver_object(axes).unwrap().unwrap();
     block_on(crate::builtins::plotting::set::set_builtin_async(vec![

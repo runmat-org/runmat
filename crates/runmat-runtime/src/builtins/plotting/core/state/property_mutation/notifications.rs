@@ -21,7 +21,7 @@ impl PreparedFigureUpdates {
         registry: &PlotRegistry,
         updates: Vec<(FigureHandle, Figure)>,
     ) -> Result<Self, FigureError> {
-        if !property.is_selected() {
+        if !property.is_selected() && property.callback.is_none() {
             return Ok(Self::CompatibilityAlias(updates));
         }
         let selected = updates

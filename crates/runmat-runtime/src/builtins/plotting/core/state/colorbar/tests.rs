@@ -19,7 +19,7 @@ fn repeated_publication_keeps_identity_and_hidden_is_not_deleted() {
     let figure = clone_figure(axes.handle).unwrap();
     notify_with_figure(axes.handle, &figure, FigureEventKind::Updated);
     assert_eq!(registry().next_plot_child_handle, next);
-    set_colorbar_visible(bar, false).unwrap();
+    set_colorbar_visible_for_property(&PropertyMutationTarget::alias(), bar, false).unwrap();
     let resolved = resolve_plot_handle(&Value::Num(bar), "get").unwrap();
     assert_eq!(
         get_properties(resolved.clone(), Some("Visible"), "get").unwrap(),

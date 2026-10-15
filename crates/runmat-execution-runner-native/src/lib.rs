@@ -35,4 +35,7 @@ pub use remote::{
 };
 pub use service::NativeExecutionService;
 pub use test_workload::execute_host_program_request;
+pub use test_workload::{
+    execute_host_graph_request_with_graphics, execute_host_program_request_with_graphics,
+};
 pub use worker::run_worker_stdio;

@@ -456,6 +456,15 @@ pub fn get_data_cursor_object_property(
 pub fn set_data_cursor_object_properties(
     value: &Value,
     args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<Option<()>> {
+    set_data_cursor_object_properties_in_context(None, value, args, builtin)
+}
+
+pub(crate) fn set_data_cursor_object_properties_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    args: &[Value],
     _builtin: &'static str,
 ) -> BuiltinResult<Option<()>> {
     let Some(handle) = read_data_cursor_handle(value).cloned() else {
@@ -469,7 +478,7 @@ pub fn set_data_cursor_object_properties(
         let name = super::properties::property_name_text(&pair[0], "set")
             .map_err(|_| invalid("datacursormode property names must be scalar text"))?;
         apply_property(mode_receiver(&handle)?, &name, &pair[1])?;
-        write_object_property(&handle, &name, pair[1].clone())?;
+        write_object_property(runtime, &handle, &name, pair[1].clone())?;
     }
     let refreshed = snapshot_from_object(&handle)?;
     runmat_gc::gc_with_value_mut(&handle.target, |target| {
@@ -546,9 +555,15 @@ fn object_property_or_default(
     .map_err(|err| internal(err.to_string()))
 }
 
-fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
+fn write_object_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &HandleRef,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
     if let Some(key) = canonical_property(name).and_then(DataCursorProperty::persistent) {
-        return super::state::mode_properties::set(
+        return super::state::mode_properties::set_in_context(
+            runtime,
             &mode_receiver(handle)?,
             key,
             value,

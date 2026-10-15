@@ -1,5 +1,5 @@
 use crate::{
-    catalog::inference::{argument_error, finish_fixed},
+    catalog::inference::{argument_error, finish_fixed, known_invalid_scalar_object_handle},
     BuiltinCatalogEntry,
 };
 use runmat_types::*;
@@ -26,6 +26,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 Some(1)
             }
             ValueKindFact::Unknown => None,
+            ValueKindFact::Object(_) => {
+                if known_invalid_scalar_object_handle(first, &[standard::FIGURE, standard::AXES]) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-AXES-TARGET",
+                        "axes target must be a scalar Figure or Axes handle",
+                        0,
+                    ));
+                }
+                Some(1)
+            }
             _ => {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-AXES-INPUT",

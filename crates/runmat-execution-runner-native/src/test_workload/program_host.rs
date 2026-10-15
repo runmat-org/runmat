@@ -48,7 +48,23 @@ pub(super) fn execute_host_unit_request<'a>(
     collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     bundle: Option<Arc<ExecutionBundle>>,
 ) -> HostResponseFuture<'a> {
-    match prepare_host_unit_route(request, materialized, collective, bundle) {
+    execute_host_unit_request_with_graphics(
+        request,
+        materialized,
+        collective,
+        bundle,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+    )
+}
+
+pub(super) fn execute_host_unit_request_with_graphics<'a>(
+    request: HostUnitRequest,
+    materialized: Option<&'a MaterializedProject>,
+    collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    bundle: Option<Arc<ExecutionBundle>>,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> HostResponseFuture<'a> {
+    match prepare_host_unit_route(request, materialized, collective, bundle, graphics) {
         Ok(execution) => execution,
         Err(error) => Box::pin(std::future::ready(ProgramExecutionResponse::Failure {
             message: error.message,
@@ -62,6 +78,7 @@ fn prepare_host_unit_route<'a>(
     materialized: Option<&'a MaterializedProject>,
     collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     bundle: Option<Arc<ExecutionBundle>>,
+    graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<HostResponseFuture<'a>, HostPreparationError> {
     let failure = |message| HostPreparationError { message };
     if let HostUnitRequest::Graph(graph) = &request {
@@ -175,6 +192,7 @@ fn prepare_host_unit_route<'a>(
     if interop == runmat_types::InteropManifest::empty()
         && collective.is_none()
         && selected_direct.is_none()
+        && matches!(graphics, runmat_core::SessionGraphicsHost::Unavailable)
     {
         return Ok(match request {
             HostUnitRequest::Direct(request) => {
@@ -194,6 +212,15 @@ fn prepare_host_unit_route<'a>(
             "failed to initialize foreign execution session: {error}"
         ))
     })?;
+    if let Err(error) = session.attach_graphics_host(graphics) {
+        let revision = match &request {
+            HostUnitRequest::Direct(request) => request.recipe.program_revision.clone(),
+            HostUnitRequest::Graph(request) => request.recipe.program_revision.clone(),
+        };
+        let runtime = session.execution_runtime_context(revision);
+        let response = runmat_vm::runtime_failure_response(error, &runtime);
+        return Ok(Box::pin(std::future::ready(response)));
+    }
     if let Some(materialized) = materialized {
         session
             .attach_foreign_private_root(materialized.private_root())
@@ -248,13 +275,33 @@ async fn execute_foreign_host_route(route: ForeignHostRoute<'_>) -> ProgramExecu
         selected_bundle,
         graph_failure_sources.clone(),
     );
-    let mut response = match driver.participate_foreground(execution).await {
+    let callbacks = session.graphics_callback_queue().cloned();
+    let execution = async move {
+        match callbacks {
+            Some(queue) => queue.drive_execution_with_host_callbacks(execution).await,
+            None => Ok(execution.await),
+        }
+    };
+    let mut response = match driver
+        .participate_foreground(execution)
+        .await
+        .and_then(|result| result)
+    {
         Ok(response) => response,
         Err(error) if graph_request => {
             graph_failure_sources.encode_runtime_failure(error, &runtime)
         }
         Err(error) => runmat_vm::runtime_failure_response(error, &runtime),
     };
+    if let Err(error) = session.flush_graphics().await {
+        if !matches!(
+            &response,
+            ProgramExecutionResponse::Failure { .. }
+                | ProgramExecutionResponse::RuntimeFailure { .. }
+        ) {
+            response = runmat_vm::runtime_failure_response(error, &runtime);
+        }
+    }
     if let Err(error) = session.close_gracefully().await {
         if matches!(
             &response,

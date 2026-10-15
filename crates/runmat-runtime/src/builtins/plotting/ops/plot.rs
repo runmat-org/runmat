@@ -2,426 +2,31 @@
 
 use log::trace;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_plot_data_pair;
 use super::op_common::line_inputs::NumericInput;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
-use super::state::{
-    current_axes_state, current_hold_enabled, line_color_for_axes_series_index,
-    next_line_color_for_axes, next_line_style_for_axes, render_active_plot,
-    set_line_style_order_for_axes, PlotRenderOptions,
-};
+use super::state::{PlotRenderOptions, PreparedPlotTarget};
 use super::style::{
     looks_like_plot_option_name, marker_metadata_from_appearance, parse_line_style_args,
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "plot",
-    op_kind: GpuOpKind::PlotRender,
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
-    // tensors directly (zero-copy) when the web renderer shares the provider WGPU context.
-    // Do not force implicit gathers here; that defeats GPU-resident workloads.
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Plots are rendered by the host renderer; GPU inputs may be consumed zero-copy when a shared WGPU context is installed.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::plot")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "plot",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "plot performs I/O and terminates fusion graphs.",
-};
-
 const BUILTIN_NAME: &str = "plot";
 
-const PLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X/Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties.",
-    }];
-pub const PLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = plot([X,] integer_Y, ...)",
-        inputs: &PLOT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native numeric storage remains authoritative for XData/YData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only.",
-    }];
-
-const PLOT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the first line object in the rendered plot series.",
-}];
-
-const PLOT_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y data; X defaults to 1:numel(Y).",
-}];
-
-const PLOT_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data; X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const PLOT_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data; X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const PLOT_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-];
-
-const PLOT_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const PLOT_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const PLOT_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data; X defaults to 1:numel(Y).",
-    },
-];
-
-const PLOT_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-];
-
-const PLOT_INPUTS_AX_X_Y_STYLE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const PLOT_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const PLOT_INPUTS_MULTI_SERIES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "series",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Interleaved X/Y series pairs with optional per-series style tokens.",
-}];
-
-const PLOT_INPUTS_AX_MULTI_SERIES: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "series",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Interleaved X/Y series pairs with optional per-series style tokens.",
-    },
-];
-
-const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "h = plot(Y)",
-        inputs: &PLOT_INPUTS_Y,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(Y, LineSpec)",
-        inputs: &PLOT_INPUTS_Y_STYLE,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(Y, Name, Value, ...)",
-        inputs: &PLOT_INPUTS_Y_PROPS,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(X, Y)",
-        inputs: &PLOT_INPUTS_X_Y,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(X, Y, LineSpec)",
-        inputs: &PLOT_INPUTS_X_Y_STYLE,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(X, Y, Name, Value, ...)",
-        inputs: &PLOT_INPUTS_X_Y_PROPS,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(ax, Y)",
-        inputs: &PLOT_INPUTS_AX_Y,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(ax, X, Y)",
-        inputs: &PLOT_INPUTS_AX_X_Y,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(ax, X, Y, LineSpec)",
-        inputs: &PLOT_INPUTS_AX_X_Y_STYLE,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(ax, X, Y, Name, Value, ...)",
-        inputs: &PLOT_INPUTS_AX_X_Y_PROPS,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(X1, Y1, ..., Xn, Yn)",
-        inputs: &PLOT_INPUTS_MULTI_SERIES,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot(ax, X1, Y1, ..., Xn, Yn)",
-        inputs: &PLOT_INPUTS_AX_MULTI_SERIES,
-        outputs: &PLOT_OUTPUT_HANDLE,
-    },
-];
-
-pub const PLOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:plot:InvalidArgument"),
-    when: "Input data, series grammar, axes targeting, or style arguments are invalid.",
-    message: "plot: invalid argument",
-};
-
-pub const PLOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOT.INTERNAL",
-    identifier: Some("RunMat:plot:Internal"),
-    when: "Internal line construction or rendering fails unexpectedly.",
-    message: "plot: internal operation failed",
-};
-
-const PLOT_ERRORS: [BuiltinErrorDescriptor; 2] = [PLOT_ERROR_INVALID_ARGUMENT, PLOT_ERROR_INTERNAL];
-
-pub const PLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PLOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PLOT_ERRORS,
-};
+pub use runmat_builtins::{PLOT_DESCRIPTOR, PLOT_ERROR_INTERNAL, PLOT_ERROR_INVALID_ARGUMENT};
 
 fn plot_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -454,27 +59,56 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "plot",
-    category = "plotting",
-    summary = "Create 2-D line plots.",
-    keywords = "plot,line,2d,visualization",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::plot::PLOT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::plot::PLOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::plot"
 )]
+pub async fn plot_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
+    plot_builtin_with_runtime(runtime.as_ref(), args).await
+}
+
 pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_plot_invalid_argument)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_plot_invalid_argument)?;
+    plot_builtin_with_runtime(None, args).await
+}
+
+async fn plot_builtin_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &PLOT_DESCRIPTOR,
+        &runmat_builtins::PLOT_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
+    let (prepared, _) =
+        super::op_common::axes_target::prepare_axes_call(runtime, BUILTIN_NAME, &args)?;
+    let explicit = prepared.is_explicit();
+    let args = if explicit {
+        args.into_iter().skip(1).collect::<Vec<_>>()
+    } else {
+        args
+    };
+    if explicit && args.is_empty() {
+        return Err(plot_error_with_detail(
+            &PLOT_ERROR_INVALID_ARGUMENT,
+            "expected data after axes handle",
+        ));
+    }
     let (mut series_plans, line_style_order) =
         parse_series_specs(args).map_err(map_plot_invalid_argument)?;
-    let axes = current_axes_state().active_index;
-    let hold_enabled = current_hold_enabled();
+    let target = PreparedPlotTarget::prepare(prepared.resolve(BUILTIN_NAME)?, explicit)
+        .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
+    let hold_enabled = target
+        .hold_enabled()
+        .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
     if let Some(order) = line_style_order.as_ref() {
         apply_line_style_order(&mut series_plans, order);
-        set_line_style_order_for_axes(axes, order);
+        target
+            .set_style_order(order)
+            .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
     }
     let opts = PlotRenderOptions {
         title: "Plot",
@@ -485,20 +119,20 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let total = series_plans.len();
     let mut plots: Vec<LinePlot> = Vec::with_capacity(series_plans.len());
     for (series_idx, mut plan) in series_plans.drain(..).enumerate() {
-        if !plan.line_style_explicit {
-            plan.appearance.line_style = if hold_enabled {
-                next_line_style_for_axes(axes)
-            } else {
-                LineStyle::Solid
-            };
+        let (line_style, color) = target
+            .series_style(
+                series_idx,
+                hold_enabled,
+                !plan.line_style_explicit,
+                !plan.color_explicit,
+            )
+            .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
+        if let Some(line_style) = line_style {
+            plan.appearance.line_style = line_style;
             plan.line_style_explicit = true;
         }
-        if !plan.color_explicit {
-            plan.appearance.color = if hold_enabled {
-                next_line_color_for_axes(axes)
-            } else {
-                line_color_for_axes_series_index(axes, series_idx)
-            };
+        if let Some(color) = color {
+            plan.appearance.color = color;
         }
         let inferred_label = plan
             .label
@@ -580,8 +214,7 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut plots_opt = Some(plots);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
+    let render_result = target.render(runtime, BUILTIN_NAME, opts, move |figure, axes_index| {
         let plots = plots_opt.take().expect("plot series consumed exactly once");
         for (idx, plot) in plots.into_iter().enumerate() {
             let plot_index = figure.add_line_plot_on_axes(plot, axes_index);
@@ -594,11 +227,9 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_line_handle(
-        figure_handle,
-        axes_index,
-        plot_index,
-    );
+    let handle = target
+        .register_line(axes_index, plot_index)
+        .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
     if let Err(err) = render_result {
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);

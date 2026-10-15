@@ -13,7 +13,7 @@ pub(super) fn property_unavailable(builtin: &'static str) -> crate::RuntimeError
     .build()
 }
 
-fn select(
+pub(crate) fn select(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<Option<GraphicsPropertySelection>> {
@@ -62,15 +62,14 @@ pub(crate) async fn get_receiver_properties(
     Ok(Some(result))
 }
 
-/// The exact Figure outcome must be consumed by the owning presentation adapter,
-/// not converted to a dirty-only success or passed to the numeric renderer.
-pub(crate) async fn set_selected_properties(
+async fn set_selected_properties_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
     selection: GraphicsPropertySelection,
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<PropertySetOutcome> {
     let kind = selection.receiver().kind();
-    let authority = PropertyMutationTarget::selected(selection.clone());
+    let authority = PropertyMutationTarget::selected(selection.clone()).with_runtime(runtime);
     match kind {
         GraphicsReceiverKind::Figure { .. } => set_properties_for_target(
             &authority,
@@ -94,7 +93,8 @@ pub(crate) async fn set_selected_properties(
     }
 }
 
-pub(crate) async fn set_receiver_properties(
+pub(crate) async fn set_receiver_properties_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
     args: &[Value],
     builtin: &'static str,
@@ -102,16 +102,40 @@ pub(crate) async fn set_receiver_properties(
     let Some(selection) = select(value, builtin)? else {
         return Ok(None);
     };
-    // This boundary has no exact native presentation consumer yet. Decline
-    // before writes; activation integration must consume the retained outcome.
-    if matches!(
+    let (outcome, presentation) = if matches!(
         selection.receiver().kind(),
         GraphicsReceiverKind::Figure { .. }
     ) {
-        return Err(property_unavailable(builtin));
-    }
-    match set_selected_properties(selection, args, builtin).await? {
+        let runtime = runtime.ok_or_else(|| property_unavailable(builtin))?;
+        let service = runtime
+            .service_ports()
+            .require_graphics_presentation(builtin)
+            .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?
+            .clone();
+        let authority =
+            PropertyMutationTarget::selected(selection.clone()).with_runtime(Some(runtime));
+        let plan =
+            figure_plan::PreparedFigureProperties::new(selection.figure_handle(), args, builtin)?;
+        let proposal = plan.proposal(&selection, builtin)?;
+        service.admit_scene_update(&proposal)?;
+        let outcome = plan.apply(&authority, selection.figure_handle(), builtin)?;
+        (outcome, Some((runtime, service)))
+    } else {
+        (
+            set_selected_properties_with_runtime(runtime, selection, args, builtin).await?,
+            None,
+        )
+    };
+    match outcome {
         PropertySetOutcome::Complete => Ok(Some(())),
-        PropertySetOutcome::Presentation(_) => Err(property_unavailable(builtin)),
+        PropertySetOutcome::Presentation(PropertyPresentation::Selected { selection, figure }) => {
+            let (runtime, service) = presentation.ok_or_else(|| property_unavailable(builtin))?;
+            let scene = crate::context::RuntimeGraphicsScene::from_property(&selection, &figure)?;
+            crate::context::complete_selected_graphics(runtime, service.as_ref(), scene).await?;
+            Ok(Some(()))
+        }
+        PropertySetOutcome::Presentation(PropertyPresentation::CompatibilityAlias(_, _)) => {
+            Err(property_unavailable(builtin))
+        }
     }
 }

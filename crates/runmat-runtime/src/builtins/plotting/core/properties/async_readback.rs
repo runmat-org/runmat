@@ -145,8 +145,17 @@ pub async fn set_properties_async(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    set_properties_async_with_runtime(None, handle, args, builtin).await
+}
+
+pub(crate) async fn set_properties_async_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: PlotHandle,
+    args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
     let PlotHandle::PlotChild(id, state) = &handle else {
-        return set_properties(handle, args, builtin);
+        return set_properties_with_runtime(runtime, handle, args, builtin);
     };
     if !matches!(
         state.as_ref(),
@@ -154,11 +163,11 @@ pub async fn set_properties_async(
             | PlotChildHandleState::Scatter(_)
             | PlotChildHandleState::Line3(_)
     ) {
-        return set_properties(handle, args, builtin);
+        return set_properties_with_runtime(runtime, handle, args, builtin);
     }
     let (child, plot, revision) =
         plot_child_element_snapshot(*id).map_err(|err| map_figure_error(builtin, err))?;
-    let authority = super::super::state::PropertyMutationTarget::alias();
+    let authority = super::super::state::PropertyMutationTarget::alias().with_runtime(runtime);
     let guard = Some(PlotUpdateGuard {
         child_handle: *id,
         revision,

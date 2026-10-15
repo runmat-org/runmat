@@ -56,11 +56,6 @@ pub(super) fn reconcile_publication(handle: FigureHandle, figure: &Figure) {
     reconcile(&mut reg, handle, figure);
 }
 
-pub fn colorbar_handles_for_figure(handle: FigureHandle) -> Vec<f64> {
-    let reg = registry();
-    handles_in_registry(&reg, handle)
-}
-
 pub(super) fn handles_in_registry(reg: &PlotRegistry, handle: FigureHandle) -> Vec<f64> {
     let mut handles: Vec<_> = reg
         .plot_children
@@ -134,10 +129,6 @@ pub(crate) fn set_colorbar_enabled_for_axes_for_property(
     };
     property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
-}
-
-pub fn set_colorbar_visible(handle: f64, visible: bool) -> Result<(), FigureError> {
-    set_colorbar_visible_for_property(&PropertyMutationTarget::alias(), handle, visible)
 }
 
 pub(crate) fn set_colorbar_visible_for_property(

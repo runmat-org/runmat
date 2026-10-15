@@ -123,6 +123,7 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 /// Complete explicit runtime authority for one session/invocation tree.
 #[derive(Clone)]
 pub struct RuntimeContext {
+    graphics_callback_mutation: Option<super::GraphicsCallbackMutationScope>,
     execution: Rc<dyn RuntimeExecutionServices>,
     /// Call-local selected V3 graph authority. This carrier retains no
     /// execution port and snapshots Values only when a task is spawned.
@@ -219,6 +220,20 @@ impl std::fmt::Debug for RuntimeContext {
 }
 
 impl RuntimeContext {
+    pub(crate) fn with_graphics_callback_mutation(
+        mut self,
+        scope: Option<super::GraphicsCallbackMutationScope>,
+    ) -> Self {
+        self.graphics_callback_mutation = scope;
+        self
+    }
+
+    #[cfg(feature = "plot-core")]
+    pub(crate) fn graphics_callback_mutation(
+        &self,
+    ) -> Option<super::GraphicsCallbackMutationScope> {
+        self.graphics_callback_mutation.clone()
+    }
     pub fn new(execution: Rc<dyn RuntimeExecutionServices>) -> Self {
         Self::with_cancellation(execution, CancellationSource::new().token())
     }
@@ -233,6 +248,7 @@ impl RuntimeContext {
         let state = Rc::new(RuntimeContextState::new(RuntimeContextLocalId::next()));
         crate::class_registry::register_context_state(&state);
         let context = Self {
+            graphics_callback_mutation: None,
             execution,
             selected_graph_program: None,
             selected_graph_function_resolver: None,
@@ -785,6 +801,34 @@ impl RuntimeContext {
         };
         drop(retired);
         count
+    }
+
+    #[cfg(feature = "plot-core")]
+    pub(crate) fn prepare_plot_behavior(&self, slot: u64) -> crate::BuiltinResult<Option<Self>> {
+        let authority = {
+            let callbacks = self.state.plot_callbacks.borrow();
+            let root = callbacks
+                .get(&slot)
+                .filter(|root| root.live.load(std::sync::atomic::Ordering::Acquire))
+                .ok_or_else(|| {
+                    crate::build_runtime_error("graphics callback root has retired")
+                        .with_identifier("RunMat:graphics:CallbackSourceRetired")
+                        .build()
+                })?;
+            root.behavior_authority.clone()
+        };
+        authority.map(|authority| authority(self)).transpose()
+    }
+
+    #[cfg(feature = "plot-core")]
+    pub(crate) fn plot_behavior_source(&self, slot: u64) -> Option<String> {
+        let callbacks = self.state.plot_callbacks.borrow();
+        let root = callbacks.get(&slot)?;
+        match &root.value {
+            runmat_value::Value::String(text) => Some(text.clone()),
+            runmat_value::Value::CharArray(chars) => Some(chars.data.iter().collect()),
+            _ => None,
+        }
     }
 
     /// Invalidate only this session's staged host-effect invocations when its

@@ -1,5 +1,56 @@
 use super::*;
 
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+#[test]
+fn selected_native_scene_staging_defers_legacy_render_and_closes_exact_receiver() {
+    use crate::context::{
+        GraphicsFlushRequest, GraphicsSceneStaging, RuntimeContext, RuntimeGraphicsFlushOperation,
+        RuntimeGraphicsPresentationService, RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+    struct Selected {
+        staged: RefCell<Vec<GraphicsReceiverRef>>,
+        retired: RefCell<Vec<GraphicsReceiverRef>>,
+    }
+    impl RuntimeGraphicsPresentationService for Selected {
+        fn flush(
+            &self,
+            _: GraphicsFlushRequest,
+        ) -> std::pin::Pin<Box<dyn RuntimeGraphicsFlushOperation>> {
+            panic!("staging is not presentation")
+        }
+        fn stage_scene(
+            &self,
+            receiver: GraphicsReceiverRef,
+        ) -> Result<GraphicsSceneStaging, RuntimeError> {
+            assert!(graphics_receiver_valid(&receiver));
+            self.staged.borrow_mut().push(receiver);
+            Ok(GraphicsSceneStaging::DeferredToFlush)
+        }
+        fn retire_scene(&self, receiver: &GraphicsReceiverRef) {
+            self.retired.borrow_mut().push(receiver.clone());
+        }
+    }
+    let _guard = lock_plot_test_registry();
+    let host = Rc::new(Selected {
+        staged: RefCell::new(Vec::new()),
+        retired: RefCell::new(Vec::new()),
+    });
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_graphics_presentation(host.clone()),
+        );
+    let _selected = runtime.enter();
+    let handle = new_figure_handle();
+    let receiver = figure_graphics_receiver(handle).unwrap().unwrap();
+    let figure = clone_figure(handle).unwrap();
+    present_figure_update_with_options("plot", handle, figure, false, false).unwrap();
+    assert!(host.staged.borrow()[0].shares_lease(&receiver));
+    close_figure(Some(handle)).unwrap();
+    assert!(host.retired.borrow()[0].shares_lease(&receiver));
+    assert!(!graphics_receiver_valid(&receiver));
+}
+
 #[test]
 fn implicit_axis_target_read_and_single_axis_updates_keep_one_current_owner() {
     let _guard = lock_plot_test_registry();
@@ -32,6 +83,12 @@ fn central_mutation_helpers_replace_exact_scene_lease_after_admission() {
         let registry = registry();
         registry.figures[&handle].scene_lease.clone()
     };
+    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+    {
+        let receiver = figure_graphics_receiver(handle).unwrap().unwrap();
+        assert!(!figure_scene_is_current(&receiver, &before));
+        assert!(figure_scene_is_current(&receiver, &selected));
+    }
     assert!(!before.shares_lease(&selected));
     assert_eq!(before.figure(), handle.as_u32());
 

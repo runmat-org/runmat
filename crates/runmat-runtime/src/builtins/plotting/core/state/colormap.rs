@@ -19,19 +19,6 @@ pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     notify_with_figure(handle, &figure, FigureEventKind::Updated);
 }
 
-pub fn set_colormap_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    colormap: ColorMap,
-) -> Result<(), FigureError> {
-    set_colormap_for_axes_for_property(
-        &PropertyMutationTarget::alias(),
-        handle,
-        axes_index,
-        colormap,
-    )
-}
-
 pub(crate) fn set_colormap_for_axes_for_property(
     property: &PropertyMutationTarget,
 

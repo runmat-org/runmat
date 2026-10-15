@@ -11,7 +11,7 @@ const AXES_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
 const AXES_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "target",
-    ty: BuiltinParamType::NumericScalar,
+    ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Optional,
     default: None,
     description: "Existing axes handle to make current, or figure handle to parent new axes.",

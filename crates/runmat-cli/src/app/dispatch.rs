@@ -9,6 +9,14 @@ use crate::commands::{
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
+    dispatch_with_graphics(cli, config, &runmat_core::SessionGraphicsHost::Unavailable).await
+}
+
+pub(crate) async fn dispatch_with_graphics(
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     let command = cli.command.clone();
     let mut script_path = cli.script.clone();
     let mut emit_bytecode = cli.emit_bytecode.clone();
@@ -27,11 +35,20 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     }
 
     match (command, script_path) {
-        (Some(command), None) => execute_command(command, cli, config).await,
+        (Some(command), None) => execute_command(command, cli, config, graphics).await,
         (None, Some(script_path)) => {
-            script::execute_script(script_path, emit_bytecode, cli, config).await
+            script::execute_script_with_graphics(
+                script_path,
+                vec![],
+                emit_bytecode,
+                cli,
+                config,
+                false,
+                graphics,
+            )
+            .await
         }
-        (None, None) => repl::execute_repl(config, cli).await,
+        (None, None) => repl::execute_repl_with_graphics(config, cli, graphics).await,
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");
             std::process::exit(1);
@@ -39,21 +56,27 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     }
 }
 
-async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
+async fn execute_command(
+    command: Commands,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     match command {
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
-            repl::execute_repl(&repl_config, cli).await
+            repl::execute_repl_with_graphics(&repl_config, cli, graphics).await
         }
         Commands::Run { file, json, args } => {
-            script::execute_script_with_args(
+            script::execute_script_with_graphics(
                 file,
                 args,
                 cli.emit_bytecode.clone(),
                 cli,
                 config,
                 json,
+                graphics,
             )
             .await
         }

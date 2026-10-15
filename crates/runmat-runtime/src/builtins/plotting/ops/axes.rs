@@ -4,9 +4,13 @@ use runmat_builtins::{AXES_DESCRIPTOR, AXES_ERROR_TOO_MANY_OUTPUTS};
 use runmat_value::Value;
 
 use super::plotting_error;
-use super::properties::{map_figure_error, resolve_plot_handle, set_properties, PlotHandle};
+use super::properties::{
+    map_figure_error, resolve_plot_handle, select_graphics_property, set_properties_with_authority,
+    PlotHandle,
+};
 use super::state::{
-    create_axes_for_figure, encode_axes_handle, select_axes_for_figure, FigureHandle,
+    create_axes_for_figure_for_property, encode_axes_handle, select_axes_for_figure_for_property,
+    FigureHandle, PropertyMutationTarget,
 };
 use super::style::value_as_string;
 
@@ -15,15 +19,30 @@ const BUILTIN_NAME: &str = "axes";
 #[runmat_macros::runtime_builtin(
     name = "axes",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::axes"
 )]
+pub fn axes_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
+    axes_builtin_with_runtime(runtime.as_ref(), args)
+}
+
 pub fn axes_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    axes_builtin_with_runtime(None, args)
+}
+
+fn axes_builtin_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &AXES_DESCRIPTOR,
         &AXES_ERROR_TOO_MANY_OUTPUTS,
         BUILTIN_NAME,
     )?;
-    axes_state(args).map_err(|mut error| {
+    axes_state(runtime, args).map_err(|mut error| {
         if error.identifier.is_none() {
             error.identifier = Some("RunMat:axes:InvalidArgument".into());
         }
@@ -32,8 +51,35 @@ pub fn axes_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     })
 }
 
-fn axes_state(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (target, property_args) = split_axes_target(args)?;
+fn axes_state(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
+    let selected = args
+        .first()
+        .map(|value| select_graphics_property(value, BUILTIN_NAME))
+        .transpose()?
+        .flatten();
+    let (target, property_args) = match selected
+        .as_ref()
+        .map(|selection| selection.receiver().kind())
+    {
+        Some(runmat_value::GraphicsReceiverKind::Axes { figure, index }) => (
+            Some(AxesTarget::ExistingAxes(FigureHandle::from(figure), index)),
+            args.into_iter().skip(1).collect(),
+        ),
+        Some(runmat_value::GraphicsReceiverKind::Figure { figure }) => (
+            Some(AxesTarget::ParentFigure(FigureHandle::from(figure))),
+            args.into_iter().skip(1).collect(),
+        ),
+        _ => split_axes_target(args)?,
+    };
+    let property = selected
+        .map_or_else(
+            PropertyMutationTarget::alias,
+            PropertyMutationTarget::selected,
+        )
+        .with_runtime(runtime);
     if !property_args.len().is_multiple_of(2) {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -42,10 +88,11 @@ fn axes_state(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     }
     match target {
         Some(AxesTarget::ExistingAxes(handle, axes_index)) => {
-            select_axes_for_figure(handle, axes_index)
+            select_axes_for_figure_for_property(&property, handle, axes_index)
                 .map_err(|err| map_figure_error(BUILTIN_NAME, err))?;
             if !property_args.is_empty() {
-                set_properties(
+                set_properties_with_authority(
+                    &property,
                     PlotHandle::Axes(handle, axes_index),
                     &property_args,
                     BUILTIN_NAME,
@@ -54,11 +101,14 @@ fn axes_state(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             Ok(encode_axes_handle(handle, axes_index))
         }
         Some(AxesTarget::ParentFigure(handle)) => {
-            create_and_configure_axes(Some(handle), property_args)
+            create_and_configure_axes(&property, Some(handle), property_args)
         }
         None => {
-            let (parent, filtered) = extract_parent_property(property_args)?;
-            create_and_configure_axes(parent, filtered)
+            let (parent, selected, filtered) = extract_parent_property(property_args)?;
+            let property = selected
+                .map_or(property, PropertyMutationTarget::selected)
+                .with_runtime(runtime);
+            create_and_configure_axes(&property, parent, filtered)
         }
     }
 }
@@ -101,6 +151,7 @@ fn split_axes_target(args: Vec<Value>) -> crate::BuiltinResult<(Option<AxesTarge
 }
 
 fn create_and_configure_axes(
+    property: &PropertyMutationTarget,
     parent: Option<FigureHandle>,
     property_args: Vec<Value>,
 ) -> crate::BuiltinResult<f64> {
@@ -110,10 +161,11 @@ fn create_and_configure_axes(
             "axes: property/value arguments must come in pairs",
         ));
     }
-    let (handle, axes_index) =
-        create_axes_for_figure(parent).map_err(|err| map_figure_error(BUILTIN_NAME, err))?;
+    let (handle, axes_index) = create_axes_for_figure_for_property(property, parent)
+        .map_err(|err| map_figure_error(BUILTIN_NAME, err))?;
     if !property_args.is_empty() {
-        set_properties(
+        set_properties_with_authority(
+            property,
             PlotHandle::Axes(handle, axes_index),
             &property_args,
             BUILTIN_NAME,
@@ -124,7 +176,11 @@ fn create_and_configure_axes(
 
 fn extract_parent_property(
     args: Vec<Value>,
-) -> crate::BuiltinResult<(Option<FigureHandle>, Vec<Value>)> {
+) -> crate::BuiltinResult<(
+    Option<FigureHandle>,
+    Option<super::state::GraphicsPropertySelection>,
+    Vec<Value>,
+)> {
     if !args.len().is_multiple_of(2) {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -132,16 +188,28 @@ fn extract_parent_property(
         ));
     }
     let mut parent = None;
+    let mut selected = None;
     let mut filtered = Vec::with_capacity(args.len());
     for pair in args.chunks_exact(2) {
         if property_name_is(&pair[0], "parent") {
-            parent = Some(parent_figure_from_value(&pair[1])?);
+            selected = select_graphics_property(&pair[1], BUILTIN_NAME)?;
+            parent = Some(
+                match selected
+                    .as_ref()
+                    .map(|selection| selection.receiver().kind())
+                {
+                    Some(runmat_value::GraphicsReceiverKind::Figure { figure }) => {
+                        FigureHandle::from(figure)
+                    }
+                    _ => parent_figure_from_value(&pair[1])?,
+                },
+            );
         } else {
             filtered.push(pair[0].clone());
             filtered.push(pair[1].clone());
         }
     }
-    Ok((parent, filtered))
+    Ok((parent, selected, filtered))
 }
 
 fn parent_figure_from_value(value: &Value) -> crate::BuiltinResult<FigureHandle> {

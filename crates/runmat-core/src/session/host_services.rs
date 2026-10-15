@@ -5,6 +5,91 @@ use runmat_runtime::context::{RuntimeGraphicsPresentationService, RuntimeHostSer
 use super::RunMatSession;
 
 impl RunMatSession {
+    pub(super) fn retire_graphics_host(&self) {
+        if let Some(service) = self.runtime_context.service_ports().graphics_presentation() {
+            service.retire();
+        }
+        if let Some(callbacks) = &self.graphics_callbacks {
+            callbacks.close();
+        }
+    }
+    /// Join an explicitly supplied local graphics host. Absence never gains
+    /// ambient native authority, including process/remote worker construction.
+    pub fn attach_graphics_host(
+        &mut self,
+        host: &SessionGraphicsHost,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        match host {
+            SessionGraphicsHost::Unavailable => {}
+            #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+            SessionGraphicsHost::Native { opener, gui } => {
+                let queue = runmat_runtime::context::RuntimeGraphicsCallbackQueue::new_for_selected(
+                    &self.runtime_context,
+                    gui.maximum_pending_callbacks,
+                    gui.maximum_callback_registrations,
+                );
+                let presentation: Rc<dyn RuntimeGraphicsPresentationService> =
+                    Rc::new(runmat_runtime::context::NativeGraphicsAttachment::new(
+                        opener.clone(),
+                        queue.downgrade(),
+                        gui.maximum_windows,
+                        gui.maximum_snapshot_bytes,
+                        runmat_runtime::context::NativeWindowConfig {
+                            width: gui.width,
+                            height: gui.height,
+                            vsync: gui.vsync,
+                            maximized: gui.maximized,
+                            ..Default::default()
+                        },
+                    )?);
+                let ports = self
+                    .runtime_context
+                    .service_ports()
+                    .clone()
+                    .with_graphics_callback_queue(queue.downgrade())
+                    .with_graphics_presentation(Rc::clone(&presentation));
+                let staged = self.runtime_context.clone().with_service_ports(ports);
+                if let Err(error) = queue.install_retained_graphics_properties(&staged) {
+                    presentation.retire();
+                    queue.close();
+                    return Err(error);
+                }
+                let previous_presentation = self
+                    .runtime_context
+                    .service_ports()
+                    .graphics_presentation()
+                    .cloned();
+                let previous_queue = self.graphics_callbacks.replace(queue);
+                self.runtime_context = staged;
+                if let Some(previous) = previous_presentation {
+                    previous.retire();
+                }
+                if let Some(previous) = previous_queue {
+                    previous.close();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Explicit host flush for command/idle boundaries, not an invented frame
+    /// acknowledgment. The selected service owns the actual operation.
+    pub async fn flush_graphics(&self) -> Result<(), runmat_runtime::RuntimeError> {
+        use runmat_runtime::context::{
+            GraphicsCallbackPolicy, GraphicsFlushRate, GraphicsFlushRequest,
+        };
+        if let Some(service) = self.runtime_context.service_ports().graphics_presentation() {
+            let operation = service.flush(GraphicsFlushRequest {
+                rate: GraphicsFlushRate::Immediate,
+                callbacks: GraphicsCallbackPolicy::Process,
+            });
+            #[cfg(not(target_arch = "wasm32"))]
+            self.local_tasks.participate_foreground(operation).await??;
+            #[cfg(target_arch = "wasm32")]
+            operation.await?;
+        }
+        Ok(())
+    }
     /// Install this session's application host, including document interaction.
     ///
     /// The host owns console forwarding, warnings and interactive input as well
@@ -27,6 +112,9 @@ impl RunMatSession {
         &mut self,
         service: Rc<dyn RuntimeGraphicsPresentationService>,
     ) {
+        if let Some(previous) = self.runtime_context.service_ports().graphics_presentation() {
+            previous.retire();
+        }
         let ports = self
             .runtime_context
             .service_ports()
@@ -67,6 +155,19 @@ impl RunMatSession {
     }
 }
 
+/// Local, nonserialized production attachment. GUI builds still require an
+/// actual OS-main-thread opener; selecting a feature alone grants nothing.
+#[derive(Clone, Default)]
+pub enum SessionGraphicsHost {
+    #[default]
+    Unavailable,
+    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+    Native {
+        opener: runmat_runtime::context::NativeWindowOpenPort,
+        gui: runmat_config::runtime::GuiConfig,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,9 +178,12 @@ mod tests {
     };
 
     struct Host;
-    struct Graphics;
+    struct Graphics(Rc<std::cell::Cell<usize>>);
 
     impl runmat_runtime::context::RuntimeGraphicsPresentationService for Graphics {
+        fn retire(&self) {
+            self.0.set(self.0.get() + 1);
+        }
         fn flush(
             &self,
             _: runmat_runtime::context::GraphicsFlushRequest,
@@ -132,7 +236,9 @@ mod tests {
         runmat_gc::gc_test_context(|| {
             let mut session = RunMatSession::with_options(false, false).unwrap();
             let before = session.runtime_context.service_ports().clone();
-            let service: Rc<dyn RuntimeGraphicsPresentationService> = Rc::new(Graphics);
+            let retired = Rc::new(std::cell::Cell::new(0));
+            let service: Rc<dyn RuntimeGraphicsPresentationService> =
+                Rc::new(Graphics(retired.clone()));
             session.install_graphics_presentation_service(service.clone());
             let after = session.runtime_context.service_ports();
             assert!(Rc::ptr_eq(after.graphics_presentation().unwrap(), &service));
@@ -140,6 +246,20 @@ mod tests {
             same_service(before.call(), after.call());
             same_service(before.placement(), after.placement());
             same_service(before.distributed(), after.distributed());
+            assert_eq!(
+                retired.get(),
+                0,
+                "installation must not retire the new attachment"
+            );
+            let capacity = std::num::NonZeroUsize::new(2).unwrap();
+            let queue = session.install_graphics_callback_queue(capacity, capacity);
+            drop(session);
+            assert!(queue.is_closed());
+            assert_eq!(
+                retired.get(),
+                1,
+                "session drop retires even externally retained services"
+            );
         });
     }
 

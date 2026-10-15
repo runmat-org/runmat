@@ -84,19 +84,32 @@ pub(super) struct FrameCommand {
     state: Arc<FrameState>,
 }
 
-#[derive(Clone, Copy)]
 enum FrameTarget {
-    Window(WindowId),
+    Window {
+        id: WindowId,
+        lifetime: Arc<std::sync::atomic::AtomicBool>,
+    },
     #[cfg(test)]
     Synthetic,
 }
 
 impl FrameCommand {
     pub(super) fn window_id(&self) -> Option<WindowId> {
-        match self.target {
-            FrameTarget::Window(id) => Some(id),
+        match &self.target {
+            FrameTarget::Window { id, .. } => Some(*id),
             #[cfg(test)]
             FrameTarget::Synthetic => None,
+        }
+    }
+
+    pub(super) fn matches_window_lifetime(
+        &self,
+        current: &Arc<std::sync::atomic::AtomicBool>,
+    ) -> bool {
+        match &self.target {
+            FrameTarget::Window { lifetime, .. } => live_window_lifetime(lifetime, current),
+            #[cfg(test)]
+            FrameTarget::Synthetic => false,
         }
     }
 
@@ -110,6 +123,13 @@ impl FrameCommand {
             state: Arc::clone(&self.state),
         })
     }
+}
+
+fn live_window_lifetime(
+    issued: &Arc<std::sync::atomic::AtomicBool>,
+    current: &Arc<std::sync::atomic::AtomicBool>,
+) -> bool {
+    Arc::ptr_eq(issued, current) && !issued.load(Ordering::Acquire)
 }
 
 impl Drop for FrameCommand {
@@ -142,11 +162,25 @@ impl InFlightFrame {
 pub struct FramePort {
     proxy: EventLoopProxy<FrameCommand>,
     window_id: WindowId,
+    close_signal: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl FramePort {
-    pub(super) fn new(proxy: EventLoopProxy<FrameCommand>, window_id: WindowId) -> Self {
-        Self { proxy, window_id }
+    pub(super) fn new(
+        proxy: EventLoopProxy<FrameCommand>,
+        window_id: WindowId,
+        close_signal: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self {
+            proxy,
+            window_id,
+            close_signal,
+        }
+    }
+
+    /// Retire this exact window, never another attachment's handle route.
+    pub fn close(&self) {
+        self.close_signal.store(true, Ordering::Release);
     }
 
     pub fn present(&self, figure: Figure) -> FrameTicket {
@@ -155,7 +189,10 @@ impl FramePort {
         FrameTicket {
             proxy: self.proxy.clone(),
             command: Some(FrameCommand {
-                target: FrameTarget::Window(self.window_id),
+                target: FrameTarget::Window {
+                    id: self.window_id,
+                    lifetime: Arc::clone(&self.close_signal),
+                },
                 figure: Some(Box::new(figure)),
                 result: Some(result),
                 state: Arc::clone(&state),
@@ -243,6 +280,13 @@ mod tests {
 
     #[test]
     fn queued_drop_never_dispatches_and_post_present_receipt_is_terminal() {
+        let lifetime = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let same_window = Arc::clone(&lifetime);
+        assert!(live_window_lifetime(&lifetime, &same_window));
+        let next_window = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        assert!(!live_window_lifetime(&lifetime, &next_window));
+        lifetime.store(true, Ordering::Release);
+        assert!(!live_window_lifetime(&lifetime, &same_window));
         let (sender, receiver) = oneshot::channel();
         let state = Arc::new(FrameState::default());
         let command = FrameCommand {

@@ -10,21 +10,12 @@ pub fn axis_limit_method_for_axes(
     axes_index: usize,
     axis: AxisLimitAxis,
 ) -> Result<AxisLimitMethod, FigureError> {
-    let reg = registry();
-    let state = reg
-        .figures
-        .get(&handle)
-        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    validate_axes_index(state, axes_index)?;
-    let meta = state
-        .figure
-        .axes_metadata(axes_index)
-        .expect("validated axes");
-    Ok(match axis {
-        AxisLimitAxis::X => meta.x_limit_method,
-        AxisLimitAxis::Y => meta.y_limit_method,
-        AxisLimitAxis::Z => meta.z_limit_method,
-    })
+    axis_limit_method_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        axis,
+    )
 }
 
 pub fn set_axis_limit_method_for_axes(
@@ -33,8 +24,24 @@ pub fn set_axis_limit_method_for_axes(
     axis: AxisLimitAxis,
     method: AxisLimitMethod,
 ) -> Result<(), FigureError> {
+    set_axis_limit_method_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        axis,
+        method,
+    )
+}
+
+pub(crate) fn set_axis_limit_method_for_axes_for_property(
+    property: &PropertyMutationTarget,
+    handle: FigureHandle,
+    axes_index: usize,
+    axis: AxisLimitAxis,
+    method: AxisLimitMethod,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let state = reg
             .figures
             .get(&handle)
@@ -45,7 +52,7 @@ pub fn set_axis_limit_method_for_axes(
         state.revision = state.revision.wrapping_add(1);
         state.figure.owned_clone()
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 
@@ -53,13 +60,11 @@ pub fn axis_color_limits_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<runmat_plot::plots::surface::ScalarColorRange, FigureError> {
-    let reg = registry();
-    let state = reg
-        .figures
-        .get(&handle)
-        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    validate_axes_index(state, axes_index)?;
-    Ok(color_limits_for_state_axes(state, axes_index))
+    axis_color_limits_snapshot_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+    )
 }
 
 pub(super) fn color_limits_for_state_axes(
@@ -80,8 +85,11 @@ pub fn axis_displayed_color_limits_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<Option<(f64, f64)>, FigureError> {
-    let range = axis_color_limits_snapshot_for_axes(handle, axes_index)?;
-    Ok(displayed_color_limits(range))
+    axis_displayed_color_limits_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+    )
 }
 
 pub(super) fn displayed_color_limits(
@@ -103,13 +111,11 @@ pub fn axis_z_limits_snapshot_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<Option<(f64, f64)>, FigureError> {
-    let mut reg = registry();
-    let state = reg
-        .figures
-        .get_mut(&handle)
-        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    validate_axes_index(state, axes_index)?;
-    Ok(z_limits_for_state_axes(state, axes_index))
+    axis_z_limits_snapshot_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+    )
 }
 
 pub(super) fn z_limits_for_state_axes(

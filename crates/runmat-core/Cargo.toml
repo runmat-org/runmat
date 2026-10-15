@@ -44,6 +44,7 @@ features = ["v4", "js"]
 default-features = false
 
 [features]
+gui = ["runmat-runtime/gui"]
 default = ["jit"]
 jit = []
 occt-native = ["runmat-runtime/occt-native"]

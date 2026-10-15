@@ -1,5 +1,7 @@
 use crate::{
-    catalog::inference::{argument_error, finish_fixed_outputs},
+    catalog::inference::{
+        argument_error, finish_fixed_outputs, known_invalid_scalar_object_handle,
+    },
     BuiltinCatalogEntry,
 };
 use runmat_types::*;
@@ -17,7 +19,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     for (index, argument) in request.arguments.iter().enumerate() {
         let target_possible = index == 0;
         let numeric_target = target_possible && matches!(argument.kind, ValueKindFact::Numeric(_));
-        let invalid = if numeric_target {
+        let invalid = if target_possible && matches!(argument.kind, ValueKindFact::Object(_)) {
+            known_invalid_scalar_object_handle(argument, &[standard::AXES])
+        } else if numeric_target {
             argument
                 .numeric()
                 .is_some_and(|n| n.domain == NumericDomain::Complex)

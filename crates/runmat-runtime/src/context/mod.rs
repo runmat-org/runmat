@@ -8,7 +8,16 @@ mod capability;
 mod cleanup_lifecycle;
 mod callable_artifacts;
 mod graphics_presentation;
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+mod native_graphics;
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub use native_graphics::NativeGraphicsAttachment;
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub use runmat_plot::gui::host_loop::WindowOpenPort as NativeWindowOpenPort;
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub use runmat_plot::gui::WindowConfig as NativeWindowConfig;
 mod graphics_callbacks;
+pub(crate) use graphics_callbacks::GraphicsCallbackMutationScope;
 #[cfg(not(target_arch = "wasm32"))]
 mod foreign_callback_lineage;
 mod arity;
@@ -63,18 +72,31 @@ pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
 pub use graphics_callbacks::{
-    GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackHandler,
-    GraphicsCallbackHostEvent, GraphicsCallbackHostFailure, GraphicsCallbackHostTicket,
-    GraphicsCallbackIngress, GraphicsCallbackIngressError, GraphicsCallbackIngressFailure,
-    GraphicsCallbackKind, GraphicsCallbackRegistration, GraphicsCallbackResponder,
-    GraphicsCallbackResult, GraphicsCallbackRolePayload, RuntimeGraphicsCallbackQueue,
+    GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackDriveError,
+    GraphicsCallbackHandler, GraphicsCallbackHostEvent, GraphicsCallbackHostFailure,
+    GraphicsCallbackHostTicket, GraphicsCallbackIngress, GraphicsCallbackIngressError,
+    GraphicsCallbackIngressFailure, GraphicsCallbackKind, GraphicsCallbackRegistration,
+    GraphicsCallbackResponder, GraphicsCallbackResult, GraphicsCallbackRolePayload,
+    GraphicsSelectedBoundCallbackResponder, RuntimeGraphicsCallbackQueue,
     WeakRuntimeGraphicsCallbackQueue,
 };
+#[cfg(feature = "plot-core")]
+pub(crate) use graphics_presentation::complete_selected as complete_selected_graphics;
+#[cfg(test)]
+pub(crate) use graphics_presentation::GraphicsFlushEffectSource;
+pub(crate) use graphics_presentation::{
+    attach_disposition as attach_graphics_disposition,
+    await_completion as await_graphics_completion,
+};
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub(crate) use graphics_presentation::{retire_selected_scene, stage_selected_scene};
 pub use graphics_presentation::{
     GraphicsCallbackPolicy, GraphicsCallbackReceipt, GraphicsFlushDisposition, GraphicsFlushRate,
-    GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation,
+    GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation, GraphicsSceneStaging,
     RuntimeGraphicsFlushOperation, RuntimeGraphicsPresentationService,
 };
+#[cfg(feature = "plot-core")]
+pub use graphics_presentation::{RuntimeGraphicsScene, RuntimeGraphicsSceneProposal};
 pub(crate) use host_dialog::{select_directory, select_file_open, select_file_save};
 pub(crate) use host_document::request as request_document;
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};

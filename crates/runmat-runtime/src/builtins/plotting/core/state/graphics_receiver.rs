@@ -95,6 +95,14 @@ pub fn axes_graphics_receiver(
     index: usize,
 ) -> Result<Option<GraphicsReceiverRef>, GraphicsReceiverIssueError> {
     let mut reg = registry();
+    axes_graphics_receiver_in_registry(&mut reg, handle, index)
+}
+
+pub(super) fn axes_graphics_receiver_in_registry(
+    reg: &mut PlotRegistry,
+    handle: FigureHandle,
+    index: usize,
+) -> Result<Option<GraphicsReceiverRef>, GraphicsReceiverIssueError> {
     let Some(state) = reg.figures.get_mut(&handle) else {
         return Ok(None);
     };
@@ -146,6 +154,30 @@ pub fn axes_graphics_receiver_for_scene(
     let receiver = issue_graphics_receiver(GraphicsReceiverKind::Axes { figure, index })?;
     state.axes_receivers.insert(index, receiver.clone());
     Ok(Some(receiver))
+}
+
+/// Authenticate a pinned scene and receiver under the same registry guard.
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub(crate) fn figure_scene_is_current(
+    receiver: &GraphicsReceiverRef,
+    scene: &GraphicsSceneLease,
+) -> bool {
+    let GraphicsReceiverKind::Figure { figure } = receiver.kind() else {
+        return false;
+    };
+    if scene.figure() != figure {
+        return false;
+    }
+    registry()
+        .figures
+        .get(&FigureHandle::from(figure))
+        .is_some_and(|state| {
+            state.scene_lease.shares_lease(scene)
+                && state
+                    .figure_receiver
+                    .as_ref()
+                    .is_some_and(|owned| owned.shares_lease(receiver))
+        })
 }
 
 /// Construct the canonical handle-object receiver for a selected live lease.

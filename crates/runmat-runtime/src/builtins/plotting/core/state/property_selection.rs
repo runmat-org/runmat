@@ -30,6 +30,13 @@ pub(crate) struct GraphicsPropertySnapshot {
 impl GraphicsPropertySelection {
     pub(crate) fn capture(receiver: GraphicsReceiverRef) -> Result<Self, FigureError> {
         let registry = registry();
+        Self::capture_in_registry(receiver, &registry)
+    }
+
+    pub(super) fn capture_in_registry(
+        receiver: GraphicsReceiverRef,
+        registry: &PlotRegistry,
+    ) -> Result<Self, FigureError> {
         let figure = match receiver.kind() {
             GraphicsReceiverKind::Figure { figure } | GraphicsReceiverKind::Axes { figure, .. } => {
                 FigureHandle::from(figure)
@@ -72,7 +79,7 @@ impl GraphicsPropertySelection {
                 .ok_or(FigureError::InvalidHandle(figure.as_u32()))?,
             scene: state.scene_lease.clone(),
         };
-        selection.validate(&registry)?;
+        selection.validate(registry)?;
         Ok(selection)
     }
 
@@ -98,6 +105,7 @@ impl GraphicsPropertySelection {
     ) -> Result<(), FigureError> {
         use super::property_mutation::PropertyLocation;
         let matches = match location {
+            PropertyLocation::CurrentFigure => false,
             PropertyLocation::Annotation(figure, axes, annotation) => {
                 figure == self.figure
                     && match &self.binding {
@@ -212,6 +220,24 @@ impl GraphicsPropertySelection {
             return Err(FigureError::StalePlotSnapshot);
         }
         Ok(state)
+    }
+
+    pub(crate) fn figure_snapshot_entry(
+        &self,
+        retained: &FigureOwner,
+    ) -> Result<FigureSnapshotEntry, FigureError> {
+        let registry = registry();
+        let state = self.validate(&registry)?;
+        let figure = state.figure.snapshot();
+        if !FigureOwner::ptr_eq(&figure, retained) {
+            return Err(FigureError::StalePlotSnapshot);
+        }
+        Ok(FigureSnapshotEntry {
+            handle: self.figure,
+            revision: state.revision,
+            scene_lease: self.scene.clone(),
+            figure,
+        })
     }
 
     pub(crate) fn child_snapshot(&self) -> Result<GraphicsPropertySnapshot, FigureError> {

@@ -3,6 +3,26 @@ use runmat_types::*;
 
 #[test]
 fn cla_literal_modes_and_device_controls_match_runtime_admission() {
+    for (class, invalid) in [(standard::AXES, false), (standard::FIGURE, true)] {
+        let target = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(class.into()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }));
+        let call = CallRequest {
+            arguments: vec![target],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        };
+        assert_eq!(
+            !inference::infer(&call, &CLA_CATALOG_ENTRY)
+                .diagnostics
+                .is_empty(),
+            invalid
+        );
+    }
     let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
     for (mode, invalid) in [(" RESET ", false), ("not-a-mode", true)] {
         let result = inference::infer(

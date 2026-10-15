@@ -7,6 +7,18 @@
 use crate::RuntimeError;
 use std::future::Future;
 use std::pin::Pin;
+#[path = "graphics_presentation/completion.rs"]
+mod completion;
+#[cfg(test)]
+pub(crate) use completion::GraphicsFlushEffectSource;
+pub(crate) use completion::{attach_disposition, await_completion};
+#[cfg(feature = "plot-core")]
+#[path = "graphics_presentation/selected.rs"]
+mod selected;
+#[cfg(feature = "plot-core")]
+pub(crate) use selected::complete_selected;
+#[cfg(feature = "plot-core")]
+pub use selected::{RuntimeGraphicsScene, RuntimeGraphicsSceneProposal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphicsFlushRate {
@@ -86,4 +98,65 @@ pub trait RuntimeGraphicsFlushOperation:
 /// atomically determine whether cancellation or host dispatch won.
 pub trait RuntimeGraphicsPresentationService {
     fn flush(&self, request: GraphicsFlushRequest) -> Pin<Box<dyn RuntimeGraphicsFlushOperation>>;
+
+    /// Same-host liveness/capability admission before property mutation. This
+    /// is not a pixel receipt or a price for a not-yet-produced scene.
+    #[cfg(feature = "plot-core")]
+    fn admit_scene_update(
+        &self,
+        _proposal: &RuntimeGraphicsSceneProposal,
+    ) -> Result<(), RuntimeError> {
+        Err(selected::unavailable())
+    }
+
+    /// Validate the actual retained output/resource bound before host effects;
+    /// the returned lazy operation owns real publication and cancellation.
+    #[cfg(feature = "plot-core")]
+    fn present_scene_update(
+        &self,
+        _scene: RuntimeGraphicsScene,
+    ) -> Result<Pin<Box<dyn RuntimeGraphicsFlushOperation>>, RuntimeError> {
+        Err(selected::unavailable())
+    }
+
+    /// Transfer a selected scene's presentation to this host without presenting
+    /// pixels. The exact receiver is runtime-only authority, not a handle grant.
+    fn stage_scene(
+        &self,
+        _receiver: runmat_value::GraphicsReceiverRef,
+    ) -> Result<GraphicsSceneStaging, RuntimeError> {
+        Ok(GraphicsSceneStaging::Unowned)
+    }
+
+    /// Retire only this attachment's windows and callback authority.
+    fn retire(&self) {}
+
+    fn retire_scene(&self, _receiver: &runmat_value::GraphicsReceiverRef) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphicsSceneStaging {
+    Unowned,
+    DeferredToFlush,
+}
+
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub(crate) fn stage_selected_scene(
+    receiver: runmat_value::GraphicsReceiverRef,
+) -> Result<GraphicsSceneStaging, RuntimeError> {
+    match super::scope::active_runtime_context()
+        .and_then(|runtime| runtime.service_ports().graphics_presentation().cloned())
+    {
+        Some(service) => service.stage_scene(receiver),
+        None => Ok(GraphicsSceneStaging::Unowned),
+    }
+}
+
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub(crate) fn retire_selected_scene(receiver: &runmat_value::GraphicsReceiverRef) {
+    if let Some(service) = super::scope::active_runtime_context()
+        .and_then(|runtime| runtime.service_ports().graphics_presentation().cloned())
+    {
+        service.retire_scene(receiver);
+    }
 }

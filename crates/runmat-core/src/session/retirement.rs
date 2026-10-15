@@ -66,6 +66,7 @@ impl RunMatSession {
     /// A `Retained` result keeps the exact foreign owner live; a `Retired`
     /// error is a completed cleanup callback failure, not a resource leak.
     pub async fn close_gracefully_retirement(&self) -> SessionRetirement {
+        self.retire_graphics_host();
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.close_gracefully_native().await

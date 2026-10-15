@@ -19,7 +19,7 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::{create_session, drive_with_graphics_callbacks};
+use crate::commands::session::{create_session_with_graphics, drive_with_graphics_callbacks};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::presentation;
@@ -42,6 +42,27 @@ pub async fn execute_script_with_args(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     fea_json: bool,
+) -> Result<()> {
+    execute_script_with_graphics(
+        script,
+        args,
+        emit_bytecode_path,
+        cli,
+        config,
+        fea_json,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+    )
+    .await
+}
+
+pub(crate) async fn execute_script_with_graphics(
+    script: PathBuf,
+    args: Vec<String>,
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    fea_json: bool,
+    graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
@@ -69,7 +90,15 @@ pub async fn execute_script_with_args(
         return Ok(());
     }
 
-    execute_script_path(script, cli, config).await
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(
+        script,
+        SourceInput::Path(source_name),
+        cli,
+        config,
+        graphics,
+    )
+    .await
 }
 
 pub(crate) fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
@@ -114,17 +143,9 @@ pub(crate) async fn execute_script_contents(
         },
         cli,
         config,
+        &runmat_core::SessionGraphicsHost::Unavailable,
     )
     .await
-}
-
-async fn execute_script_path(
-    script: PathBuf,
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    let source_name = script.to_string_lossy().to_string();
-    execute_script_request(script, SourceInput::Path(source_name), cli, config).await
 }
 
 async fn execute_script_request(
@@ -132,13 +153,15 @@ async fn execute_script_request(
     request_source: SourceInput,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
     let enable_jit = config.jit.enabled;
-    let mut engine = create_session(
+    let mut engine = create_session_with_graphics(
         enable_jit,
         config.runtime.verbose,
         config,
         "Failed to create execution engine",
+        graphics,
     )?;
     let _project_lease = install_project_for_source(&mut engine, &script, cli).await?;
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
@@ -203,6 +226,10 @@ async fn execute_script_request(
             return Err(AlreadyReportedCliError.into());
         }
     };
+    engine
+        .flush_graphics()
+        .await
+        .context("failed to flush native graphics")?;
     let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
     engine.shutdown_local_tasks();
     foreign_lifecycle.context("failed to finish foreign runtime lifecycle")?;

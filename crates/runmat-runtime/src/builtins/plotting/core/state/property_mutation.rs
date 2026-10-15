@@ -5,6 +5,38 @@ use std::cell::RefCell;
 #[path = "property_mutation/notifications.rs"]
 mod notifications;
 use notifications::PreparedFigureUpdates;
+#[path = "property_mutation/axes_reads.rs"]
+mod axes_reads;
+pub(crate) use axes_reads::{
+    axis_color_limits_snapshot_for_axes_for_property,
+    axis_displayed_color_limits_for_axes_for_property,
+    axis_displayed_limits_snapshot_for_axes_for_property, axis_limit_method_for_axes_for_property,
+    axis_tick_angles_snapshot_for_axes_for_property,
+    axis_tick_formats_snapshot_for_axes_for_property,
+    axis_tick_labels_snapshot_for_axes_for_property, axis_ticks_snapshot_for_axes_for_property,
+    axis_z_limits_snapshot_for_axes_for_property,
+};
+#[path = "property_mutation/current_axes.rs"]
+mod current_axes;
+#[path = "property_mutation/current_limits.rs"]
+mod current_limits;
+pub(crate) use current_axes::axes_state_snapshot_for_property;
+pub(crate) use current_axes::current_axes_handle_for_figure_for_property;
+pub(crate) use current_axes::current_axes_state_for_property;
+pub(crate) use current_axes::{
+    set_axis_tick_angles_for_property, set_axis_tick_formats_for_property,
+    set_axis_tick_labels_for_property, set_axis_ticks_for_property,
+};
+pub(crate) use current_limits::{
+    set_current_x_limits_for_property, set_current_y_limits_for_property,
+};
+#[path = "property_mutation/layout.rs"]
+mod layout;
+pub(crate) use layout::{color_order_for_axes_for_property, color_order_for_figure_for_property};
+pub(crate) use layout::{
+    configure_subplot_for_property, configure_subplot_state_for_property,
+    set_color_order_for_axes_for_property, set_color_order_for_figure_for_property,
+};
 #[path = "property_mutation/axes_properties.rs"]
 mod axes_properties;
 pub(crate) use axes_properties::{
@@ -42,7 +74,8 @@ mod selection;
 pub(crate) use selection::{
     axes_metadata_snapshot_for_property, axis_display_bounds_snapshot_for_axes_for_property,
     data_aspect_ratio_snapshot_for_axes_for_property, plot_child_handle_snapshot_for_property,
-    select_axes_for_figure_for_property, select_current_figure_if_exists_for_property,
+    select_axes_for_figure_for_property, select_axes_receiver_for_property,
+    select_current_figure_if_exists_for_property,
 };
 #[path = "property_mutation/chart_metadata.rs"]
 mod chart_metadata;
@@ -78,9 +111,12 @@ pub(super) use transactions::{
 
 pub(crate) struct PropertyMutationTarget {
     selected: Option<RefCell<Option<GraphicsPropertySelection>>>,
+    callback: Option<crate::context::GraphicsCallbackMutationScope>,
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum PropertyLocation {
+    CurrentFigure,
     Figure(FigureHandle),
     Axes(FigureHandle, usize),
     Plot(FigureHandle, usize),
@@ -104,7 +140,10 @@ impl From<String> for PropertyMutationError {
 
 impl PropertyMutationTarget {
     pub(crate) const fn alias() -> Self {
-        Self { selected: None }
+        Self {
+            selected: None,
+            callback: None,
+        }
     }
 
     pub(crate) fn is_selected(&self) -> bool {
@@ -125,6 +164,20 @@ impl PropertyMutationTarget {
     pub(crate) fn selected(selection: GraphicsPropertySelection) -> Self {
         Self {
             selected: Some(RefCell::new(Some(selection))),
+            callback: None,
+        }
+    }
+
+    pub(crate) fn with_runtime(mut self, runtime: Option<&crate::context::RuntimeContext>) -> Self {
+        self.callback =
+            runtime.and_then(crate::context::RuntimeContext::graphics_callback_mutation);
+        self
+    }
+
+    pub(super) fn selecting(&self, selection: GraphicsPropertySelection) -> Self {
+        Self {
+            selected: Some(RefCell::new(Some(selection))),
+            callback: self.callback.clone(),
         }
     }
 
@@ -140,14 +193,49 @@ impl PropertyMutationTarget {
         location: PropertyLocation,
     ) -> Result<PropertyMutationGuard<'_>, FigureError> {
         let registry = registry();
+        let location = match location {
+            PropertyLocation::CurrentFigure => PropertyLocation::Figure(registry.current),
+            location => location,
+        };
         if let Some(selection) = self.selection()? {
             selection.validate(&registry)?;
             selection.validate_location(location)?;
         }
+        let figure = match location {
+            PropertyLocation::CurrentFigure => None,
+            PropertyLocation::Figure(figure)
+            | PropertyLocation::Axes(figure, _)
+            | PropertyLocation::Plot(figure, _)
+            | PropertyLocation::Annotation(figure, _, _) => Some(figure),
+            PropertyLocation::Child(id) => registry
+                .plot_children
+                .get(&id)
+                .map(|child| child.figure_axes().0),
+        };
+        let callback = self
+            .callback
+            .as_ref()
+            .filter(|scope| figure.is_some_and(|figure| figure.as_u32() == scope.figure()))
+            .map(|scope| {
+                let state = registry
+                    .figures
+                    .get(&FigureHandle::from(scope.figure()))
+                    .ok_or(FigureError::StalePlotSnapshot)?;
+                let receiver = state
+                    .figure_receiver
+                    .as_ref()
+                    .ok_or(FigureError::StalePlotSnapshot)?;
+                if !scope.admits(receiver, &state.scene_lease) {
+                    return Err(FigureError::StalePlotSnapshot);
+                }
+                Ok((scope.clone(), receiver.clone(), state.scene_lease.clone()))
+            })
+            .transpose()?;
         Ok(PropertyMutationGuard {
             registry,
             target: self,
             retired: None,
+            callback,
         })
     }
 
@@ -204,23 +292,33 @@ impl PropertyMutationTarget {
         figure: &Figure,
         kind: FigureEventKind,
     ) -> Result<(), FigureError> {
-        if self.selected.is_none() {
+        if self.selected.is_none() && self.callback.is_none() {
             notify_with_figure(handle, figure, kind);
             return Ok(());
         }
-        let revision = {
+        let (revision, receiver, scene) = {
             let mut registry = self.registry(PropertyLocation::Figure(handle))?;
             super::colorbar::reconcile(&mut registry, handle, figure);
-            registry.figures.get(&handle).map(|state| state.revision)
+            let state = registry
+                .figures
+                .get(&handle)
+                .ok_or(FigureError::StalePlotSnapshot)?;
+            (
+                Some(state.revision),
+                state
+                    .figure_receiver
+                    .clone()
+                    .ok_or(FigureError::StalePlotSnapshot)?,
+                state.scene_lease.clone(),
+            )
         };
-        let selected = self.selection()?.ok_or(FigureError::StalePlotSnapshot)?;
         notify_event(FigureEventView {
             handle,
             kind,
             revision,
             figure: Some(figure),
-            receiver: Some(selected.figure_receiver()),
-            scene: Some(selected.scene()),
+            receiver: Some(&receiver),
+            scene: Some(&scene),
         });
         Ok(())
     }
@@ -233,6 +331,11 @@ pub(super) struct PropertyMutationGuard<'a> {
     target: &'a PropertyMutationTarget,
     // The original backing may own callable roots: retire it after the lock.
     retired: Option<GraphicsPropertySelection>,
+    callback: Option<(
+        crate::context::GraphicsCallbackMutationScope,
+        GraphicsReceiverRef,
+        GraphicsSceneLease,
+    )>,
 }
 
 impl PropertyMutationGuard<'_> {
@@ -304,6 +407,21 @@ impl DerefMut for PropertyMutationGuard<'_> {
 
 impl Drop for PropertyMutationGuard<'_> {
     fn drop(&mut self) {
+        if let Some((scope, receiver, predecessor)) = &self.callback {
+            if let Some(state) = self
+                .registry
+                .figures
+                .get(&FigureHandle::from(scope.figure()))
+            {
+                if state
+                    .figure_receiver
+                    .as_ref()
+                    .is_some_and(|current| current.shares_lease(receiver))
+                {
+                    scope.record_successor(receiver, predecessor, &state.scene_lease);
+                }
+            }
+        }
         if let Some(slot) = &self.target.selected {
             let previous = slot.borrow_mut().take();
             let successor = previous

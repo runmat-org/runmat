@@ -3,9 +3,28 @@
 //! `cargo run -p runmat-plot --example native_gui_smoke --features gui`
 //! A successful presentation is a submission/lifecycle witness, not GPU
 //! completion or display timing; the separate PNG readback checks real pixels.
+//! Pass `--cli /absolute/path/to/runmat` to qualify the actual CLI/Core/native
+//! host path instead; it must have been built with its `gui` feature.
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "native_gui_smoke/cli.rs"]
+mod cli;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut arguments = std::env::args_os().skip(1);
+    if let Some(option) = arguments.next() {
+        if option != "--cli" {
+            return Err(std::io::Error::other("expected --cli /absolute/path/to/runmat").into());
+        }
+        let executable = arguments
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing CLI executable"))?;
+        if arguments.next().is_some() {
+            return Err(std::io::Error::other("unexpected smoke argument").into());
+        }
+        return cli::run(std::path::Path::new(&executable));
+    }
     use runmat_plot::export::native_surface::render_figure_png_bytes_interactive;
     use runmat_plot::gui::{register_main_thread, PlotWindow, WindowConfig};
     use runmat_plot::plots::{Figure, LinePlot};

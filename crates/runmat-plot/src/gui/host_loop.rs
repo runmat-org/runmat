@@ -14,7 +14,7 @@ use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -54,7 +54,7 @@ pub enum WindowOpenError {
 struct OpenRequest {
     figure_handle: u32,
     config: WindowConfig,
-    response: oneshot::Sender<Result<FramePort, WindowOpenError>>,
+    response: oneshot::Sender<Result<WindowOpenReceipt, WindowOpenError>>,
     state: Arc<AtomicU8>,
 }
 
@@ -63,9 +63,14 @@ struct OpenRequest {
 pub struct WindowOpenPort {
     sender: SyncSender<OpenRequest>,
     shutdown: Arc<AtomicBool>,
+    host_lifetime: Weak<()>,
 }
 
 impl WindowOpenPort {
+    /// Descriptive liveness for admission, not a reservation against later close.
+    pub fn is_closed(&self) -> bool {
+        self.shutdown.load(Ordering::Acquire) || self.host_lifetime.upgrade().is_none()
+    }
     pub fn open(&self, figure_handle: u32, config: WindowConfig) -> WindowOpenTicket {
         let (response, receiver) = oneshot::channel();
         let state = Arc::new(AtomicU8::new(QUEUED));
@@ -93,11 +98,20 @@ impl WindowOpenPort {
 pub struct WindowOpenTicket {
     sender: SyncSender<OpenRequest>,
     request: Option<OpenRequest>,
-    receiver: oneshot::Receiver<Result<FramePort, WindowOpenError>>,
+    receiver: oneshot::Receiver<Result<WindowOpenReceipt, WindowOpenError>>,
     state: Arc<AtomicU8>,
 }
 
 impl WindowOpenTicket {
+    pub fn disposition(&self) -> WindowOpenDisposition {
+        match self.state.load(Ordering::Acquire) {
+            QUEUED | RETIRED => WindowOpenDisposition::NotOpened,
+            DISPATCHED => WindowOpenDisposition::Indeterminate,
+            OPENED => WindowOpenDisposition::Opened,
+            _ => unreachable!("native window-open state"),
+        }
+    }
+
     pub fn abandon(&self) -> WindowOpenDisposition {
         let state =
             match self
@@ -117,7 +131,7 @@ impl WindowOpenTicket {
 }
 
 impl Future for WindowOpenTicket {
-    type Output = Result<FramePort, WindowOpenError>;
+    type Output = Result<WindowOpenReceipt, WindowOpenError>;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         if let Some(request) = self.request.take() {
@@ -154,6 +168,25 @@ impl Drop for WindowOpenTicket {
     }
 }
 
+/// Linear window lifetime authority. Routing-table clones do not retain it.
+/// Even an acknowledged open dropped before its receiver polls closes only
+/// this window, including the dispatched-open/cancellation race.
+pub struct WindowOpenReceipt {
+    port: FramePort,
+}
+
+impl WindowOpenReceipt {
+    pub fn frame_port(&self) -> &FramePort {
+        &self.port
+    }
+}
+
+impl Drop for WindowOpenReceipt {
+    fn drop(&mut self) {
+        self.port.close();
+    }
+}
+
 struct HostedWindow {
     window: PlotWindow<'static>,
     last_render_time: Instant,
@@ -171,6 +204,7 @@ pub struct NativeGraphicsHost {
     sender: SyncSender<OpenRequest>,
     shutdown: Arc<AtomicBool>,
     maximum_windows: NonZeroUsize,
+    host_lifetime: Arc<()>,
 }
 
 impl NativeGraphicsHost {
@@ -188,6 +222,7 @@ impl NativeGraphicsHost {
             sender,
             shutdown: Arc::new(AtomicBool::new(false)),
             maximum_windows,
+            host_lifetime: Arc::new(()),
         })
     }
 
@@ -195,6 +230,7 @@ impl NativeGraphicsHost {
         WindowOpenPort {
             sender: self.sender.clone(),
             shutdown: Arc::clone(&self.shutdown),
+            host_lifetime: Arc::downgrade(&self.host_lifetime),
         }
     }
 
@@ -205,6 +241,7 @@ impl NativeGraphicsHost {
             sender,
             shutdown,
             maximum_windows,
+            host_lifetime,
         } = self;
         // The host is a receiver, not its own producer. Releasing this clone
         // lets worker-lane retirement terminate the loop if no opener remains.
@@ -216,6 +253,7 @@ impl NativeGraphicsHost {
             maximum_windows: maximum_windows.get(),
             windows: HashMap::new(),
             opens_disconnected: false,
+            _host_lifetime: host_lifetime,
         };
         event_loop
             .run_app(&mut owner)
@@ -230,6 +268,7 @@ struct HostApplication {
     maximum_windows: usize,
     windows: HashMap<WindowId, HostedWindow>,
     opens_disconnected: bool,
+    _host_lifetime: Arc<()>,
 }
 
 impl ApplicationHandler<FrameCommand> for HostApplication {
@@ -250,6 +289,12 @@ impl ApplicationHandler<FrameCommand> for HostApplication {
         let Some(hosted) = self.windows.get_mut(&window_id) else {
             return;
         };
+        let Some(lifetime) = hosted._lifecycle_registration.signal() else {
+            return;
+        };
+        if !command.matches_window_lifetime(&lifetime) {
+            return;
+        }
         let Some(mut frame) = command.begin() else {
             return;
         };
@@ -307,6 +352,9 @@ impl ApplicationHandler<FrameCommand> for HostApplication {
             target.exit();
             return;
         }
+        // Retire exact old window routes before admitting an explicitly
+        // requested replacement at a reused figure coordinate.
+        self.windows.retain(|_, hosted| !hosted.close_requested());
         loop {
             match self.opens.try_recv() {
                 Ok(request) => open_window(
@@ -323,7 +371,6 @@ impl ApplicationHandler<FrameCommand> for HostApplication {
                 }
             }
         }
-        self.windows.retain(|_, hosted| !hosted.close_requested());
         for hosted in self.windows.values_mut() {
             hosted.window.handle_event(
                 Event::AboutToWait,
@@ -401,7 +448,10 @@ fn open_window(
         let mut window =
             pollster::block_on(PlotWindow::new_with_window(request.config, native_window))
                 .map_err(|error| WindowOpenError::Create(error.to_string()))?;
-        let port = FramePort::new(proxy.clone(), window.window.id());
+        let close_signal = lifecycle_registration
+            .signal()
+            .expect("nonzero registered window");
+        let port = FramePort::new(proxy.clone(), window.window.id(), close_signal);
         frame_registration
             .activate(port.clone())
             .map_err(WindowOpenError::Routing)?;
@@ -422,7 +472,11 @@ fn open_window(
     match result {
         Ok((port, hosted)) => {
             request.state.store(OPENED, Ordering::Release);
-            if request.response.send(Ok(port)).is_ok() {
+            if request
+                .response
+                .send(Ok(WindowOpenReceipt { port }))
+                .is_ok()
+            {
                 windows.insert(hosted.window.window.id(), hosted);
             }
         }

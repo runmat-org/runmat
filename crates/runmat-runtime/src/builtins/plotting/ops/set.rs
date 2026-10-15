@@ -48,36 +48,67 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "set",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::set"
 )]
+pub async fn set_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<String> {
+    set_builtin_with_runtime(runtime.as_ref(), args).await
+}
+
 pub async fn set_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<String> {
+    set_builtin_with_runtime(None, args).await
+}
+
+async fn set_builtin_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<String> {
     if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(set_error_with_detail(
             &SET_ERROR_INVALID_ARGUMENT,
             "expected a plotting handle followed by property/value pairs",
         ));
     }
-    if let Some(()) = super::zoom::set_zoom_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
-        return Ok("ok".to_string());
-    }
-    if let Some(()) = super::pan::set_pan_object_properties(&args[0], &args[1..], BUILTIN_NAME)? {
-        return Ok("ok".to_string());
-    }
-    if let Some(()) = super::datacursormode::set_data_cursor_object_properties(
+    if let Some(()) = super::zoom::set_zoom_object_properties_in_context(
+        runtime,
         &args[0],
         &args[1..],
         BUILTIN_NAME,
     )? {
         return Ok("ok".to_string());
     }
-    if let Some(()) = super::properties::set_receiver_properties(&args[0], &args[1..], BUILTIN_NAME)
-        .await
-        .map_err(map_set_error)?
+    if let Some(()) = super::pan::set_pan_object_properties_in_context(
+        runtime,
+        &args[0],
+        &args[1..],
+        BUILTIN_NAME,
+    )? {
+        return Ok("ok".to_string());
+    }
+    if let Some(()) = super::datacursormode::set_data_cursor_object_properties_in_context(
+        runtime,
+        &args[0],
+        &args[1..],
+        BUILTIN_NAME,
+    )? {
+        return Ok("ok".to_string());
+    }
+    if let Some(()) = super::properties::set_receiver_properties_with_runtime(
+        runtime,
+        &args[0],
+        &args[1..],
+        BUILTIN_NAME,
+    )
+    .await
+    .map_err(map_set_error)?
     {
         return Ok("ok".to_string());
     }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
-    super::properties::set_properties_async(handle, &args[1..], BUILTIN_NAME)
+    super::properties::set_properties_async_with_runtime(runtime, handle, &args[1..], BUILTIN_NAME)
         .await
         .map_err(map_set_error)?;
     Ok("ok".to_string())

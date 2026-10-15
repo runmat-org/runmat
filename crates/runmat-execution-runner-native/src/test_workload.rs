@@ -6,6 +6,10 @@ use runmat_test_runner_execution::TestAttemptWorkload;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+mod graphics;
+pub use graphics::{
+    execute_host_graph_request_with_graphics, execute_host_program_request_with_graphics,
+};
 
 /// A one-shot child must not release a selected host whose lifecycle callback
 /// refused retirement. The parent receives a fatal wire marker and reaps the

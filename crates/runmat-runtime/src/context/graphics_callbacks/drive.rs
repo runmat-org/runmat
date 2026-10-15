@@ -18,11 +18,23 @@ impl RuntimeGraphicsCallbackQueue {
         &self,
         execution: F,
     ) -> Result<F::Output, RuntimeError> {
+        self.drive_execution_with_host_callbacks_classified(execution)
+            .await
+            .map_err(GraphicsCallbackDriveError::into_runtime_error)
+    }
+
+    /// Retain an externally pinned execution when a consumed callback-local
+    /// failure is recoverable. Service/authority failures remain terminal.
+    pub async fn drive_execution_with_host_callbacks_classified<F: Future>(
+        &self,
+        execution: F,
+    ) -> Result<F::Output, GraphicsCallbackDriveError> {
         if self.0.driving.replace(true) {
             return Err(
                 build_runtime_error("graphics callback session lane is already driving")
                     .with_identifier("RunMat:graphics:CallbackDriverReentrant")
-                    .build(),
+                    .build()
+                    .into(),
             );
         }
         struct DriveGuard<'a>(&'a Inner);
@@ -61,7 +73,7 @@ impl RuntimeGraphicsCallbackQueue {
                     return Ok(result);
                 }
             }
-            self.process().await?;
+            self.process_classified().await?;
         }
     }
 }
@@ -76,6 +88,118 @@ mod tests {
     use futures::FutureExt;
     use std::cell::Cell;
     use std::cell::RefCell;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn classified_callback_failure_preserves_one_pinned_execution_and_terminal_authority_failures()
+    {
+        #[derive(Clone, Copy, Debug)]
+        enum Case {
+            Language,
+            Operational,
+            Retired,
+            Cancelled,
+        }
+        for case in [
+            Case::Language,
+            Case::Operational,
+            Case::Retired,
+            Case::Cancelled,
+        ] {
+            futures::executor::block_on(async {
+                let cancellation = runmat_execution::cancellation::CancellationSource::new();
+                let selected = RuntimeContext::with_cancellation(
+                    Rc::new(RuntimeExecutionService::new()),
+                    cancellation.token(),
+                );
+                let capacity = NonZeroUsize::new(2).unwrap();
+                let queue = RuntimeGraphicsCallbackQueue::new(capacity, capacity);
+                let weak = queue.downgrade();
+                let calls = Rc::new(Cell::new(0));
+                let callback_calls = Rc::clone(&calls);
+                let callback: Rc<GraphicsCallbackResponder> = Rc::new(move |_| {
+                    let weak = weak.clone();
+                    let cancellation = cancellation.clone();
+                    let calls = Rc::clone(&callback_calls);
+                    Box::pin(async move {
+                        calls.set(calls.get() + 1);
+                        if matches!(case, Case::Retired) {
+                            weak.upgrade().unwrap().close();
+                        }
+                        if matches!(case, Case::Cancelled) {
+                            cancellation.cancel(runmat_execution::CancellationReason::User);
+                        }
+                        let mut error = build_runtime_error("callback diagnostic")
+                            .with_identifier("RunMat:SameDiagnostic")
+                            .with_failure_origin(if matches!(case, Case::Operational) {
+                                crate::runtime_error::RuntimeFailureOrigin::Unclassified
+                            } else {
+                                crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation
+                            });
+                        if matches!(case, Case::Operational) {
+                            error =
+                                error.with_source(std::io::Error::other("owned operational cause"));
+                        }
+                        Err(error.build())
+                    })
+                });
+                let (_registration, ingress) = queue
+                    .register_response(selected, 9, GraphicsCallbackKind::PanActionPre, callback)
+                    .unwrap();
+                ingress
+                    .send(GraphicsCallbackHostEvent {
+                        figure: 9,
+                        kind: GraphicsCallbackKind::PanActionPre,
+                        position: None,
+                    })
+                    .unwrap();
+                let polls = Rc::new(Cell::new(0));
+                let source_polls = Rc::clone(&polls);
+                let mut original = Box::pin(std::future::poll_fn(move |_| {
+                    source_polls.set(source_polls.get() + 1);
+                    if source_polls.get() == 1 {
+                        Poll::Pending
+                    } else {
+                        Poll::Ready("primary source outcome and streams")
+                    }
+                }));
+                let failure = queue
+                    .drive_execution_with_host_callbacks_classified(original.as_mut())
+                    .await
+                    .unwrap_err();
+                assert_eq!(calls.get(), 1, "{case:?}");
+                assert_eq!(
+                    polls.get(),
+                    1,
+                    "source remains pinned at the suspended poll"
+                );
+                match (case, failure) {
+                    (Case::Language, GraphicsCallbackDriveError::Callback(error)) => {
+                        assert_eq!(error.identifier(), Some("RunMat:SameDiagnostic"));
+                        assert_eq!(
+                            queue
+                                .drive_execution_with_host_callbacks_classified(original.as_mut())
+                                .await
+                                .unwrap(),
+                            "primary source outcome and streams"
+                        );
+                        assert_eq!(polls.get(), 2);
+                        assert_eq!(calls.get(), 1, "consumed callback was not replayed");
+                    }
+                    (Case::Operational, GraphicsCallbackDriveError::Service(error)) => {
+                        assert!(error
+                            .source
+                            .as_ref()
+                            .unwrap()
+                            .downcast_ref::<std::io::Error>()
+                            .is_some());
+                    }
+                    (Case::Retired | Case::Cancelled, GraphicsCallbackDriveError::Service(_)) => {}
+                    (case, failure) => panic!("incorrect recovery for {case:?}: {failure:?}"),
+                }
+            });
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]

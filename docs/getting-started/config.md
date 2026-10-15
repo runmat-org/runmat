@@ -320,6 +320,17 @@ The former `profile_path` setting is removed; delete it from existing configurat
 | `height`    | integer | `800`   | Default GUI window height. |
 | `vsync`     | boolean | `true`  | Enables VSync.             |
 | `maximized` | boolean | `false` | Starts window maximized.   |
+| `maximum_pending_opens` | positive integer | `64` | Maximum queued native-window open requests. |
+| `maximum_windows` | positive integer | `64` | Maximum live native windows owned by the host. |
+| `maximum_snapshot_bytes` | positive integer | `268435456` | Upper bound on the retained Figure scene batch admitted for native presentation. |
+| `maximum_pending_callbacks` | positive integer | `1024` | Maximum queued graphics callback events. A full queue reports backpressure. |
+| `maximum_callback_registrations` | positive integer | `1024` | Maximum callback registrations in a session's graphics queue. |
+
+These live-GUI limits must be nonzero. They bound open requests, retained scene
+batches and callback queues independently; they do not bound renderer/GPU or
+whole-process memory. `maximum_snapshot_bytes` is separate from the serialized
+export/replay limit `runtime.plotting.export.scene_budget_bytes`. Raise an
+individual limit only when the application needs the corresponding capacity.
 
 
 #### `[runtime.plotting.export]`
@@ -507,6 +518,11 @@ width = 1200
 height = 800
 vsync = true
 maximized = false
+maximum_pending_opens = 64
+maximum_windows = 64
+maximum_snapshot_bytes = 268435456
+maximum_pending_callbacks = 1024
+maximum_callback_registrations = 1024
 
 [runtime.plotting.export]
 format = "png"

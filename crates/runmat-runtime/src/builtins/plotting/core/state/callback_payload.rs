@@ -7,10 +7,19 @@ pub(crate) fn callback_payload_valid(
     kind: GraphicsCallbackKind,
     payload: &GraphicsCallbackRolePayload,
 ) -> bool {
+    callback_payload_valid_at_scene(registered, kind, payload, payload.figure_and_scene().1)
+}
+
+pub(crate) fn callback_payload_valid_at_scene(
+    registered: &GraphicsReceiverRef,
+    kind: GraphicsCallbackKind,
+    payload: &GraphicsCallbackRolePayload,
+    admitted_scene: &GraphicsSceneLease,
+) -> bool {
     if !payload.matches_role(kind) {
         return false;
     }
-    let (figure, scene) = payload.figure_and_scene();
+    let (figure, _) = payload.figure_and_scene();
     if !figure.shares_lease(registered) {
         return false;
     }
@@ -25,7 +34,7 @@ pub(crate) fn callback_payload_valid(
         .figure_receiver
         .as_ref()
         .is_some_and(|owned| owned.shares_lease(figure))
-        || !state.scene_lease.shares_lease(scene)
+        || !state.scene_lease.shares_lease(admitted_scene)
     {
         return false;
     }

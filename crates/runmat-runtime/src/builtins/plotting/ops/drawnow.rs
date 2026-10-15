@@ -92,41 +92,22 @@ async fn drawnow_in_context(
         .await
         .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
 
-    let mut operation = service.flush(request);
-    let mut terminal = None;
-    let cancellation_race = cooperation
-        .await_cancellable(async {
-            terminal = Some(operation.as_mut().await);
-        })
-        .await;
-    // A completed host result wins even when cancellation arrives during its
-    // ready poll. The shared cancellation wrapper still owns the listener and
-    // drops externally pending work when cancellation wins first.
-    let terminal = match (terminal, cancellation_race) {
-        (Some(result), _) => result,
-        (None, Err(source)) => {
-            let disposition = operation.as_mut().abandon();
-            return Err(cancelled_flush(source, disposition));
-        }
-        (None, Ok(())) => {
-            let disposition = operation.as_mut().abandon();
-            return Err(attach_disposition(
-                drawnow_error(
-                    &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
-                    "host completion returned no receipt",
-                ),
-                disposition,
-            ));
-        }
-    };
-    let disposition = operation.as_mut().abandon();
-    let receipt = match terminal {
-        Ok(receipt) => receipt,
-        Err(mut error) => {
-            error.context = error.context.with_builtin("drawnow");
-            return Err(attach_disposition(error, disposition));
-        }
-    };
+    let (receipt, disposition) = crate::context::await_graphics_completion(
+        runtime,
+        service.flush(request),
+        cancelled_flush,
+        || {
+            drawnow_error(
+                &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
+                "host completion returned no receipt",
+            )
+        },
+    )
+    .await
+    .map_err(|mut error| {
+        error.context = error.context.with_builtin("drawnow");
+        error
+    })?;
     if disposition != GraphicsFlushDisposition::Published
         && (receipt.presentation == GraphicsPresentation::Presented
             || receipt.callbacks == GraphicsCallbackReceipt::Processed)

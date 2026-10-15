@@ -28,12 +28,12 @@ pub(crate) struct PlotCallbackRoot {
     pub(crate) live: Arc<AtomicBool>,
     _roots: crate::execution::RootedValueLease,
     // No role is published merely because its property value was stored.
-    _behavior_authority: Option<crate::context::BackgroundCallbackAuthority>,
+    pub(crate) behavior_authority: Option<std::rc::Rc<crate::context::BackgroundCallbackAuthority>>,
 }
 
 #[path = "callbacks/behavior.rs"]
 mod behavior;
-pub(super) use behavior::retain_behavior;
+pub(super) use behavior::{retain_behavior, retain_behavior_in_context};
 
 #[derive(Clone, Debug)]
 pub struct PlotCallableToken(Arc<PlotCallableLease>);
@@ -114,6 +114,20 @@ fn retain_root(
     authority: Option<crate::context::BackgroundCallbackAuthority>,
     builtin: &'static str,
 ) -> BuiltinResult<PlotCallableToken> {
+    retain_root_in_context(
+        crate::context::legacy::active().as_ref(),
+        value,
+        authority,
+        builtin,
+    )
+}
+
+fn retain_root_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    authority: Option<crate::context::BackgroundCallbackAuthority>,
+    builtin: &'static str,
+) -> BuiltinResult<PlotCallableToken> {
     let slot = reserve_slot(&NEXT_SLOT, builtin)?;
     let live = Arc::new(AtomicBool::new(true));
     let roots = crate::execution::RootedValueLease::for_traced(&value)
@@ -122,9 +136,9 @@ fn retain_root(
         value,
         live: Arc::clone(&live),
         _roots: roots,
-        _behavior_authority: authority,
+        behavior_authority: authority.map(std::rc::Rc::new),
     };
-    if let Some(runtime) = crate::context::legacy::active() {
+    if let Some(runtime) = runtime {
         runtime.retain_plot_callback(slot, root);
         Ok(PlotCallableToken(Arc::new(PlotCallableLease {
             slot,

@@ -14,13 +14,27 @@ use std::sync::mpsc;
 
 use crate::cli::Cli;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::{create_session, drive_with_graphics_callbacks};
+use crate::commands::session::{
+    create_session_with_graphics,
+    drive_repl_with_graphics_callbacks as drive_with_graphics_callbacks,
+};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_compact_runtime_diagnostic, format_frontend_error};
 use crate::presentation::{self, StreamStyles};
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
+#[path = "repl/piped_input.rs"]
+mod piped_input;
+
 pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()> {
+    execute_repl_with_graphics(config, cli, &runmat_core::SessionGraphicsHost::Unavailable).await
+}
+
+pub(crate) async fn execute_repl_with_graphics(
+    config: &RunMatRuntimeConfig,
+    cli: &Cli,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     info!("Starting RunMat REPL");
     if config.runtime.verbose {
         info!("Verbose mode enabled");
@@ -33,11 +47,12 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         if enable_jit { "enabled" } else { "disabled" }
     );
 
-    let mut engine = create_session(
+    let mut engine = create_session_with_graphics(
         enable_jit,
         config.runtime.verbose,
         config,
         "Failed to create REPL engine",
+        graphics,
     )?;
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
     let _project_lease = install_project_for_source(&mut engine, &cwd, cli).await?;
@@ -53,13 +68,12 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
     use rustyline::error::ReadlineError;
     use rustyline::DefaultEditor;
 
-    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
-
     let stdin_is_tty = atty::is(atty::Stream::Stdin);
     if !stdin_is_tty {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
+        // This CLI invocation is stdin's sole consumer until source admission;
+        // no script/input builtin is running while this owner collects it.
+        let buffer = piped_input::PipedInput::stdin()?
+            .await
             .context("Failed to read piped input")?;
         let callbacks = engine.graphics_callback_queue().cloned();
         if !local_tasks
@@ -83,6 +97,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         return Ok(());
     }
 
+    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
     print_repl_banner(config);
     let prompt = presentation::stdout().brand("runmat> ");
     let (input_sender, mut input) = futures::channel::mpsc::unbounded();
@@ -344,6 +359,26 @@ async fn process_repl_input(
     for raw_line in input.lines() {
         if !process_repl_line(raw_line.trim(), engine, config).await? {
             return Ok(false);
+        }
+    }
+
+    // Execution diagnostics/produced streams remain primary. A presentation
+    // failure is reported separately; fatal callback authority errors still
+    // retire the caller after its original diagnostic/output was presented.
+    if let Err(error) = engine.flush_graphics().await {
+        eprintln!(
+            "{}: {error}",
+            presentation::stderr().error("Graphics error")
+        );
+        if matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|source| source
+                    .downcast_ref::<runmat_runtime::context::GraphicsCallbackDriveError>()),
+            Some(runmat_runtime::context::GraphicsCallbackDriveError::Service(_))
+        ) {
+            return Err(error).context("graphics callback service failed after command output");
         }
     }
 

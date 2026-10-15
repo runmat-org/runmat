@@ -405,7 +405,36 @@ pub enum PlotType {
     ReferenceLine,
 }
 
+#[path = "figure/metadata_budget.rs"]
+mod metadata_budget;
+pub use metadata_budget::FigureMetadataOverlay;
+
 impl Figure {
+    /// Proposed text metadata uses the same retained-body accounting as a
+    /// real snapshot, without cloning plot data or its backing allocations.
+    pub fn retained_snapshot_bytes_with_metadata<'a>(
+        &self,
+        overlays: impl IntoIterator<Item = FigureMetadataOverlay<'a>>,
+    ) -> Option<usize> {
+        let current = self.retained_snapshot_bytes()?;
+        let body = current.checked_sub(self.metadata_overlay().retained_bytes(self)?)?;
+        let mut maximum: Option<usize> = None;
+        for overlay in overlays {
+            let bytes = body.checked_add(overlay.retained_bytes(self)?)?;
+            maximum = Some(maximum.map_or(bytes, |maximum| maximum.max(bytes)));
+        }
+        maximum.or(Some(current))
+    }
+
+    pub fn metadata_overlay(&self) -> FigureMetadataOverlay<'_> {
+        FigureMetadataOverlay {
+            name: self.name.as_ref(),
+            sg_title: self.sg_title.as_ref(),
+            sg_title_style: &self.sg_title_style,
+            active_axes: None,
+        }
+    }
+
     /// Heap bytes retained by an immutable snapshot of this figure.
     ///
     /// Shared GPU buffers are cheap resident handles. Reference-counted host

@@ -626,6 +626,15 @@ fn object_property_or_default(
 pub fn set_zoom_object_properties(
     value: &Value,
     args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<Option<()>> {
+    set_zoom_object_properties_in_context(None, value, args, builtin)
+}
+
+pub(crate) fn set_zoom_object_properties_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    args: &[Value],
     _builtin: &'static str,
 ) -> BuiltinResult<Option<()>> {
     let Some(handle) = read_zoom_handle(value).cloned() else {
@@ -641,7 +650,7 @@ pub fn set_zoom_object_properties(
             .map_err(|_| invalid("zoom property names must be scalar text"))?;
         let value = &args[idx + 1];
         apply_zoom_property(mode_receiver(&handle)?, &name, value)?;
-        write_object_property(&handle, &name, value.clone())?;
+        write_object_property(runtime, &handle, &name, value.clone())?;
         idx += 2;
     }
     let refreshed = snapshot_from_object(&handle)?;
@@ -654,9 +663,15 @@ pub fn set_zoom_object_properties(
     Ok(Some(()))
 }
 
-fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
+fn write_object_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &HandleRef,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
     if let Some(key) = canonical_property(name).and_then(ZoomProperty::persistent) {
-        return super::state::mode_properties::set(
+        return super::state::mode_properties::set_in_context(
+            runtime,
             &mode_receiver(handle)?,
             key,
             value,

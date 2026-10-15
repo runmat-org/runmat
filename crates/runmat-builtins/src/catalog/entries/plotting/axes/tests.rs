@@ -28,6 +28,26 @@ fn axes_inference_returns_host_handle_without_inventing_graphics_identity() {
 }
 #[test]
 fn axes_inference_validates_known_property_syntax_and_preserves_unknown_target() {
+    for (class, invalid) in [(standard::AXES, false), (standard::FIGURE, false)] {
+        let target = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(class.into()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }));
+        let call = CallRequest {
+            arguments: vec![target],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        };
+        assert_eq!(
+            !inference::infer(&call, &AXES_CATALOG_ENTRY)
+                .diagnostics
+                .is_empty(),
+            invalid
+        );
+    }
     let text = ValueFact::scalar(ValueKindFact::String);
     let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
     for (arguments, invalid) in [

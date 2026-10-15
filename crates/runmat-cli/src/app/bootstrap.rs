@@ -47,28 +47,24 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 
-    configure_gc_from_config(&config)?;
-
     let compilation_only = matches!(
         cli.command,
         Some(Commands::Compile { .. } | Commands::NativeInterface { .. })
     );
-    if !compilation_only {
-        let accel_options: AccelerateInitOptions = (&config.accelerate).into();
-        runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
-
-        configure_plotting_from_config(&config);
-        configure_analysis_from_config(&config)?;
-        report_plot_context_status(&config);
-    }
-
     let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => !compilation_only,
+        PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
         PlotMode::Auto => {
             !compilation_only && !config.plotting.force_headless && is_gui_available()
         }
         PlotMode::Headless => false,
     };
+
+    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+    if wants_gui && super::native_graphics::applies(&cli) {
+        return super::native_graphics::run(cli, config);
+    }
+
+    initialize_execution_lane(&config, compilation_only)?;
 
     let _gui_initialized = if wants_gui {
         info!("Initializing GUI plotting system");
@@ -109,6 +105,21 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     };
 
     dispatch::dispatch(&cli, &config).await
+}
+
+pub(super) fn initialize_execution_lane(
+    config: &RunMatRuntimeConfig,
+    compilation_only: bool,
+) -> Result<()> {
+    configure_gc_from_config(config)?;
+    if !compilation_only {
+        let accel_options: AccelerateInitOptions = (&config.accelerate).into();
+        runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
+        configure_plotting_from_config(config);
+        configure_analysis_from_config(config)?;
+        report_plot_context_status(config);
+    }
+    Ok(())
 }
 
 /// Load configuration from files and environment

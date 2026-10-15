@@ -13,6 +13,22 @@ pub(crate) fn create_session(
     config: &RunMatRuntimeConfig,
     create_error_context: &'static str,
 ) -> Result<RunMatSession> {
+    create_session_with_graphics(
+        enable_jit,
+        verbose,
+        config,
+        create_error_context,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+    )
+}
+
+pub(crate) fn create_session_with_graphics(
+    enable_jit: bool,
+    verbose: bool,
+    config: &RunMatRuntimeConfig,
+    create_error_context: &'static str,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<RunMatSession> {
     let mut engine =
         RunMatSession::with_options(enable_jit, verbose).context(create_error_context)?;
     let execution = runmat_execution_runner_native::NativeExecutionService::new(
@@ -37,6 +53,9 @@ pub(crate) fn create_session(
         .set_python_config(&config.foreign.python)
         .context("failed to configure Python runtime")?;
     engine.set_selected_foreign_config(std::sync::Arc::new(config.clone()));
+    engine
+        .attach_graphics_host(graphics)
+        .context("failed to attach native graphics host")?;
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }
@@ -55,5 +74,34 @@ pub(crate) async fn drive_with_graphics_callbacks<F: Future>(
             .await
             .context("session graphics callback failed"),
         None => Ok(execution.await),
+    }
+}
+
+/// A local callback diagnostic must not drop/recreate the REPL command or
+/// its input future. Fatal pump authority failures still stop the caller.
+pub(crate) async fn drive_repl_with_graphics_callbacks<F: Future>(
+    callbacks: Option<RuntimeGraphicsCallbackQueue>,
+    execution: F,
+) -> Result<F::Output> {
+    let Some(callbacks) = callbacks else {
+        return Ok(execution.await);
+    };
+    let mut execution = Box::pin(execution);
+    loop {
+        match callbacks
+            .drive_execution_with_host_callbacks_classified(execution.as_mut())
+            .await
+        {
+            Ok(result) => return Ok(result),
+            Err(runmat_runtime::context::GraphicsCallbackDriveError::Callback(error)) => {
+                eprintln!(
+                    "{}: {error}",
+                    crate::presentation::stderr().error("Graphics callback error")
+                );
+            }
+            Err(runmat_runtime::context::GraphicsCallbackDriveError::Service(error)) => {
+                return Err(error).context("session graphics callback service failed");
+            }
+        }
     }
 }

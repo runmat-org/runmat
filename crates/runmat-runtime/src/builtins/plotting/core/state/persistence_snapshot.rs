@@ -30,6 +30,16 @@ pub struct FigureSnapshotEntry {
     pub figure: FigureOwner,
 }
 
+impl FigureSnapshotEntry {
+    pub(crate) fn retained_byte_upper_bound(&self) -> Option<usize> {
+        Self::retained_byte_upper_bound_for_payload(self.figure.retained_snapshot_bytes()?)
+    }
+
+    pub(crate) fn retained_byte_upper_bound_for_payload(payload_bytes: usize) -> Option<usize> {
+        std::mem::size_of::<Self>().checked_add(figure_owner_allocation_upper_bound(payload_bytes)?)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FigurePersistenceSnapshot {
     pub scope: FigureSnapshotScope,

@@ -31,7 +31,7 @@ pub use execution::*;
 pub use foreign_unit_host::{ForeignUnitHost, ForeignUnitRetirement};
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
-pub use session::{RunMatSession, SessionRetirement};
+pub use session::{RunMatSession, SessionGraphicsHost, SessionRetirement};
 pub use telemetry::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
     TelemetryRunFinish, TelemetryRunGuard, TelemetrySink,

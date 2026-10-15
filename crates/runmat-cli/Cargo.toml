@@ -94,7 +94,7 @@ sha2 = { workspace = true }
 default = ["gui", "blas-lapack", "wgpu", "cuda", "jit", "occt-native"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
 cuda = ["runmat-accelerate/cuda"]
-gui = ["runmat-plot/gui"]
+gui = ["runmat-plot/gui", "runmat-runtime/gui", "runmat-core/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
 jit = ["runmat-core/jit"]
@@ -108,3 +108,6 @@ git2 = { version = "0.20", default-features = false }
 serde_json = { workspace = true }
 openapiv3 = "2.0"
 serde_yaml = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_IO"] }

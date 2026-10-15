@@ -7,6 +7,7 @@ use std::borrow::Cow;
 
 #[path = "properties/async_readback.rs"]
 mod async_readback;
+pub(crate) use async_readback::set_properties_async_with_runtime;
 pub use async_readback::{get_properties_async, set_properties_async};
 #[path = "properties/read_source.rs"]
 mod read_source;
@@ -19,7 +20,10 @@ mod axes_read;
 mod set_target;
 #[path = "properties/receiver.rs"]
 mod receiver;
-pub(crate) use receiver::{get_receiver_properties, set_receiver_properties};
+#[path = "properties/figure_plan.rs"]
+mod figure_plan;
+pub(crate) use receiver::select as select_graphics_property;
+pub(crate) use receiver::{get_receiver_properties, set_receiver_properties_with_runtime};
 use set_target::PropertySetHandle;
 pub(crate) use set_target::PropertySetOutcome;
 #[path = "properties/set_preflight.rs"]
@@ -170,13 +174,31 @@ pub fn set_properties(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    set_properties_for_target(
-        &super::state::PropertyMutationTarget::alias(),
-        (&handle).into(),
+    set_properties_with_runtime(None, handle, args, builtin)
+}
+
+pub(crate) fn set_properties_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: PlotHandle,
+    args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    set_properties_with_authority(
+        &super::state::PropertyMutationTarget::alias().with_runtime(runtime),
+        handle,
         args,
         builtin,
-    )?
-    .complete_compatibility(builtin)
+    )
+}
+
+pub(crate) fn set_properties_with_authority(
+    authority: &super::state::PropertyMutationTarget,
+    handle: PlotHandle,
+    args: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    set_properties_for_target(authority, (&handle).into(), args, builtin)?
+        .complete_compatibility(builtin)
 }
 
 fn set_properties_for_target(
@@ -202,25 +224,8 @@ fn set_properties_for_target(
             Ok(PropertySetOutcome::Complete)
         }
         PropertySetHandle::Figure(handle) => {
-            let mut needs_present = false;
-            for pair in args.chunks_exact(2) {
-                validate_figure_property_value_for_target(
-                    authority,
-                    &pair[0],
-                    &pair[1],
-                    Some(handle),
-                    builtin,
-                )?;
-            }
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                needs_present |= apply_figure_property(authority, handle, &key, &pair[1], builtin)?;
-            }
-            if needs_present {
-                PropertySetOutcome::presentation(authority, handle, builtin)
-            } else {
-                Ok(PropertySetOutcome::Complete)
-            }
+            figure_plan::PreparedFigureProperties::new(handle, args, builtin)?
+                .apply(authority, handle, builtin)
         }
         PropertySetHandle::Axes(handle, axes_index) => {
             for pair in args.chunks_exact(2) {
@@ -1995,94 +2000,6 @@ fn apply_ruler_property(
     }
 }
 
-fn apply_figure_property(
-    authority: &super::state::PropertyMutationTarget,
-
-    figure_handle: FigureHandle,
-    key: &str,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<bool> {
-    let opts = LineStyleParseOptions::generic(builtin);
-    match key {
-        "name" => {
-            let name = value_as_text_string(value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
-            super::state::set_figure_name_for_property(authority, figure_handle, name)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "numbertitle" => {
-            let enabled = value_as_bool(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
-            })?;
-            super::state::set_figure_number_title_for_property(authority, figure_handle, enabled)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "visible" => {
-            let visible = value_as_bool(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
-            })?;
-            let _ =
-                super::state::set_figure_visible_for_property(authority, figure_handle, visible)
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "position" => {
-            let position = parse_figure_position(value, builtin)?;
-            super::state::set_figure_position_for_property(authority, figure_handle, position)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "color" => {
-            let color = parse_color_value(&opts, value)?;
-            super::state::set_figure_background_color_for_property(authority, figure_handle, color)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "tag" => {
-            let tag = value_as_text_string(value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
-            super::state::set_figure_tag_for_property(authority, figure_handle, tag)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "currentaxes" => {
-            let resolved = resolve_plot_handle(value, builtin)?;
-            let PlotHandle::Axes(fig, axes_index) = resolved else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must be an axes handle"),
-                ));
-            };
-            if fig != figure_handle {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must belong to the target figure"),
-                ));
-            }
-            super::state::select_axes_for_figure_for_property(authority, figure_handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "sgtitle" => {
-            apply_figure_text_alias(
-                authority,
-                figure_handle,
-                PlotObjectKind::SuperTitle,
-                value,
-                builtin,
-            )?;
-            Ok(true)
-        }
-        other => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported figure property `{other}`"),
-        )),
-    }
-}
-
 pub(crate) fn validate_figure_property_value(
     key_value: &Value,
     property_value: &Value,
@@ -2099,75 +2016,13 @@ pub(crate) fn validate_figure_property_value(
 }
 
 fn validate_figure_property_value_for_target(
-    authority: &super::state::PropertyMutationTarget,
-
+    _authority: &super::state::PropertyMutationTarget,
     key_value: &Value,
     property_value: &Value,
     target_figure: Option<FigureHandle>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let key = property_name(key_value, builtin)?;
-    let opts = LineStyleParseOptions::generic(builtin);
-    match key.as_str() {
-        "name" => {
-            value_as_text_string(property_value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
-        }
-        "numbertitle" => {
-            value_as_bool(property_value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
-            })?;
-        }
-        "visible" => {
-            value_as_bool(property_value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
-            })?;
-        }
-        "position" => {
-            let _ = parse_figure_position(property_value, builtin)?;
-        }
-        "color" => {
-            let _ = parse_color_value(&opts, property_value)?;
-        }
-        "tag" => {
-            value_as_text_string(property_value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
-        }
-        "currentaxes" => {
-            let resolved = resolve_plot_handle(property_value, builtin)?;
-            let PlotHandle::Axes(fig, _) = resolved else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must be an axes handle"),
-                ));
-            };
-            let Some(target) = target_figure else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes requires an existing target figure"),
-                ));
-            };
-            if fig != target {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must belong to the target figure"),
-                ));
-            }
-        }
-        "sgtitle" => validate_figure_text_alias(
-            authority,
-            PlotObjectKind::SuperTitle,
-            property_value,
-            builtin,
-        )?,
-        other => {
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: unsupported figure property `{other}`"),
-            ));
-        }
-    }
-    Ok(())
+    figure_plan::validate(key_value, property_value, target_figure, builtin)
 }
 
 fn get_histogram_property(
@@ -7681,88 +7536,6 @@ fn validate_axes_text_alias(
         ));
     }
     axes_metadata_snapshot(src_handle, src_axes).map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
-}
-
-fn apply_figure_text_alias(
-    authority: &super::state::PropertyMutationTarget,
-
-    handle: FigureHandle,
-    kind: PlotObjectKind,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<()> {
-    if let Some(text) = value_as_text_string(value) {
-        match kind {
-            PlotObjectKind::SuperTitle => {
-                super::state::set_sg_title_properties_for_figure_for_property(
-                    authority,
-                    handle,
-                    Some(text),
-                    None,
-                )
-                .map_err(|err| map_figure_error(builtin, err))?;
-            }
-            _ => unreachable!(),
-        }
-        return Ok(());
-    }
-
-    let scalar = handle_scalar(value, builtin)?;
-    let (src_handle, _src_axes, src_kind) =
-        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
-    if src_kind != kind {
-        return Err(plotting_error(
-            builtin,
-            format!(
-                "{builtin}: expected a matching text handle for `{}`",
-                key_name(kind)
-            ),
-        ));
-    }
-
-    let figure = super::state::clone_figure(src_handle)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
-    let (text, style) = match kind {
-        PlotObjectKind::SuperTitle => (figure.sg_title, figure.sg_title_style),
-        _ => unreachable!(),
-    };
-    super::state::set_sg_title_properties_for_figure_for_property(
-        authority,
-        handle,
-        text,
-        Some(style),
-    )
-    .map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
-}
-
-fn validate_figure_text_alias(
-    _authority: &super::state::PropertyMutationTarget,
-
-    kind: PlotObjectKind,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<()> {
-    if value_as_text_string(value).is_some() {
-        return Ok(());
-    }
-
-    let scalar = handle_scalar(value, builtin)?;
-    let (src_handle, _src_axes, src_kind) =
-        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
-    if src_kind != kind {
-        return Err(plotting_error(
-            builtin,
-            format!(
-                "{builtin}: expected a matching text handle for `{}`",
-                key_name(kind)
-            ),
-        ));
-    }
-
-    super::state::clone_figure(src_handle)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
     Ok(())
 }
 
