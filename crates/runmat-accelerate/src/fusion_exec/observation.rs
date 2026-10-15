@@ -175,7 +175,7 @@ impl FusionCpuObservation {
         pc: usize,
         binding: &crate::graph::VarBinding,
         actual: &Value,
-    ) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
+    ) -> Result<Option<Value>, Box<runmat_runtime::RuntimeError>> {
         let Some(vm) = self.vm_completion.as_ref() else {
             return Ok(None);
         };
@@ -183,11 +183,11 @@ impl FusionCpuObservation {
             return Ok(None);
         };
         if !vm_readback_current(vm, self.feedback.as_deref()) {
-            return Err(runmat_runtime::build_runtime_error(
-                "selected host route expired at ordinary load",
-            )
-            .with_identifier("RunMat:Placement:StaleHostReadback")
-            .build());
+            return Err(Box::new(
+                runmat_runtime::build_runtime_error("selected host route expired at ordinary load")
+                    .with_identifier("RunMat:Placement:StaleHostReadback")
+                    .build(),
+            ));
         }
         prepared.substitute_load(pc, binding, actual)
     }

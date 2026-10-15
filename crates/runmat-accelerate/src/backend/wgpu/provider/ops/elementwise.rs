@@ -3194,7 +3194,7 @@ impl WgpuProvider {
                     resource: entry.buffer.as_ref().as_entire_binding(),
                 });
             }
-            for (k, (out_buf, _)) in output_buffers.iter().enumerate() {
+            for (k, out_buf) in output_buffers.iter().enumerate() {
                 bind_entries.push(wgpu::BindGroupEntry {
                     binding: (inputs.len() + k) as u32,
                     resource: out_buf.as_ref().as_entire_binding(),
@@ -3257,7 +3257,7 @@ impl WgpuProvider {
             Ok(last_submission_id)
         })??;
         let mut handles = Vec::with_capacity(num_outputs);
-        for ((out_buf, _), class) in output_buffers.into_iter().zip(output_classes) {
+        for (out_buf, class) in output_buffers.into_iter().zip(output_classes) {
             let handle = if *class == runmat_accelerate_api::ProviderElementType::Logical {
                 self.register_logical_buffer(
                     out_buf,

@@ -45,7 +45,7 @@ impl FusionRegionObservations {
         pc: usize,
         instruction: &crate::bytecode::Instr,
         stack: &mut [runmat_value::Value],
-    ) -> Result<(), runmat_runtime::RuntimeError> {
+    ) -> Result<(), Box<runmat_runtime::RuntimeError>> {
         use runmat_accelerate::graph::{VarBinding, VarKind};
         let binding = match instruction {
             crate::bytecode::Instr::LoadVar(index) => VarBinding {
@@ -70,10 +70,10 @@ impl FusionRegionObservations {
             return Ok(());
         };
         let Some(actual) = stack.last_mut() else {
-            return Err(runmat_runtime::build_runtime_error(
-                "certified ordinary load produced no operand",
-            )
-            .build());
+            return Err(Box::new(
+                runmat_runtime::build_runtime_error("certified ordinary load produced no operand")
+                    .build(),
+            ));
         };
         if let Some(value) = ticket.substitute_vm_host_load(pc, &binding, actual)? {
             *actual = value;

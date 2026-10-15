@@ -405,3 +405,4 @@ fn host_single_staging_counts_both_actual_conversion_passes_on_f32_abi() {
     assert_eq!(work.adapter_element_visits, 16); // materialize_f64 then upload's f32 conversion
     assert_eq!(work.estimate.dispatches, Some(1)); // host passes are not GPU kernels
 }
+use runmat_accelerate_api::ProviderWorkload;

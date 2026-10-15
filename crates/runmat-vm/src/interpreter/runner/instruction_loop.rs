@@ -612,14 +612,19 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             context.runtime = outer_runtime;
         }
         #[cfg(feature = "native-accel")]
-        let dispatch_result = dispatch_result.and_then(|result| {
-            fusion_observations.substitute_loaded_input(
+        let dispatch_result = match dispatch_result {
+            Ok(result) => match fusion_observations.substitute_loaded_input(
                 executed_pc,
                 &bytecode.instructions[executed_pc],
                 stack,
-            )?;
-            Ok(result)
-        });
+            ) {
+                Ok(()) => Ok(result),
+                // Load validation boxes only the failure path. Ordinary
+                // dispatch retains its existing owned runtime-error boundary.
+                Err(error) => Err(*error),
+            },
+            Err(error) => Err(error),
+        };
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
             Err(err) => {

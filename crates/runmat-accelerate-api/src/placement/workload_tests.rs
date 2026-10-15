@@ -1,4 +1,5 @@
 use super::ProviderWorkload;
+use crate::ProviderPrecision;
 
 #[test]
 fn exact_numeric_download_binds_lazy_view_class_roles_and_one_host_output() {

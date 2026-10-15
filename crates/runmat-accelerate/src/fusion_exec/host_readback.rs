@@ -178,7 +178,7 @@ impl PreparedVmHostInputs {
         pc: usize,
         binding: &crate::graph::VarBinding,
         actual: &Value,
-    ) -> Result<Option<Value>, RuntimeError> {
+    ) -> Result<Option<Value>, Box<RuntimeError>> {
         let source = self.mirrors.iter().find(|(source, _)| {
             source
                 .loads
@@ -191,9 +191,9 @@ impl PreparedVmHostInputs {
         if !source.current()
             || !matches!(actual, Value::GpuTensor(handle) if source.matches_handle(handle))
         {
-            return Err(unavailable(
+            return Err(Box::new(unavailable(
                 "selected host source changed at its certified ordinary load",
-            ));
+            )));
         }
         Ok(Some(value.clone()))
     }

@@ -1,6 +1,7 @@
 //! Elementwise admission over shared physical readback and canonical host
 //! allocation contracts. No policy or numerical semantics live here.
 use super::*;
+use crate::fusion::FusionOp;
 use crate::fusion_exec::host_readback::{CpuHostResources, CpuReadbackPlan, Source};
 use crate::fusion_exec::VmHostInputUses;
 use runmat_execution::{
