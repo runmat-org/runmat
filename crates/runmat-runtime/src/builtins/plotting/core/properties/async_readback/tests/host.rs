@@ -29,6 +29,12 @@ fn stale_snapshot_refuses_atomic_property_update() {
     };
     let figure = state.figure;
     let plot_index = state.plot_index;
+    let receiver = crate::builtins::plotting::state::plot_child_graphics_receiver(handle as u64)
+        .unwrap()
+        .unwrap();
+    let selected =
+        crate::builtins::plotting::state::GraphicsPropertySelection::capture(receiver).unwrap();
+    let authority = crate::builtins::plotting::state::PropertyMutationTarget::selected(selected);
     crate::builtins::plotting::state::update_plot_element(figure, plot_index, |_| {})
         .expect("intervening mutation");
     let mut called = false;
@@ -45,6 +51,15 @@ fn stale_snapshot_refuses_atomic_property_update() {
         crate::builtins::plotting::state::FigureError::StalePlotSnapshot
     ));
     assert!(!called);
+    let mut selected_called = false;
+    crate::builtins::plotting::state::update_plot_element_for_property(
+        &authority,
+        figure,
+        plot_index,
+        |_| selected_called = true,
+    )
+    .expect_err("an intervening ordinary mutation retires the selected scene");
+    assert!(!selected_called);
 }
 
 #[test]
@@ -117,4 +132,119 @@ fn metadata_queries_and_style_only_updates_do_not_require_coordinate_materializa
         block_on(get_properties_async(target, Some("LineWidth"), "get")).expect("style"),
         Value::Num(3.0)
     );
+    for make in [host_line as fn() -> f64, host_scatter, host_line3] {
+        let id = make();
+        let receiver = crate::builtins::plotting::state::plot_child_graphics_receiver(id as u64)
+            .unwrap()
+            .unwrap();
+        let object = crate::builtins::plotting::state::graphics_receiver_object(receiver.clone())
+            .unwrap()
+            .unwrap();
+        let Value::HandleObject(handle) = &object else {
+            panic!("exact chart object")
+        };
+        assert!(crate::is_handle_valid(handle));
+        let original = x_data(id);
+        assert_eq!(
+            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+                object.clone(),
+                Value::String("XData".into())
+            ]))
+            .unwrap(),
+            original
+        );
+        block_on(crate::builtins::plotting::set::set_builtin_async(vec![
+            object.clone(),
+            Value::String("LineWidth".into()),
+            Value::Num(4.0),
+        ]))
+        .unwrap();
+        assert_eq!(
+            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+                object.clone(),
+                Value::String("LineWidth".into())
+            ]))
+            .unwrap(),
+            Value::Num(4.0)
+        );
+        let replacement = Tensor::new(vec![8.0, 9.0], vec![1, 2]).unwrap();
+        block_on(crate::builtins::plotting::set::set_builtin_async(vec![
+            object.clone(),
+            Value::String("XData".into()),
+            Value::Tensor(replacement.clone()),
+        ]))
+        .unwrap();
+        assert_eq!(
+            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+                object.clone(),
+                Value::String("XData".into())
+            ]))
+            .unwrap(),
+            Value::Tensor(replacement)
+        );
+        let selected =
+            crate::builtins::plotting::state::GraphicsPropertySelection::capture(receiver).unwrap();
+        crate::builtins::plotting::state::close_figure(Some(selected.figure_handle())).unwrap();
+        assert!(
+            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+                object,
+                Value::String("Type".into())
+            ]))
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
+    use crate::builtins::plotting::state;
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    crate::builtins::plotting::reset_plot_state();
+    let id = host_line();
+    let (child, _, _) = plot_child_element_snapshot(id).unwrap();
+    let figure = child.figure_axes().0;
+    let receiver = state::figure_graphics_receiver(figure).unwrap().unwrap();
+    let selection = state::GraphicsPropertySelection::capture(receiver.clone()).unwrap();
+    let outcome = block_on(super::super::super::receiver::set_selected_properties(
+        selection,
+        &[
+            Value::String("Name".into()),
+            Value::String("retained".into()),
+        ],
+        "set",
+    ))
+    .unwrap();
+    let PropertySetOutcome::Presentation(PropertyPresentation::Selected {
+        selection,
+        figure: retained,
+    }) = outcome
+    else {
+        panic!("selected Figure requires real presentation")
+    };
+    assert!(selection.figure_receiver().shares_lease(&receiver));
+    selection.ensure_current().unwrap();
+    assert_eq!(retained.name.as_deref(), Some("retained"));
+    let axes = state::axes_graphics_receiver(figure, 0).unwrap().unwrap();
+    let object = state::graphics_receiver_object(axes).unwrap().unwrap();
+    block_on(crate::builtins::plotting::set::set_builtin_async(vec![
+        object.clone(),
+        Value::String("Grid".into()),
+        Value::Bool(true),
+        Value::String("Box".into()),
+        Value::Bool(false),
+    ]))
+    .unwrap();
+    assert_eq!(
+        block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+            object,
+            Value::String("Grid".into())
+        ]))
+        .unwrap(),
+        Value::Bool(true)
+    );
+    assert!(selection.ensure_current().is_err());
+    assert_eq!(retained.name.as_deref(), Some("retained"));
+    state::close_figure(Some(figure)).unwrap();
+    assert!(!state::graphics_receiver_valid(&receiver));
 }

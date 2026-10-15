@@ -24,7 +24,28 @@ pub fn set_colormap_for_axes(
     axes_index: usize,
     colormap: ColorMap,
 ) -> Result<(), FigureError> {
-    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
+    set_colormap_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        colormap,
+    )
+}
+
+pub(crate) fn set_colormap_for_axes_for_property(
+    property: &PropertyMutationTarget,
+
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+) -> Result<(), FigureError> {
+    set_colormap_for_axes_with_length_for_property(
+        property,
+        handle,
+        axes_index,
+        colormap,
+        DEFAULT_COLORMAP_LENGTH,
+    )
 }
 
 pub fn set_colormap_for_axes_with_length(
@@ -33,8 +54,25 @@ pub fn set_colormap_for_axes_with_length(
     colormap: ColorMap,
     length: usize,
 ) -> Result<(), FigureError> {
+    set_colormap_for_axes_with_length_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        colormap,
+        length,
+    )
+}
+
+pub(crate) fn set_colormap_for_axes_with_length_for_property(
+    property: &PropertyMutationTarget,
+
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+    length: usize,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let direct_images =
             direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
         let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
@@ -45,7 +83,7 @@ pub fn set_colormap_for_axes_with_length(
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 

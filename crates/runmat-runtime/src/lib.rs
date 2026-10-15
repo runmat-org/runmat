@@ -126,9 +126,10 @@ pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
                 runmat_value::GraphicsReceiverKind::Axes { .. } => {
                     handle.class_name == runmat_types::standard::AXES
                 }
-                // Chart HandleObject projection is not admitted until its
-                // canonical class and lease-bearing property owner exist.
-                runmat_value::GraphicsReceiverKind::PlotChild { .. } => return false,
+                runmat_value::GraphicsReceiverKind::PlotChild { .. } => {
+                    plotting_hooks::graphics_receiver_class(&receiver)
+                        .is_some_and(|class| handle.class_name == class)
+                }
             };
             admitted_class && plotting_hooks::graphics_receiver_valid(&receiver)
         }

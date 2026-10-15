@@ -59,31 +59,42 @@ pub fn axis_color_limits_snapshot_for_axes(
         .get(&handle)
         .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
     validate_axes_index(state, axes_index)?;
+    Ok(color_limits_for_state_axes(state, axes_index))
+}
+
+pub(super) fn color_limits_for_state_axes(
+    state: &FigureState,
+    axes_index: usize,
+) -> runmat_plot::plots::surface::ScalarColorRange {
     if let Some((lower, upper)) = state
         .figure
         .axes_metadata(axes_index)
         .and_then(|meta| meta.color_limits)
     {
-        return Ok(runmat_plot::plots::surface::ScalarColorRange::Known(
-            lower, upper,
-        ));
+        return runmat_plot::plots::surface::ScalarColorRange::Known(lower, upper);
     }
-    Ok(state.figure.axes_scalar_color_range(axes_index))
+    state.figure.axes_scalar_color_range(axes_index)
 }
 
 pub fn axis_displayed_color_limits_for_axes(
     handle: FigureHandle,
     axes_index: usize,
 ) -> Result<Option<(f64, f64)>, FigureError> {
-    use runmat_plot::plots::surface::ScalarColorRange;
     let range = axis_color_limits_snapshot_for_axes(handle, axes_index)?;
-    Ok(match range {
+    Ok(displayed_color_limits(range))
+}
+
+pub(super) fn displayed_color_limits(
+    range: runmat_plot::plots::surface::ScalarColorRange,
+) -> Option<(f64, f64)> {
+    use runmat_plot::plots::surface::ScalarColorRange;
+    match range {
         ScalarColorRange::Known(lo, hi) if lo.is_finite() && hi.is_finite() && lo < hi => {
             Some((lo, hi))
         }
         ScalarColorRange::Empty | ScalarColorRange::NotMapped => Some((0.0, 1.0)),
         ScalarColorRange::Known(_, _) | ScalarColorRange::Unavailable => None,
-    })
+    }
 }
 
 /// Z limits exist for represented 3-D content or an explicitly configured Z
@@ -101,7 +112,10 @@ pub fn axis_z_limits_snapshot_for_axes(
     Ok(z_limits_for_state_axes(state, axes_index))
 }
 
-fn z_limits_for_state_axes(state: &mut FigureState, axes_index: usize) -> Option<(f64, f64)> {
+pub(super) fn z_limits_for_state_axes(
+    state: &mut FigureState,
+    axes_index: usize,
+) -> Option<(f64, f64)> {
     if let Some(limits) = state
         .figure
         .axes_metadata(axes_index)
@@ -129,8 +143,23 @@ pub fn set_hidden_line_removal_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
+    set_hidden_line_removal_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
+}
+
+pub(crate) fn set_hidden_line_removal_for_axes_for_property(
+    property: &PropertyMutationTarget,
+
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state
             .figure
@@ -138,7 +167,7 @@ pub fn set_hidden_line_removal_for_axes(
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 
@@ -147,14 +176,29 @@ pub fn set_y_direction_for_axes(
     axes_index: usize,
     direction: YDirection,
 ) -> Result<(), FigureError> {
+    set_y_direction_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        direction,
+    )
+}
+
+pub(crate) fn set_y_direction_for_axes_for_property(
+    property: &PropertyMutationTarget,
+
+    handle: FigureHandle,
+    axes_index: usize,
+    direction: YDirection,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_y_direction(axes_index, direction);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 

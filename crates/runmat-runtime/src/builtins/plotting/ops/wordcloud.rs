@@ -17,8 +17,7 @@ use std::collections::HashMap;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
-    register_wordcloud_handle, update_wordcloud_figure, update_wordcloud_handle_state,
-    PlotRenderOptions, WordCloudHandleState,
+    register_wordcloud_handle, PlotRenderOptions, WordCloudHandleState,
 };
 use crate::builtins::plotting::state::{select_axes_for_figure, select_figure, FigureHandle};
 use crate::builtins::plotting::style::{
@@ -1077,12 +1076,24 @@ pub(crate) fn get_wordcloud_property(
     }
 }
 
-pub(crate) fn apply_wordcloud_property(
+fn property_state_error(
+    builtin: &'static str,
+    source: crate::builtins::plotting::state::FigureError,
+) -> RuntimeError {
+    let _ = builtin;
+    let mut error = wordcloud_error(format!("wordcloud: {source}"));
+    error.source = Some(Box::new(source));
+    error
+}
+
+pub(crate) fn apply_wordcloud_property_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     handle: f64,
     state: &WordCloudHandleState,
     key: &str,
     value: &Value,
-    _builtin: &'static str,
+    builtin: &'static str,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(value) && is_option_key(&canonical_key(key)) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -1090,8 +1101,17 @@ pub(crate) fn apply_wordcloud_property(
             BUILTIN_NAME,
         )?;
     }
-    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot(handle) {
+    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot_for_property(
+        authority, handle,
+    ) {
         Ok(crate::builtins::plotting::state::PlotChildHandleState::WordCloud(current)) => current,
+        Err(err) if authority.is_selected() => return Err(property_state_error(builtin, err)),
+        _ if authority.is_selected() => {
+            return Err(property_state_error(
+                builtin,
+                crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+            ))
+        }
         _ => state.clone(),
     };
     match canonical_key(key).as_str() {
@@ -1179,69 +1199,89 @@ pub(crate) fn apply_wordcloud_property(
             )));
         }
     }
-    refresh_wordcloud_rendering(&mut next)?;
-    update_wordcloud_handle_state(handle, next)
-        .map_err(|err| wordcloud_error(format!("wordcloud: {err}")))
+    refresh_wordcloud_rendering_for_property(authority, &mut next)?;
+    crate::builtins::plotting::state::update_wordcloud_handle_state_for_property(
+        authority, handle, next,
+    )
+    .map_err(|err| property_state_error(BUILTIN_NAME, err))
 }
 
-fn refresh_wordcloud_rendering(state: &mut WordCloudHandleState) -> BuiltinResult<()> {
+fn refresh_wordcloud_rendering_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+    state: &mut WordCloudHandleState,
+) -> BuiltinResult<()> {
     let display =
         display_indices_from_parts(&state.word_data, &state.size_data, state.max_display_words);
-    let location = state.clone();
-    update_wordcloud_figure(&location, |figure| {
-        figure.set_axes_title(state.axes_index, state.title.clone());
-        figure.set_axes_title_style(
-            state.axes_index,
-            TextStyle {
-                visible: state.visible,
-                ..Default::default()
-            },
-        );
-        figure.set_axes_box_enabled(state.axes_index, state.box_visible);
-        ensure_annotation_slots(figure, state, display.len())?;
-        for (slot, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
-            let Some(annotation) = figure.axes_text_annotation(state.axes_index, annotation_index)
-            else {
-                return Err(crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle);
-            };
-            let _ = annotation;
-            if let Some(idx) = display.get(slot).copied() {
-                figure.set_axes_text_annotation_text(
-                    state.axes_index,
-                    annotation_index,
-                    state.word_data[idx].clone(),
-                );
-                let mut style = TextStyle {
-                    color: Some(word_color(slot, idx, &options_from_state(state))),
-                    font_size: Some(font_size(
-                        state.size_data[idx],
-                        &state.size_data,
-                        &options_from_state(state),
-                    )),
+    crate::builtins::plotting::state::update_wordcloud_figure_for_property(
+        authority,
+        state.figure,
+        state.axes_index,
+        |figure| {
+            figure.set_axes_title(state.axes_index, state.title.clone());
+            figure.set_axes_title_style(
+                state.axes_index,
+                TextStyle {
                     visible: state.visible,
                     ..Default::default()
+                },
+            );
+            figure.set_axes_box_enabled(state.axes_index, state.box_visible);
+            ensure_annotation_slots(figure, state, display.len())?;
+            for (slot, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
+                let Some(annotation) =
+                    figure.axes_text_annotation(state.axes_index, annotation_index)
+                else {
+                    return Err(
+                        crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+                    );
                 };
-                if slot == 0 {
-                    style.font_weight = Some("bold".to_string());
+                let _ = annotation;
+                if let Some(idx) = display.get(slot).copied() {
+                    figure.set_axes_text_annotation_text(
+                        state.axes_index,
+                        annotation_index,
+                        state.word_data[idx].clone(),
+                    );
+                    let mut style = TextStyle {
+                        color: Some(word_color(slot, idx, &options_from_state(state))),
+                        font_size: Some(font_size(
+                            state.size_data[idx],
+                            &state.size_data,
+                            &options_from_state(state),
+                        )),
+                        visible: state.visible,
+                        ..Default::default()
+                    };
+                    if slot == 0 {
+                        style.font_weight = Some("bold".to_string());
+                    }
+                    figure.set_axes_text_annotation_position(
+                        state.axes_index,
+                        annotation_index,
+                        layout_position(slot, display.len(), &options_from_state(state)),
+                    );
+                    figure.set_axes_text_annotation_style(
+                        state.axes_index,
+                        annotation_index,
+                        style,
+                    );
+                } else {
+                    let mut style = TextStyle {
+                        visible: false,
+                        ..Default::default()
+                    };
+                    style.color = Some(DEFAULT_COLOR);
+                    figure.set_axes_text_annotation_style(
+                        state.axes_index,
+                        annotation_index,
+                        style,
+                    );
                 }
-                figure.set_axes_text_annotation_position(
-                    state.axes_index,
-                    annotation_index,
-                    layout_position(slot, display.len(), &options_from_state(state)),
-                );
-                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
-            } else {
-                let mut style = TextStyle {
-                    visible: false,
-                    ..Default::default()
-                };
-                style.color = Some(DEFAULT_COLOR);
-                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
             }
-        }
-        Ok(())
-    })
-    .map_err(|err| wordcloud_error(format!("wordcloud: {err}")))?;
+            Ok(())
+        },
+    )
+    .map_err(|err| property_state_error(BUILTIN_NAME, err))?;
     Ok(())
 }
 

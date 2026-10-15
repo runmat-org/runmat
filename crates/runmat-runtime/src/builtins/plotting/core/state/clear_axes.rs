@@ -47,8 +47,16 @@ pub(super) fn clear_registered_axes(
         {
             return false;
         }
-        remap_indices(child, &mapping)
+        true
     });
+    // Drop-only admission does not copy a retained payload. Only survivors
+    // whose Figure layout is being remapped become writable.
+    reg.plot_children.retain_mut_where(
+        |child| {
+            child.figure_axes().0 == handle && !matches!(child, PlotChildHandleState::ColorBar(_))
+        },
+        |_, child| remap_indices(child, &mapping),
+    );
 }
 
 /// Grid expansion can reclaim former overlay axes. Compact their plot data

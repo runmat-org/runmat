@@ -20,15 +20,21 @@ pub(super) fn reconcile(reg: &mut PlotRegistry, handle: FigureHandle, figure: &F
     reg.plot_children.retain(|_, child| {
         if let PlotChildHandleState::ColorBar(bar) = child {
             if bar.figure == handle {
-                let Some(meta) = figure.axes_metadata.get(bar.axes_index) else {
+                if figure.axes_metadata.get(bar.axes_index).is_none() {
                     return false;
-                };
-                bar.visible = meta.colorbar_enabled;
+                }
                 existing_axes.insert(bar.axes_index);
             }
         }
         true
     });
+    reg.plot_children.for_each_mut_where(
+        |child| matches!(child, PlotChildHandleState::ColorBar(bar) if bar.figure == handle
+            && figure.axes_metadata.get(bar.axes_index).is_some_and(|meta| meta.colorbar_enabled != bar.visible)),
+        |child| { if let PlotChildHandleState::ColorBar(bar) = child {
+            bar.visible = figure.axes_metadata[bar.axes_index].colorbar_enabled;
+        } },
+    );
     for (axes_index, meta) in figure.axes_metadata.iter().enumerate() {
         if meta.colorbar_enabled && !existing_axes.contains(&axes_index) {
             let id = reg.next_plot_child_handle;
@@ -52,6 +58,10 @@ pub(super) fn reconcile_publication(handle: FigureHandle, figure: &Figure) {
 
 pub fn colorbar_handles_for_figure(handle: FigureHandle) -> Vec<f64> {
     let reg = registry();
+    handles_in_registry(&reg, handle)
+}
+
+pub(super) fn handles_in_registry(reg: &PlotRegistry, handle: FigureHandle) -> Vec<f64> {
     let mut handles: Vec<_> = reg
         .plot_children
         .iter()
@@ -85,8 +95,23 @@ pub fn set_colorbar_enabled_for_axes(
     axes_index: usize,
     enabled: bool,
 ) -> Result<(), FigureError> {
+    set_colorbar_enabled_for_axes_for_property(
+        &PropertyMutationTarget::alias(),
+        handle,
+        axes_index,
+        enabled,
+    )
+}
+
+pub(crate) fn set_colorbar_enabled_for_axes_for_property(
+    property: &PropertyMutationTarget,
+
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
     let figure = {
-        let mut reg = registry();
+        let mut reg = property.registry(PropertyLocation::Axes(handle, axes_index))?;
         let state = reg
             .figures
             .get(&handle)
@@ -107,28 +132,34 @@ pub fn set_colorbar_enabled_for_axes(
         reconcile(&mut reg, handle, &figure);
         figure
     };
-    notify_with_figure(handle, &figure, FigureEventKind::Updated);
+    property.notify(handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }
 
 pub fn set_colorbar_visible(handle: f64, visible: bool) -> Result<(), FigureError> {
+    set_colorbar_visible_for_property(&PropertyMutationTarget::alias(), handle, visible)
+}
+
+pub(crate) fn set_colorbar_visible_for_property(
+    property: &PropertyMutationTarget,
+    handle: f64,
+    visible: bool,
+) -> Result<(), FigureError> {
     let (figure_handle, figure) = {
-        let mut reg = registry();
-        let Some(PlotChildHandleState::ColorBar(bar)) = reg.plot_children.get(&(handle as u64))
+        let mut reg = property.registry(PropertyLocation::Child(property.child_key(handle)?))?;
+        let Some(PlotChildHandleState::ColorBar(bar)) =
+            reg.plot_children.get(&property.child_key(handle)?)
         else {
             return Err(FigureError::InvalidPlotObjectHandle);
         };
         let (figure_handle, axes_index) = (bar.figure, bar.axes_index);
-        let state = reg
-            .figures
-            .get_mut(&figure_handle)
-            .ok_or(FigureError::InvalidHandle(figure_handle.as_u32()))?;
+        let state = existing_axes_state_mut(&mut reg, figure_handle, axes_index)?;
         state.figure.set_axes_colorbar_enabled(axes_index, visible);
         state.revision = state.revision.wrapping_add(1);
         let figure = state.figure.clone();
         reconcile(&mut reg, figure_handle, &figure);
         (figure_handle, figure)
     };
-    notify_with_figure(figure_handle, &figure, FigureEventKind::Updated);
+    property.notify(figure_handle, &figure, FigureEventKind::Updated)?;
     Ok(())
 }

@@ -153,16 +153,8 @@ pub fn axes_graphics_receiver_for_scene(
 pub fn graphics_receiver_object(
     receiver: GraphicsReceiverRef,
 ) -> Result<Option<runmat_value::Value>, runmat_gc::GcError> {
-    if !graphics_receiver_valid(&receiver) {
+    let Some(class) = graphics_receiver_class(&receiver) else {
         return Ok(None);
-    }
-    let class = match receiver.kind() {
-        GraphicsReceiverKind::Figure { .. } => runmat_types::standard::FIGURE,
-        GraphicsReceiverKind::Axes { .. } => runmat_types::standard::AXES,
-        // Canonical chart class identities and lease-bearing property
-        // transactions are separate admissions. Do not project a numeric
-        // Type label as a HandleObject class.
-        GraphicsReceiverKind::PlotChild { .. } => return Ok(None),
     };
     let object = runmat_value::ObjectInstance::new(class).with_graphics_receiver(receiver);
     let target = runmat_gc::gc_allocate(runmat_value::Value::Object(object))?;
@@ -173,6 +165,47 @@ pub fn graphics_receiver_object(
             valid: true,
         },
     )))
+}
+
+/// Derive class only from the exact live typed registry entry, never Type text.
+pub(crate) fn graphics_receiver_class(
+    receiver: &GraphicsReceiverRef,
+) -> Option<runmat_types::StaticClassIdentity> {
+    let registry = registry();
+    match receiver.kind() {
+        GraphicsReceiverKind::Figure { figure } => registry
+            .figures
+            .get(&FigureHandle::from(figure))
+            .filter(|state| {
+                state
+                    .figure_receiver
+                    .as_ref()
+                    .is_some_and(|owned| owned.shares_lease(receiver))
+            })
+            .map(|_| runmat_types::standard::FIGURE),
+        GraphicsReceiverKind::Axes { figure, index } => registry
+            .figures
+            .get(&FigureHandle::from(figure))
+            .filter(|state| {
+                index < axes_count(state)
+                    && state
+                        .axes_receivers
+                        .get(&index)
+                        .is_some_and(|owned| owned.shares_lease(receiver))
+            })
+            .map(|_| runmat_types::standard::AXES),
+        GraphicsReceiverKind::PlotChild { id } => registry
+            .plot_children
+            .entries
+            .get(&id)
+            .filter(|entry| {
+                entry
+                    .receiver
+                    .as_ref()
+                    .is_some_and(|owned| owned.shares_lease(receiver))
+            })
+            .map(|entry| entry.state.class_identity()),
+    }
 }
 
 #[cfg(test)]
@@ -206,9 +239,12 @@ mod tests {
         let original = figure_graphics_receiver(handle)
             .expect("issue receiver")
             .expect("selected figure");
+        let selection = GraphicsPropertySelection::capture(original.clone()).unwrap();
+        selection.ensure_current().unwrap();
         assert!(graphics_receiver_valid(&original));
         close_figure(Some(handle)).expect("close");
         assert!(!graphics_receiver_valid(&original));
+        assert!(selection.ensure_current().is_err());
         select_figure(handle);
         let replacement = figure_graphics_receiver(handle)
             .expect("issue replacement")
@@ -231,6 +267,12 @@ mod tests {
         let repeated = plot_child_graphics_receiver(id)
             .expect("borrow child")
             .expect("registered child");
+        let selection = GraphicsPropertySelection::capture(original.clone()).unwrap();
+        assert_eq!(
+            graphics_receiver_class(&original),
+            Some(runmat_types::standard::GRAPHICS_LINE)
+        );
+        selection.ensure_current().unwrap();
         assert!(original.shares_lease(&repeated));
         assert!(graphics_receiver_valid(&original));
         assert!(!graphics_receiver_valid(&GraphicsReceiverRef::issued(
@@ -238,8 +280,59 @@ mod tests {
             original.generation(),
         )));
 
+        let other_id = register_line_handle(figure, 0, 1) as u64;
+        let (original_state, other_state) = {
+            let reg = registry();
+            (
+                reg.plot_children.entries[&id].state.clone(),
+                reg.plot_children.entries[&other_id].state.clone(),
+            )
+        };
+        {
+            let mut reg = registry();
+            let other = reg
+                .plot_children
+                .find_mut(|state| state.plot_index() == Some(1))
+                .unwrap();
+            let PlotChildHandleState::Line(other) = other else {
+                panic!("line state");
+            };
+            other.plot_index = 2;
+            assert!(
+                Arc::ptr_eq(&original_state, &reg.plot_children.entries[&id].state),
+                "borrowed predicates must not copy unrelated selected state"
+            );
+            assert!(!Arc::ptr_eq(
+                &other_state,
+                &reg.plot_children.entries[&other_id].state
+            ));
+        }
+        assert_eq!(
+            other_state.plot_index(),
+            Some(1),
+            "the retained snapshot is immutable"
+        );
+        selection.ensure_current().unwrap();
+        {
+            let mut reg = registry();
+            let original = reg.plot_children.get_mut(&id).unwrap();
+            let PlotChildHandleState::Line(original) = original else {
+                panic!("line state");
+            };
+            original.plot_index = 3;
+        }
+        assert!(
+            graphics_receiver_valid(&original),
+            "metadata replacement does not forge a new receiver"
+        );
+        assert!(
+            selection.ensure_current().is_err(),
+            "backing identity fences metadata changes even without a scene revision"
+        );
+
         clear_figure(Some(figure)).expect("clear figure");
         assert!(!graphics_receiver_valid(&original));
+        assert!(selection.ensure_current().is_err());
         assert!(plot_child_graphics_receiver(id).expect("lookup").is_none());
 
         let mut reg = registry();
@@ -457,26 +550,23 @@ mod tests {
             denied_set.identifier(),
             Some("RunMat:graphics:ReceiverPropertyUnavailable")
         );
-        let denied_get = crate::builtins::plotting::get::get_builtin(vec![
+        let selected_get = crate::builtins::plotting::get::get_builtin(vec![
             value.clone(),
             runmat_value::Value::String("Name".into()),
         ])
-        .expect_err("object getter must retain lease through registry read");
+        .expect("object getter retains lease through registry read");
         assert_eq!(
-            denied_get.identifier(),
-            Some("RunMat:graphics:ReceiverPropertyUnavailable")
+            selected_get,
+            Value::String(clone_figure(figure).unwrap().name.unwrap_or_default())
         );
-        let denied_dot = futures::executor::block_on(crate::object::resolve::load_member(
+        let selected_dot = futures::executor::block_on(crate::object::resolve::load_member(
             value.clone(),
             "Name".into(),
             false,
             None,
         ))
-        .expect_err("dot read cannot erase the lease");
-        assert_eq!(
-            denied_dot.identifier(),
-            Some("RunMat:graphics:ReceiverPropertyUnavailable")
-        );
+        .expect("dot read uses the exact property owner");
+        assert_eq!(selected_dot, selected_get);
         assert_ne!(
             crate::builtins::plotting::get::get_builtin(vec![
                 runmat_value::Value::Num(f64::from(figure.as_u32())),

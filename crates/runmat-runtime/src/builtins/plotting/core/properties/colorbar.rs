@@ -1,5 +1,5 @@
 //! Properties of registered colorbars, backed by their shared scene owner.
-use super::super::state::{set_colorbar_visible, ColorBarHandleState};
+use super::super::state::ColorBarHandleState;
 use super::*;
 
 pub(super) fn get(
@@ -28,6 +28,7 @@ pub(super) fn get(
 }
 
 pub(super) fn set(
+    authority: &super::super::state::PropertyMutationTarget,
     handle: f64,
     key: &str,
     value: &Value,
@@ -41,7 +42,8 @@ pub(super) fn set(
                     format!("{builtin}: Visible expects an on/off logical value"),
                 )
             })?;
-            set_colorbar_visible(handle, visible).map_err(|error| map_figure_error(builtin, error))
+            super::super::state::set_colorbar_visible_for_property(authority, handle, visible)
+                .map_err(|error| map_figure_error(builtin, error))
         }
         other => Err(plotting_error(
             builtin,

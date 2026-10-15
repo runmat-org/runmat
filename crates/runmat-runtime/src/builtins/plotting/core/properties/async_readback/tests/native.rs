@@ -159,16 +159,25 @@ fn exported_resident_line_retains_borrowed_allocations_until_coordinate_publicat
         ));
     })
     .expect("install provider-owned line source");
+    let receiver = crate::builtins::plotting::state::plot_child_graphics_receiver(handle as u64)
+        .unwrap()
+        .unwrap();
+    let object = crate::builtins::plotting::state::graphics_receiver_object(receiver)
+        .unwrap()
+        .unwrap();
     drop(x);
     drop(y);
     assert!(provider.acquire_live(&x_wire).is_ok());
     assert!(provider.acquire_live(&y_wire).is_ok());
 
-    let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
     let Value::Tensor(x_before) =
-        block_on(get_properties_async(target, Some("XData"), "get")).expect("exported x")
+        block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+            object.clone(),
+            Value::String("XData".into()),
+        ]))
+        .expect("exact source read")
     else {
-        panic!("expected typed x tensor");
+        panic!("expected typed source")
     };
     assert_eq!(x_before.materialize_f64(), vec![1.25, -3.5]);
     let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
@@ -181,18 +190,14 @@ fn exported_resident_line_retains_borrowed_allocations_until_coordinate_publicat
     assert!(provider.acquire_live(&x_wire).is_ok());
     assert!(provider.acquire_live(&y_wire).is_ok());
 
-    let target = resolve_plot_handle(&Value::Num(handle), "set").expect("handle");
-    block_on(set_properties_async(
-        target,
-        &[
-            Value::String("XData".into()),
-            Value::Tensor(Tensor::new(vec![8.0, 9.0], vec![1, 2]).expect("new x")),
-            Value::String("YData".into()),
-            Value::Tensor(Tensor::new(vec![-6.0, 7.0], vec![1, 2]).expect("new y")),
-        ],
-        "set",
-    ))
-    .expect("publish replacement coordinates");
+    block_on(crate::builtins::plotting::set::set_builtin_async(vec![
+        object,
+        Value::String("XData".into()),
+        Value::Tensor(Tensor::new(vec![8.0, 9.0], vec![1, 2]).expect("new x")),
+        Value::String("YData".into()),
+        Value::Tensor(Tensor::new(vec![-6.0, 7.0], vec![1, 2]).expect("new y")),
+    ]))
+    .expect("exact replacement coordinates");
     assert!(provider.acquire_live(&x_wire).is_err());
     assert!(provider.acquire_live(&y_wire).is_err());
     let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");

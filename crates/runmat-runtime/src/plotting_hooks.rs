@@ -67,6 +67,20 @@ pub(crate) fn graphics_callback_payload_valid(
     }
 }
 
+pub(crate) fn graphics_receiver_class(
+    receiver: &runmat_value::GraphicsReceiverRef,
+) -> Option<runmat_types::StaticClassIdentity> {
+    #[cfg(feature = "plot-core")]
+    {
+        crate::builtins::plotting::state::graphics_receiver_class(receiver)
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = receiver;
+        None
+    }
+}
+
 /// Preserve the owning builtin's public error while retaining the original
 /// cause, span, and retry disposition.
 pub(crate) fn with_render_cause(
