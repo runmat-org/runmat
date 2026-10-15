@@ -176,6 +176,7 @@ async fn usable_scale(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     scale: GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
     progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
     let precision = runmat_accelerate_api::handle_precision(input)
@@ -190,6 +191,18 @@ async fn usable_scale(
         "resident constant constructor unavailable",
     )?;
     let zero = admitted_real(kind, provider, input, zero, scale.shape(), precision)?;
+    let zero = reduction::protect_live_operands(
+        kind,
+        zero,
+        &[input, &scale, &finite],
+        "resident zero constructor aliased a live operand",
+    )?;
+    let zero = reduction::protect_live_operands(
+        kind,
+        zero,
+        protected,
+        "resident zero constructor aliased a surrounding operand",
+    )?;
     let nonzero = provider
         .elem_ne(&scale, &zero)
         .await
@@ -205,6 +218,18 @@ async fn usable_scale(
         "resident constant constructor unavailable",
     )?;
     let one = admitted_real(kind, provider, input, one, scale.shape(), precision)?;
+    let one = reduction::protect_live_operands(
+        kind,
+        one,
+        &[input, &scale, &finite, &zero, &nonzero, &usable],
+        "resident one constructor aliased a live operand",
+    )?;
+    let one = reduction::protect_live_operands(
+        kind,
+        one,
+        protected,
+        "resident one constructor aliased a surrounding operand",
+    )?;
     let result = provider
         .select(&usable, &scale, &one)
         .await

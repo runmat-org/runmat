@@ -166,8 +166,15 @@ impl ExtremaKind {
         };
         let host = self.gather_tensor(scalar).await?;
         let number = crate::builtins::common::tensor::tensor_value_f64(&host, 0);
-        self.scalar_values_with_owner(provider, tensor, &Value::Num(number), number, scalar_left)
-            .await
+        self.scalar_values_with_owner(
+            provider,
+            tensor,
+            &Value::Num(number),
+            number,
+            scalar_left,
+            Some(scalar),
+        )
+        .await
     }
 
     pub(in crate::builtins::math::reduction) async fn scalar_values(
@@ -178,7 +185,7 @@ impl ExtremaKind {
         scalar_left: bool,
     ) -> BuiltinResult<Option<GpuTensorHandle>> {
         let provider = self.owner(input)?;
-        self.scalar_values_with_owner(provider, input, other, scalar, scalar_left)
+        self.scalar_values_with_owner(provider, input, other, scalar, scalar_left, None)
             .await
     }
 
@@ -189,6 +196,7 @@ impl ExtremaKind {
         other: &Value,
         scalar: f64,
         scalar_left: bool,
+        protected_scalar: Option<&GpuTensorHandle>,
     ) -> BuiltinResult<Option<GpuTensorHandle>> {
         if !super::scalar_hook_preserves_class(input, other) {
             return Ok(None);
@@ -202,7 +210,15 @@ impl ExtremaKind {
                 )
             })?;
             if let Some(fill) = fill {
-                let fill = self.admit_output(provider, input, input, &contract, fill)?;
+                // A final selector result may lawfully retain an input, but
+                // its constant operand must be a distinct produced allocation.
+                let fill_contract = gpu_helpers::BinaryGpuOutputContract {
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                    ..like_contract(input, input.shape().to_vec())
+                };
+                let protected_other = protected_scalar.unwrap_or(input);
+                let fill =
+                    self.admit_output(provider, input, protected_other, &fill_contract, fill)?;
                 let result = if scalar_left {
                     provider.elem_max(&fill, input).await
                 } else {

@@ -144,7 +144,16 @@ async fn run(
         );
         scale = admitted_real(kind, provider, forecast, next, &expected, precision)?;
     }
-    let scale = usable_scale(kind, provider, forecast, scale, progress).await?;
+    let protected = [
+        actual,
+        &forecast_abs,
+        &actual_abs,
+        &forecast_real,
+        &actual_real,
+        forecast_imaginary.as_ref().unwrap_or(forecast),
+        actual_imaginary.as_ref().unwrap_or(actual),
+    ];
+    let scale = usable_scale(kind, provider, forecast, scale, &protected, progress).await?;
     let scale = admitted_real(
         kind,
         provider,

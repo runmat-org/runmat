@@ -180,6 +180,7 @@ fn malformed_stages_and_pending_futures_preserve_inputs_and_retire_owned_interme
     for mode in [
         Mode::WrongValues,
         Mode::WrongFill,
+        Mode::AliasFill,
         Mode::WrongRepmat,
         Mode::PendingValues,
         Mode::PendingDownload,
@@ -196,7 +197,7 @@ fn malformed_stages_and_pending_futures_preserve_inputs_and_retire_owned_interme
                 vec![2, 1]
             },
         );
-        let other = if matches!(mode, Mode::WrongFill) {
+        let other = if matches!(mode, Mode::WrongFill | Mode::AliasFill) {
             Value::Num(3.0)
         } else {
             Value::GpuTensor(right.handle.clone())
@@ -221,12 +222,13 @@ fn malformed_stages_and_pending_futures_preserve_inputs_and_retire_owned_interme
             let error = futures::executor::block_on(future).unwrap_err();
             assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-            if matches!(mode, Mode::WrongFill | Mode::WrongRepmat) {
+            if matches!(mode, Mode::WrongFill | Mode::AliasFill | Mode::WrongRepmat) {
                 assert_eq!(provider.values.load(Ordering::SeqCst), 0);
             }
         }
         left.handle.allocation_lease().validate_live().unwrap();
         right.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(provider.read(&left.handle).unwrap(), vec![1.0, 2.0]);
         all_retired_except(
             provider,
             &[left.handle.buffer_id(), right.handle.buffer_id()],
