@@ -42,7 +42,7 @@ impl TimestampCapability {
         self.inside_encoders
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn without_encoder_timestamps_for_test(self) -> Self {
         Self {
             inside_encoders: false,

@@ -3,7 +3,7 @@ use super::*;
 
 pub async fn refresh_auto_offload_calibration(
     commit: bool,
-) -> Result<AutoOffloadCalibrationOutcome> {
+) -> ProviderExecutionResult<AutoOffloadCalibrationOutcome> {
     let provider = runmat_accelerate_api::provider()
         .ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let info = provider.device_info_struct();
@@ -14,7 +14,11 @@ pub async fn refresh_auto_offload_calibration(
     auto_calibrate(provider, &mut cfg).await?;
     let delta = compute_delta(&before, &cfg);
     let persisted_to = if commit {
-        Some(persist_thresholds_async(&info, &cfg, provider.precision()).await?)
+        Some(
+            persist_thresholds_async(&info, &cfg, provider.precision())
+                .await
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?,
+        )
     } else {
         None
     };
