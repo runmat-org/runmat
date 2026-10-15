@@ -33,11 +33,12 @@ pub fn materialize_native_object_artifact(
         ));
     }
     let target = &object.manifest.target;
-    recipe.target = ProgramTarget::native(
+    recipe.target = ProgramTarget::native_product(
         "native-object-v1",
         target
             .execution_identity()
             .map_err(|error| AotError::contract("aot.artifact.target", error.to_string()))?,
+        object.manifest.product.clone(),
     );
     let metadata = canonical_native_manifest(&object.manifest)?;
     let payload = NativeObjectPayload::new(
@@ -91,6 +92,12 @@ pub fn read_native_object_artifact(
     }
     let manifest: NativeObjectManifest = serde_json::from_slice(&payload.metadata)
         .map_err(|error| AotError::contract("aot.artifact.metadata", error.to_string()))?;
+    if recipe.target.native_product_mode() != Some(&manifest.product) {
+        return Err(AotError::contract(
+            "aot.artifact.product",
+            "recipe and object selected product modes differ",
+        ));
+    }
     validate_object_policy(recipe, &manifest)?;
     if canonical_native_manifest(&manifest)? != payload.metadata {
         return Err(AotError::contract(
@@ -298,6 +305,7 @@ mod tests {
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
+                product: runmat_execution::host::NativeProductMode::HostUnselected,
                 object_format: native_object_format_for_target(&target).unwrap(),
                 target,
                 executable_cache_key,

@@ -400,6 +400,16 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
     assert_eq!(first.manifest.entrypoint, ProgramFunctionId(0));
     assert_eq!(first.manifest.functions[0].symbol, "runmat_aot_entry");
     assert!(first.manifest.data.is_empty());
+    assert_eq!(
+        first.manifest.product,
+        runmat_execution::host::NativeProductMode::HostUnselected
+    );
+    let mut untagged = serde_json::to_value(&first.manifest).unwrap();
+    untagged.as_object_mut().unwrap().remove("product");
+    assert!(
+        serde_json::from_value::<runmat_native_codegen::aot::NativeObjectManifest>(untagged)
+            .is_err()
+    );
 
     let mut tampered = first;
     tampered.bytes.push(0);

@@ -3,7 +3,7 @@ use runmat_native_codegen::{aot::NATIVE_OBJECT_SCHEMA_VERSION, NativeTarget};
 
 use crate::{AotError, AotResult};
 
-pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 5;
+pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 6;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
@@ -52,6 +52,7 @@ impl RuntimeArchiveCapabilities {
 #[serde(deny_unknown_fields)]
 pub struct RuntimeArchiveManifest {
     pub schema_version: u16,
+    pub product: runmat_execution::host::NativeProductMode,
     pub runmat_version: String,
     pub target_triple: String,
     pub native_target: NativeTarget,
@@ -123,7 +124,32 @@ impl RuntimeArchiveManifest {
                     "runtime archive target triple is invalid",
                 )
             })?;
-        if triple != target_lexicon::HOST || self.native_target != NativeTarget::current() {
+        self.product
+            .validate()
+            .map_err(|error| AotError::contract("aot.archive.product", error.to_string()))?;
+        if let Some(binding) = self.product.selected() {
+            runmat_native_codegen::aot::validate_native_product(
+                &self.product,
+                &self.native_target,
+                self.runtime_fingerprint,
+                self.catalog_fingerprint,
+                binding.optimization,
+            )
+            .map_err(|error| AotError::contract("aot.archive.product", error.to_string()))?;
+            if triple.to_string()
+                != binding
+                    .target
+                    .triple()
+                    .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?
+                || self.archive_digest != binding.runtime_component
+                || !self.native_link_tokens.is_empty()
+            {
+                return Err(AotError::contract(
+                    "aot.archive.product",
+                    "selected runtime archive identity or link inputs differ",
+                ));
+            }
+        } else if triple != target_lexicon::HOST || self.native_target != NativeTarget::current() {
             return Err(AotError::contract(
                 "aot.archive.target",
                 "runtime archive does not match this RunMat host",

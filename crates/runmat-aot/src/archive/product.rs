@@ -55,6 +55,22 @@ impl RuntimeArchive {
                 "decoded runtime archive does not match its manifest",
             ));
         }
+        if self.manifest.product.selected().is_some() {
+            let probe = super::read_native_abi_probe(&archive)?;
+            if &probe
+                != self
+                    .manifest
+                    .native_target
+                    .native_parts()
+                    .map_err(|error| AotError::contract("aot.archive.probe", error.to_string()))?
+                    .1
+            {
+                return Err(AotError::contract(
+                    "aot.archive.probe",
+                    "runtime archive probe differs from selected product",
+                ));
+            }
+        }
         Ok(archive)
     }
 }
@@ -65,6 +81,26 @@ pub fn build_runtime_archive(
     native_link_tokens: Vec<String>,
     encoding: RuntimeArchiveEncoding,
     capabilities: RuntimeArchiveCapabilities,
+) -> AotResult<RuntimeArchive> {
+    build_archive(
+        archive,
+        environment,
+        native_link_tokens,
+        encoding,
+        capabilities,
+        runmat_native_codegen::NativeTarget::current(),
+        runmat_execution::host::NativeProductMode::HostUnselected,
+    )
+}
+
+pub(super) fn build_archive(
+    archive: &[u8],
+    environment: &ProgramEnvironment,
+    native_link_tokens: Vec<String>,
+    encoding: RuntimeArchiveEncoding,
+    capabilities: RuntimeArchiveCapabilities,
+    target: runmat_native_codegen::NativeTarget,
+    product: runmat_execution::host::NativeProductMode,
 ) -> AotResult<RuntimeArchive> {
     let archive_bytes = u64::try_from(archive.len()).map_err(|_| {
         AotError::contract("aot.archive.size", "runtime archive exceeds the host size")
@@ -94,9 +130,16 @@ pub fn build_runtime_archive(
     }
     let manifest = RuntimeArchiveManifest {
         schema_version: RUNTIME_ARCHIVE_SCHEMA_VERSION,
+        target_triple: match product.selected() {
+            Some(binding) => binding
+                .target
+                .triple()
+                .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?,
+            None => target_lexicon::HOST.to_string(),
+        },
+        product,
         runmat_version: env!("CARGO_PKG_VERSION").to_string(),
-        target_triple: target_lexicon::HOST.to_string(),
-        native_target: runmat_native_codegen::NativeTarget::current(),
+        native_target: target,
         native_ir_schema_version: runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION,
         native_object_schema_version: runmat_native_codegen::aot::NATIVE_OBJECT_SCHEMA_VERSION,
         runtime_fingerprint: environment.runtime_fingerprint,
@@ -153,11 +196,11 @@ mod tests {
         ))
         .unwrap_err();
         assert!(error.to_string().contains("aot.archive.schema"));
-        assert!(error.to_string().contains("actual 3, expected 5"));
+        assert!(error.to_string().contains("actual 3, expected 6"));
 
         let changed_fields = br#"{"schema_version":3,"native_ir_schema_version":5,"native_object_schema_version":4,"native_link_tokens":"changed representation"}"#;
         let error = RuntimeArchiveManifest::from_json(changed_fields).unwrap_err();
         assert!(error.to_string().contains("aot.archive.schema"));
-        assert!(error.to_string().contains("actual 3, expected 5"));
+        assert!(error.to_string().contains("actual 3, expected 6"));
     }
 }

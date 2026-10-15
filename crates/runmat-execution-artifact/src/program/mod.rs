@@ -27,5 +27,6 @@ pub use request::{
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V7, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 pub use target::{
-    NativeTargetIdentity, ProgramTarget, ProgramTargetCohort, PROGRAM_TARGET_SCHEMA_VERSION,
+    NativeTargetIdentity, ProgramProductMode, ProgramTarget, ProgramTargetCohort,
+    PROGRAM_TARGET_SCHEMA_VERSION,
 };

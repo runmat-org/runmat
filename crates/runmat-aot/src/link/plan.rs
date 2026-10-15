@@ -8,6 +8,8 @@ use super::{LinkerDriver, LinkerFamily};
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct LinkPlan {
+    pub schema_version: u16,
+    pub product: runmat_execution::host::NativeProductMode,
     pub target_triple: String,
     pub driver: LinkerDriver,
     pub object: PathBuf,
@@ -28,6 +30,17 @@ pub fn build_link_plan(
         .validate()
         .map_err(|error| AotError::contract("aot.link.object", error.to_string()))?;
     runtime.manifest.validate()?;
+    if object_product.manifest.product.selected().is_some()
+        || runtime.manifest.product.selected().is_some()
+    {
+        return Err(AotError::contract("aot.link.selected_admission", "selected link planning requires the complete verified ordered component/toolchain closure"));
+    }
+    if object_product.manifest.product != runtime.manifest.product {
+        return Err(AotError::contract(
+            "aot.link.product",
+            "object and runtime selected product modes differ",
+        ));
+    }
     if object_product.manifest.target != runtime.manifest.native_target {
         return Err(AotError::contract(
             "aot.link.target",
@@ -51,17 +64,26 @@ pub fn build_link_plan(
         ));
     }
     let mut response_tokens = Vec::new();
+    let macos = object_product
+        .manifest
+        .target
+        .native_parts()
+        .map_err(|error| AotError::contract("aot.link.target", error.to_string()))?
+        .0
+        .target
+        .operating_system
+        == runmat_execution::host::NativeOperatingSystem::Macos;
     match driver.family {
         LinkerFamily::UnixCc => {
             response_tokens.push(object.display().to_string());
             if closed_world {
                 response_tokens.push(archive.display().to_string());
-                response_tokens.push(if cfg!(target_os = "macos") {
+                response_tokens.push(if macos {
                     "-Wl,-dead_strip".into()
                 } else {
                     "-Wl,--gc-sections".into()
                 });
-            } else if cfg!(target_os = "macos") {
+            } else if macos {
                 response_tokens.push(format!("-Wl,-force_load,{}", archive.display()));
             } else {
                 response_tokens.push("-Wl,--whole-archive".into());
@@ -94,6 +116,8 @@ pub fn build_link_plan(
         ));
     }
     Ok(LinkPlan {
+        schema_version: 1,
+        product: object_product.manifest.product.clone(),
         target_triple: runtime.manifest.target_triple.clone(),
         driver,
         object: object.to_path_buf(),
@@ -150,6 +174,7 @@ mod tests {
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
+                product: runmat_execution::host::NativeProductMode::HostUnselected,
                 object_format: native_object_format_for_target(&target).unwrap(),
                 target,
                 executable_cache_key: Digest::sha256(b"executable"),

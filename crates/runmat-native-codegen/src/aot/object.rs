@@ -33,9 +33,46 @@ pub fn emit_relocatable_object_with_data(
 pub fn emit_relocatable_object_for_runtime(
     assembly: &NativeAssembly,
     optimization: NativeOptimization,
+    embedded_data: Vec<NativeObjectData>,
+    runtime_binding_mode: AotRuntimeBindingMode,
+    builtin_bindings: Vec<AotBuiltinBinding>,
+) -> NativeCodegenResult<RelocatableNativeObject> {
+    emit_object(
+        assembly,
+        optimization,
+        embedded_data,
+        runtime_binding_mode,
+        builtin_bindings,
+        runmat_execution::host::NativeProductMode::HostUnselected,
+    )
+}
+
+pub fn emit_selected_relocatable_object(
+    selected: &super::SelectedNativeProduct<'_>,
+    assembly: &NativeAssembly,
+    embedded_data: Vec<NativeObjectData>,
+    runtime_binding_mode: AotRuntimeBindingMode,
+    builtin_bindings: Vec<AotBuiltinBinding>,
+) -> NativeCodegenResult<RelocatableNativeObject> {
+    selected.validate_assembly(assembly)?;
+    let binding = selected.product().selected().expect("selected constructor");
+    emit_object(
+        assembly,
+        binding.optimization,
+        embedded_data,
+        runtime_binding_mode,
+        builtin_bindings,
+        selected.product().clone(),
+    )
+}
+
+fn emit_object(
+    assembly: &NativeAssembly,
+    optimization: NativeOptimization,
     mut embedded_data: Vec<NativeObjectData>,
     runtime_binding_mode: AotRuntimeBindingMode,
     mut builtin_bindings: Vec<AotBuiltinBinding>,
+    product_mode: runmat_execution::host::NativeProductMode,
 ) -> NativeCodegenResult<RelocatableNativeObject> {
     assembly.verify()?;
     assembly.target.validate()?;
@@ -124,6 +161,7 @@ pub fn emit_relocatable_object_for_runtime(
         .map(|item| {
             let program = super::AotProgramManifest::from_canonical_bytes(&item.bytes)?;
             if program.executable != assembly.executable_identity
+                || program.product != product_mode
                 || program.entrypoint != assembly.selected_entrypoint
                 || embedded_data
                     .iter()
@@ -216,6 +254,7 @@ pub fn emit_relocatable_object_for_runtime(
     })?;
     let manifest = NativeObjectManifest {
         schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
+        product: product_mode,
         target: assembly.target.clone(),
         object_format: super::product::native_object_format_for_target(&assembly.target)?,
         executable_cache_key: assembly.executable_cache_key,

@@ -1,10 +1,11 @@
+use runmat_execution::host::NativeProductMode;
 use runmat_execution::{Digest, ExecutableIdentity};
 use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 11;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 7;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 12;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 8;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -55,6 +56,7 @@ impl AotBuiltinBinding {
 #[serde(deny_unknown_fields)]
 pub struct AotProgramManifest {
     pub schema_version: u16,
+    pub product: NativeProductMode,
     pub executable: ExecutableIdentity,
     /// Compiler/native identity selected for this product. The executable
     /// identity independently retains its immutable portable function ordinal.
@@ -82,74 +84,28 @@ struct AotProgramManifestAdmission {
     schema_version: u16,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PureAotProgramManifestV6 {
-    schema_version: u16,
-    executable: ExecutableIdentity,
-    entrypoint: ProgramFunctionId,
-    native_ir_digest: Digest,
-    source_map: runmat_execution::ExecutableSourceMapV2,
-    functions: Vec<AotProgramFunction>,
-    runtime_binding_mode: AotRuntimeBindingMode,
-    builtin_bindings: Vec<AotBuiltinBinding>,
-}
-
 impl AotProgramManifest {
-    /// Only a caller that has verified the paired Native IR has empty interop
-    /// may migrate a V6 manifest, which had no foreign-policy commitment.
-    pub fn from_canonical_bytes_allow_pure_v6(
-        bytes: &[u8],
-        paired_ir_is_pure: bool,
+    pub fn from_assembly_for_selected(
+        selected: &super::SelectedNativeProduct<'_>,
+        assembly: &crate::NativeAssembly,
+        native_ir_digest: Digest,
+        foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
+        source_map: runmat_execution::ExecutableSourceMapV2,
+        runtime_binding_mode: AotRuntimeBindingMode,
+        builtin_bindings: Vec<AotBuiltinBinding>,
     ) -> Result<Self, crate::NativeCodegenError> {
-        if bytes.len() > MAX_AOT_PROGRAM_MANIFEST_BYTES {
-            return Err(crate::NativeCodegenError::new(
-                "native.aot.program.bounds",
-                "AOT program manifest exceeds its byte bound",
-            ));
-        }
-        let admission: AotProgramManifestAdmission =
-            serde_json::from_slice(bytes).map_err(|error| {
-                crate::NativeCodegenError::new("native.aot.program", error.to_string())
-            })?;
-        if admission.schema_version == AOT_PROGRAM_MANIFEST_SCHEMA_VERSION {
-            return Self::from_canonical_bytes(bytes);
-        }
-        if admission.schema_version != 6 || !paired_ir_is_pure {
-            return Err(crate::NativeCodegenError::new(
-                "native.aot.program.schema",
-                "AOT program manifest schema is unsupported for this Native IR",
-            ));
-        }
-        let old: PureAotProgramManifestV6 = serde_json::from_slice(bytes).map_err(|error| {
-            crate::NativeCodegenError::new("native.aot.program", error.to_string())
-        })?;
-        if old.schema_version != 6
-            || serde_json::to_vec(&serde_json::to_value(&old).map_err(|error| {
-                crate::NativeCodegenError::new("native.aot.program", error.to_string())
-            })?)
-            .map_err(|error| {
-                crate::NativeCodegenError::new("native.aot.program", error.to_string())
-            })? != bytes
-        {
-            return Err(crate::NativeCodegenError::new(
-                "native.aot.program",
-                "legacy pure AOT program manifest is not canonical",
-            ));
-        }
-        let current = Self {
-            schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
-            executable: old.executable,
-            entrypoint: old.entrypoint,
-            native_ir_digest: old.native_ir_digest,
-            foreign_policy: None,
-            source_map: old.source_map,
-            functions: old.functions,
-            runtime_binding_mode: old.runtime_binding_mode,
-            builtin_bindings: old.builtin_bindings,
-        };
-        current.validate()?;
-        Ok(current)
+        selected.validate_assembly(assembly)?;
+        let mut manifest = Self::from_assembly(
+            assembly,
+            native_ir_digest,
+            foreign_policy,
+            source_map,
+            runtime_binding_mode,
+            builtin_bindings,
+        )?;
+        manifest.product = selected.product().clone();
+        manifest.validate()?;
+        Ok(manifest)
     }
 
     pub fn from_assembly(
@@ -187,6 +143,7 @@ impl AotProgramManifest {
             .sort_by(|left, right| (&left.name, &left.variant).cmp(&(&right.name, &right.variant)));
         let manifest = Self {
             schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
+            product: NativeProductMode::HostUnselected,
             executable: assembly.executable_identity.clone(),
             entrypoint: assembly.selected_entrypoint,
             native_ir_digest,
@@ -210,9 +167,21 @@ impl AotProgramManifest {
                 ),
             ));
         }
+        self.product.validate().map_err(|error| {
+            crate::NativeCodegenError::new("native.aot.program.product", error.to_string())
+        })?;
         self.executable.program.validate().map_err(|error| {
             crate::NativeCodegenError::new("native.aot.program", error.to_string())
         })?;
+        if self.product.selected().is_some_and(|binding| {
+            binding.runtime != *self.executable.program.runtime_fingerprint()
+                || binding.catalog != *self.executable.program.catalog_fingerprint()
+        }) {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program.product",
+                "selected product differs from program environment",
+            ));
+        }
         if let Some(policy) = &self.foreign_policy {
             runmat_execution_artifact::object::validate_foreign_policy_object(policy).map_err(
                 |error| {
@@ -354,10 +323,9 @@ mod admission_tests {
     }
 
     #[test]
-    fn foreign_v6_is_rejected_before_legacy_shape_decode() {
-        let error = AotProgramManifest::from_canonical_bytes_allow_pure_v6(
+    fn untagged_v6_is_rejected_before_legacy_shape_decode() {
+        let error = AotProgramManifest::from_canonical_bytes(
             br#"{"schema_version":6,"functions":"changed representation"}"#,
-            false,
         )
         .unwrap_err();
         assert_eq!(error.code, "native.aot.program.schema");
@@ -452,6 +420,7 @@ pub struct NativeObjectDataDescriptor {
 #[serde(deny_unknown_fields)]
 pub struct NativeObjectManifest {
     pub schema_version: u16,
+    pub product: NativeProductMode,
     pub target: NativeTarget,
     pub object_format: NativeObjectFormat,
     pub executable_cache_key: Digest,
@@ -484,6 +453,13 @@ impl RelocatableNativeObject {
             ));
         }
         self.manifest.target.validate()?;
+        super::selected::validate_native_product(
+            &self.manifest.product,
+            &self.manifest.target,
+            self.manifest.runtime_fingerprint,
+            self.manifest.catalog_fingerprint,
+            self.manifest.optimization,
+        )?;
         if let Some(policy) = self.manifest.foreign_policy {
             runmat_execution_artifact::foreign_policy_descriptor(policy).map_err(|error| {
                 crate::NativeCodegenError::new("native.object.foreign_policy", error.to_string())

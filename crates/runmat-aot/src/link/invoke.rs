@@ -25,6 +25,15 @@ pub fn link_standalone(
     runtime: &RuntimeArchive,
     request: &LinkRequest,
 ) -> AotResult<LinkedProgram> {
+    // This entrypoint discovers an ambient host linker. Selected products need
+    // the verified retained-input/toolchain adapter, never a metadata downgrade.
+    if object.manifest.product.selected().is_some() || runtime.manifest.product.selected().is_some()
+    {
+        return Err(AotError::contract(
+            "aot.link.selected_admission",
+            "selected products require verified selected-link admission",
+        ));
+    }
     let parent = request
         .output
         .parent()
