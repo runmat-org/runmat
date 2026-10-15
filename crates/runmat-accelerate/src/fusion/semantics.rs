@@ -502,6 +502,28 @@ impl ResolvedProgram {
         self.source_input_set.contains(&id)
     }
 
+    /// Literal representation follows the same explicit source precision
+    /// projection as assembly; an emitter cannot invent a narrowing cast.
+    pub(crate) fn represented_constant_class(
+        &self,
+        id: ValueId,
+        original: NumericClass,
+    ) -> Result<NumericClass> {
+        let effective = self.floating_class(id)?;
+        if effective == original
+            || (original == NumericClass::Double
+                && effective == NumericClass::Single
+                && self.precision_policy.permits_double_to_single()
+                && self.provider_precision == ProviderPrecision::F32)
+        {
+            Ok(effective)
+        } else {
+            Err(anyhow!(
+                "constant class differs from admitted source precision"
+            ))
+        }
+    }
+
     pub fn physical_inputs_are_single(&self, indices: &[usize]) -> bool {
         indices.iter().all(|&index| {
             self.source_inputs.get(index).is_some_and(|fact| {

@@ -62,6 +62,35 @@ fn certified_power_fusion_embeds_original_double_controls_before_operand_casts()
                 8,
                 crate::wgsl::validation_tests::RequiredCaps::None,
             );
+            // Captured metadata controls share constant-leaf normalization,
+            // but must not instantiate a Double data value in an F32 shader.
+            // Two results force the complete, non-checked fallback as well.
+            let mut captured = source.clone();
+            captured.inputs = vec![0];
+            captured.const_values.insert(1, Value::Num(exponent));
+            let captured_program = resolve_policy(
+                &captured,
+                std::slice::from_ref(&base),
+                ProviderPrecision::F32,
+                policy,
+            )
+            .unwrap();
+            let generated = captured
+                .prepare_typed_shader(&[2, 3], &captured_program, ScalarType::F32)
+                .unwrap();
+            assert_eq!(
+                generated.requirements(),
+                runmat_accelerate_api::ProviderShaderRequirements::Basic
+            );
+            assert!(!generated.source().contains("f64"));
+            assert!(!generated.source().contains("let control1"));
+            crate::wgsl::validation_tests::validate_generated(
+                "captured-power-control",
+                generated.source(),
+                64,
+                8,
+                crate::wgsl::validation_tests::RequiredCaps::None,
+            );
             if policy == PrecisionPolicy::Exact {
                 identities.push(program.cache_identity().unwrap());
             }

@@ -64,6 +64,125 @@ fn resolve(
 }
 
 #[test]
+fn captured_scalar_leaves_seed_exact_words_for_single_and_multi_output_fallbacks() {
+    use crate::wgsl::validation_tests::{validate_generated, RequiredCaps};
+    use runmat_accelerate_api::ProviderShaderRequirements;
+
+    for single in [false, true] {
+        let cases = if single {
+            vec![0.1_f32.to_bits() as u64, 0x8000_0000, 1, 0x7fc0_0042]
+        } else {
+            vec![
+                0.1_f64.to_bits(),
+                0x8000_0000_0000_0000,
+                1,
+                0x7ff8_0000_0000_0042,
+            ]
+        };
+        for bits in cases {
+            let mut source = plan(vec![add(0, 1, 2), add(2, 1, 3)], 3);
+            source.inputs = vec![0];
+            let (input, value, scalar, precision, expected, requirements, caps) = if single {
+                (
+                    Value::Tensor(
+                        runmat_value::Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap(),
+                    ),
+                    Value::Tensor(
+                        runmat_value::Tensor::from_f32(
+                            vec![f32::from_bits(bits as u32)],
+                            vec![1, 1],
+                        )
+                        .unwrap(),
+                    ),
+                    ScalarType::F32,
+                    ProviderPrecision::F32,
+                    format!("bitcast<f32>(0x{bits:08x}u)"),
+                    ProviderShaderRequirements::Basic,
+                    RequiredCaps::None,
+                )
+            } else {
+                (
+                    Value::Tensor(runmat_value::Tensor::new(vec![0.25, 0.5], vec![1, 2]).unwrap()),
+                    Value::Num(f64::from_bits(bits)),
+                    ScalarType::F64,
+                    ProviderPrecision::F64,
+                    format!(
+                        "runmat_f64_from_words(0x{:08x}u, 0x{:08x}u)",
+                        bits as u32,
+                        (bits >> 32) as u32
+                    ),
+                    ProviderShaderRequirements::F64IeeeWords,
+                    RequiredCaps::Float64Int64,
+                )
+            };
+            source.const_values.insert(1, value);
+            // An unused aggregate is not an additional scalar leaf to render.
+            source.const_values.insert(
+                99,
+                Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            );
+            let program = resolve(&source, std::slice::from_ref(&input), precision);
+            for outputs in [&[3][..], &[2, 3][..], &[1, 3][..]] {
+                let shader = source
+                    .prepare_typed_shader(outputs, &program, scalar)
+                    .unwrap();
+                assert!(shader.source().contains(&expected), "{}", shader.source());
+                assert_eq!(shader.source().matches("let control1 =").count(), 1);
+                assert!(!shader.source().contains("control99"));
+                assert_eq!(shader.requirements(), requirements);
+                validate_generated("captured-scalar-leaves", shader.source(), 64, 8, caps);
+            }
+            // Same-ID captured values must never replace actual invocation
+            // operands, including when their literal class differs.
+            source.inputs.push(1);
+            let program = resolve(&source, &[input.clone(), input], precision);
+            let shader = source.prepare_typed_shader(&[3], &program, scalar).unwrap();
+            assert!(!shader.source().contains("control1"));
+            assert_eq!(shader.requirements(), ProviderShaderRequirements::Basic);
+        }
+    }
+}
+
+#[test]
+fn captured_double_scalar_narrowing_requires_the_admitted_precision_policy() {
+    let mut source = plan(vec![add(0, 1, 2)], 2);
+    source.inputs = vec![0];
+    source.const_values.insert(1, Value::Num(0.1));
+    let input = Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    for policy in [PrecisionPolicy::Exact, PrecisionPolicy::AllowDoubleToSingle] {
+        let program = futures::executor::block_on(ResolvedProgram::resolve_with_policy(
+            &source,
+            &[&input],
+            ProviderPrecision::F32,
+            policy,
+        ))
+        .unwrap();
+        let shader = source.prepare_typed_shader(&[2], &program, ScalarType::F32);
+        if policy == PrecisionPolicy::Exact {
+            assert!(shader.is_err());
+        } else {
+            let shader = shader.unwrap();
+            assert!(shader.source().contains(&format!(
+                "bitcast<f32>(0x{:08x}u)",
+                (0.1_f64 as f32).to_bits()
+            )));
+            assert!(!shader.source().contains("runmat_f64_from_words"));
+            assert_eq!(
+                shader.requirements(),
+                runmat_accelerate_api::ProviderShaderRequirements::Basic
+            );
+            crate::wgsl::validation_tests::validate_generated(
+                "opted-captured-double",
+                shader.source(),
+                64,
+                8,
+                crate::wgsl::validation_tests::RequiredCaps::None,
+            );
+        }
+    }
+}
+
+#[test]
 fn root_slice_keeps_shared_dependencies_once_and_original_temporary_indices() {
     let plan = plan(
         vec![add(0, 1, 2), add(0, 0, 3), add(2, 2, 4), add(2, 4, 5)],

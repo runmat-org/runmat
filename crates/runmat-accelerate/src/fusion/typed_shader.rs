@@ -106,6 +106,14 @@ impl FusionGroupPlan {
         for id in controls {
             expressions.insert(id, String::new());
         }
+        for id in allowed_controls {
+            expressions.entry(id).or_default();
+        }
+        for id in outputs {
+            if self.const_values.contains_key(id) && !program.is_invocation_input(*id) {
+                expressions.entry(*id).or_default();
+            }
+        }
         // A single public result may use checked lowering only when it covers
         // every source operation. A partial slice could hide an effect or an
         // invalid operation that complete elementwise emission must report.

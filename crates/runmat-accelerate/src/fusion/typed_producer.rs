@@ -12,6 +12,8 @@ use std::collections::{HashMap, HashSet};
 
 #[path = "typed_producer/program.rs"]
 mod program;
+#[path = "typed_producer/constants.rs"]
+mod constants;
 
 pub(crate) struct TypedProducer {
     pub body: String,
@@ -35,9 +37,27 @@ impl TypedProducer {
         roots: Option<&[ValueId]>,
     ) -> Result<Self> {
         program.require_source_plan(plan)?;
-        let selected = roots
-            .map(|roots| producer_indices(plan, &expressions, roots))
-            .transpose()?;
+        // Captured constants are leaves even when the physical indexing owner
+        // has no buffer expression for them. Invocation inputs still win over
+        // same-ID captured constants, exactly as in source assembly.
+        let mut leaves = expressions.clone();
+        for &id in plan.const_values.keys() {
+            if !program.is_invocation_input(id) {
+                leaves.entry(id).or_default();
+            }
+        }
+        // Even complete emission must reject a constant which ambiguously
+        // aliases a produced SSA value; None still emits every operation.
+        let indices = producer_indices(plan, &leaves, roots.unwrap_or_default())?;
+        let selected = roots.map(|_| indices);
+        let constant_body = constants::seed(
+            plan,
+            program,
+            buffer_type,
+            &mut expressions,
+            selected.as_ref(),
+            roots,
+        )?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()
@@ -90,7 +110,7 @@ impl TypedProducer {
                 }
             }
         }
-        let mut body = String::new();
+        let mut body = constant_body;
         let mut helpers = Vec::new();
         let mut exact_power = false;
         for (index, operation) in plan.operations.iter().enumerate() {

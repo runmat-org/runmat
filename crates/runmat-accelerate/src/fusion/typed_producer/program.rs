@@ -270,7 +270,7 @@ fn require_provider_class(class: NumericClass, buffer_type: ScalarType) -> Resul
     Ok(())
 }
 
-fn literal(value: &Value) -> Option<ScalarLiteral> {
+pub(super) fn literal(value: &Value) -> Option<ScalarLiteral> {
     match value {
         Value::Num(number) => Some(ScalarLiteral::F64Bits(number.to_bits())),
         Value::Tensor(tensor) if tensor.len() == 1 => match tensor.numeric_value_at(0)? {

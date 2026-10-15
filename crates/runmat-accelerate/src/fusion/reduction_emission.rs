@@ -1,16 +1,16 @@
 //! Sealed ordinary producer source for legacy reduction geometry. Numerical
 //! expressions and helpers come only from the checked typed fusion owner.
 
-use super::{semantics::ResolvedProgram, typed_producer::TypedProducer, FusionGroupPlan, FusionOp};
+use super::{semantics::ResolvedProgram, typed_producer::TypedProducer, FusionGroupPlan};
 use crate::graph::ValueId;
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::{GpuTensorLayout, ProviderPrecision};
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::ScalarType;
 use runmat_runtime::value_fact::value_fact;
-use runmat_value::{NumericScalar, Value};
+use runmat_value::Value;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub(crate) struct ReductionProducerEmission {
     root: ValueId,
@@ -109,7 +109,7 @@ impl ReductionProducerEmission {
             ProviderPrecision::F32 => ScalarType::F32,
             ProviderPrecision::F64 => ScalarType::F64,
         };
-        let mut expressions: HashMap<ValueId, String> = source
+        let expressions: HashMap<ValueId, String> = source
             .inputs
             .iter()
             .enumerate()
@@ -124,38 +124,6 @@ impl ReductionProducerEmission {
                 )
             })
             .collect();
-        let used: HashSet<_> = source
-            .operations
-            .iter()
-            .flat_map(|operation| match operation {
-                FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => {
-                    inputs.iter().copied()
-                }
-            })
-            .chain(std::iter::once(root))
-            .collect();
-        let mut constants: Vec<_> = source
-            .const_values
-            .iter()
-            .filter(|(id, _)| used.contains(id) && !expressions.contains_key(id))
-            .collect();
-        constants.sort_unstable_by_key(|(id, _)| **id);
-        let mut constant_body = String::new();
-        for (&id, value) in constants {
-            let (name, bit_type, bits, digits) = match value {
-                Value::Num(value) => ("f64", "u64", value.to_bits(), 16),
-                Value::Tensor(tensor) if tensor.len() == 1 => match tensor.numeric_value_at(0) {
-                    Some(NumericScalar::F32(value)) => {
-                        ("f32", "u32", u64::from(value.to_bits()), 8)
-                    }
-                    Some(NumericScalar::F64(value)) => ("f64", "u64", value.to_bits(), 16),
-                    _ => return Err(anyhow!("selected reduction has a nonfloating control")),
-                },
-                _ => return Err(anyhow!("selected reduction has an unsupported control")),
-            };
-            constant_body.push_str(&format!("    let control{id}_bits: {bit_type} = 0x{bits:0digits$x}u;\n    let control{id}: {name} = bitcast<{name}>(control{id}_bits);\n"));
-            expressions.insert(id, format!("control{id}"));
-        }
         let producer = TypedProducer::emit(source, program, scalar, expressions, Some(&[root]))?;
         let expression = producer.expression(root)?.to_owned();
         let mut preamble = producer.preamble(program)?;
@@ -166,7 +134,7 @@ impl ReductionProducerEmission {
             root,
             precision,
             identity,
-            body: format!("{constant_body}{}", producer.body),
+            body: producer.body,
             expression,
             preamble,
             root_shape,
