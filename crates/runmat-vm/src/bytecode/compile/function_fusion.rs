@@ -108,7 +108,13 @@ pub(super) fn certify_compiled_function_scaffold(
                     statement.contract.status,
                     FusionStageFactStatus::Inferred | FusionStageFactStatus::UnknownInputs
                 );
-                if selected && statement.contract.effects.0.is_empty() && signals == 1 {
+                if selected
+                    && signals == 1
+                    && crate::bytecode::fusion_effects::elementwise_statement_effects_are_compatible(
+                        &body.instructions,
+                        statement,
+                    )
+                {
                     position += 1;
                     continue;
                 }
@@ -143,8 +149,8 @@ pub(super) fn certify_compiled_function_scaffold(
                     position = start;
                     continue;
                 }
-                // An effectful statement can close a candidate only when the
-                // existing certificate proves its unique terminal reduction.
+                // Outside the shared canonical elementwise allowance, effects
+                // can close a candidate only through its terminal reduction.
                 let terminal_admitted = selected
                     && signals == 1
                     && slice.try_add_segment(start, position + 1, &mut accepted);

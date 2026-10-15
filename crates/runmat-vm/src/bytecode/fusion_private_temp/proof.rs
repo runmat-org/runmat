@@ -11,6 +11,7 @@ use runmat_mir::analysis::FusionStageFactStatus;
 use runmat_types::EffectKind;
 
 use super::FusionPrivateTempBridge;
+use crate::bytecode::fusion_effects::elementwise_statement_effects_are_compatible;
 
 #[path = "proof/empty_control.rs"]
 mod empty_control;
@@ -328,37 +329,6 @@ fn private_elementwise_signal(
     kind == FusionInstructionKind::Elementwise
         || (kind == FusionInstructionKind::Matmul
             && matches!(instructions.get(pc), Some(Instr::Mul)))
-}
-
-// Throw/suspend markers on an authenticated canonical numerical call describe
-// its ordinary typed adapters, not permission to hide arbitrary effects. The
-// actual selected operation must still pass runtime binding/domain admission.
-// Primitive statements cannot borrow a builtin's markers, and all workspace,
-// callback, unknown, or other externally observable effects remain barriers.
-fn elementwise_statement_effects_are_compatible(
-    instructions: &[Instr],
-    statement: &CompiledFusionStageStatement,
-) -> bool {
-    if statement.contract.effects.0.is_empty() {
-        return true;
-    }
-    let Some((pc, FusionInstructionKind::Elementwise)) =
-        unique_statement_signal(instructions, statement)
-    else {
-        return false;
-    };
-    let Some(Instr::CallBuiltinMulti(name, arguments, 1)) = instructions.get(pc) else {
-        return false;
-    };
-    let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) else {
-        return false;
-    };
-    crate::accel::fusion_declaration::canonical_kind(entry, Some(*arguments))
-        == Some(FusionInstructionKind::Elementwise)
-        && statement.contract.effects.0.iter().all(|effect| {
-            matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)
-                && entry.contract.effects.contains(effect)
-        })
 }
 
 fn unique_statement_signal(

@@ -1,4 +1,6 @@
 mod artifact;
+#[cfg(feature = "native-accel")]
+mod fusion_effects;
 pub mod compile;
 #[cfg(feature = "native-accel")]
 pub(crate) mod fusion_private_temp;

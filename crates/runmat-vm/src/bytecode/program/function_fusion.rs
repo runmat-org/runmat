@@ -301,17 +301,22 @@ impl<'a> FunctionFusionCertificateIndex<'a> {
             if signal_pcs.len() != 1 {
                 return Err("function fusion hint has multiple signals in one statement".into());
             }
-            if !statement.contract.effects.0.is_empty()
-                && (layout.is_none()
-                    || position.checked_add(1) != Some(candidate.stmt_end)
-                    || !self
-                        .body
-                        .instructions
-                        .get(signal_pcs[0])
-                        .is_some_and(canonical_terminal_reduction)
-                    || !statement.contract.effects.0.iter().all(|effect| {
-                        matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)
-                    }))
+            if !crate::bytecode::fusion_effects::elementwise_statement_effects_are_compatible(
+                &self.body.instructions,
+                statement,
+            ) && (layout.is_none()
+                || position.checked_add(1) != Some(candidate.stmt_end)
+                || !self
+                    .body
+                    .instructions
+                    .get(signal_pcs[0])
+                    .is_some_and(canonical_terminal_reduction)
+                || !statement
+                    .contract
+                    .effects
+                    .0
+                    .iter()
+                    .all(|effect| matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)))
             {
                 return Err("function fusion hint has nonterminal or impure effects".into());
             }

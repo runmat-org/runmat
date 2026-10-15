@@ -67,6 +67,102 @@ fn compile_function(source: &str) -> (runmat_hir::FunctionId, FunctionRegistry) 
 }
 
 #[test]
+fn general_elementwise_function_keeps_one_chain_through_portable_admission() {
+    let (function, registry) =
+        compile_function("function y=f(x)\ny=exp(-x).*sin(4*x)+tanh(x).*tanh(x);\nend\n");
+    fn assert_chain(registry: &FunctionRegistry, function: runmat_hir::FunctionId) {
+        let body = registry.get(function).unwrap();
+        body.validate_fusion_scaffold().unwrap();
+        let executable = body.execution_bytecode(registry);
+        assert!(executable.layout.is_none(), "no borrowed entrypoint layout");
+        let signals = body
+            .instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(pc, instruction)| {
+                matches!(instruction, Instr::CallBuiltinMulti(name, 1, 1)
+                if name == "exp" || name == "sin" || name == "tanh")
+                .then_some(pc)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(signals.len(), 4);
+        let (_, groups) = executable.reconciled_runtime_fusion_graph().unwrap();
+        assert!(
+            groups.iter().any(|group| {
+                group.kind == runmat_accelerate::FusionKind::ElementwiseChain
+                    && group.nodes.len() >= 8
+                    && signals
+                        .iter()
+                        .all(|pc| group.span.start <= *pc && *pc <= group.span.end)
+            }),
+            "one original function chain, without injected argument facts"
+        );
+        // MIR intrinsically gives these primitives no local effects even with
+        // unknown function inputs. The new allowance belongs only to calls.
+        let projection = body.fusion_stage_projection.as_ref().unwrap();
+        for statement in &projection.statements {
+            if body.instructions[statement.pc.start..statement.pc.end]
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::Neg | Instr::Mul))
+            {
+                assert!(statement.contract.effects.0.is_empty());
+            }
+        }
+    }
+    assert_chain(&registry, function);
+    let encoded = crate::bytecode::encode_interpreter_program_v2(&registry).unwrap();
+    let decoded = crate::bytecode::decode_interpreter_program_v2(&encoded).unwrap();
+    assert_chain(&decoded, decoded.resolve_name("f").unwrap());
+
+    let body = registry.get(function).unwrap();
+    let statement = body
+        .fusion_stage_projection
+        .as_ref()
+        .unwrap()
+        .statements
+        .iter()
+        .find(|statement| {
+            body.instructions[statement.pc.start..statement.pc.end]
+                .iter()
+                .any(|instruction| {
+                    matches!(instruction,
+                Instr::CallBuiltinMulti(name, 1, 1) if name == "exp")
+                })
+        })
+        .unwrap();
+    let compatible = crate::bytecode::fusion_effects::elementwise_statement_effects_are_compatible;
+    assert!(compatible(&body.instructions, statement));
+    for effect in [
+        runmat_types::EffectKind::Unknown,
+        runmat_types::EffectKind::HostCallback,
+        runmat_types::EffectKind::WorkspaceWrite,
+    ] {
+        let mut forbidden = statement.clone();
+        forbidden.contract.effects.0.insert(effect);
+        assert!(!compatible(&body.instructions, &forbidden));
+    }
+    // Neither an intrinsic nor an undeclared call can borrow exp's effects.
+    let pc = (statement.pc.start..statement.pc.end)
+        .find(|pc| {
+            matches!(
+                &body.instructions[*pc], Instr::CallBuiltinMulti(name, 1, 1) if name == "exp"
+            )
+        })
+        .unwrap();
+    let mut effectful = statement.clone();
+    effectful
+        .contract
+        .effects
+        .0
+        .insert(runmat_types::EffectKind::MayThrow);
+    let mut replaced = body.instructions.clone();
+    replaced[pc] = Instr::Neg;
+    assert!(!compatible(&replaced, &effectful));
+    replaced[pc] = Instr::CallBuiltinMulti("disp".into(), 1, 1);
+    assert!(!compatible(&replaced, &effectful));
+}
+
+#[test]
 fn effectful_assertion_chain_does_not_poison_neighboring_function_groups() {
     let source = "function y=f(x)\na=x+x;\nb=a+a;\nassert(max(abs(x-[1 2 3]))<1e-10);\nc=x+x;\nd=c+c;\ny=b+d;\nend\n";
     let (function, registry) = compile_function(source);
