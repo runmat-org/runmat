@@ -1,5 +1,8 @@
 //! Backend implementation of the runtime's already-admitted operand port.
-use super::{preparation::ArgumentOperation, *};
+use super::{
+    preparation::{ArgumentOperation, BuiltinPreparationContext},
+    *,
+};
 use runmat_builtins::{
     BuiltinOperandPreparation, BuiltinPreparationOperation as Operation,
     BuiltinPreparationProviderRequirement, BuiltinSinkPreparation,
@@ -257,14 +260,16 @@ fn prepare_with_inner(
     };
     let completion = request.take_prepared_completion_right();
     let prepared = auto
-        .prepare_operation_with_host(
+        .prepare_operation_with_context(
             request.admission().binding.builtin.name,
             request.operands(),
-            Some(context),
             operation,
-            completion,
-            host,
-            compound,
+            BuiltinPreparationContext {
+                runtime: Some(context),
+                completion,
+                host,
+                compound,
+            },
         )
         .map_err(preparation_error)?;
     Ok(prepared)

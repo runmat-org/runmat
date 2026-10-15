@@ -1,5 +1,17 @@
 use super::*;
 
+/// Invocation-owned completion and borrowed host/provider preparation evidence.
+#[derive(Default)]
+pub(super) struct BuiltinPreparationContext<'a> {
+    pub(super) runtime: Option<&'a RuntimeContext>,
+    pub(super) completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+    pub(super) host: Option<(
+        &'a crate::fusion_exec::host_readback::CpuHostResources,
+        runmat_execution::Digest,
+    )>,
+    pub(super) compound: Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
+}
+
 pub(super) enum ArgumentOperation {
     Reduction,
     AdmittedSum {
@@ -200,22 +212,31 @@ impl NativeAutoOffload {
         operation: ArgumentOperation,
         completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
-        self.prepare_operation_with_host(name, args, runtime, operation, completion, None, None)
+        self.prepare_operation_with_context(
+            name,
+            args,
+            operation,
+            BuiltinPreparationContext {
+                runtime,
+                completion,
+                ..Default::default()
+            },
+        )
     }
 
-    pub(super) fn prepare_operation_with_host(
+    pub(super) fn prepare_operation_with_context(
         &self,
         name: &str,
         args: &[Value],
-        runtime: Option<&RuntimeContext>,
         operation: ArgumentOperation,
-        completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
-        host: Option<(
-            &crate::fusion_exec::host_readback::CpuHostResources,
-            runmat_execution::Digest,
-        )>,
-        compound: Option<&runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
+        context: BuiltinPreparationContext<'_>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
+        let BuiltinPreparationContext {
+            runtime,
+            completion,
+            host,
+            compound,
+        } = context;
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
