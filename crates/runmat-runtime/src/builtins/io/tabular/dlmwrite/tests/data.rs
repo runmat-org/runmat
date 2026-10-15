@@ -3,13 +3,13 @@ use super::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_resident_matrix_shape_rejects_before_download_or_file_creation() {
-    let _fs_lock = runmat_filesystem::provider_override_lock();
-    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
-        "/tabular",
-    ));
-    let _selected = runmat_filesystem::replace_provider(filesystem);
-    runmat_filesystem::set_current_dir("/tabular").expect("fixture cwd");
     test_support::with_test_provider(|provider| {
+        let _fs_lock = runmat_filesystem::provider_override_lock();
+        let filesystem = std::sync::Arc::new(
+            runmat_filesystem::MemoryFsProvider::with_current_dir("/tabular"),
+        );
+        let _selected = runmat_filesystem::replace_provider(filesystem);
+        runmat_filesystem::set_current_dir("/tabular").expect("fixture cwd");
         let handle = provider
             .upload(&HostTensorView {
                 data: &[1.0, 2.0],
@@ -19,11 +19,12 @@ fn known_invalid_resident_matrix_shape_rejects_before_download_or_file_creation(
         provider.reset_telemetry();
         let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = "/tabular/invalid-resident.csv";
-        let error = dlmwrite_builtin(
+        let error = futures::executor::block_on(super::super::dlmwrite_builtin(
+            None,
             Value::from(path),
             Value::GpuTensor(handle.clone()),
             Vec::new(),
-        )
+        ))
         .expect_err("non-singleton page is invalid data geometry");
         assert!(error.message().contains("2-D"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);

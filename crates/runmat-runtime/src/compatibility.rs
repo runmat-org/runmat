@@ -1917,7 +1917,6 @@ mod tests {
             ("tinv", "tinv-integer-degrees-of-freedom"),
             ("tinv", "tinv-integer-probability"),
             ("tinv", "tinv-logical-input"),
-            ("toc", "toc-legacy-double-timer-handle"),
             ("toeplitz", "toeplitz-complex-integer-input"),
             ("tpdf", "tpdf-integer-degrees-of-freedom"),
             ("tpdf", "tpdf-integer-x"),

@@ -183,6 +183,7 @@ RUNMAT_MEX_LOCAL void
 runmatDataArrayRecordSparseLayoutCopy(size_t byte_length);
 RUNMAT_MEX_LOCAL void runmatDataArraySetError(const char *identifier,
                                               const char *message);
+RUNMAT_MEX_LOCAL int runmatDataArrayHasError(void);
 RUNMAT_MEX_LOCAL int runmatDataArrayType(const mxArray *array);
 RUNMAT_MEX_LOCAL mxArray *runmatDataArrayCreateStringArray(
     size_t ndim, const size_t *dims);

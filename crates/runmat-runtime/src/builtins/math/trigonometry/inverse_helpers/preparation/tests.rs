@@ -221,7 +221,7 @@ fn floating_trig_preparation_drop_and_replacement_cannot_record_success() {
 fn floating_trig_like_controls_are_admitted_before_service_and_remain_local() {
     let events = Events::default();
     let context = context(&events, Mode::Pass);
-    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    context.set_runmat_extensions_enabled(true);
     for name in ["sin", "cos", "tan", "atan"] {
         let invalid = [
             Value::Num(0.5),

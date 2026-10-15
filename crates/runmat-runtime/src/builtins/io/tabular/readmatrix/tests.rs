@@ -211,6 +211,7 @@ fn readmatrix_output_type_supports_every_numeric_class() {
 
 #[test]
 fn readmatrix_output_type_parses_wide_integer_text_without_binary64() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_wide_integer");
     fs::write(
         &path,
@@ -240,6 +241,7 @@ fn readmatrix_output_type_parses_wide_integer_text_without_binary64() {
 
 #[test]
 fn readmatrix_documented_integer_output_remains_enabled_in_matlab_mode() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_integer_matlab_mode");
     fs::write(&path, "9007199254740993\n").expect("write sample file");
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -319,6 +321,7 @@ fn readmatrix_descriptor_signatures_cover_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_reads_csv_data() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_csv");
     fs::write(&path, "1,2,3\n4,5,6\n").expect("write sample file");
     let result = block_on(readmatrix_builtin(
@@ -462,6 +465,7 @@ fn option_usize_reads_every_integer_class_exactly() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_skips_header_lines() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let path = unique_path("readmatrix_header");
     fs::write(&path, "time,value\n0,10\n1,12\n").expect("write sample file");
@@ -485,6 +489,7 @@ fn readmatrix_skips_header_lines() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_respects_delimiter_option() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_tab");
     fs::write(&path, "1\t2\t3\n4\t5\t6\n").expect("write sample file");
     let args = vec![Value::from("Delimiter"), Value::from("tab")];
@@ -507,6 +512,7 @@ fn readmatrix_respects_delimiter_option() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_respects_range_string() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_range_string");
     fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
     let args = vec![Value::from("Range"), Value::from("B2:C3")];
@@ -529,6 +535,7 @@ fn readmatrix_respects_range_string() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_respects_range_numeric_vector() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_range_numeric");
     fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
     let range = Tensor::new(vec![2.0, 2.0, 3.0, 3.0], vec![1, 4]).expect("range tensor");
@@ -552,6 +559,7 @@ fn readmatrix_respects_range_numeric_vector() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_treats_custom_missing_tokens() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_missing");
     fs::write(&path, "1,NA,3\nNA,5,missing\n").expect("write file");
     let strings = StringArray::new(vec!["NA".to_string(), "missing".to_string()], vec![1, 2])
@@ -579,6 +587,7 @@ fn readmatrix_treats_custom_missing_tokens() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_uses_decimal_and_thousands_separators() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_decimal");
     fs::write(&path, "1.234,56;7.890,12\n").expect("write sample file");
     let args = vec![
@@ -610,6 +619,7 @@ fn readmatrix_uses_decimal_and_thousands_separators() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_applies_empty_value() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_empty_value");
     fs::write(&path, "1,,3\n4,,6\n").expect("write sample file");
     let args = vec![Value::from("EmptyValue"), Value::Num(0.0)];
@@ -632,6 +642,7 @@ fn readmatrix_applies_empty_value() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_accepts_struct_options() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let path = unique_path("readmatrix_struct_opts");
     fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
@@ -662,6 +673,7 @@ fn readmatrix_accepts_struct_options() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_errors_on_non_numeric_field() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_error");
     fs::write(&path, "1,abc,3\n").expect("write sample file");
     let err = block_on(readmatrix_builtin(
@@ -681,6 +693,7 @@ fn readmatrix_errors_on_non_numeric_field() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_returns_empty_on_no_data() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_empty");
     File::create(&path).expect("create file");
     let result = block_on(readmatrix_builtin(
@@ -702,6 +715,7 @@ fn readmatrix_returns_empty_on_no_data() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_output_type_logical() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_output_logical");
     fs::write(&path, "0,1,-3\nNaN,0,5\n").expect("write sample file");
     let args = vec![Value::from("OutputType"), Value::from("logical")];
@@ -724,6 +738,7 @@ fn readmatrix_output_type_logical() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_like_logical_proto() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let path = unique_path("readmatrix_like_logical");
     fs::write(&path, "1,0\n0,5\n").expect("write sample file");
@@ -750,6 +765,7 @@ fn readmatrix_like_logical_proto() {
 fn readmatrix_like_gpu_proto() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
+        let _fs_lock = runmat_filesystem::provider_override_lock();
         let path = unique_path("readmatrix_like_gpu");
         fs::write(&path, "1,2\n3,4\n").expect("write sample file");
         let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
@@ -788,6 +804,7 @@ fn readmatrix_like_gpu_proto() {
 fn readmatrix_integer_gpu_like_preserves_wide_storage_and_exact_owner() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
+        let _fs_lock = runmat_filesystem::provider_override_lock();
         let path = unique_path("readmatrix_integer_gpu_like");
         fs::write(&path, "9007199254740993,18446744073709551615\n").expect("write sample file");
         let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
@@ -824,6 +841,7 @@ fn readmatrix_integer_gpu_like_preserves_wide_storage_and_exact_owner() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_accepts_character_vector_path() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_char_path");
     fs::write(&path, "1 2 3\n").expect("write sample file");
     let text = path.to_string_lossy().to_string();
@@ -849,6 +867,7 @@ fn readmatrix_accepts_character_vector_path() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_handles_quoted_fields() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_quotes");
     fs::write(&path, "\"1\",\"2\",\"3\"\n").expect("write sample file");
     let result = block_on(readmatrix_builtin(
@@ -870,6 +889,7 @@ fn readmatrix_handles_quoted_fields() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_preserves_negative_infinity() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_infinity");
     fs::write(&path, "-Inf,Inf,NaN\n").expect("write sample file");
     let result = block_on(readmatrix_builtin(
@@ -894,6 +914,7 @@ fn readmatrix_preserves_negative_infinity() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_accepts_shift_jis_encoding_label() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_shift_jis");
     fs::write(&path, b"1,2\n3,4\n").expect("write sample file");
     let result = block_on(readmatrix_builtin(
@@ -915,6 +936,7 @@ fn readmatrix_accepts_shift_jis_encoding_label() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_auto_detects_utf16_bom() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_utf16_auto");
     let mut bytes = vec![0xFF, 0xFE];
     for unit in "1,2\n3,4\n".encode_utf16() {
@@ -940,6 +962,7 @@ fn readmatrix_auto_detects_utf16_bom() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn readmatrix_supports_whitespace_delimiter() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_whitespace");
     fs::write(&path, "1 2 3\n4 5 6\n").expect("write sample file");
     let result = block_on(readmatrix_builtin(

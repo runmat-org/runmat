@@ -344,23 +344,42 @@ fn inverse_range_rejects_aliases_and_wrong_storage_without_freeing_borrowed_inpu
 }
 
 #[test]
-fn inverse_range_only_unsupported_hook_is_inconclusive() {
+fn inverse_range_only_first_unsupported_hook_is_inconclusive() {
     let _serial = test_support::accel_test_lock();
-    for step in 1..=2 {
-        let (provider, input) = fixture(step, Fault::Unsupported);
-        let _provider = ThreadProviderGuard::set(Some(provider));
-        assert_eq!(
-            block_on(requires_complex(
-                provider,
-                &input,
-                RealDomain::ClosedUnitInterval,
-                asin_diagnostic()
-            ))
-            .unwrap(),
-            None
-        );
-        provider.assert_reclaimed(&input);
-    }
+    let (provider, input) = fixture(1, Fault::Unsupported);
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    assert_eq!(
+        block_on(requires_complex(
+            provider,
+            &input,
+            RealDomain::ClosedUnitInterval,
+            asin_diagnostic()
+        ))
+        .unwrap(),
+        None
+    );
+    provider.assert_reclaimed(&input);
+
+    // Once reduce_min has completed, an unsupported reduce_max cannot
+    // authorize replay: its failure follows a provider effect.
+    let (provider, input) = fixture(2, Fault::Unsupported);
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    let error = block_on(requires_complex(
+        provider,
+        &input,
+        RealDomain::ClosedUnitInterval,
+        asin_diagnostic(),
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:asin:Internal"));
+    let source = error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>())
+        .expect("post-effect provider cause remains attached");
+    assert!(source.is_after_effect());
+    assert!(!source.is_unsupported());
+    provider.assert_reclaimed(&input);
     let (provider, input) = fixture(0, Fault::None);
     let _provider = ThreadProviderGuard::set(Some(provider));
     assert_eq!(

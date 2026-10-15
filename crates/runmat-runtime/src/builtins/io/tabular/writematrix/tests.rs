@@ -50,6 +50,7 @@ fn writematrix_descriptor_signatures_cover_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_writes_space_delimited_txt() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
     let filename = path.to_string_lossy().into_owned();
@@ -68,6 +69,7 @@ fn writematrix_writes_space_delimited_txt() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_defaults_to_comma_for_csv() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let filename = path.to_string_lossy().into_owned();
@@ -86,6 +88,7 @@ fn writematrix_defaults_to_comma_for_csv() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_preserves_typed_integer_matrix_values_exactly() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let tensor = Tensor::new_integer(
         IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
@@ -108,6 +111,7 @@ fn writematrix_preserves_typed_integer_matrix_values_exactly() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn writematrix_preserves_public_low_rank_numeric_projection() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let rank_zero_path = temp_path("csv");
     let rank_zero = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
         .expect("rank-zero integer");
@@ -143,6 +147,7 @@ fn writematrix_preserves_public_low_rank_numeric_projection() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_honours_write_mode_append() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     let first = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let second = Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).unwrap();
@@ -172,6 +177,7 @@ fn writematrix_honours_write_mode_append() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_uses_minimal_string_quoting_by_default() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let strings = StringArray::new(
         vec!["Alice".to_string(), "Bob, Jr.".to_string()],
@@ -231,6 +237,7 @@ fn writematrix_gates_bytes_output_before_file_access() {
 #[test]
 fn writematrix_accepts_gpu_tensor_inputs() {
     test_support::with_test_provider(|provider| {
+        let _fs_lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let view = HostTensorView {

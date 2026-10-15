@@ -50,11 +50,15 @@ mexFunction(int outputCount, mxArray **outputValues, int inputCount,
         runmat_mex_detail::invokeCppGateway<MexFunction>(
             outputCount, outputValues, inputCount, inputValues);
     } catch (const std::exception &error) {
-        runmatDataArraySetError("RunMat:mex:cppException", error.what());
+        if (!runmatDataArrayHasError()) {
+            runmatDataArraySetError("RunMat:mex:cppException", error.what());
+        }
     } catch (...) {
-        runmatDataArraySetError(
-            "RunMat:mex:cppException",
-            "C++ MEX gateway threw an unknown exception");
+        if (!runmatDataArrayHasError()) {
+            runmatDataArraySetError(
+                "RunMat:mex:cppException",
+                "C++ MEX gateway threw an unknown exception");
+        }
     }
 }
 

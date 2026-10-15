@@ -79005,9 +79005,8 @@
         }
       ],
       "integer_audit": {
-        "kind": "AliasOf",
-        "canonical_builtin": "h5info",
-        "notes": "Legacy spelling delegates to h5info metadata semantics."
+        "kind": "NotApplicable",
+        "notes": "Legacy spelling delegates to h5info metadata semantics; both forms accept only scalar text paths and expose metadata counts as double values."
       }
     },
     {

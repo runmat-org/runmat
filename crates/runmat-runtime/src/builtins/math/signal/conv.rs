@@ -989,7 +989,9 @@ pub(crate) mod tests {
         .expect("rank-zero input is admitted") else {
             panic!("expected empty tensor");
         };
-        assert_eq!(empty.shape(), [0, 1]);
+        // A rank-zero scalar has no column orientation; the row kernel owns
+        // the empty valid-result orientation.
+        assert_eq!(empty.shape(), [1, 0]);
         assert!(empty.materialize_f64().is_empty());
 
         let Value::Tensor(row) = conv_builtin(

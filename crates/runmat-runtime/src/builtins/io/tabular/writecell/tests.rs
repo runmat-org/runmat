@@ -140,6 +140,7 @@ fn malformed_host_pair_precedes_earlier_resident_option_gather() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_writes_heterogeneous_csv() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let filename = path.to_string_lossy().into_owned();
     let values = cell(
@@ -166,6 +167,7 @@ mod append;
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn writecell_overwrite_uses_same_path_write_lock() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     fs::write(&path, "existing\n").expect("seed");
     let filename = path.to_string_lossy().into_owned();
@@ -195,6 +197,7 @@ fn writecell_overwrite_uses_same_path_write_lock() {
 #[cfg(unix)]
 #[test]
 fn writecell_canonical_aliases_share_write_lock() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     fs::write(&path, "").expect("seed");
     let mut link = path.clone();
@@ -214,6 +217,7 @@ fn writecell_canonical_aliases_share_write_lock() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let filename = path.to_string_lossy().into_owned();
     let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
@@ -238,6 +242,7 @@ fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_preserves_integer_cell_text_exactly() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let filename = path.to_string_lossy().into_owned();
     let wide = (1_u64 << 53) + 1;
@@ -329,6 +334,7 @@ fn writecell_bytes_output_is_gated_before_filesystem_access() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_rejects_nested_cells_and_nonscalar_arrays() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("csv");
     let filename = path.to_string_lossy().into_owned();
     let nested = cell(vec![cell(vec![Value::Num(1.0)], 1, 1)], 1, 1);
@@ -354,6 +360,7 @@ fn writecell_rejects_nested_cells_and_nonscalar_arrays() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_writes_xlsx_with_sheet_and_range() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let values = cell(
@@ -391,6 +398,7 @@ fn writecell_writes_xlsx_with_sheet_and_range() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_rejects_unsupported_spreadsheet_extension() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xls");
     let filename = path.to_string_lossy().into_owned();
     let values = cell(vec![Value::from("A"), Value::Num(1.0)], 1, 2);

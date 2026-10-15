@@ -16,6 +16,7 @@ extern "C" RUNMAT_MEX_LOCAL void
 runmatDataArrayRecordSparseLayoutCopy(std::size_t byteLength);
 extern "C" RUNMAT_MEX_LOCAL void
 runmatDataArraySetError(const char *identifier, const char *message);
+extern "C" RUNMAT_MEX_LOCAL int runmatDataArrayHasError(void);
 extern "C" RUNMAT_MEX_LOCAL int runmatDataArrayType(const mxArray *array);
 extern "C" RUNMAT_MEX_LOCAL mxArray *
 runmatDataArrayCreateStringArray(std::size_t ndim, const std::size_t *dims);

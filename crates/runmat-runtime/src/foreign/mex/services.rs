@@ -935,120 +935,131 @@ mod tests {
 
     #[test]
     fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
-        let mut target = ObjectInstance::new("FixtureHandle");
-        target.properties.insert("Value".into(), Value::Num(4.0));
-        let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
-        let handle = HandleRef {
-            class_name: "FixtureHandle".into(),
-            target,
-            valid: true,
-        };
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        register_fixture_handle_class(&runtime);
-        let services = RuntimeMexHostServices::new(runtime);
+        runmat_gc::gc_test_context(|| {
+            let mut target = ObjectInstance::new("FixtureHandle");
+            target.properties.insert("Value".into(), Value::Num(4.0));
+            let target_root =
+                runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
+            let handle = HandleRef {
+                class_name: "FixtureHandle".into(),
+                target: target_root.handle(),
+                valid: true,
+            };
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            register_fixture_handle_class(&runtime);
+            let services = RuntimeMexHostServices::new(runtime);
 
-        assert_eq!(
-            pollster::block_on(services.get_object_property_rooted(
+            assert_eq!(
+                pollster::block_on(services.get_object_property_rooted(
+                    Value::HandleObject(handle.clone()),
+                    0,
+                    "Value".into(),
+                ))
+                .expect("read handle property")
+                .value(),
+                &Value::Num(4.0)
+            );
+            let updated = pollster::block_on(services.set_object_property_rooted(
                 Value::HandleObject(handle.clone()),
                 0,
                 "Value".into(),
+                Value::Num(9.0),
             ))
-            .expect("read handle property")
-            .value(),
-            &Value::Num(4.0)
-        );
-        let updated = pollster::block_on(services.set_object_property_rooted(
-            Value::HandleObject(handle.clone()),
-            0,
-            "Value".into(),
-            Value::Num(9.0),
-        ))
-        .expect("write handle property");
-        let Value::HandleObject(updated) = updated.value() else {
-            panic!("handle property assignment must return the same handle kind");
-        };
-        assert_eq!(updated, &handle);
-        assert_eq!(
-            pollster::block_on(services.get_object_property_rooted(
-                Value::HandleObject(handle),
-                0,
-                "Value".into(),
-            ))
-            .expect("read updated handle property")
-            .value(),
-            &Value::Num(9.0)
-        );
+            .expect("write handle property");
+            let Value::HandleObject(updated) = updated.value() else {
+                panic!("handle property assignment must return the same handle kind");
+            };
+            assert_eq!(updated, &handle);
+            assert_eq!(
+                pollster::block_on(services.get_object_property_rooted(
+                    Value::HandleObject(handle),
+                    0,
+                    "Value".into(),
+                ))
+                .expect("read updated handle property")
+                .value(),
+                &Value::Num(9.0)
+            );
+            drop(target_root);
+        });
     }
 
     #[test]
     fn indexed_object_callbacks_select_exact_zero_based_element() {
-        let make_handle = |value| {
-            let mut target = ObjectInstance::new("FixtureHandle");
-            target.properties.insert("Value".into(), Value::Num(value));
-            let target = runmat_gc::gc_allocate(Value::Object(target))
-                .expect("allocate indexed handle target");
-            HandleRef {
-                class_name: "FixtureHandle".into(),
-                target,
-                valid: true,
-            }
-        };
-        let first = make_handle(2.0);
-        let second = make_handle(4.0);
-        let array = runmat_value::ObjectArray::from_handles(
-            "FixtureHandle",
-            vec![first.clone(), second.clone()],
-            vec![1, 2],
-        )
-        .expect("valid handle array");
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        register_fixture_handle_class(&runtime);
-        let services = RuntimeMexHostServices::new(runtime);
+        runmat_gc::gc_test_context(|| {
+            let make_handle = |value| {
+                let mut target = ObjectInstance::new("FixtureHandle");
+                target.properties.insert("Value".into(), Value::Num(value));
+                let target_root = runmat_gc::gc_allocate_rooted(Value::Object(target))
+                    .expect("root indexed handle target");
+                (
+                    HandleRef {
+                        class_name: "FixtureHandle".into(),
+                        target: target_root.handle(),
+                        valid: true,
+                    },
+                    target_root,
+                )
+            };
+            let (first, first_root) = make_handle(2.0);
+            let (second, second_root) = make_handle(4.0);
+            let array = runmat_value::ObjectArray::from_handles(
+                "FixtureHandle",
+                vec![first.clone(), second.clone()],
+                vec![1, 2],
+            )
+            .expect("valid handle array");
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            register_fixture_handle_class(&runtime);
+            let services = RuntimeMexHostServices::new(runtime);
 
-        assert_eq!(
-            pollster::block_on(services.get_object_property_rooted(
-                Value::ObjectArray(array.clone()),
+            assert_eq!(
+                pollster::block_on(services.get_object_property_rooted(
+                    Value::ObjectArray(array.clone()),
+                    1,
+                    "Value".into(),
+                ))
+                .expect("read indexed property")
+                .value(),
+                &Value::Num(4.0)
+            );
+            let updated = pollster::block_on(services.set_object_property_rooted(
+                Value::ObjectArray(array),
                 1,
                 "Value".into(),
+                Value::Num(9.0),
             ))
-            .expect("read indexed property")
-            .value(),
-            &Value::Num(4.0)
-        );
-        let updated = pollster::block_on(services.set_object_property_rooted(
-            Value::ObjectArray(array),
-            1,
-            "Value".into(),
-            Value::Num(9.0),
-        ))
-        .expect("write indexed property");
-        let Value::ObjectArray(updated) = updated.value() else {
-            panic!("indexed property write must preserve the object array");
-        };
-        assert_eq!(updated.shape(), &[1, 2]);
-        runmat_gc::gc_with_value(&first.target, |value| {
-            let Value::Object(value) = value else {
-                panic!("first indexed target must remain an object");
+            .expect("write indexed property");
+            let Value::ObjectArray(updated) = updated.value() else {
+                panic!("indexed property write must preserve the object array");
             };
-            assert_eq!(value.properties.get("Value"), Some(&Value::Num(2.0)));
-        })
-        .expect("inspect first indexed target");
-        runmat_gc::gc_with_value(&second.target, |value| {
-            let Value::Object(value) = value else {
-                panic!("second indexed target must remain an object");
-            };
-            assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
-        })
-        .expect("inspect second indexed target");
+            assert_eq!(updated.shape(), &[1, 2]);
+            runmat_gc::gc_with_value(&first.target, |value| {
+                let Value::Object(value) = value else {
+                    panic!("first indexed target must remain an object");
+                };
+                assert_eq!(value.properties.get("Value"), Some(&Value::Num(2.0)));
+            })
+            .expect("inspect first indexed target");
+            runmat_gc::gc_with_value(&second.target, |value| {
+                let Value::Object(value) = value else {
+                    panic!("second indexed target must remain an object");
+                };
+                assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+            })
+            .expect("inspect second indexed target");
+            drop((first_root, second_root));
+        });
     }
 
     #[test]
     fn compiled_cpp_engine_properties_preserve_runtime_handle_identity() {
-        let directory = tempfile::tempdir().expect("temporary C++ MEX directory");
-        let source = directory.path().join("handle_properties.cpp");
-        fs::write(
-            &source,
-            r#"
+        runmat_gc::gc_test_context(|| {
+            let directory = tempfile::tempdir().expect("temporary C++ MEX directory");
+            let source = directory.path().join("handle_properties.cpp");
+            fs::write(
+                &source,
+                r#"
 #include "mex.hpp"
 #include "mexAdapter.hpp"
 
@@ -1072,45 +1083,47 @@ public:
     }
 };
 "#,
-        )
-        .expect("write C++ MEX fixture");
-
-        let mut target = ObjectInstance::new("FixtureHandle");
-        target.properties.insert("Value".into(), Value::Num(4.0));
-        let target_root =
-            runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
-        let target = target_root.handle();
-        let handle = HandleRef {
-            class_name: "FixtureHandle".into(),
-            target,
-            valid: true,
-        };
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        register_fixture_handle_class(&runtime);
-        let services = Rc::new(RuntimeMexHostServices::new(runtime));
-        let artifact = runmat_mex::MexBuild::new(&source, directory.path())
-            .compile()
-            .expect("compile C++ MEX fixture");
-        let module = runmat_mex::MexModule::load(&artifact.module).expect("load C++ MEX fixture");
-        let invocation = module
-            .invoke_with_services(
-                &[Value::HandleObject(handle.clone())],
-                1,
-                module.api_mode(),
-                services,
             )
-            .expect("invoke C++ MEX fixture");
-        let [Value::HandleObject(output)] = invocation.outputs.as_slice() else {
-            panic!("C++ MEX output must retain handle-object identity");
-        };
-        assert_eq!(output, &handle);
-        runmat_gc::gc_with_value(&handle.target, |value| {
-            let Value::Object(value) = value else {
-                panic!("handle target must remain an object");
+            .expect("write C++ MEX fixture");
+
+            let mut target = ObjectInstance::new("FixtureHandle");
+            target.properties.insert("Value".into(), Value::Num(4.0));
+            let target_root =
+                runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
+            let target = target_root.handle();
+            let handle = HandleRef {
+                class_name: "FixtureHandle".into(),
+                target,
+                valid: true,
             };
-            assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
-        })
-        .expect("inspect updated handle target");
-        drop(target_root);
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            register_fixture_handle_class(&runtime);
+            let services = Rc::new(RuntimeMexHostServices::new(runtime));
+            let artifact = runmat_mex::MexBuild::new(&source, directory.path())
+                .compile()
+                .expect("compile C++ MEX fixture");
+            let module =
+                runmat_mex::MexModule::load(&artifact.module).expect("load C++ MEX fixture");
+            let invocation = module
+                .invoke_with_services(
+                    &[Value::HandleObject(handle.clone())],
+                    1,
+                    module.api_mode(),
+                    services,
+                )
+                .expect("invoke C++ MEX fixture");
+            let [Value::HandleObject(output)] = invocation.outputs.as_slice() else {
+                panic!("C++ MEX output must retain handle-object identity");
+            };
+            assert_eq!(output, &handle);
+            runmat_gc::gc_with_value(&handle.target, |value| {
+                let Value::Object(value) = value else {
+                    panic!("handle target must remain an object");
+                };
+                assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+            })
+            .expect("inspect updated handle target");
+            drop(target_root);
+        });
     }
 }

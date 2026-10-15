@@ -29,6 +29,7 @@ fn text_controls_require_effective_scalar_shape() {
 
 #[test]
 fn workbook_and_sheet_codec_failures_retain_typed_sources() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     use std::error::Error;
 
     let invalid = unique_path("xlsread_invalid_codec_source");
@@ -296,6 +297,7 @@ fn xlsread_registers_public_descriptor() {
 
 #[test]
 fn xlsread_reads_numeric_range_as_default_output() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_numeric_range");
     write_minimal_xlsx(&path);
     let value = direct_xlsread(&path, vec![Value::from("A2:B4")], None);
@@ -314,6 +316,7 @@ fn xlsread_reads_numeric_range_as_default_output() {
 
 #[test]
 fn xlsread_accepts_sheet_and_range() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_sheet_range");
     write_minimal_xlsx(&path);
     let value = direct_xlsread(&path, vec![Value::from("Data"), Value::from("B2:B3")], None);
@@ -329,6 +332,7 @@ fn xlsread_accepts_sheet_and_range() {
 
 #[test]
 fn string_sheet_selector_is_not_numeric_index() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_numeric_sheet_name");
     write_named_xlsx(&path, "1");
     let value = direct_xlsread(&path, vec![Value::from("1"), Value::from("A2:A2")], None);
@@ -518,6 +522,7 @@ fn zip64_entry_count_fixture(entry_count: u64) -> Vec<u8> {
 
 #[test]
 fn explicit_range_preserves_raw_shape_with_blank_borders() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_blank_border_range");
     write_minimal_xlsx(&path);
     let value = direct_xlsread(&path, vec![Value::from("B1:D5")], Some(3));
@@ -554,6 +559,7 @@ fn oversized_explicit_range_is_rejected_before_allocation() {
 
 #[test]
 fn xlsread_returns_text_and_raw_outputs() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_multi_output");
     write_minimal_xlsx(&path);
     let value = direct_xlsread(&path, vec![Value::from("A1:C3")], Some(3));
@@ -592,6 +598,7 @@ fn xlsread_returns_text_and_raw_outputs() {
 
 #[test]
 fn xlsread_rejects_too_many_outputs() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_too_many_outputs");
     write_minimal_xlsx(&path);
     let _guard = crate::output_count::push_output_count(Some(4));

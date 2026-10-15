@@ -20,6 +20,11 @@ void runmatDataArraySetError(const char *identifier, const char *message) {
     runmat_host->set_error(runmat_host->host, identifier, message);
 }
 
+int runmatDataArrayHasError(void) {
+    runmat_require_host();
+    return runmat_host->has_error(runmat_host->host);
+}
+
 int runmatDataArrayType(const mxArray *array) {
     runmat_require_host();
     return runmat_host->data_array_type(runmat_host->host, array);

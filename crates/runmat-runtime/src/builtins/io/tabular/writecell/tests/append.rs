@@ -3,6 +3,7 @@ use super::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_honours_delimiter_quote_strings_and_append() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     let filename = path.to_string_lossy().into_owned();
     let first = cell(vec![Value::from("a,b"), Value::Num(2.0)], 1, 2);
@@ -41,6 +42,7 @@ fn writecell_honours_delimiter_quote_strings_and_append() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_append_inserts_missing_row_boundary() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     fs::write(&path, "existing").expect("seed");
     let filename = path.to_string_lossy().into_owned();
@@ -97,6 +99,7 @@ fn writecell_append_quotes_across_bounded_chunks_on_selected_provider() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn writecell_concurrent_appends_share_one_boundary_insertion() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("txt");
     fs::write(&path, "existing").expect("seed");
     let filename = path.to_string_lossy().into_owned();

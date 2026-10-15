@@ -28,9 +28,9 @@ pub const HDF5INFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::AliasOf,
-    canonical_builtin: Some("h5info"),
-    notes: "Legacy spelling delegates to h5info metadata semantics.",
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "Legacy spelling delegates to h5info metadata semantics; both forms accept only scalar text paths and expose metadata counts as double values.",
 };
 
 pub const HDF5INFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {

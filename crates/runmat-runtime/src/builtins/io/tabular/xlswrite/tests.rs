@@ -130,6 +130,7 @@ fn xlswrite_gates_numeric_range_before_file_access() {
 
 #[test]
 fn xlswrite_writes_numeric_matrix_with_sheet_and_range() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -156,6 +157,7 @@ fn xlswrite_writes_numeric_matrix_with_sheet_and_range() {
 
 #[test]
 fn xlswrite_accepts_cell_strings_logicals_and_ints() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xls");
     let filename = path.to_string_lossy().into_owned();
     let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
@@ -208,6 +210,7 @@ fn xlswrite_preserves_integer_cell_xml_exactly() {
 
 #[test]
 fn xlswrite_accepts_top_level_sparse_matrix() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![9.0, 8.0]).unwrap();
@@ -247,6 +250,7 @@ fn xlswrite_preserves_sparse_integer_cells_exactly() {
 
 #[test]
 fn xlswrite_preserves_existing_cells_outside_overlay() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let initial = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -275,6 +279,7 @@ fn xlswrite_preserves_existing_cells_outside_overlay() {
 
 #[test]
 fn xlswrite_preserves_other_sheets_and_uses_numeric_sheet_ordinal() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     block_on(xlswrite_call(
@@ -315,6 +320,7 @@ fn xlswrite_preserves_other_sheets_and_uses_numeric_sheet_ordinal() {
 
 #[test]
 fn xlswrite_numeric_sheet_placeholders_avoid_name_collisions() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     block_on(xlswrite_call(
@@ -349,6 +355,7 @@ fn xlswrite_numeric_sheet_placeholders_avoid_name_collisions() {
 
 #[test]
 fn xlswrite_accepts_scalar_tensor_sheet_selector_and_absolute_range() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let sheet = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
@@ -393,6 +400,7 @@ fn xlswrite_rejects_sparse_inputs_that_would_densify_too_large() {
 
 #[test]
 fn xlswrite_rejects_unmarked_existing_workbook_instead_of_flattening_it() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let table = CellTable::from_cells(1, 1, vec![CellValue::Number(1.0)]).expect("table");
     let bytes = writecell::build_xlsx_workbook(&table, "External", RangeStart::default())
@@ -457,6 +465,7 @@ fn xlswrite_rejects_invalid_sheet_names_instead_of_rewriting_them() {
 
 #[test]
 fn xlswrite_returns_status_and_message_outputs() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let _guard = crate::output_count::push_output_count(Some(2));

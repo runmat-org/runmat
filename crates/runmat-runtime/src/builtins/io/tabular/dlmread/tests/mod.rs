@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use runmat_value::{CharArray, IntegerStorage, Tensor as BuiltinTensor};
 
 fn dlmread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     futures::executor::block_on(super::dlmread_builtin(None, path, rest))
 }
 
