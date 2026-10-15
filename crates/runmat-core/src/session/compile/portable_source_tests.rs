@@ -2,6 +2,49 @@
 mod graph_codec;
 
 #[test]
+fn portable_compilation_rejects_proven_matrix_shape_error() {
+    let source = "A = rand(3,4); B = rand(3,4); C = A * B;";
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let error = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new("fixture", "main.m", source),
+        None,
+    ))
+    .expect_err("proven incompatible matrix dimensions must not seal a product");
+    let crate::RunError::Compile(error) = error else {
+        panic!("canonical frontend diagnostic must remain a typed compile error");
+    };
+    assert_eq!(error.identifier.as_deref(), Some("RM-TYPE-MATMUL"));
+    assert!(error.message.contains("inner dimensions 4 and 3"));
+    let span = error.span.expect("MIR diagnostic keeps its source span");
+    assert!(source[span.start..span.end].contains("A * B"));
+}
+
+#[test]
+fn portable_compilation_keeps_runtime_dependent_matrix_shape_admissible() {
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new(
+            "fixture",
+            "main.m",
+            "function C = main(A, B)\nC = A * B;\nend\n",
+        ),
+        None,
+    ))
+    .expect("unknown runtime operand shapes are not a proven error");
+    assert!(unit.portable_envelope().is_ok());
+
+    let warning_only = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new(
+            "fixture",
+            "warningOnly.m",
+            "function y = warningOnly(x)\ny = definitely_missing(x);\nend\n",
+        ),
+        None,
+    ));
+    assert!(warning_only.is_ok(), "unresolved dynamic call is a warning");
+}
+
+#[test]
 fn portable_source_ordinals_ignore_unrelated_session_source_allocations() {
     let source = crate::ExecutableSource::new(
         "fixture",

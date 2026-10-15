@@ -8,6 +8,19 @@ use std::sync::Arc;
 pub(super) mod program_sources;
 use program_sources::identity::{executable_primary_access_path, executable_source_identity};
 
+fn fatal_frontend_diagnostic(
+    diagnostics: &[runmat_hir::HirDiagnostic],
+) -> Option<runmat_vm::CompileError> {
+    diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error)
+        .map(|diagnostic| {
+            runmat_vm::CompileError::new(diagnostic.message.clone())
+                .with_identifier(diagnostic.code.clone())
+                .with_span(diagnostic.primary.span)
+        })
+}
+
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
 ) -> Option<runmat_hir::FunctionId> {
@@ -1214,6 +1227,9 @@ impl RunMatSession {
                 return Err(error.into());
             }
             if let Some(error) = frontend.compile_failure {
+                return Err(error.into());
+            }
+            if let Some(error) = fatal_frontend_diagnostic(&frontend.diagnostics) {
                 return Err(error.into());
             }
             (
