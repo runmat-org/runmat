@@ -2,8 +2,7 @@
 use super::*;
 use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 use runmat_native_executor::execute::NativeInvocationStep;
-use runmat_runtime::context::RuntimeWorkspaceService;
-use std::cell::RefCell;
+use runmat_runtime::context::{RuntimeServicePorts, RuntimeWorkspaceService};
 
 #[test]
 fn valid_generic_deopt_preserves_published_workspace_but_releases_execution_roots() {
@@ -14,7 +13,15 @@ fn valid_generic_deopt_preserves_published_workspace_but_releases_execution_root
 
 fn deopt_ownership(cancel: bool) {
     let source = CancellationSource::new();
-    let runtime = runtime_context().with_cancellation_token(source.token());
+    let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let published_service: Rc<dyn RuntimeWorkspaceService> = Rc::new(
+        runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace.clone()),
+    );
+    let runtime = runtime_context()
+        .with_cancellation_token(source.token())
+        .with_service_ports(
+            RuntimeServicePorts::default().with_workspace(published_service.clone()),
+        );
     let owned = runmat_gc::gc_allocate_rooted(Value::String("execution-only".into())).unwrap();
     let owned_handle = owned.handle();
     let published =
@@ -29,8 +36,6 @@ fn deopt_ownership(cancel: bool) {
     };
     let owned_value = make_value(owned_handle);
     let published_value = make_value(published_handle);
-    let published_service: Rc<RefCell<Option<Rc<dyn RuntimeWorkspaceService>>>> = Rc::default();
-    let observed_service = published_service.clone();
     let calls = Arc::new(AtomicUsize::new(0));
     let observed_calls = calls.clone();
     let activation = runtime.enter();
@@ -46,7 +51,6 @@ fn deopt_ownership(cancel: bool) {
                 service
                     .assign("published", published_value.clone())
                     .unwrap();
-                *observed_service.borrow_mut() = Some(service);
             }
             let result = owned_value.clone();
             Box::pin(async move {
@@ -64,14 +68,17 @@ fn deopt_ownership(cancel: bool) {
         .unwrap();
     let executor = compile_executor(assembly).unwrap();
     let mut invocation = executor
-        .begin_with_deoptimization(
-            ProgramFunctionId(0),
-            vec![],
-            vec![],
-            1,
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
+            function: ProgramFunctionId(0),
+            captures: vec![],
+            arguments: vec![],
+            requested_outputs: 1,
             runtime,
-            DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(safepoint)),
-        )
+            deoptimization: DeoptimizationPolicy::default()
+                .inject(FaultInjection::Safepoint(safepoint)),
+            osr_target: None,
+            workspace: Some(NativeWorkspaceInput::default()),
+        })
         .unwrap();
     let NativeInvocationStep::Deoptimized { target, frame, .. } =
         advance_after_suspended_work(&mut invocation).unwrap()
@@ -120,13 +127,13 @@ fn deopt_ownership(cancel: bool) {
     runmat_gc::gc_collect_major().unwrap();
     assert!(runmat_gc::gc_clone_value(&owned_handle).is_err());
     assert!(runmat_gc::gc_clone_value(&published_handle).is_ok());
-    let service = published_service.borrow_mut().take().unwrap();
     assert!(
-        matches!(service.lookup("published"), Some(Value::HandleObject(value)) if value.target == published_handle)
+        matches!(published_service.lookup("published"), Some(Value::HandleObject(value)) if value.target == published_handle)
     );
     assert!(invocation.advance().is_err());
     drop(invocation);
-    drop(service);
+    base_workspace.close().unwrap();
+    drop(published_service);
     runmat_gc::gc_collect_major().unwrap();
     assert!(runmat_gc::gc_clone_value(&published_handle).is_err());
     drop(invoker);

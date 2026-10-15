@@ -62,6 +62,7 @@ fn setfield_strict_indexed_resident_field_rejects_before_provider_access() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn setfield_gpu_tensor_indexing_gathers_to_host() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
 

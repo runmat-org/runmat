@@ -62,33 +62,42 @@ fn pol2cart_preparation_preserves_every_operand_output_mode_and_full_broadcast()
                 outputs,
             ))
             .unwrap();
-            let actual = block_on(context.scope(
-                crate::dispatcher::call_builtin_async_with_outputs(NAME, &all[..count], outputs),
-            ))
+            let actual = block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    NAME,
+                    &all[..count],
+                    outputs,
+                ),
+            )
             .unwrap();
             assert_eq!(actual, expected);
             assert_eq!(calls.borrow_mut().pop(), Some((count, Some(outputs))));
         }
-        block_on(context.scope(crate::dispatcher::call_builtin_async(NAME, &all[..count])))
-            .unwrap();
+        block_on(crate::dispatcher::call_builtin_async_in_context(
+            &context,
+            NAME,
+            &all[..count],
+        ))
+        .unwrap();
         assert_eq!(calls.borrow_mut().pop(), Some((count, None)));
     }
     assert!(block_on(
-        context.scope(crate::dispatcher::call_builtin_async_with_outputs(
-            NAME,
-            &all[..2],
-            3
-        ))
+        crate::dispatcher::call_builtin_async_with_outputs_in_context(&context, NAME, &all[..2], 3)
     )
     .is_err());
     let mut invalid = all.to_vec();
     invalid[2] = Value::String("invalid elevation".into());
-    assert!(
-        block_on(context.scope(crate::dispatcher::call_builtin_async(NAME, &invalid))).is_err()
-    );
+    assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+        &context, NAME, &invalid
+    ))
+    .is_err());
     let mut mixed = all.to_vec();
     mixed[2] = Value::Tensor(Tensor::from_f32(vec![7.0; 4], vec![1, 1, 4]).unwrap());
-    block_on(context.scope(crate::dispatcher::call_builtin_async(NAME, &mixed))).unwrap();
+    block_on(crate::dispatcher::call_builtin_async_in_context(
+        &context, NAME, &mixed,
+    ))
+    .unwrap();
     assert!(
         calls.borrow().is_empty(),
         "invalid or mixed-class form must not be promoted"

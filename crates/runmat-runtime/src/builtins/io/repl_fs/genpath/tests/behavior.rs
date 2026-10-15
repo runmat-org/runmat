@@ -25,6 +25,7 @@ impl Drop for CurrentDirectoryGuard {
 
 #[test]
 fn returns_a_character_row_for_a_folder() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempdir().expect("directory");
     let result = call(vec![Value::String(
         directory.path().to_string_lossy().into(),
@@ -58,6 +59,7 @@ fn uses_current_directory_without_arguments() {
 
 #[test]
 fn accepts_character_and_string_scalar_roots() {
+    let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempdir().expect("directory");
     let path = directory.path().to_string_lossy();
     let character = call(vec![Value::CharArray(CharArray::new_row(&path))]).expect("character");
@@ -71,6 +73,7 @@ fn accepts_character_and_string_scalar_roots() {
 
 #[test]
 fn deduplicates_symbolic_link_targets() {
+    let _lock = runmat_filesystem::provider_override_lock();
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;

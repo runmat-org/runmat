@@ -33,6 +33,9 @@ fn timeit_measures_time() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn timeit_accepts_num_outputs_argument() {
+    let _counter_guard = COUNTER_NUM_OUTPUTS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let runtime = runtime();
     runtime.set_runmat_extensions_enabled(true);
     let _callbacks = install_test_callbacks(&runtime);
@@ -108,6 +111,9 @@ fn timeit_rejects_invalid_num_outputs() {
 
 #[test]
 fn timeit_gates_typed_integer_output_counts_before_invoking_the_callback() {
+    let _counter_guard = COUNTER_NUM_OUTPUTS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let runtime = runtime();
     runtime.set_runmat_extensions_enabled(false);
     let _callbacks = install_test_callbacks(&runtime);

@@ -671,7 +671,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
             )
             .unwrap();
         let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
-            invocation.advance().unwrap()
+            advance_after_suspended_work(&mut invocation).unwrap()
         else {
             panic!("selected safepoint must deoptimize")
         };
@@ -1175,9 +1175,13 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     });
     drop(activation);
     let constructor = compile_executor(super_constructor_fixture()).unwrap();
-    let execution = constructor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-        .unwrap();
+    let execution = futures::executor::block_on(constructor.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime,
+    ))
+    .unwrap();
     let Value::Object(value) = execution.outputs.first().unwrap() else {
         panic!("super constructor must return the active child receiver");
     };
@@ -1997,7 +2001,10 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
             break resume;
         }
     };
-    assert!(retained_root.is_none(), "first completed call owns the handle");
+    assert!(
+        retained_root.is_none(),
+        "first completed call owns the handle"
+    );
     let suspended_safepoint = assembly.functions[0].blocks[resume.block as usize]
         .instructions
         .iter()
@@ -2021,7 +2028,7 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
     runmat_gc::gc_clone_value(&completion_handle)
         .expect("completed call output remains rooted before consumption");
     let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-        invocation.advance().unwrap()
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("contextual GC-stressed invocation must complete")
     };

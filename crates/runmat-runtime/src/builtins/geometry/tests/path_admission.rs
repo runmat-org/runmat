@@ -11,9 +11,18 @@ use std::{
     },
 };
 
-#[derive(Default)]
 struct CountingGeometryFs {
     reads: AtomicUsize,
+    owner: std::thread::ThreadId,
+}
+
+impl Default for CountingGeometryFs {
+    fn default() -> Self {
+        Self {
+            reads: AtomicUsize::new(0),
+            owner: std::thread::current().id(),
+        }
+    }
 }
 
 fn unexpected() -> io::Error {
@@ -29,7 +38,11 @@ impl FsProvider for CountingGeometryFs {
         Err(unexpected())
     }
     async fn read(&self, _: &Path) -> io::Result<Vec<u8>> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
+        // The provider is process-wide; unrelated tests can read through it
+        // while this test's synchronous calls are running on the owner thread.
+        if std::thread::current().id() == self.owner {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(TRIANGLE_STL.as_bytes().to_vec())
     }
     async fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {

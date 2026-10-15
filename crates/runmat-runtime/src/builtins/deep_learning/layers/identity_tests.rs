@@ -132,7 +132,7 @@ fn fully_connected_positional_operation_dimension_is_not_an_option_name() {
             Value::String("dense".into()),
         ],
     ))
-    .expect("R2026a positional dimension");
+    .expect("documented positional dimension");
     let Value::Object(layer) = layer else {
         panic!("fully connected layer")
     };

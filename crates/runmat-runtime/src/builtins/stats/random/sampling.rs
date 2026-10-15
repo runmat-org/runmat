@@ -2650,15 +2650,13 @@ mod tests {
         random::reset_rng();
         for shape in [vec![], vec![1]] {
             let population = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
-            let Value::Tensor(sample) = block_on(datasample::datasample_builtin(
+            let sample = block_on(datasample::datasample_builtin(
                 population,
                 vec![Value::Num(1.0)],
             ))
-            .expect("sample singleton population") else {
-                panic!("expected tensor sample");
-            };
-            assert_eq!(sample.shape(), &[1, 1]);
-            assert_eq!(sample.materialize_f64(), vec![7.0]);
+            .expect("sample singleton population");
+            assert_eq!(shape_of_sampled_value(&sample).unwrap(), [1, 1]);
+            assert_eq!(sample, Value::Num(7.0));
         }
     }
 

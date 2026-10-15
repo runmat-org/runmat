@@ -47,13 +47,14 @@ fn inverse_real_domain_admission_precedes_service_and_preserves_exact_values() {
         ))
         .unwrap();
         for outputs in [0, 1] {
-            let output = block_on(context.scope(
-                crate::dispatcher::call_builtin_async_with_outputs(
+            let output = block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &context,
                     name,
                     std::slice::from_ref(&value),
                     outputs,
                 ),
-            ))
+            )
             .unwrap();
             if outputs == 1 {
                 assert_eq!(output, expected);
@@ -71,29 +72,32 @@ fn inverse_real_domain_admission_precedes_service_and_preserves_exact_values() {
             );
         }
         assert!(block_on(
-            context.scope(crate::dispatcher::call_builtin_async_with_outputs(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &context,
                 name,
                 &[value],
                 2
-            ))
+            )
         )
         .is_err());
         assert!(block_on(
-            context.scope(crate::dispatcher::call_builtin_async_with_outputs(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &context,
                 name,
                 &[Value::String("bad".into())],
                 1
-            ))
+            )
         )
         .is_err());
         for data in [outside, f32::NAN] {
             let value = Value::Tensor(Tensor::from_f32(vec![data], vec![1, 1]).unwrap());
             block_on(
-                context.scope(crate::dispatcher::call_builtin_async_with_outputs(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &context,
                     name,
                     &[value],
                     1,
-                )),
+                ),
             )
             .unwrap();
         }

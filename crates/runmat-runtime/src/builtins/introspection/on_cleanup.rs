@@ -519,7 +519,16 @@ mod tests {
                     )
                 }
                 SynchronousSubmitRetirement::PollReadyThenReject => {
-                    block_on(future);
+                    let mut future = future;
+                    let mut context =
+                        std::task::Context::from_waker(futures::task::noop_waker_ref());
+                    assert!(
+                        matches!(
+                            future.as_mut().poll(&mut context),
+                            std::task::Poll::Ready(())
+                        ),
+                        "the fixture callback must finish in one poll before rejection"
+                    );
                     Err(
                         crate::build_runtime_error("exact fixture rejected after polling callback")
                             .with_identifier("RunMat:onCleanup:PolledThenRejected")

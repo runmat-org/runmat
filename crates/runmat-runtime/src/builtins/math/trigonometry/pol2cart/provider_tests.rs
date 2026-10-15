@@ -224,6 +224,35 @@ fn inputs(provider: &Provider) -> (GpuTensorHandle, Vec<Value>) {
     ];
     (borrowed, args)
 }
+fn resident_inputs(provider: &Provider) -> (GpuTensorHandle, Vec<Value>) {
+    let theta = provider
+        .inner
+        .upload(&HostTensorView {
+            data: &[0.0, 0.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let rho = provider
+        .inner
+        .upload(&HostTensorView {
+            data: &[2.0],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    let z = provider
+        .inner
+        .upload(&HostTensorView {
+            data: &[7.0, 8.0, 9.0],
+            shape: &[1, 3],
+        })
+        .unwrap();
+    let args = vec![
+        Value::GpuTensor(theta.clone()),
+        Value::GpuTensor(rho),
+        Value::GpuTensor(z),
+    ];
+    (theta, args)
+}
 fn run(args: &[Value], outputs: usize) -> BuiltinResult<crate::execution::RootedValue> {
     block_on(crate::dispatcher::call_builtin_async_with_outputs(
         NAME, args, outputs,
@@ -336,16 +365,27 @@ fn pol2cart_outputs_preserve_automatic_and_explicit_input_provenance() {
 }
 
 #[test]
-fn only_unsupported_hooks_fall_back_and_pending_drop_reclaims_owned_uploads() {
+fn pre_effect_unsupported_hook_falls_back_late_hook_is_terminal_and_pending_drop_reclaims() {
     let _lock = test_support::accel_test_lock();
-    let provider = provider(4, Fault::Unsupported);
+    let provider = provider(1, Fault::Unsupported);
     let _provider = ThreadProviderGuard::set(Some(provider));
-    let (borrowed, args) = inputs(provider);
+    let (borrowed, args) = resident_inputs(provider);
     let output = run(&args, 3).unwrap();
     let Value::OutputList(values) = output.value() else {
         panic!("outputs")
     };
     assert!(values.iter().all(|v| matches!(v, Value::Tensor(_))));
+    provider.assert_reclaimed(0);
+    assert_borrowed_live(provider, &borrowed);
+    *provider.state.lock().unwrap() = State {
+        at: 4,
+        fault: Fault::Unsupported,
+        ..State::default()
+    };
+    let (borrowed, args) = inputs(provider);
+    let error = run(&args, 3).expect_err("late unsupported cannot replay staged effects");
+    assert!(error.message().contains("injected unavailable hook"));
+    assert_eq!(provider.state.lock().unwrap().calls, 4);
     provider.assert_reclaimed(0);
     assert_borrowed_live(provider, &borrowed);
     *provider.state.lock().unwrap() = State {

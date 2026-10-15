@@ -621,7 +621,7 @@ fn valid_gradient_provider_result(
     } else {
         GpuTensorStorage::Real
     };
-    output.shape() == input.shape()
+    output.shape() == matlab_gradient_shape(input.shape(), product(input.shape()))
         && output.device_id() == input.device_id()
         && !gradient_handles_alias(output, input)
         && prior_outputs

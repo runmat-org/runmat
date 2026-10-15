@@ -14,7 +14,7 @@ pub use contract::{
     DELETE_DESCRIPTOR, DELETE_ERROR_EMPTY_FILENAME, DELETE_ERROR_FILE_NOT_FOUND,
     DELETE_ERROR_INVALID_HANDLE, DELETE_ERROR_INVALID_INPUT, DELETE_ERROR_INVALID_PATTERN,
     DELETE_ERROR_IS_DIRECTORY, DELETE_ERROR_OS_ERROR, DELETE_ERROR_RUNTIME_CONTEXT,
-    DELETE_INTEGER_AUDIT, DELETE_INTEGER_CAPABILITIES,
+    DELETE_INTEGER_CAPABILITIES,
 };
 
 /// Parsed public option identity, retained through admission and execution.
@@ -82,6 +82,6 @@ pub const DELETE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &DELETE_INTEGER_CAPABILITIES,
-    integer_audit: Some(&DELETE_INTEGER_AUDIT),
+    integer_audit: None,
     suppress_auto_output: true,
 };

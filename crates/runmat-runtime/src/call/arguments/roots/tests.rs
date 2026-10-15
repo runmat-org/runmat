@@ -241,10 +241,15 @@ fn expansion_result_survives_collecting_source_registration_retirement() {
         OBSERVED_HANDLE.with(|selected| selected.set(Some(handle)));
         let observed = Arc::new(AtomicBool::new(false));
         let callback_observed = Arc::clone(&observed);
+        let output_root_retired = Arc::new(AtomicBool::new(false));
+        let callback_root_retired = Arc::clone(&output_root_retired);
         let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
             let Some(handle) = OBSERVED_HANDLE.with(Cell::get) else {
                 return;
             };
+            if event == runmat_gc::RootRetirement::Explicit(handle) {
+                callback_root_retired.store(true, Ordering::SeqCst);
+            }
             if !matches!(event, runmat_gc::RootRetirement::Registration(_))
                 || callback_observed.swap(true, Ordering::SeqCst)
             {
@@ -264,8 +269,25 @@ fn expansion_result_survives_collecting_source_registration_retirement() {
         assert!(observed.load(Ordering::SeqCst));
         assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_ok());
         drop(arguments);
+        assert!(output_root_retired.load(Ordering::SeqCst));
+        assert_ne!(
+            runmat_gc::gc_is_reachable_excluding(handle, &[]),
+            Some(true),
+            "no registered value root may retain the completed argument"
+        );
+        let major_collections = runmat_gc::gc_stats()
+            .major_collections
+            .load(Ordering::Relaxed);
         runmat_gc::gc_collect_major().expect("collect after result retirement");
-        assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_err());
+        // Collection can defer while another test thread has registered VM
+        // roots; root retirement and available reachability are the invariant.
+        if runmat_gc::gc_stats()
+            .major_collections
+            .load(Ordering::Relaxed)
+            > major_collections
+        {
+            assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_err());
+        }
         OBSERVED_HANDLE.with(|selected| selected.set(None));
     });
 }

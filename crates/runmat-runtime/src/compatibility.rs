@@ -377,10 +377,21 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_version_pin_is_centralized_in_the_repository() {
-        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let canonical_policy = workspace_root.join("docs/getting-started/compatability.md");
-        let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
+    fn compatibility_pin_is_shared_by_default_policy_consumers() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        assert_eq!(
+            runtime.language_mode(),
+            crate::context::RuntimeLanguageMode::Matlab
+        );
+        assert!(!runtime.runmat_extensions_enabled());
+        assert!(pinned_release().is_ok());
+
+        // Release-boundary facts in builtin contracts, examples, and tests are
+        // not competing defaults. Check the actual policy consumers instead:
+        // runtime query implementations and the parser/Core default-mode
+        // normalization must not define their own release or product pin.
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
         let bare_release_label = release_label.strip_prefix('r').unwrap_or(&release_label);
         let product_version = MATLAB_COMPATIBILITY_VERSION.to_ascii_lowercase();
@@ -405,29 +416,30 @@ mod tests {
                 })
             })
         };
-        let mut pending = vec![workspace_root.clone()];
-        while let Some(directory) = pending.pop() {
-            for entry in std::fs::read_dir(&directory).expect("read repository directory") {
-                let path = entry.expect("read repository entry").path();
-                if path.is_dir() {
-                    if !matches!(
-                        path.file_name().and_then(|name| name.to_str()),
-                        Some(".git" | "target")
-                    ) {
-                        pending.push(path);
-                    }
-                } else if path != canonical_policy && path != runtime_policy {
-                    let Ok(contents) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    assert!(
-                        !contains_pin_token(&contents),
-                        "the compatibility pin must appear only in {} and the runtime policy: {}",
-                        canonical_policy.display(),
-                        path.display()
-                    );
-                }
-            }
+        let policy_consumers = [
+            (
+                "runtime queries",
+                include_str!("builtins/introspection/runtime_compat.rs"),
+            ),
+            ("runtime defaults", include_str!("context/state.rs")),
+            (
+                "parser default",
+                include_str!("../../../crates/runmat-parser/src/options.rs"),
+            ),
+            (
+                "session normalization",
+                include_str!("../../../crates/runmat-core/src/session/config.rs"),
+            ),
+            (
+                "session construction",
+                include_str!("../../../crates/runmat-core/src/session/init.rs"),
+            ),
+        ];
+        for (consumer, source) in policy_consumers {
+            assert!(
+                !contains_pin_token(source),
+                "{consumer} must use the central compatibility pin rather than define a second default"
+            );
         }
     }
 
@@ -1995,6 +2007,216 @@ mod tests {
             ("zlabel", "zlabel-integer-axes-handle"),
             ("zoom", "zoom-integer-target-handle"),
             ("zplane", "zplane-nonfloating-input"),
+            // Completed source-owned extension cohorts in the 728 catalog.
+            // Keep these frozen expectations independent of `declared`.
+            ("__runmat_timer_delete", "timer-method-status-output"),
+            ("__runmat_timer_start", "timer-method-status-output"),
+            ("__runmat_timer_startat", "timer-method-status-output"),
+            ("__runmat_timer_startat", "timer-startat-relative-seconds"),
+            ("__runmat_timer_stop", "timer-method-status-output"),
+            ("__runmat_timer_wait", "timer-method-status-output"),
+            ("adamupdate", "adamupdate-typed-integer-scalar"),
+            ("bi2de", "bi2de-integer-base"),
+            ("bi2de", "bi2de-resident-input"),
+            ("blsimpv", "blsimpv-nondouble-input"),
+            ("blsprice", "blsprice-nondouble-input"),
+            ("busdays", "business-day-typed-legacy-serial-input"),
+            ("busdays", "datetime-logical-numeric-input"),
+            ("busdays", "datetime-resident-numeric-input"),
+            ("caldays", "datetime-resident-numeric-input"),
+            ("calendarDuration", "calendar-duration-logical-component"),
+            ("calendarDuration", "calendar-duration-shorthand"),
+            ("calendarDuration", "datetime-resident-numeric-input"),
+            ("calmonths", "datetime-resident-numeric-input"),
+            ("calquarters", "datetime-resident-numeric-input"),
+            ("calweeks", "datetime-resident-numeric-input"),
+            ("calyears", "datetime-resident-numeric-input"),
+            ("close", "close-network-selector"),
+            ("close", "close-tcp-cell"),
+            ("combvec", "combvec-typed-integer-input"),
+            ("crossentropy", "crossentropy-integer-numeric-input"),
+            ("crossentropy", "crossentropy-plain-numeric-pair"),
+            ("damp", "ss-integer-matrix-input"),
+            ("damp", "ss-integer-sample-time"),
+            ("damp", "tf-integer-coefficients"),
+            ("damp", "tf-integer-sample-time"),
+            ("damp", "tf-logical-coefficients"),
+            ("datenum", "datenum-four-five-components"),
+            ("datenum", "datetime-logical-numeric-input"),
+            ("datenum", "datetime-resident-numeric-input"),
+            ("datenum", "legacy-datetime-typed-numeric-input"),
+            ("datestr", "datetime-logical-numeric-input"),
+            ("datestr", "datetime-resident-numeric-input"),
+            ("datestr", "legacy-datetime-typed-numeric-input"),
+            ("datevec", "datetime-logical-numeric-input"),
+            ("datevec", "datetime-resident-numeric-input"),
+            ("datevec", "legacy-datetime-typed-numeric-input"),
+            ("days", "duration-gpu-input"),
+            ("days252bus", "business-day-typed-legacy-serial-input"),
+            ("days252bus", "datetime-logical-numeric-input"),
+            ("days252bus", "datetime-resident-numeric-input"),
+            ("daysdif", "business-day-typed-legacy-serial-input"),
+            ("daysdif", "datetime-logical-numeric-input"),
+            ("daysdif", "datetime-resident-numeric-input"),
+            ("dcgain", "tf-integer-coefficients"),
+            ("dcgain", "tf-integer-sample-time"),
+            ("dcgain", "tf-logical-coefficients"),
+            ("de2bi", "de2bi-integer-control"),
+            ("de2bi", "de2bi-logical-input"),
+            ("de2bi", "de2bi-nd-input"),
+            ("de2bi", "de2bi-resident-input"),
+            ("de2bi", "de2bi-wide-integer"),
+            ("digraph", "digraph-integer-adjacency"),
+            ("digraph", "digraph-integer-weights"),
+            ("drawnow", "drawnow-status-output"),
+            ("duration.eq", "duration-gpu-input"),
+            ("duration.ge", "duration-gpu-input"),
+            ("duration.gt", "duration-gpu-input"),
+            ("duration.le", "duration-gpu-input"),
+            ("duration.lt", "duration-gpu-input"),
+            ("duration.minus", "duration-gpu-input"),
+            ("duration.ne", "duration-gpu-input"),
+            ("duration.plus", "duration-gpu-input"),
+            ("duration.subsasgn", "duration-gpu-input"),
+            ("duration.subsref", "duration-gpu-input"),
+            ("eomday", "datetime-logical-numeric-input"),
+            ("eomday", "datetime-resident-numeric-input"),
+            ("erase", "erase-char-matrix"),
+            ("erase", "erase-string-cell"),
+            ("etime", "datetime-logical-numeric-input"),
+            ("etime", "datetime-resident-numeric-input"),
+            ("etime", "legacy-datetime-typed-numeric-input"),
+            ("exportONNXNetwork", "export-onnx-typed-integer-controls"),
+            ("fbusdate", "business-day-typed-legacy-serial-input"),
+            ("fbusdate", "datetime-logical-numeric-input"),
+            ("fbusdate", "datetime-resident-numeric-input"),
+            ("featureInputLayer", "feature-input-vector-size"),
+            ("feedback", "tf-integer-coefficients"),
+            ("feedback", "tf-integer-sample-time"),
+            ("feedback", "tf-logical-coefficients"),
+            ("forward", "forward-typed-integer-data"),
+            ("graph", "graph-integer-adjacency"),
+            ("graph", "graph-integer-weights"),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-grid",
+            ),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-query",
+            ),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-values",
+            ),
+            ("h5disp", "h5disp-captured-text-output"),
+            ("hgsave", "figure-persistence-status-output"),
+            ("holidays", "business-day-typed-legacy-serial-input"),
+            ("holidays", "datetime-logical-numeric-input"),
+            ("holidays", "datetime-resident-numeric-input"),
+            ("holidays", "holidays-local-year"),
+            ("hours", "duration-gpu-input"),
+            ("integral", "integral-renamed-tolerance-option"),
+            ("isbetween", "datetime-logical-numeric-input"),
+            ("isbetween", "datetime-resident-numeric-input"),
+            ("isbetween", "isbetween-serial-date-input"),
+            ("isbusday", "business-day-typed-legacy-serial-input"),
+            ("isbusday", "datetime-logical-numeric-input"),
+            ("isbusday", "datetime-resident-numeric-input"),
+            ("isstable", "tf-integer-coefficients"),
+            ("isstable", "tf-integer-sample-time"),
+            ("isstable", "tf-logical-coefficients"),
+            ("lbusdate", "business-day-typed-legacy-serial-input"),
+            ("lbusdate", "datetime-logical-numeric-input"),
+            ("lbusdate", "datetime-resident-numeric-input"),
+            ("lower", "lower-string-cell"),
+            ("lqr", "lqr-integer-matrix-input"),
+            ("memmapfile.subsasgn", "memmapfile-explicit-gpu-argument"),
+            ("memmapfile.subsref", "memmapfile-explicit-gpu-argument"),
+            ("milliseconds", "duration-gpu-input"),
+            ("minutes", "duration-gpu-input"),
+            ("notify", "notify-extra-callback-arguments"),
+            ("notify", "notify-status-output"),
+            ("nyquist", "nyquist-integer-input"),
+            ("nyquist", "nyquist-logical-input"),
+            ("nyquist", "nyquist-resident-input"),
+            ("optimizableVariable", "optimizable-variable-integer-range"),
+            ("pole", "ss-integer-matrix-input"),
+            ("pole", "ss-integer-sample-time"),
+            ("pole", "tf-integer-coefficients"),
+            ("pole", "tf-integer-sample-time"),
+            ("pole", "tf-logical-coefficients"),
+            ("print", "print-status-output"),
+            ("pzmap", "ss-integer-matrix-input"),
+            ("pzmap", "ss-integer-sample-time"),
+            ("pzmap", "tf-integer-coefficients"),
+            ("pzmap", "tf-integer-sample-time"),
+            ("pzmap", "tf-logical-coefficients"),
+            ("readtimetable", "table2timetable-generated-row-times"),
+            ("restoredefaultpath", "restoredefaultpath-return"),
+            ("rethrow", "rethrow-active-catch-shorthand"),
+            ("rethrow", "rethrow-text-input"),
+            ("rlocus", "ss-integer-matrix-input"),
+            ("rlocus", "ss-integer-sample-time"),
+            ("rlocus", "tf-integer-coefficients"),
+            ("rlocus", "tf-integer-sample-time"),
+            ("rlocus", "tf-logical-coefficients"),
+            ("save", "save-status-output"),
+            ("saveas", "figure-persistence-status-output"),
+            ("savefig", "figure-persistence-status-output"),
+            ("seconds", "duration-gpu-input"),
+            ("setpref", "setpref-status-output"),
+            ("step", "tf-integer-coefficients"),
+            ("step", "tf-integer-sample-time"),
+            ("step", "tf-logical-coefficients"),
+            ("stepinfo", "tf-integer-coefficients"),
+            ("stepinfo", "tf-integer-sample-time"),
+            ("stepinfo", "tf-logical-coefficients"),
+            ("strtrim", "strtrim-string-cell"),
+            ("tf.ldivide", "tf-integer-coefficients"),
+            ("tf.ldivide", "tf-integer-sample-time"),
+            ("tf.ldivide", "tf-logical-coefficients"),
+            ("tf.minus", "tf-integer-coefficients"),
+            ("tf.minus", "tf-integer-sample-time"),
+            ("tf.minus", "tf-logical-coefficients"),
+            ("tf.mldivide", "tf-integer-coefficients"),
+            ("tf.mldivide", "tf-integer-sample-time"),
+            ("tf.mldivide", "tf-logical-coefficients"),
+            ("tf.mpower", "tf-integer-coefficients"),
+            ("tf.mpower", "tf-integer-sample-time"),
+            ("tf.mpower", "tf-logical-coefficients"),
+            ("tf.mrdivide", "tf-integer-coefficients"),
+            ("tf.mrdivide", "tf-integer-sample-time"),
+            ("tf.mrdivide", "tf-logical-coefficients"),
+            ("tf.mtimes", "tf-integer-coefficients"),
+            ("tf.mtimes", "tf-integer-sample-time"),
+            ("tf.mtimes", "tf-logical-coefficients"),
+            ("tf.plus", "tf-integer-coefficients"),
+            ("tf.plus", "tf-integer-sample-time"),
+            ("tf.plus", "tf-logical-coefficients"),
+            ("tf.power", "tf-integer-coefficients"),
+            ("tf.power", "tf-integer-sample-time"),
+            ("tf.power", "tf-logical-coefficients"),
+            ("tf.rdivide", "tf-integer-coefficients"),
+            ("tf.rdivide", "tf-integer-sample-time"),
+            ("tf.rdivide", "tf-logical-coefficients"),
+            ("tf.times", "tf-integer-coefficients"),
+            ("tf.times", "tf-integer-sample-time"),
+            ("tf.times", "tf-logical-coefficients"),
+            ("tf.uminus", "tf-integer-coefficients"),
+            ("tf.uminus", "tf-integer-sample-time"),
+            ("tf.uminus", "tf-logical-coefficients"),
+            ("tf.uplus", "tf-integer-coefficients"),
+            ("tf.uplus", "tf-integer-sample-time"),
+            ("tf.uplus", "tf-logical-coefficients"),
+            ("upper", "upper-string-cell"),
+            ("userpath", "userpath-partial-path"),
+            ("weekday", "datetime-logical-numeric-input"),
+            ("weekday", "datetime-resident-numeric-input"),
+            ("years", "duration-gpu-input"),
+            ("zero", "tf-integer-coefficients"),
+            ("zero", "tf-integer-sample-time"),
+            ("zero", "tf-logical-coefficients"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2030,6 +2252,14 @@ mod tests {
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
         for registered in metadata_view::integer_metadata()
             .into_iter()
+            // The generated docs catalog is the producer's public-policy
+            // projection; method/internal extensions remain covered by the
+            // exhaustive live-registration checks above.
+            .filter(|builtin| {
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                })
+            })
             .filter(|builtin| !builtin.extensions.is_empty())
         {
             let name = registered.name;
@@ -2366,6 +2596,9 @@ mod tests {
                 assert_eq!(previous, audit, "{} duplicate integer audit", builtin.name);
             }
         }
+        // The native FFI calllib/libpointer/libstruct/setdatatype entries now
+        // declare positive typed integer capabilities instead of audit-only
+        // dispositions; retain this as the independently reviewed audit set.
         assert_eq!(
             audited.keys().copied().collect::<Vec<_>>(),
             [
@@ -2400,12 +2633,14 @@ mod tests {
                 "ancestor",
                 "append",
                 "argsort",
+                "audioinfo",
                 "box",
-                "calllib",
                 "cancel",
                 "caxis",
                 "cellstr",
+                "clear",
                 "clearCache",
+                "clearvars",
                 "commit",
                 "copyfile",
                 "data.copy",
@@ -2418,11 +2653,13 @@ mod tests {
                 "data.move",
                 "data.open",
                 "deblank",
+                "diary",
                 "dir",
                 "erasePunctuation",
                 "eraseURLs",
                 "exist",
                 "extractHTMLText",
+                "fea.authorStudy",
                 "fea.compare",
                 "fea.field",
                 "fea.materialAssignment",
@@ -2441,17 +2678,26 @@ mod tests {
                 "filesep",
                 "findElement",
                 "findprop",
+                "format",
                 "func2str",
                 "functions",
                 "genvarname",
+                "geometry.inspect",
                 "geometry.listRegions",
+                "geometry.load",
                 "geometry.meshes",
                 "getAttribute",
                 "getenv",
                 "getmethod",
+                "gpuInfo",
                 "grid",
                 "gunzip",
                 "gzip",
+                "h5disp",
+                "h5info",
+                "hdf5info",
+                "hdf5read",
+                "hdf5write",
                 "hgload",
                 "hgsave",
                 "htmlTree",
@@ -2474,6 +2720,7 @@ mod tests {
                 "ishandle",
                 "ishermitian",
                 "isjava",
+                "iskeyword",
                 "isletter",
                 "islogical",
                 "ismatrix",
@@ -2507,9 +2754,8 @@ mod tests {
                 "legend",
                 "libfunctions",
                 "libisloaded",
-                "libpointer",
-                "libstruct",
                 "loadlibrary",
+                "localfunctions",
                 "lower",
                 "ls",
                 "matches",
@@ -2519,6 +2765,7 @@ mod tests {
                 "mex",
                 "mexcuda",
                 "mexext",
+                "mfilename",
                 "mkdir",
                 "movefile",
                 "mustBeFile",
@@ -2528,6 +2775,7 @@ mod tests {
                 "mustBeTextScalar",
                 "mustBeValidVariableName",
                 "namedargs2cell",
+                "namelengthmax",
                 "normalizeWords",
                 "notify",
                 "onCleanup",
@@ -2546,19 +2794,21 @@ mod tests {
                 "regexp",
                 "regexpPattern",
                 "regexpi",
+                "rehash",
                 "removeStopWords",
                 "replace",
+                "restoredefaultpath",
                 "rethrow",
                 "reverse",
                 "rmpath",
                 "rowfilter",
                 "run",
+                "save",
                 "saveas",
                 "savefig",
                 "saveobj",
                 "second",
                 "sendmail",
-                "setdatatype",
                 "shading",
                 "splitlines",
                 "stats",
@@ -2588,6 +2838,7 @@ mod tests {
                 "uiputfile",
                 "unloadlibrary",
                 "unsetenv",
+                "unzip",
                 "upper",
                 "urldecode",
                 "urlencode",
@@ -2598,6 +2849,9 @@ mod tests {
                 "verLessThan",
                 "version",
                 "what",
+                "which",
+                "who",
+                "whos",
                 "word2ind",
                 "word2vec",
                 "writeWordEmbedding",

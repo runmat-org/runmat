@@ -3,8 +3,7 @@ use crate::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationObservation, PreparedBuiltinOperands,
 };
 use crate::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
 use futures::{executor::block_on, task::noop_waker};
 use std::{
@@ -76,20 +75,18 @@ impl RuntimeAccelerationService for Service {
         })
     }
 }
-fn enter(events: &Events, mode: Mode) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(
-                RuntimeServicePorts::default()
-                    .with_acceleration(Rc::new(Service(events.clone(), mode))),
-            ),
-    )
+fn context(events: &Events, mode: Mode) -> RuntimeContext {
+    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_acceleration(Rc::new(Service(events.clone(), mode))),
+        )
 }
 
 #[test]
 fn atan2_admission_precedes_service_for_both_operands_shapes_and_outputs() {
     let events = Events::default();
-    let _context = enter(&events, Mode::Pass);
+    let context = context(&events, Mode::Pass);
     for values in [
         vec![Value::Num(1.0), Value::String("bad".into())],
         vec![Value::Complex(1.0, 0.0), Value::Num(1.0)],
@@ -99,14 +96,20 @@ fn atan2_admission_precedes_service_for_both_operands_shapes_and_outputs() {
             Value::Tensor(Tensor::new(vec![0.0; 3], vec![1, 3]).unwrap()),
         ],
     ] {
-        assert!(block_on(crate::dispatcher::call_builtin_async("atan2", &values)).is_err());
+        assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+            &context, "atan2", &values
+        ))
+        .is_err());
         assert!(events.borrow().is_empty());
     }
-    assert!(block_on(crate::dispatcher::call_builtin_async_with_outputs(
-        "atan2",
-        &[Value::Num(1.0), Value::Num(1.0)],
-        2
-    ))
+    assert!(block_on(
+        crate::dispatcher::call_builtin_async_with_outputs_in_context(
+            &context,
+            "atan2",
+            &[Value::Num(1.0), Value::Num(1.0)],
+            2
+        )
+    )
     .is_err());
     assert!(events.borrow().is_empty());
 }
@@ -114,7 +117,7 @@ fn atan2_admission_precedes_service_for_both_operands_shapes_and_outputs() {
 #[test]
 fn atan2_preparation_preserves_broadcast_single_empty_and_zero_outputs() {
     let events = Events::default();
-    let _context = enter(&events, Mode::Pass);
+    let context = context(&events, Mode::Pass);
     for count in [0, 1] {
         for empty in [false, true] {
             events.borrow_mut().clear();
@@ -127,11 +130,14 @@ fn atan2_preparation_preserves_broadcast_single_empty_and_zero_outputs() {
             );
             let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![1, 3, 1]).unwrap());
             let expected = atan2_host(y.clone(), x.clone()).unwrap();
-            let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
-                "atan2",
-                &[y, x],
-                count,
-            ))
+            let result = block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    "atan2",
+                    &[y, x],
+                    count,
+                ),
+            )
             .unwrap();
             assert_eq!(result, expected);
             assert_eq!(*events.borrow(), ["prepare", "begin", "success"]);
@@ -143,9 +149,11 @@ fn atan2_preparation_preserves_broadcast_single_empty_and_zero_outputs() {
 fn atan2_preparation_failure_and_abandonment_are_not_success() {
     for mode in [Mode::Invalid, Mode::Pending] {
         let events = Events::default();
-        let _context = enter(&events, mode);
+        let context = context(&events, mode);
         let inputs = [Value::Num(1.0), Value::Num(2.0)];
-        let mut call = Box::pin(crate::dispatcher::call_builtin_async("atan2", &inputs));
+        let mut call = Box::pin(crate::dispatcher::call_builtin_async_in_context(
+            &context, "atan2", &inputs,
+        ));
         if matches!(mode, Mode::Pending) {
             assert!(matches!(
                 call.as_mut().poll(&mut Context::from_waker(&noop_waker())),
@@ -159,8 +167,10 @@ fn atan2_preparation_failure_and_abandonment_are_not_success() {
         }
     }
     let events = Events::default();
-    let _context = enter(&events, Mode::Pass);
+    let context = context(&events, Mode::Pass);
     let inputs = [Value::Num(1.0), Value::Num(2.0)];
-    drop(crate::dispatcher::call_builtin_async("atan2", &inputs));
+    drop(crate::dispatcher::call_builtin_async_in_context(
+        &context, "atan2", &inputs,
+    ));
     assert!(events.borrow().is_empty());
 }

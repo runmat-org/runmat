@@ -546,7 +546,15 @@ mod tests {
                 let runmat_plot::plots::PlotElement::Scatter(scatter) = plot else {
                     panic!("expected scatter plot");
                 };
-                assert_eq!(scatter.per_point_sizes, expected_sizes);
+                let rendered_sizes: Vec<_> = (0..scatter.len())
+                    .map(|index| {
+                        scatter
+                            .per_point_sizes
+                            .as_ref()
+                            .map_or(scatter.marker_size, |sizes| sizes[index])
+                    })
+                    .collect();
+                assert_eq!(Some(rendered_sizes), expected_sizes);
             }
         }
     }

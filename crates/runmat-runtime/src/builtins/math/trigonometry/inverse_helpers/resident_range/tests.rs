@@ -72,16 +72,22 @@ impl Provider {
         &self,
         input: &GpuTensorHandle,
         minimum: bool,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let fault = self.step();
-        self.before(fault).await?;
+        // The injected Unsupported result is certified before any provider
+        // work. Later download/upload errors cannot make that claim.
+        self.before(fault)
+            .await
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
         if matches!(fault, Fault::BorrowedAlias) {
             return Ok(input.clone());
         }
         if matches!(fault, Fault::TemporaryAlias) {
             return Ok(self.state.lock().unwrap().owned[0].0.acquire()?);
         }
-        let host = self.inner.download(input)?;
+        let host = self.inner.download(input).map_err(|error| {
+            runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+        })?;
         let value = if minimum {
             host.data.into_iter().fold(f64::INFINITY, f64::min)
         } else {
@@ -95,12 +101,21 @@ impl Provider {
                     data: runmat_accelerate_api::HostNumericDataView::F64(&[value, 0.0]),
                     shape: &[1, 1],
                     storage: GpuTensorStorage::ComplexInterleaved,
+                })
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
                 })?
         } else {
-            self.inner.upload(&HostTensorView {
-                data: &[value],
-                shape: &[1, 1],
-            })?
+            self.inner
+                .upload(&HostTensorView {
+                    data: &[value],
+                    shape: &[1, 1],
+                })
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?
         };
         self.state
             .lock()
@@ -146,21 +161,13 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            self.reduce(input, true).await.map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
-        })
+        Box::pin(async move { self.reduce(input, true).await })
     }
     fn reduce_max<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            self.reduce(input, false).await.map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
-        })
+        Box::pin(async move { self.reduce(input, false).await })
     }
 }
 

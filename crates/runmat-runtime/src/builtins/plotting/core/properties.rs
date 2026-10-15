@@ -1,3 +1,4 @@
+use runmat_plot::plots::figure::AxisLimitAxis;
 use runmat_plot::plots::{
     ColorMap, LegendStyle, NumericPlotData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
@@ -729,6 +730,11 @@ fn get_axes_property(
         axes_state_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
         .map_err(|err| map_figure_error(builtin, err))?;
+    let displayed_axis = |axis| {
+        super::state::axis_displayed_limits_snapshot_for_axes(handle, axes_index, axis)
+            .map(limit_value)
+            .map_err(|err| map_figure_error(builtin, err))
+    };
     let displayed_color = || {
         axis_displayed_color_limits_for_axes(handle, axes_index)
             .map(limit_value)
@@ -876,8 +882,8 @@ fn get_axes_property(
                 Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
             st.insert("ColorLimits", displayed_color()?);
-            st.insert("XLim", limit_value(x_bounds(display_bounds)));
-            st.insert("YLim", limit_value(y_bounds(display_bounds)));
+            st.insert("XLim", displayed_axis(AxisLimitAxis::X)?);
+            st.insert("YLim", displayed_axis(AxisLimitAxis::Y)?);
             st.insert("ZLim", displayed_z()?);
             st.insert("CLim", displayed_color()?);
             st.insert(
@@ -1014,8 +1020,8 @@ fn get_axes_property(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
         Some("colorlimits") => displayed_color(),
-        Some("xlim") => Ok(limit_value(x_bounds(display_bounds))),
-        Some("ylim") => Ok(limit_value(y_bounds(display_bounds))),
+        Some("xlim") => displayed_axis(AxisLimitAxis::X),
+        Some("ylim") => displayed_axis(AxisLimitAxis::Y),
         Some("zlim") => displayed_z(),
         Some("clim") => displayed_color(),
         Some("xtick") => Ok(tick_value(ticks_or_auto(

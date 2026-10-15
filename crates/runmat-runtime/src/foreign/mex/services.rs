@@ -1077,7 +1077,9 @@ public:
 
         let mut target = ObjectInstance::new("FixtureHandle");
         target.properties.insert("Value".into(), Value::Num(4.0));
-        let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
+        let target_root =
+            runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
+        let target = target_root.handle();
         let handle = HandleRef {
             class_name: "FixtureHandle".into(),
             target,
@@ -1109,5 +1111,6 @@ public:
             assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
         })
         .expect("inspect updated handle target");
+        drop(target_root);
     }
 }

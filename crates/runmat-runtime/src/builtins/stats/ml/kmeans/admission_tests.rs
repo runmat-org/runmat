@@ -397,7 +397,11 @@ fn ignored_nested_resident_metadata_is_protected_without_inheriting_explicit_int
 
     *provider.behavior.lock().unwrap() = UploadBehavior::Unsupported;
     let host = Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap());
-    let result = restore_kmeans_value(host.clone(), Some(&source.handle), &borrowed)
+    let automatic = source
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let result = restore_kmeans_value(host.clone(), Some(&automatic), &borrowed)
         .expect("ignored explicit metadata cannot force output placement");
     assert_eq!(result, host);
 }
@@ -421,7 +425,11 @@ fn consumed_explicit_scalar_control_prevents_implicit_host_output_fallback() {
     let host = Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap());
 
     let ignored_control = BorrowedOperands::new();
-    let fallback = restore_kmeans_value(host.clone(), Some(&source.handle), &ignored_control)
+    let automatic = source
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let fallback = restore_kmeans_value(host.clone(), Some(&automatic), &ignored_control)
         .expect("unsupported automatic upload permits host fallback");
     assert_eq!(fallback, host);
 

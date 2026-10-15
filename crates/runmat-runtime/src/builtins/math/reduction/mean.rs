@@ -1357,14 +1357,6 @@ fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> Bu
 }
 
 async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id() != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if args.weights.is_none()
         && (runmat_accelerate_api::handle_integer_type(&handle).is_some()
             || runmat_accelerate_api::handle_is_logical(&handle))

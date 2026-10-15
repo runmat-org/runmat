@@ -661,7 +661,10 @@ mod tests {
                 vec![1, 2],
             )
             .unwrap();
-            let integer = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let integer = gpu_helpers::upload_tensor(provider, &integer)
+                .expect("integer upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
             let integer_result = call(Value::GpuTensor(integer)).expect("integer sinc fallback");
             let Value::Tensor(integer_result) = integer_result else {
                 panic!("single provider cannot retain double integer result");
@@ -674,7 +677,9 @@ mod tests {
                     data: &[0, 1],
                     shape: &[1, 2],
                 })
-                .expect("logical upload");
+                .expect("logical upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
             let logical_result = call(Value::GpuTensor(logical)).expect("logical sinc fallback");
             let Value::Tensor(logical_result) = logical_result else {
                 panic!("single provider cannot retain double logical result");

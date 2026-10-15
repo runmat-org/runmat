@@ -148,5 +148,3 @@ pub const DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DELETE_ERRORS,
 };
-
-pub const DELETE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "File and handle targets do not perform integer arithmetic. ResolveSymbolicLinks accepts every built-in integer class only at exact scalar zero or one before effects." };

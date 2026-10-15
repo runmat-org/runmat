@@ -123,7 +123,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     drop(admitted);
 
     let error = block_on(super::super::sum_builtin(
-        Some(context),
+        Some(context.clone()),
         None,
         data(),
         vec![
@@ -136,10 +136,12 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     assert_eq!(error.identifier(), Some("RunMat:sum:InvalidArgument"));
     assert_eq!(observed.borrow().len(), 1);
 
-    let delegated = block_on(super::super::sum_with_nan_policy(
+    let delegated = block_on(super::super::sum_for_invocation(
+        Some(&context),
         data(),
         Vec::new(),
         Some(ReductionNaN::Omit),
+        runmat_types::SumInvocation::Sum,
     ))
     .unwrap();
     assert!(matches!(delegated, Value::Tensor(_)));

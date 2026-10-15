@@ -679,7 +679,7 @@ fn conv_meta_from_shape(shape: &[usize]) -> ConvInputMeta {
 
 fn shape_rows_cols(shape: &[usize]) -> (usize, usize) {
     if shape.is_empty() {
-        (0, 0)
+        (1, 1)
     } else if shape.len() == 1 {
         (1, shape[0])
     } else {

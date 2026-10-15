@@ -241,6 +241,7 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
 
 static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
 static COUNTER_NUM_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
+static COUNTER_NUM_OUTPUTS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static COUNTER_INVALID: AtomicUsize = AtomicUsize::new(0);
 static COUNTER_ZERO_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
 

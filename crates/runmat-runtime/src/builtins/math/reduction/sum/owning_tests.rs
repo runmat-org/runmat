@@ -295,6 +295,10 @@ fn logical_f32_resident_default_native_and_noop_adapt_to_double() {
         .owner
         .allocate_logical_zeroed(vec![2, 2], ProviderPrecision::F32)
         .unwrap();
+    let automatic = input
+        .handle
+        .with_provenance(GpuHandleProvenance::Automatic)
+        .unwrap();
     for options in [
         vec![],
         vec![Value::from("native")],
@@ -302,7 +306,7 @@ fn logical_f32_resident_default_native_and_noop_adapt_to_double() {
         vec![Value::from("omitnan")],
     ] {
         let result = futures::executor::block_on(sum_with_nan_policy(
-            Value::GpuTensor(input.handle.clone()),
+            Value::GpuTensor(automatic.clone()),
             options,
             None,
         ))
