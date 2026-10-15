@@ -26,7 +26,19 @@ pub(super) async fn execute(
         |mut operands| async move {
             let value = match operands.remove(0) {
                 Value::Tensor(tensor) => {
-                    logical_buffer_to_host(LogicalBuffer::from_real_tensor(&tensor))
+                    let value = logical_buffer_to_host(LogicalBuffer::from_real_tensor(&tensor))?;
+                    if let Some(context) = context {
+                        if let Some(route) = crate::builtins::math::host_route::selected(
+                            context,
+                            crate::context::VmFusionHostInstruction::ElementwiseCall,
+                        ) {
+                            route.confirm_host_branch(
+                                context,
+                                crate::context::VmFusionHostInstruction::ElementwiseCall,
+                            );
+                        }
+                    }
+                    Ok(value)
                 }
                 Value::GpuTensor(handle) => logical_from_gpu(handle).await,
                 _ => Err(logical_error_with_message(

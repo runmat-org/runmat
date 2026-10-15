@@ -483,7 +483,8 @@ fn nansum_waits_for_its_typed_admission_instead_of_legacy_prepromotion() {
 fn admitted_upload_failure_keeps_acceleration_error_identity() {
     let probe = Rc::new(Probe::default());
     probe.provider.set(true);
-    let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
+    let provider = admitted_owners::owner_with_upload_failure(true);
+    let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
     let error =
         match super::super::admitted::prepare_with(&auto, &runtime(&probe), logical_request()) {
             Err(error) => error,

@@ -44,8 +44,9 @@ impl RuntimeAccelerationService for Adapter {
                 runmat_builtins::BuiltinPreparationFormId(expected_form)
             );
             let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
-            let prepared =
-                super::admitted::prepare_with(&auto, &context, request).map_err(|error| *error)?;
+            let prepared = super::admitted::prepare_async(&auto, &context, request)
+                .await
+                .map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
         })
@@ -198,7 +199,18 @@ impl RuntimePlacementService for Probe {
     ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
         self.requests.borrow_mut().push(request.clone());
         let node = &request.graph.nodes[0];
-        let candidate = &node.candidates[usize::from(self.provider.get())].descriptor;
+        let candidate = &node
+            .candidates
+            .iter()
+            .find(|candidate| candidate.descriptor.kind.is_provider() == self.provider.get())
+            .ok_or_else(|| {
+                runmat_runtime::build_runtime_error(
+                    "fixture requested a physically unavailable route",
+                )
+                .with_identifier("RunMat:Placement:NoLegalCandidate")
+                .build()
+            })?
+            .descriptor;
         Ok(runmat_execution::PlacementDecision {
             signature: request.signature.clone(),
             selections: vec![runmat_execution::SelectedExecutionCandidate {
@@ -272,6 +284,7 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
         observation: Some(observation),
         uploads: None,
         request_input_root: None,
+        readbacks: None,
     }
 }
 

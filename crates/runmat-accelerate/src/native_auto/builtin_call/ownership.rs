@@ -58,6 +58,10 @@ impl OwnedUploads {
         self.borrowed_handles.iter().chain(&self.owned).collect()
     }
 
+    pub(super) fn has_uploads(&self) -> bool {
+        !self.owned.is_empty()
+    }
+
     pub(super) fn track(&mut self, handle: &GpuTensorHandle) {
         if !self
             .borrowed_handles
@@ -120,13 +124,16 @@ mod tests {
             let value = Value::GpuTensor(allocation.handle);
             let output = retain_output.then(|| value.clone());
             let mut uploads = OwnedUploads::new(&[]).unwrap();
+            assert!(!uploads.has_uploads());
             let Value::GpuTensor(handle) = &value else {
                 unreachable!()
             };
             uploads.track(handle);
             uploads.track(handle);
+            assert!(uploads.has_uploads());
             drop(value);
             uploads.release().unwrap();
+            assert!(!uploads.has_uploads());
             assert_eq!(allocation.probe.retirements(), usize::from(!retain_output));
             drop(uploads);
             drop(output);
@@ -147,6 +154,7 @@ mod tests {
         let mut uploads =
             OwnedUploads::new(&[Value::GpuTensor(allocation.handle.clone())]).unwrap();
         uploads.track(&other_view);
+        assert!(!uploads.has_uploads());
         drop(other_view);
         assert!(uploads.owned.is_empty());
         uploads.release().unwrap();

@@ -13,11 +13,14 @@ pub(super) enum ExponentialOperation {
 }
 
 impl ExponentialOperation {
-    pub(super) const fn name(self) -> &'static str {
+    pub(super) const fn catalog_entry(self) -> &'static runmat_builtins::BuiltinCatalogEntry {
         match self {
-            Self::Exp => "exp",
-            Self::Expm1 => "expm1",
+            Self::Exp => &runmat_builtins::EXP_CATALOG_ENTRY,
+            Self::Expm1 => &runmat_builtins::EXPM1_CATALOG_ENTRY,
         }
+    }
+    pub(super) const fn name(self) -> &'static str {
+        self.catalog_entry().identity.name
     }
 
     pub(super) const fn invalid_input(self) -> &'static BuiltinErrorDescriptor {

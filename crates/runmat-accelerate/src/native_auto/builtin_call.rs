@@ -4,6 +4,7 @@ pub(super) mod observation;
 pub use admitted::{install_preparation_service, AdmittedAcceleration};
 mod nary;
 mod owner_admission;
+mod host_readback;
 mod ownership;
 mod preparation;
 #[cfg(test)]
@@ -20,6 +21,7 @@ pub(super) struct PreparedBuiltinCall {
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
     request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
+    readbacks: Option<crate::fusion_exec::host_readback::PreparedVmHostInputs>,
 }
 
 /// One call owns both its measurement and its fresh operand allocations.
@@ -27,10 +29,25 @@ struct BuiltinCallGuard {
     observation: Option<BuiltinCallObservation>,
     uploads: Option<ownership::OwnedUploads>,
     _request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
+    readbacks: Option<crate::fusion_exec::host_readback::PreparedVmHostInputs>,
 }
 
 impl BuiltinCallGuard {
     fn finish(mut self, result: Result<&Value, &RuntimeError>) -> PreparationResult<()> {
+        if let Some(readbacks) = self.readbacks.take() {
+            if let Err(error) = readbacks.cleanup() {
+                if let Some(observation) = self.observation.as_mut() {
+                    observation.cleanup_failed();
+                }
+                return Err(Box::new(
+                    runmat_runtime::build_runtime_error("private host source cleanup failed")
+                        .with_identifier("RunMat:AccelerationCleanupFailed")
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                        .with_source(error)
+                        .build(),
+                ));
+            }
+        }
         // Release unused staging before sealing the candidate's publication.
         if let Some(uploads) = self.uploads.as_mut() {
             if let Err(error) = uploads.release() {
@@ -61,6 +78,7 @@ impl PreparedBuiltinCall {
             observation: None,
             uploads: None,
             request_input_root: None,
+            readbacks: None,
         }
     }
 
@@ -85,6 +103,7 @@ impl PreparedBuiltinCall {
                 observation: self.observation,
                 uploads: self.uploads,
                 _request_input_root: self.request_input_root,
+                readbacks: self.readbacks,
             },
         )
     }

@@ -22,6 +22,11 @@ pub trait PreparedCallCompletion {
 /// borrowed input protection and adopt returned aliases before releasing temps.
 /// No timing assumptions are imposed by the runtime.
 pub trait BuiltinPreparationObservation {
+    /// A completed private preparation effect may forbid retry of the body.
+    /// This can only strengthen to Never; it never requests a new replay.
+    fn gpu_gather_retry_policy(&self) -> crate::GpuGatherRetry {
+        crate::GpuGatherRetry::Legacy
+    }
     /// Optional provider-owned operation scope. None deliberately masks an outer
     /// scope; opaque bodies must not borrow another candidate's completion proof.
     fn provider_recorder(
@@ -45,17 +50,29 @@ pub struct PreparedBuiltinOperands {
 }
 
 impl PreparedBuiltinOperands {
+    pub(super) fn forbids_gpu_gather_retry(&self) -> bool {
+        self.observation.as_ref().is_some_and(|observation| {
+            observation.gpu_gather_retry_policy() == crate::GpuGatherRetry::Never
+        })
+    }
     pub fn new(
         operands: Vec<Value>,
         observation: Option<Box<dyn BuiltinPreparationObservation>>,
     ) -> Result<Self, RuntimeError> {
+        let no_replay = observation.as_ref().is_some_and(|observation| {
+            observation.gpu_gather_retry_policy() == crate::GpuGatherRetry::Never
+        });
         let operands_root = match RootedValueLease::for_values(operands.iter()) {
             Ok(root) => root,
             Err(error) => {
                 if let Some(observation) = observation {
                     observation.abort();
                 }
-                return Err(error.into_runtime_error());
+                let mut error = error.into_runtime_error();
+                if no_replay {
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                }
+                return Err(error);
             }
         };
         Ok(Self {

@@ -13,6 +13,10 @@ pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
         Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
     pub(in crate::native_auto) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
+    pub(in crate::native_auto) host: Option<(
+        &'a crate::fusion_exec::host_readback::CpuHostResources,
+        runmat_execution::Digest,
+    )>,
 }
 
 #[derive(Default)]
@@ -32,6 +36,7 @@ pub struct BuiltinCallObservation {
     receipt: Option<ProviderOperationReceipt>,
     command_contribution: Option<CommandProviderContribution>,
     completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+    host_execution: Option<runmat_runtime::context::preparation::PreparedHostExecution>,
 }
 
 struct BackendCompletedCall {
@@ -91,6 +96,25 @@ impl runmat_runtime::context::preparation::PreparedCallCompletion for BackendCom
 }
 
 impl BuiltinCallObservation {
+    pub(super) fn select_private_host(
+        &mut self,
+        context: &RuntimeContext,
+        form: &'static runmat_builtins::BuiltinPreparationForm,
+    ) -> Option<runmat_runtime::context::preparation::PreparedHostExecution> {
+        if self.provider_selected {
+            return None;
+        }
+        let proof = self
+            .completion
+            .as_ref()?
+            .select_host_execution(context, form)?;
+        self.host_execution = Some(proof.clone());
+        Some(proof)
+    }
+
+    pub(super) fn host_selected(&self) -> bool {
+        !self.provider_selected
+    }
     pub(super) fn new(
         feedback: Option<Box<LocalPlacementFeedback>>,
         trace: PlacementTraceContext,
@@ -108,6 +132,7 @@ impl BuiltinCallObservation {
             receipt: None,
             command_contribution: None,
             completion: None,
+            host_execution: None,
         }
     }
 
@@ -270,7 +295,10 @@ impl BuiltinCallObservation {
                 if self.provider_selected {
                     self.receipt.is_some()
                 } else {
-                    self.host_inputs && !runmat_runtime::dispatcher::value_contains_gpu(value)
+                    self.host_execution
+                        .as_ref()
+                        .map_or(self.host_inputs, |proof| proof.is_confirmed())
+                        && !runmat_runtime::dispatcher::value_contains_gpu(value)
                 }
             });
             if (status

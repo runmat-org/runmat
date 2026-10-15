@@ -37,6 +37,12 @@ impl<'a> RuntimeBuiltinInvocation<'a> {
         mut self,
         observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
     ) -> Self {
+        let host = observation
+            .as_ref()
+            .and_then(|sink| sink.prepared_host_execution());
+        self.context = self
+            .context
+            .map(|context| context.with_prepared_host_execution(host));
         self.call_observation = observation;
         self
     }

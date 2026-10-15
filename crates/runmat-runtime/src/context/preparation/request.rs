@@ -47,6 +47,22 @@ pub struct AdmittedSumReduction {
 }
 
 impl AdmittedBuiltinPreparation {
+    pub(super) fn with_selected_call(mut self, context: &super::RuntimeContext) -> Self {
+        if matches!(
+            self.form.operation,
+            BuiltinPreparationOperation::RuntimeOwned | BuiltinPreparationOperation::Sink(_)
+        ) {
+            return self;
+        }
+        if self.prepared_completion.is_none()
+            && super::PreparedHostExecution::supports_form(self.form)
+        {
+            self.prepared_completion = context.prepared_host_execution().and_then(|origin| {
+                origin.claim_right(self.admission.binding, self.admission.requested_outputs)
+            });
+        }
+        self
+    }
     /// Opt in only after the domain has parsed and certified its complete
     /// prepared route. The selected binding and output mode are compared to
     /// the dispatcher's non-clone right; absence remains ordinary execution.
@@ -62,6 +78,10 @@ impl AdmittedBuiltinPreparation {
 
     pub fn take_prepared_completion_right(&mut self) -> Option<super::PreparedCompletionRight> {
         self.prepared_completion.take()
+    }
+
+    pub fn has_prepared_completion_right(&self) -> bool {
+        self.prepared_completion.is_some()
     }
 
     pub fn with_sum_reduction(

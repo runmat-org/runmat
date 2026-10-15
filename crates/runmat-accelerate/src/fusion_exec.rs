@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod observation;
-mod host_readback;
+pub(crate) mod host_readback;
 mod host_input_uses;
 pub use host_input_uses::{VmHostInputUses, VmHostLoadUse};
 pub(crate) use host_readback::checked_extra_host_scratch;

@@ -200,6 +200,21 @@ impl NativeAutoOffload {
         operation: ArgumentOperation,
         completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
+        self.prepare_operation_with_host(name, args, runtime, operation, completion, None)
+    }
+
+    pub(super) fn prepare_operation_with_host(
+        &self,
+        name: &str,
+        args: &[Value],
+        runtime: Option<&RuntimeContext>,
+        operation: ArgumentOperation,
+        completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+        host: Option<(
+            &crate::fusion_exec::host_readback::CpuHostResources,
+            runmat_execution::Digest,
+        )>,
+    ) -> ProviderExecutionResult<PreparedBuiltinCall> {
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
@@ -217,6 +232,7 @@ impl NativeAutoOffload {
                 runtime,
                 preparation_program: operation.preparation_program(),
                 prepared_authority: completion.as_ref().map(|right| right.session_authority()),
+                host,
             },
         )?;
         let trace = record_decision(decision_entry(
@@ -278,6 +294,7 @@ impl NativeAutoOffload {
                     observation: Some(observation),
                     uploads,
                     request_input_root: None,
+                    readbacks: None,
                 }),
                 Err(error) => {
                     // A completed preparation error is an operational failure;

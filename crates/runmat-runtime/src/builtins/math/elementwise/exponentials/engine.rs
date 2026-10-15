@@ -38,23 +38,20 @@ pub(super) async fn execute_non_table(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
-    match value {
-        Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
-        Value::SparseTensor(sparse) => super::sparse::evaluate(operation, sparse),
-        value => {
-            let route = crate::builtins::math::host_route::canonical(
-                runtime,
-                crate::context::VmFusionHostInstruction::ElementwiseCall,
-                std::iter::once(&value),
-            );
-            let output = super::host::evaluate(operation, value)?;
-            if let Some(route) = route {
-                route.confirm_host_branch(
-                    runtime.unwrap(),
-                    crate::context::VmFusionHostInstruction::ElementwiseCall,
-                );
-            }
-            Ok(output)
-        }
-    }
+    let output = crate::builtins::math::trigonometry::inverse_helpers::preparation::unary(
+        runtime,
+        operation.catalog_entry().identity,
+        value,
+        |value| async move {
+            let value = match value {
+                Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
+                Value::SparseTensor(sparse) => super::sparse::evaluate(operation, sparse),
+                value => super::host::evaluate(operation, value),
+            }?;
+            crate::execution::RootedValue::new(value).map_err(|cause| cause.into_runtime_error())
+        },
+    )
+    .await?;
+    let (value, _root) = output.into_value_and_lease();
+    Ok(value)
 }

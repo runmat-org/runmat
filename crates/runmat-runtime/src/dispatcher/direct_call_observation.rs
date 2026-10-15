@@ -21,8 +21,10 @@ use runmat_execution::{
 use runmat_time::{duration_ns_saturating, Instant};
 
 mod prepared;
+mod prepared_host;
 use prepared::PreparedSelection;
 pub use prepared::{PreparedBindingAuthority, PreparedCompletionRight};
+pub use prepared_host::PreparedHostExecution;
 
 /// Leaf-owned post-parse certificate for a serial, ready, host-only subroute
 /// with direct host output. The implementer must have ruled out provider
@@ -36,6 +38,7 @@ pub(crate) trait HostCallDomainFacts: serde::Serialize {
     fn requested_outputs(&self) -> Option<usize>;
 }
 
+#[derive(Clone)]
 pub(crate) enum RegistrationAuthority {
     Global(RuntimeBindingRegistration),
     Scoped {
@@ -85,6 +88,7 @@ struct State {
     selected: Option<SelectedObservation>,
     prepared: Option<PreparedSelection>,
     prepared_claimed: bool,
+    host_branch: prepared_host::HostBranchState,
     invalidated: bool,
 }
 
@@ -104,6 +108,7 @@ impl CallObservation {
                 selected: None,
                 prepared: None,
                 prepared_claimed: false,
+                host_branch: Default::default(),
                 invalidated: false,
             })),
         })
