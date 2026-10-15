@@ -578,13 +578,9 @@ async fn execute_elementwise_placed_inner(
             FusionExecutionOutcome::Executed(outputs) => outputs,
             FusionExecutionOutcome::SharedRuntime(observation) => {
                 let observation = if let Some(right) = right {
-                    let bindings = AdmittedBindings::new(&request)
-                        .and_then(|bindings| bindings.canonical_bindings(request.runtime.as_ref()));
-                    observation.with_vm_host_route(
-                        right,
-                        request.runtime.as_ref(),
-                        bindings.as_deref(),
-                    )
+                    let operations = AdmittedBindings::new(&request)
+                        .and_then(|bindings| bindings.host_operations(request.runtime.as_ref()));
+                    observation.with_vm_host_operations(right, request.runtime.as_ref(), operations)
                 } else {
                     observation
                 };

@@ -197,7 +197,7 @@ impl RuntimePlacementService for AutoPlacement {
                     assert_eq!(
                         request.signature.provider_provenance,
                         Some(
-                            typed_reduction_placement::selected_provider_capability_digest(
+                            typed_reduction_placement::feedback::selected_provider_capability_digest(
                                 device_id
                             )
                         )
@@ -214,7 +214,9 @@ impl RuntimePlacementService for AutoPlacement {
                     panic!("provider fault injection requires a selected provider route");
                 };
                 let provenance =
-                    typed_reduction_placement::selected_provider_capability_digest(device_id);
+                    typed_reduction_placement::feedback::selected_provider_capability_digest(
+                        device_id,
+                    );
                 let permit = selected
                     .observation_permit
                     .as_ref()

@@ -1,7 +1,9 @@
 //! One compiled general-chain execution witness shared by native and WebGPU hosts.
 //! This intentionally does not qualify the original mixed-Double POWER expression.
 use super::test_helpers;
-use super::typed_reduction_placement::{selected_provider_capability_digest, CapturingPlacement};
+use super::typed_reduction_placement::{
+    feedback::selected_provider_capability_digest, CapturingPlacement,
+};
 use runmat_accelerate::placement::{PlacementEventKind, PlacementSession, PlacementVariant};
 use runmat_accelerate::FusionKind;
 use runmat_execution::{ExecutionCandidateKind, PlacementExecutionAuthorityRevision};
@@ -59,7 +61,16 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
                     .iter()
                     .all(|pc| group.span.start <= *pc && *pc <= group.span.end)
         })
-        .expect("one complete compiler-owned general chain");
+        .unwrap_or_else(|| {
+            let projection = graph_bytecode
+                .active_function
+                .and_then(|id| bytecode.function_registry.get(id))
+                .and_then(|function| function.fusion_stage_projection.as_ref());
+            panic!(
+                "one complete compiler-owned general chain; groups={groups:#?}; instructions={:#?}; selected projection={projection:#?}",
+                graph_bytecode.instructions,
+            )
+        });
     assert!(chain.nodes.len() >= 8);
     assert!(chain.nodes.iter().all(|id| graph.node(*id).is_some()));
 
@@ -152,7 +163,6 @@ pub(crate) async fn assert_general_chain_full_call(decoded_function: bool) {
     for receipt in completed {
         assert!(receipt.succeeded);
         assert!(receipt.total_elapsed_ns > 0);
-        eprintln!("general_chain decoded_function={decoded_function} selected_trace={:?} observed_revision={:?}", chain_traces[0].correlation, receipt.signature.revision);
         // A Provider-local preparation/body/cleanup receipt is not acceptance
         // of the required VM publication boundary. Keep this obligation strict.
         assert!(matches!(receipt.signature.revision.authority,

@@ -16,11 +16,13 @@ impl ElementwiseKernelObservation {
         if elements == 0 {
             return None;
         }
+        let recorder = current_provider_observation()?;
         let operation = ProviderOperationIdentity::new(crate::placement::fusion_operation_token(
             &crate::fusion::FusionKind::ElementwiseChain,
         ));
-        let recorder = current_provider_observation()
-            .filter(|recorder| recorder.expects_operation(&operation))?;
+        if !recorder.expects_operation(&operation) {
+            return None;
+        }
         let checkpoint = recorder.submission_checkpoint();
         Some(Self {
             recorder,

@@ -5,6 +5,7 @@ use super::*;
 use runmat_runtime::builtins::common::spec::{
     scan_represented_sign, FusionAdmissionWork, FusionSignEvidence,
 };
+use runmat_types::OperatorKind;
 use runmat_types::{real_floating_add_mode, ValueKindFact};
 
 pub(super) fn applies(operation: &FusionOp, snapshot: Option<SemanticBinding>) -> bool {

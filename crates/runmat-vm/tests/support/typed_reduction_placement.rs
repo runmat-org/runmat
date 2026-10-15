@@ -1,7 +1,6 @@
 //! Reduction-specific selection inventory layered on the shared feedback owner.
 #[path = "placement_feedback.rs"]
-mod feedback;
-pub(crate) use feedback::selected_provider_capability_digest;
+pub(crate) mod feedback;
 pub(crate) type CapturingPlacement = feedback::FeedbackPlacement<CapturedReductionSelection>;
 
 use runmat_execution::{

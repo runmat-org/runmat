@@ -3,8 +3,8 @@ use super::*;
 
 fn capturing_fusion_placement(
     session: Rc<runmat_accelerate::placement::PlacementSession>,
-) -> Rc<typed_reduction_placement::CapturingPlacement> {
-    Rc::new(typed_reduction_placement::CapturingPlacement {
+) -> Rc<placement_feedback::FeedbackPlacement<()>> {
+    Rc::new(placement_feedback::FeedbackPlacement {
         session,
         reduction_selection: Default::default(),
         delivered: Default::default(),
@@ -13,7 +13,7 @@ fn capturing_fusion_placement(
     })
 }
 
-fn assert_one_cpu_full_call(capture: &typed_reduction_placement::CapturingPlacement) {
+fn assert_one_cpu_full_call(capture: &placement_feedback::FeedbackPlacement<()>) {
     let feedback = capture.delivered.lock().unwrap();
     let cpu = feedback
         .iter()

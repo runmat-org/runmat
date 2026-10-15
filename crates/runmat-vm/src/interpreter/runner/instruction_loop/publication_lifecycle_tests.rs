@@ -155,7 +155,11 @@ fn assert_no_reduction_receipt(capture: &CapturingPlacement) {
     assert_eq!(offered.descriptor.preparation, selected.preparation);
     assert_eq!(
         selected.signature.provider_provenance,
-        Some(typed_reduction_placement::selected_provider_capability_digest(selected.device_id))
+        Some(
+            typed_reduction_placement::feedback::selected_provider_capability_digest(
+                selected.device_id
+            )
+        )
     );
     assert!(matches!(
         selected.signature.revision.authority,

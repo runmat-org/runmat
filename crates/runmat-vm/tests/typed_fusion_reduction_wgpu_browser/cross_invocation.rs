@@ -67,7 +67,9 @@ async fn browser_folded_min_learns_across_separate_vm_invocations() {
         assert_eq!(
             selected.signature.provider_provenance,
             Some(
-                typed_reduction_placement::selected_provider_capability_digest(selected.device_id)
+                typed_reduction_placement::feedback::selected_provider_capability_digest(
+                    selected.device_id
+                )
             ),
             "selected browser signature must carry the real WebGPU capability snapshot"
         );
@@ -184,7 +186,7 @@ async fn browser_folded_min_learns_across_separate_vm_invocations() {
     let _ = session.plan(request.clone()).unwrap();
     assert!(session.plan(request.clone()).unwrap().from_cache);
     let provider_digest =
-        typed_reduction_placement::selected_provider_capability_digest(learned.device_id);
+        typed_reduction_placement::feedback::selected_provider_capability_digest(learned.device_id);
     session.invalidate(runmat_execution::PlacementInvalidation::Provider {
         digest: provider_digest,
     });

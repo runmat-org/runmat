@@ -3,8 +3,8 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-#[path = "support/typed_reduction_placement.rs"]
-mod typed_reduction_placement;
+#[path = "support/placement_feedback.rs"]
+mod placement_feedback;
 
 #[path = "fusion_gpu/persistent.rs"]
 mod persistent;

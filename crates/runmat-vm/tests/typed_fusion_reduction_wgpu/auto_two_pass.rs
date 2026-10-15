@@ -193,7 +193,11 @@ fn execute_actual_auto(
         .all(|device| *device == offered_device));
     assert_eq!(
         selected.signature.provider_provenance,
-        Some(typed_reduction_placement::selected_provider_capability_digest(offered_device)),
+        Some(
+            typed_reduction_placement::feedback::selected_provider_capability_digest(
+                offered_device
+            )
+        ),
         "host and provider choices must retain the actual offered provider's provenance"
     );
     let offered_provider_candidates = selected

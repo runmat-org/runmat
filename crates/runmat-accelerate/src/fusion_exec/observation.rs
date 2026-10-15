@@ -102,7 +102,7 @@ impl FusionCpuObservation {
         mut self,
         right: VmFusionCompletionRight,
         runtime: Option<&RuntimeContext>,
-        operations: Option<&[runmat_runtime::context::VmFusionHostOperation]>,
+        operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
     ) -> Self {
         let host_route = self
             .feedback
@@ -110,9 +110,7 @@ impl FusionCpuObservation {
             .filter(|feedback| feedback.is_current())
             .and(runtime)
             .and_then(|runtime| {
-                operations.and_then(|operations| {
-                    right.host_route_operations(runtime, operations.to_vec())
-                })
+                operations.and_then(|operations| right.host_route_operations(runtime, operations))
             });
         self.vm_completion = Some(Box::new(VmCpuCompletion {
             right,
