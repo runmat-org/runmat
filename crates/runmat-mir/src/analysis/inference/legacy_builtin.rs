@@ -12,11 +12,10 @@ use std::collections::BTreeMap;
 
 use runmat_builtins::Type;
 use runmat_types::{
-    infer_call, infer_concatenate, infer_numeric_conversion, infer_reduction, infer_repmat,
-    infer_reshape, permute_shape, CallContract, CallInference, CallRequest, CellFact,
-    DimensionFact, DynamicReason, FactInference, FactJoin, InferenceDiagnostic, NumericClass,
-    NumericDomain, NumericFact, ObjectFact, OutputListFact, ShapeFact, StorageFact, StructFact,
-    ValueFact, ValueKindFact,
+    infer_call, infer_concatenate, infer_numeric_conversion, infer_reduction, CallContract,
+    CallInference, CallRequest, CellFact, DynamicReason, FactInference, FactJoin,
+    InferenceDiagnostic, NumericClass, NumericDomain, NumericFact, ObjectFact, OutputListFact,
+    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 
 pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<CallInference> {
@@ -57,43 +56,6 @@ fn infer_registered_legacy_builtin(
             &repeatable_contract(meshgrid_fact(request)),
             request,
         ));
-    }
-    if name.eq_ignore_ascii_case("reshape") {
-        return request.arguments.first().map(|source| {
-            let (dimensions, mut diagnostics) = dimensions_from(request, 1, true);
-            let mut inference = infer_reshape(source, dimensions);
-            inference.diagnostics.append(&mut diagnostics);
-            call_from_fact(inference, request)
-        });
-    }
-    if name.eq_ignore_ascii_case("repmat") {
-        return request.arguments.first().map(|source| {
-            let (dimensions, diagnostics) = dimensions_from(request, 1, false);
-            let mut inference = infer_repmat(source, &dimensions);
-            inference.diagnostics.extend(diagnostics);
-            call_from_fact(inference, request)
-        });
-    }
-    if name.eq_ignore_ascii_case("permute") {
-        return request.arguments.first().map(|source| {
-            let order = request
-                .literals
-                .numeric_vector_at(1)
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<Option<Vec<_>>>();
-            let inference = match order {
-                Some(order) => match permute_shape(&source.shape, &order) {
-                    Ok(shape) => FactInference::exact(with_shape(source, shape)),
-                    Err(diagnostic) => FactInference {
-                        fact: ValueFact::unknown(DynamicReason::ConflictingControlFlow),
-                        diagnostics: vec![diagnostic],
-                    },
-                },
-                None => FactInference::exact(with_shape(source, ShapeFact::Unknown)),
-            };
-            call_from_fact(inference, request)
-        });
     }
     if name.eq_ignore_ascii_case("horzcat") || name.eq_ignore_ascii_case("vertcat") {
         let dimension = if name.eq_ignore_ascii_case("horzcat") {
@@ -180,61 +142,6 @@ fn call_from_fact(inference: FactInference, request: &CallRequest) -> CallInfere
     let mut call = infer_call(&CallContract::fixed(vec![inference.fact]), request);
     call.diagnostics.extend(inference.diagnostics);
     call
-}
-
-fn with_shape(source: &ValueFact, shape: ShapeFact) -> ValueFact {
-    let mut output = source.clone();
-    output.shape = shape;
-    output
-}
-
-fn dimensions_from(
-    request: &CallRequest,
-    start: usize,
-    reshape: bool,
-) -> (Vec<DimensionFact>, Vec<InferenceDiagnostic>) {
-    let literals = request.literals.literal_args.get(start..).unwrap_or(&[]);
-    let flattened = match literals.first() {
-        Some(runmat_types::LiteralValue::Vector(values)) if literals.len() == 1 => {
-            values.as_slice()
-        }
-        _ => literals,
-    };
-    let mut inferred_dimensions = 0usize;
-    let mut diagnostics = Vec::new();
-    let dimensions = flattened
-        .iter()
-        .map(
-            |literal| match runmat_types::LiteralContext::numeric_from_literal(literal) {
-                Some(value) if reshape && value == -1.0 => {
-                    inferred_dimensions += 1;
-                    DimensionFact::Unknown
-                }
-                Some(value) if value.is_finite() && value >= 0.0 && value.fract() == 0.0 => {
-                    DimensionFact::Known(value as usize)
-                }
-                Some(_) => {
-                    diagnostics.push(InferenceDiagnostic::error(
-                    if reshape { "RM-TYPE-RESHAPE" } else { "RM-TYPE-REPMAT" },
-                    if reshape {
-                        "reshape dimensions must be non-negative integers or one inferred dimension"
-                    } else {
-                        "repmat dimensions must be non-negative integers"
-                    },
-                ));
-                    DimensionFact::Unknown
-                }
-                None => DimensionFact::Unknown,
-            },
-        )
-        .collect();
-    if reshape && inferred_dimensions > 1 {
-        diagnostics.push(InferenceDiagnostic::error(
-            "RM-TYPE-RESHAPE",
-            "reshape accepts at most one inferred dimension",
-        ));
-    }
-    (dimensions, diagnostics)
 }
 
 fn repeatable_contract(output: ValueFact) -> CallContract {

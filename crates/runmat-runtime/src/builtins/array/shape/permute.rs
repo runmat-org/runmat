@@ -4,238 +4,59 @@
 //! dimensions and integrates with the acceleration layer to keep gpuArray
 //! outputs resident on the device whenever possible.
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::*;
+pub use runmat_builtins::{PERMUTE_DESCRIPTOR, PERMUTE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage,
     StringArray, Tensor, Value,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::permute")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "permute",
-    op_kind: GpuOpKind::Custom("permute"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("permute")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Providers should implement a custom permute hook; the runtime falls back to gather→permute→upload when unavailable.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::permute")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "permute",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Permute only changes metadata/data layout; fusion plans treat it as a boundary between kernels.",
-};
-
-fn permute_order_len(ty: &Type) -> Option<usize> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            element_count_if_known(shape)
-        }
-        Type::Num | Type::Int | Type::Bool => Some(1),
-        _ => None,
-    }
-}
-
-fn permute_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.len() < 2 {
-        return Type::Unknown;
-    }
-    let input = &args[0];
-    let order_len = ctx
-        .numeric_vector_at(1)
-        .map(|values| values.len())
-        .or_else(|| permute_order_len(&args[1]));
-    let shape = order_len.map(runmat_builtins::shape_rules::unknown_shape);
-    match input {
-        Type::Tensor { .. } => Type::Tensor { shape },
-        Type::Logical { .. } => Type::Logical { shape },
-        Type::Num | Type::Int | Type::Bool => input.clone(),
-        Type::Cell { .. } => input.clone(),
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
-const PERMUTE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array with dimensions reordered by order.",
-}];
-
-const PERMUTE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array/value.",
-    },
-    BuiltinParamDescriptor {
-        name: "order",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row/column vector containing a permutation of 1:ndims(A).",
-    },
-];
-
-const PERMUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = permute(A, order)",
-    inputs: &PERMUTE_INPUTS,
-    outputs: &PERMUTE_OUTPUT,
-}];
-
-const PERMUTE_ERROR_INVALID_ORDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERMUTE.INVALID_ORDER",
-    identifier: Some("RunMat:permute:InvalidOrder"),
-    when: "order is non-numeric, non-vector, empty, non-integer, out of range, or duplicated.",
-    message: "permute: invalid order vector",
-};
-
-const PERMUTE_ERROR_RANK_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERMUTE.RANK_MISMATCH",
-    identifier: Some("RunMat:permute:RankMismatch"),
-    when: "order length is less than ndims(A).",
-    message: "permute: order length must be at least ndims(A)",
-};
-
-const PERMUTE_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERMUTE.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:permute:UnsupportedInput"),
-    when: "A has unsupported type for permute.",
-    message: "permute: unsupported input type",
-};
-
-const PERMUTE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PERMUTE_ERROR_INVALID_ORDER,
-    PERMUTE_ERROR_RANK_MISMATCH,
-    PERMUTE_ERROR_UNSUPPORTED_INPUT,
-];
-
-pub const PERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PERMUTE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PERMUTE_ERRORS,
-};
-
-const PERMUTE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The generic array contract includes every integer class. Permutation only reorders authoritative elements and preserves class exactly.",
-    }];
-const PERMUTE_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dimorder",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public row-vector contract requires unique positive integer elements. RunMat decodes every supported integer class exactly.",
-    }];
-pub const PERMUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = permute(integer_A, dimorder)",
-        inputs: &PERMUTE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host, paired complex-integer, and provider-resident paths preserve exact class, shape, owner, and explicit residency while changing only layout.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = permute(A, integer_dimorder)",
-        inputs: &PERMUTE_INTEGER_ORDER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Dimension order is parsed exactly as one-based usize values and validated as a complete permutation before data or provider dispatch.",
-    },
-];
-
 #[runtime_builtin(
     name = "permute",
-    category = "array/shape",
-    summary = "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
-    keywords = "permute,dimension reorder,swap axes,gpu",
-    accel = "custom",
-    type_resolver(permute_type),
-    descriptor(crate::builtins::array::shape::permute::PERMUTE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::permute::PERMUTE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
-    let order_vec = parse_order_argument("permute", order)?;
+    crate::output_count::validate_fixed_outputs(
+        &PERMUTE_DESCRIPTOR,
+        &PERMUTE_ERROR_INVALID_ORDER,
+        "permute",
+    )?;
+
+    let order_vec = parse_order_argument("permute", order)
+        .map_err(|error| super::error::declared(error, &PERMUTE_ERROR_INVALID_ORDER))?;
     match value {
         Value::Tensor(t) => {
-            validate_rank("permute", &order_vec, t.shape().len())?;
+            validate_rank("permute", &order_vec, t.shape().len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_tensor("permute", t, &order_vec).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(la) => {
-            validate_rank("permute", &order_vec, la.shape.len())?;
+            validate_rank("permute", &order_vec, la.shape.len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_logical_array("permute", la, &order_vec).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            validate_rank("permute", &order_vec, ct.shape().len())?;
+            validate_rank("permute", &order_vec, ct.shape().len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_complex_tensor("permute", ct, &order_vec)
                 .map(Value::ComplexTensor)?)
         }
         Value::StringArray(sa) => {
-            validate_rank("permute", &order_vec, sa.shape.len())?;
+            validate_rank("permute", &order_vec, sa.shape.len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_string_array("permute", sa, &order_vec).map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
-            validate_rank("permute", &order_vec, ca.shape.len())?;
+            validate_rank("permute", &order_vec, ca.shape.len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_char_array("permute", ca, &order_vec).map(Value::CharArray)?)
         }
         Value::Struct(structure) => {
-            validate_rank("permute", &order_vec, 2)?;
+            validate_rank("permute", &order_vec, 2).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(Value::Struct(structure))
         }
         Value::StructArray(array) => {
@@ -243,7 +64,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
                 "permute",
                 &order_vec,
                 crate::builtins::common::shape::effective_rank(array.shape()),
-            )?;
+            ).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             let zero_based = order_vec.iter().map(|dimension| dimension - 1).collect::<Vec<_>>();
             array
                 .permute(&zero_based)
@@ -251,22 +72,22 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
                 .map_err(|error| permute_error("permute", error))
         }
         Value::GpuTensor(handle) => {
-            validate_rank("permute", &order_vec, handle.shape().len())?;
+            validate_rank("permute", &order_vec, handle.shape().len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_gpu("permute", handle, &order_vec).await?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("permute", value)
                 .map_err(|e| permute_error("permute", e))?;
-            validate_rank("permute", &order_vec, tensor.shape().len())?;
+            validate_rank("permute", &order_vec, tensor.shape().len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             Ok(permute_tensor("permute", tensor, &order_vec).map(tensor::tensor_into_value)?)
         }
-        other => Err(permute_error(
+        other => Err(super::error::declared(permute_error(
             "permute",
             format!(
                 "permute: unsupported input type {:?}; expected numeric, logical, complex, string, or gpuArray values",
                 other
             ),
-        )),
+        ), &PERMUTE_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
@@ -720,23 +541,6 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
 
-    #[test]
-    fn permute_type_uses_order_len() {
-        let order = Type::Tensor {
-            shape: Some(vec![Some(1), Some(2)]),
-        };
-        let out = permute_type(
-            &[Type::Tensor { shape: None }, order],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
@@ -913,37 +717,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn permute_typed_complex_integer_preserves_exact_paired_storage() {
-        let complex = ComplexTensor::new_integer(
-            IntegerComplexStorage::new(
-                IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
-                IntegerStorage::U64(vec![5, 6, 7, 8]),
-            )
-            .expect("storage"),
-            vec![2, 2],
-        )
-        .expect("complex");
-        let order = tensor(&[2.0, 1.0], &[1, 2]);
-        let value =
-            permute_builtin(Value::ComplexTensor(complex), Value::Tensor(order)).expect("permute");
-
-        let Value::ComplexTensor(output) = value else {
-            panic!("expected complex tensor");
-        };
-        assert_eq!(output.shape(), &[2, 2]);
-        assert_eq!(
-            output
-                .integer_storage()
-                .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
-            Some((
-                &IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 2, u64::MAX]),
-                &IntegerStorage::U64(vec![5, 7, 6, 8]),
-            ))
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_string_array() {
@@ -990,6 +763,37 @@ pub(crate) mod tests {
         assert!(err
             .to_string()
             .contains("order length (1) must be at least ndims(A) (2)"));
+    }
+
+    #[test]
+    fn permute_typed_complex_integer_preserves_exact_paired_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2, 9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![5, 6, 7, 8]),
+            )
+            .expect("storage"),
+            vec![2, 2],
+        )
+        .expect("complex");
+        let order = tensor(&[2.0, 1.0], &[1, 2]);
+        let value =
+            permute_builtin(Value::ComplexTensor(complex), Value::Tensor(order)).expect("permute");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape(), &[2, 2]);
+        assert_eq!(
+            output
+                .integer_storage()
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 2, u64::MAX]),
+                &IntegerStorage::U64(vec![5, 7, 6, 8]),
+            ))
+        );
     }
 
     #[test]

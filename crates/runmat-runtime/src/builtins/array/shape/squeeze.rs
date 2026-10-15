@@ -1,169 +1,28 @@
 //! MATLAB-compatible `squeeze` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::*;
+pub use runmat_builtins::{SQUEEZE_DESCRIPTOR, SQUEEZE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "squeeze",
-    op_kind: GpuOpKind::Custom("squeeze"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("reshape")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Uses provider reshape hook to drop singleton metadata without moving device buffers.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "squeeze",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes:
-        "Squeeze only mutates metadata; fusion planner treats it as a no-op for kernel generation.",
-};
 
 fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("squeeze").build()
 }
 
-const SQUEEZE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value with singleton dimensions removed (2-D minimum preserved).",
-}];
-
-const SQUEEZE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array/value.",
-}];
-
-const SQUEEZE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = squeeze(A)",
-    inputs: &SQUEEZE_INPUTS,
-    outputs: &SQUEEZE_OUTPUT,
-}];
-
-const SQUEEZE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUEEZE.INVALID_INPUT",
-    identifier: Some("RunMat:squeeze:InvalidInput"),
-    when: "A has an unsupported type for squeeze.",
-    message: "squeeze: unsupported input type",
-};
-
-const SQUEEZE_ERRORS: [BuiltinErrorDescriptor; 1] = [SQUEEZE_ERROR_INVALID_INPUT];
-
-pub const SQUEEZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SQUEEZE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SQUEEZE_ERRORS,
-};
-
-const SQUEEZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "squeeze is class-agnostic structural array manipulation and preserves every integer element without numeric conversion.",
-    }];
-pub const SQUEEZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = squeeze(integer_A)",
-        inputs: &SQUEEZE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Only shape metadata changes. Host values retain authoritative storage and resident values retain the same provider buffer through reshape metadata.",
-    }];
-
-fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
-    if shape.len() <= 2 {
-        return shape.to_vec();
-    }
-    let mut squeezed: Vec<Option<usize>> = shape
-        .iter()
-        .copied()
-        .filter(|dim| *dim != Some(1))
-        .collect();
-    if squeezed.is_empty() {
-        squeezed = vec![Some(1), Some(1)];
-    } else if squeezed.len() == 1 {
-        squeezed.push(Some(1));
-    }
-    squeezed
-}
-
-fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } => Type::Tensor {
-            shape: Some(squeeze_shape_options(shape)),
-        },
-        Type::Logical { shape: Some(shape) } => Type::Logical {
-            shape: Some(squeeze_shape_options(shape)),
-        },
-        Type::Tensor { shape: None } => Type::tensor(),
-        Type::Logical { shape: None } => Type::logical(),
-        Type::Num | Type::Int | Type::Bool => input.clone(),
-        Type::Cell { .. } => input.clone(),
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 #[runtime_builtin(
     name = "squeeze",
-    category = "array/shape",
-    summary = "Remove singleton dimensions while preserving MATLAB vector orientation semantics.",
-    keywords = "squeeze,singleton dimensions,array reshape,gpu",
-    accel = "shape",
-    type_resolver(squeeze_type),
-    descriptor(crate::builtins::array::shape::squeeze::SQUEEZE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::squeeze::SQUEEZE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &SQUEEZE_DESCRIPTOR,
+        &SQUEEZE_ERROR_INVALID_INPUT,
+        "squeeze",
+    )?;
+
     squeeze_value(value).await
 }
 
@@ -185,10 +44,10 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::GpuTensor(handle) => squeeze_gpu(handle).await,
         Value::String(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
-        other => Err(squeeze_error(format!(
+        other => Err(super::error::declared(squeeze_error(format!(
             "squeeze: unsupported input type {}; expected numeric, logical, string, char, cell, or gpu array",
             value_kind(&other)
-        ))),
+        )), &SQUEEZE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -317,22 +176,6 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
-
-    #[test]
-    fn squeeze_type_preserves_logical_shape() {
-        let out = squeeze_type(
-            &[Type::Logical {
-                shape: Some(vec![Some(1), Some(3), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(3), Some(1)])
-            }
-        );
-    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
