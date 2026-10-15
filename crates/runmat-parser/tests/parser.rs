@@ -626,21 +626,13 @@ fn parse_imaginary_unit_adjacent_number_in_matrix() {
         panic!("expected 1+2i");
     };
     assert!(matches!(**lhs, Expr::Number(ref n, _) if n == "1"));
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &**rhs else {
-        panic!("expected 2*i");
-    };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == "2"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "i"));
+    assert!(matches!(**rhs, Expr::ImaginaryNumber(ref n, _) if n == "2i"));
 
     let Expr::Binary(lhs, BinOp::Sub, rhs, _) = &rows[0][1] else {
         panic!("expected 3-4j");
     };
     assert!(matches!(**lhs, Expr::Number(ref n, _) if n == "3"));
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &**rhs else {
-        panic!("expected 4*j");
-    };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == "4"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+    assert!(matches!(**rhs, Expr::ImaginaryNumber(ref n, _) if n == "4j"));
 }
 
 #[test]
@@ -652,17 +644,32 @@ fn parse_imaginary_unit_adjacent_leading_dot_number_in_matrix() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].len(), 2);
 
-    let Expr::Binary(lhs_l, BinOp::Mul, lhs_r, _) = &rows[0][0] else {
-        panic!("expected .1*i");
-    };
-    assert!(matches!(**lhs_l, Expr::Number(ref n, _) if n == ".1"));
-    assert!(matches!(**lhs_r, Expr::Ident(ref n, _) if n == "i"));
+    assert!(matches!(&rows[0][0], Expr::ImaginaryNumber(n, _) if n == ".1i"));
 
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &rows[0][1] else {
-        panic!("expected .5e-2*j");
+    assert!(matches!(&rows[0][1], Expr::ImaginaryNumber(n, _) if n == ".5e-2j"));
+}
+
+#[test]
+fn imaginary_suffix_is_one_numeric_atom_before_postfix_and_power() {
+    let program = parse("x = 1e3i; y = 2j'; z = 2i^2; w = i;").unwrap();
+    assert!(
+        matches!(&program.body[0], Stmt::Assign(_, Expr::ImaginaryNumber(n, _), _, _) if n == "1e3i")
+    );
+    assert!(
+        matches!(&program.body[1], Stmt::Assign(_, Expr::Unary(_, inner, _), _, _) if matches!(&**inner, Expr::ImaginaryNumber(n, _) if n == "2j"))
+    );
+    assert!(
+        matches!(&program.body[2], Stmt::Assign(_, Expr::Binary(left, BinOp::Pow, _, _), _, _) if matches!(&**left, Expr::ImaginaryNumber(n, _) if n == "2i"))
+    );
+    assert!(matches!(&program.body[3], Stmt::Assign(_, Expr::Ident(n, _), _, _) if n == "i"));
+
+    let matrix = parse("a = [2 i];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &matrix.body[0] else {
+        panic!("spaced matrix entries");
     };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == ".5e-2"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+    assert_eq!(rows[0].len(), 2);
+    assert!(matches!(&rows[0][0], Expr::Number(n, _) if n == "2"));
+    assert!(matches!(&rows[0][1], Expr::Ident(n, _) if n == "i"));
 }
 
 #[test]

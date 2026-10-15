@@ -377,6 +377,11 @@ pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
             text: value.clone(),
             class: runmat_types::NumericClass::Double,
         },
+        crate::MirConstant::ImaginaryNumber(value) => LiteralValue::Complex {
+            real: "0".into(),
+            imaginary: value.clone(),
+            class: runmat_types::NumericClass::Double,
+        },
         crate::MirConstant::IntegerLiteral(value) => LiteralValue::Integer {
             text: value.text().to_owned(),
             class: integer_literal_numeric_class(value.class()),

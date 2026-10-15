@@ -4232,6 +4232,14 @@ impl Compiler {
                 self.emit(Instr::LoadConst(value));
                 Ok(())
             }
+            MirOperand::Constant(MirConstant::ImaginaryNumber(value)) => {
+                let value = value.parse().map_err(|_| {
+                    self.compile_error(format!("invalid imaginary number literal {value:?}"))
+                        .with_identifier(IDENT_MIR_NUMBER_LITERAL_INVALID)
+                })?;
+                self.emit(Instr::LoadComplex(0.0, value));
+                Ok(())
+            }
             MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
                 self.emit(Instr::LoadInt(runmat_value::IntValue::from(value)));
                 Ok(())

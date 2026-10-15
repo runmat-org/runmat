@@ -341,6 +341,16 @@ fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
     assert_eq!(execution.outputs, vec![Value::String("NaN".into())]);
 }
 
+#[test]
+fn native_imaginary_numeric_constant_is_not_a_symbol_lookup() {
+    let executor =
+        compile_executor(constant_fixture(MirConstant::ImaginaryNumber("1e3".into()))).unwrap();
+    let execution = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap();
+    assert_eq!(execution.outputs, vec![Value::Complex(0.0, 1000.0)]);
+}
+
 fn constant_fixture(constant: MirConstant) -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 2 };
     lower_body(

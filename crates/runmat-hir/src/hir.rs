@@ -357,6 +357,7 @@ impl HirExpr {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    ImaginaryNumber(String),
     IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),

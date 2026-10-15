@@ -2731,6 +2731,17 @@ impl LoweringCtx {
         let span = expr.span();
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
+            AstExpr::ImaginaryNumber(value, _) => {
+                let coefficient = value
+                    .strip_suffix(&['i', 'I', 'j', 'J'][..])
+                    .filter(|coefficient| !coefficient.is_empty())
+                    .ok_or_else(|| {
+                        HirError::new("invalid imaginary numeric literal")
+                            .with_span(span)
+                            .with_identifier("RunMat:ImaginaryLiteralInvalid")
+                    })?;
+                HirExprKind::ImaginaryNumber(coefficient.to_owned())
+            }
             AstExpr::IntegerLiteral(value, _) => HirExprKind::IntegerLiteral(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
             AstExpr::NameValueArg(_, _, _) => {
@@ -3873,6 +3884,7 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
         AstExpr::Ident(word, _) | AstExpr::Number(word, _) => {
             CommandArgument::Word(SymbolName(word.clone()))
         }
+        AstExpr::ImaginaryNumber(value, _) => CommandArgument::Word(SymbolName(value.clone())),
         AstExpr::IntegerLiteral(value, _) => {
             CommandArgument::Word(SymbolName(value.text().to_string()))
         }

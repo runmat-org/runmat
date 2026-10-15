@@ -42,4 +42,5 @@ pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-pub const MIR_SCHEMA_VERSION: u16 = 11;
+/// Version 12 distinguishes imaginary numeric literals from symbol references.
+pub const MIR_SCHEMA_VERSION: u16 = 12;

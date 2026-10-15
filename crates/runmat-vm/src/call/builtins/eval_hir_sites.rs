@@ -309,6 +309,7 @@ fn side_effect_free_input(expression: &HirExpr) -> bool {
         &expression.kind,
         HirExprKind::Binding(_)
             | HirExprKind::Number(_)
+            | HirExprKind::ImaginaryNumber(_)
             | HirExprKind::IntegerLiteral(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)

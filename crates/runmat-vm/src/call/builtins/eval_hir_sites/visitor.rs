@@ -204,6 +204,7 @@ fn visit_expr(expr: &HirExpr, caller: FunctionId, sites: &mut Vec<HirUnresolvedS
             visit_expr(member, caller, sites);
         }
         HirExprKind::Number(_)
+        | HirExprKind::ImaginaryNumber(_)
         | HirExprKind::IntegerLiteral(_)
         | HirExprKind::String(_)
         | HirExprKind::Constant(_)

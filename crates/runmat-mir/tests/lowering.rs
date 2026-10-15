@@ -22,6 +22,32 @@ fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     lower_assembly(&hir.assembly).unwrap()
 }
 
+#[test]
+fn imaginary_suffix_is_a_complex_mir_constant_and_fact() {
+    let mir = lower_mir("i = 7; z = 1e3i;");
+    let body = mir.bodies.values().next().unwrap();
+    let local = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Local(local),
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::ImaginaryNumber(value))),
+            } if value == "1e3" => Some(*local),
+            _ => None,
+        })
+        .expect("imaginary constant assignment");
+    let store = analyze_assembly(&mir);
+    assert_eq!(
+        &final_local_fact(body, &store, local).kind,
+        &ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })
+    );
+}
+
 fn analyze_single_body(src: &str) -> (MirBody, AnalysisStore) {
     let mir = lower_mir(src);
     let body = mir.bodies.values().next().unwrap().clone();

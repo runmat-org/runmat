@@ -220,7 +220,10 @@ fn rvalue_operands(value: &MirRvalue) -> Option<[Option<&MirOperand>; 2]> {
 fn primitive_constant(operand: &MirOperand) -> bool {
     match operand {
         MirOperand::Constant(
-            MirConstant::Number(_) | MirConstant::IntegerLiteral(_) | MirConstant::Bool(_),
+            MirConstant::Number(_)
+            | MirConstant::ImaginaryNumber(_)
+            | MirConstant::IntegerLiteral(_)
+            | MirConstant::Bool(_),
         ) => true,
         MirOperand::Constant(MirConstant::Symbol(name)) => matches!(
             runmat_runtime::builtin::builtin_constant_value(&name.0),

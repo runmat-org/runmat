@@ -853,6 +853,19 @@ fn leading_dot_complex_literals_execute() {
 }
 
 #[test]
+fn imaginary_numeric_suffix_ignores_shadowed_units() {
+    let vars = execute_source("i = 7; j = 9; a = 1i; b = 2j; c = 1e3i; d = .5e-2j; e = i; f = j; g = real(2i^2); h = imag(2j');");
+    assert!(matches!(&vars[2], Value::Complex(re, im) if *re == 0.0 && *im == 1.0));
+    assert!(matches!(&vars[3], Value::Complex(re, im) if *re == 0.0 && *im == 2.0));
+    assert!(matches!(&vars[4], Value::Complex(re, im) if *re == 0.0 && *im == 1000.0));
+    assert!(matches!(&vars[5], Value::Complex(re, im) if *re == 0.0 && *im == 0.005));
+    assert!(matches!(&vars[6], Value::Num(value) if *value == 7.0));
+    assert!(matches!(&vars[7], Value::Num(value) if *value == 9.0));
+    assert!(matches!(&vars[8], Value::Num(value) if (*value + 4.0).abs() < 1e-12));
+    assert!(matches!(&vars[9], Value::Num(value) if *value == -2.0));
+}
+
+#[test]
 fn matrix_literal_with_leading_dot_entries_executes() {
     let input = "A = [1 .2 .3];";
     let vars = execute_source(input);

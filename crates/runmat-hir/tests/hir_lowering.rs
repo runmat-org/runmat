@@ -67,6 +67,23 @@ fn script_lowers_to_module_entrypoint_and_workspace_bindings() {
 }
 
 #[test]
+fn imaginary_suffix_lowers_as_literal_even_when_unit_is_bound() {
+    let assembly = lower_semantic("i = 7; j = 9; a = 1i; b = 2j; c = i;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let statements = &assembly.functions[entry.0].body.statements;
+    for (index, expected) in [(2, "1"), (3, "2")] {
+        let HirStmtKind::Assign(_, expr, _) = &statements[index].kind else {
+            panic!("imaginary assignment");
+        };
+        assert!(matches!(&expr.kind, HirExprKind::ImaginaryNumber(value) if value == expected));
+    }
+    let HirStmtKind::Assign(_, expr, _) = &statements[4].kind else {
+        panic!("bare unit assignment");
+    };
+    assert!(matches!(&expr.kind, HirExprKind::Binding(_)));
+}
+
+#[test]
 fn top_level_function_lowers_to_module_owned_function_with_bindings() {
     let assembly = lower_semantic("function y = f(x); y = x; end");
 
@@ -1344,6 +1361,7 @@ fn lowering_emits_only_fixed_requested_output_counts() {
             | HirExprKind::WorkspaceFirstStaticProperty { .. }
             | HirExprKind::MetaClass(_)
             | HirExprKind::Number(_)
+            | HirExprKind::ImaginaryNumber(_)
             | HirExprKind::IntegerLiteral(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)

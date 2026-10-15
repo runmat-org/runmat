@@ -12,6 +12,7 @@ pub enum MirOperand {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirConstant {
     Number(String),
+    ImaginaryNumber(String),
     IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Symbol(SymbolName),

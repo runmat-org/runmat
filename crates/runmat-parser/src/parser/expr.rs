@@ -168,19 +168,6 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_unary()?;
         loop {
-            if self.peek_token() == Some(&Token::Ident) && self.pos > 0 {
-                let prev = &self.tokens[self.pos - 1];
-                let curr = &self.tokens[self.pos];
-                let is_adjacent = self.tokens_adjacent(self.pos - 1, self.pos);
-                let is_imag =
-                    curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
-                if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
-                    let token = self.next().unwrap();
-                    let rhs = Expr::Ident(token.lexeme, self.span_from(token.position, token.end));
-                    node = self.make_binary(node, BinOp::Mul, rhs);
-                    continue;
-                }
-            }
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,
@@ -413,8 +400,25 @@ impl Parser {
         match self.next() {
             Some(info) => match info.token {
                 Token::Integer | Token::Float => {
-                    let span = self.span_from(info.position, info.end);
-                    Ok(Expr::Number(info.lexeme, span))
+                    // The suffix is syntax of the numeric atom, not a variable
+                    // named i/j. Preserve the numeric text for later f64 decoding.
+                    if self.peek_token() == Some(&Token::Ident)
+                        && self.tokens_adjacent(self.pos - 1, self.pos)
+                        && self.tokens[self.pos].lexeme.len() == 1
+                        && matches!(
+                            self.tokens[self.pos].lexeme.as_bytes()[0],
+                            b'i' | b'I' | b'j' | b'J'
+                        )
+                    {
+                        let suffix = self.next().expect("peeked imaginary suffix");
+                        Ok(Expr::ImaginaryNumber(
+                            format!("{}{}", info.lexeme, suffix.lexeme),
+                            self.span_from(info.position, suffix.end),
+                        ))
+                    } else {
+                        let span = self.span_from(info.position, info.end);
+                        Ok(Expr::Number(info.lexeme, span))
+                    }
                 }
                 Token::RadixInteger => {
                     let span = self.span_from(info.position, info.end);

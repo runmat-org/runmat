@@ -432,6 +432,14 @@ pub(super) fn evaluate_operand(
                         "invalid MIR numeric constant {text:?}: {error}"
                     ))
                 })?),
+                MirConstant::ImaginaryNumber(text) => Value::Complex(
+                    0.0,
+                    text.parse::<f64>().map_err(|error| {
+                        NativeExecutorError::Host(format!(
+                            "invalid MIR imaginary numeric constant {text:?}: {error}"
+                        ))
+                    })?,
+                ),
                 MirConstant::IntegerLiteral(value) => {
                     Value::Int(runmat_value::IntValue::from(value))
                 }

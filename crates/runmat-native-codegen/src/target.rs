@@ -158,7 +158,7 @@ impl NativeTarget {
     ) -> NativeCodegenResult<runmat_execution::Digest> {
         self.validate()?;
         Ok(runmat_execution::Digest::sha256_serialized(&(
-            "runmat-native-ir-target-v14",
+            "runmat-native-ir-target-v15",
             crate::NATIVE_IR_SCHEMA_VERSION,
             executable_cache_key,
             selected_entrypoint.0,

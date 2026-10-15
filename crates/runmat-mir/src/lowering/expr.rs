@@ -27,6 +27,9 @@ pub(crate) fn lower_expr_with_replacements(
         HirExprKind::Number(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value.clone())))
         }
+        HirExprKind::ImaginaryNumber(value) => MirRvalue::Use(MirOperand::Constant(
+            MirConstant::ImaginaryNumber(value.clone()),
+        )),
         HirExprKind::IntegerLiteral(value) => MirRvalue::Use(MirOperand::Constant(
             MirConstant::IntegerLiteral(value.clone()),
         )),
@@ -1199,6 +1202,9 @@ pub(crate) fn lower_simple_operand(
 ) -> Result<Option<MirOperand>, HirError> {
     Ok(Some(match &expr.kind {
         HirExprKind::Number(value) => MirOperand::Constant(MirConstant::Number(value.clone())),
+        HirExprKind::ImaginaryNumber(value) => {
+            MirOperand::Constant(MirConstant::ImaginaryNumber(value.clone()))
+        }
         HirExprKind::IntegerLiteral(value) => {
             MirOperand::Constant(MirConstant::IntegerLiteral(value.clone()))
         }
