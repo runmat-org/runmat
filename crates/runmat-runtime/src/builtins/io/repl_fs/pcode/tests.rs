@@ -1,5 +1,4 @@
 use super::*;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use futures::executor::block_on;
 use std::env;
 use std::path::Path;
@@ -60,9 +59,6 @@ fn push_cwd(path: &Path) -> CwdGuard {
 #[test]
 fn pcode_creates_obscured_executable_p_file_from_source_name() {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("worker.m"), "answer = 42;\n").expect("write source");
     let _cwd = push_cwd(temp.path());
@@ -80,9 +76,6 @@ fn pcode_creates_obscured_executable_p_file_from_source_name() {
 #[test]
 fn pcode_inplace_writes_next_to_source() {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
     let src_dir = temp.path().join("src");
     std::fs::create_dir_all(&src_dir).expect("create src");
@@ -104,9 +97,6 @@ fn pcode_inplace_writes_next_to_source() {
 #[test]
 fn pcode_folder_preserves_package_and_class_suffix_in_current_dir() {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
     let source_root = temp.path().join("source").join("+pkg").join("@Widget");
     std::fs::create_dir_all(&source_root).expect("create source root");
@@ -128,9 +118,6 @@ fn pcode_folder_preserves_package_and_class_suffix_in_current_dir() {
 #[test]
 fn pcode_wildcard_ignores_non_m_files() {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("one.m"), "one = 1;\n").expect("write one");
     std::fs::write(temp.path().join("one.txt"), "not matlab\n").expect("write txt");

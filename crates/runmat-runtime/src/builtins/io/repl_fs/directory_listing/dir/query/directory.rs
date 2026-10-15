@@ -51,9 +51,7 @@ mod tests {
 
     #[test]
     fn captured_virtual_provider_survives_global_provider_swap() {
-        let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _lock = runmat_filesystem::provider_override_lock();
         let memory = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
         memory
             .write_project_path("/workspace/virtual.txt", b"owned")

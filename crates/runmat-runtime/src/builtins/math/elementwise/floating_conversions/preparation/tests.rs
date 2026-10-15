@@ -2,8 +2,7 @@ use crate::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationObservation, PreparedBuiltinOperands,
 };
 use crate::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
 use crate::RuntimeError;
 use futures::executor::block_on;
@@ -83,22 +82,20 @@ impl RuntimeAccelerationService for Service {
         })
     }
 }
-fn enter(events: &Events, replace: bool) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
-                Service {
-                    events: events.clone(),
-                    replace,
-                },
-            ))),
-    )
+fn runtime(events: &Events, replace: bool) -> RuntimeContext {
+    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_acceleration(Rc::new(Service {
+                events: events.clone(),
+                replace,
+            })),
+        )
 }
 
 #[test]
 fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["double", "single"] {
         let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
@@ -116,7 +113,10 @@ fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
                 if like {
                     args.extend([Value::from("like"), Value::Num(0.0)]);
                 }
-                let result = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
+                let result = block_on(crate::dispatcher::call_builtin_async_in_context(
+                    &runtime, name, &args,
+                ))
+                .unwrap();
                 let Value::Tensor(output) = result.value() else {
                     panic!("dense shape-preserving output");
                 };
@@ -131,7 +131,7 @@ fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
 #[test]
 fn invalid_options_prototypes_and_output_counts_never_prepare() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["double", "single"] {
         for args in [
@@ -150,14 +150,20 @@ fn invalid_options_prototypes_and_output_counts_never_prepare() {
             vec![Value::Num(1.0), Value::from("like"), Value::from("invalid")],
             vec![Value::OutputList(vec![])],
         ] {
-            assert!(block_on(crate::dispatcher::call_builtin_async(name, &args)).is_err());
+            assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+                &runtime, name, &args
+            ))
+            .is_err());
             assert!(events.borrow().is_empty());
         }
-        assert!(block_on(crate::dispatcher::call_builtin_async_with_outputs(
-            name,
-            &[Value::Num(1.0)],
-            2
-        ))
+        assert!(block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                &runtime,
+                name,
+                &[Value::Num(1.0)],
+                2
+            )
+        )
         .is_err());
         assert!(events.borrow().is_empty());
     }
@@ -166,14 +172,16 @@ fn invalid_options_prototypes_and_output_counts_never_prepare() {
 #[test]
 fn deliberate_service_replacement_is_revalidated_by_conversion_body() {
     let events = Events::default();
-    let _context = enter(&events, true);
+    let runtime = runtime(&events, true);
     for name in ["double", "single"] {
-        drop(crate::dispatcher::call_builtin_async(
+        drop(crate::dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[Value::Num(1.0)],
         ));
         assert!(events.borrow().is_empty());
-        assert!(block_on(crate::dispatcher::call_builtin_async(
+        assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             &[Value::Num(1.0)]
         ))
@@ -190,7 +198,7 @@ fn pending_provider_abandonment_aborts_the_shared_observation_once() {
     use std::future::Future;
     use std::task::{Context, Poll};
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     for name in ["double", "single"] {
         with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
             let input = provider
@@ -200,7 +208,9 @@ fn pending_provider_abandonment_aborts_the_shared_observation_once() {
                 })
                 .unwrap();
             let args = [Value::GpuTensor(input.clone())];
-            let mut call = Box::pin(crate::dispatcher::call_builtin_async(name, &args));
+            let mut call = Box::pin(crate::dispatcher::call_builtin_async_in_context(
+                &runtime, name, &args,
+            ));
             let mut context = Context::from_waker(futures::task::noop_waker_ref());
             assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
             assert_eq!(&*events.borrow(), &["prepare", "begin"]);

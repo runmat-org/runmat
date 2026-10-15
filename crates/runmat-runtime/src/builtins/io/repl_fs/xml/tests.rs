@@ -1,20 +1,12 @@
 use super::*;
 use crate::builtins::common::fs::path_to_string;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_filesystem::FsProvider;
 
 #[path = "tests/write_owner.rs"]
 mod write_owner;
 
-fn fs_test_guard() -> (
-    std::sync::MutexGuard<'static, ()>,
-    std::sync::MutexGuard<'static, ()>,
-) {
-    let provider_guard = runmat_filesystem::provider_override_lock();
-    let repl_guard = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    (provider_guard, repl_guard)
+fn fs_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    runmat_filesystem::provider_override_lock()
 }
 
 #[test]

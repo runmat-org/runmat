@@ -5,12 +5,9 @@ use runmat_value::{CharArray, Value};
 use super::support::{call, PathGuard};
 use crate::builtins::common::path_search::search_directories;
 use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
 fn locked() -> (std::sync::MutexGuard<'static, ()>, PathGuard) {
-    let lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let lock = runmat_filesystem::provider_override_lock();
     (lock, PathGuard::new())
 }
 
@@ -58,7 +55,7 @@ fn mutation_updates_runtime_search_directories() {
 }
 #[test]
 fn discarded_output_still_updates_path() {
-    let _lock = super::super::super::REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = super::support::PathGuard::new();
     let _outputs = crate::output_count::push_output_count(Some(0));
     super::support::call(vec![runmat_value::Value::from("discarded-output-path")]).unwrap();

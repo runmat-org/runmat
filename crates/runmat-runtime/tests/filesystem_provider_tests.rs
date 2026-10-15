@@ -4,7 +4,6 @@ use pollster::block_on;
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
-use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_runtime::call_builtin;
 use runmat_runtime::call_builtin_async_with_outputs;
 use runmat_runtime::execution::RootedValue;
@@ -321,7 +320,6 @@ fn exercise_recent_import_export_builtins_through_provider() {
 
 #[test]
 fn sandbox_provider_supports_repl_and_tabular_builtins() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
     let _provider_lock = vfs::provider_override_lock();
     let temp = tempdir().expect("temp dir");
     let sandbox = Arc::new(
@@ -355,7 +353,6 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn remote_provider_supports_repl_and_tabular_builtins() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
     let _provider_lock = vfs::provider_override_lock();
     let server = remote_test_support::RemoteTestServer::spawn();
     let remote = Arc::new(

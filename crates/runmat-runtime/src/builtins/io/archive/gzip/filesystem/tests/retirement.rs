@@ -12,9 +12,7 @@ use super::support::{poll_once, runtime, RecordingProvider};
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pending_provider_read_is_dropped_on_cancellation_or_abandonment_without_output_effects() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     for cancel in [false, true] {
         let selected = Arc::new(RecordingProvider::new("/selected").with_pending_reads());
         let cancellation = CancellationSource::new();
@@ -55,9 +53,7 @@ fn pending_provider_read_is_dropped_on_cancellation_or_abandonment_without_outpu
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn public_pending_write_is_dropped_on_cancellation_or_abandonment_without_publication() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     for cancel in [false, true] {
         let selected = Arc::new(RecordingProvider::new("/selected").with_pending_writes());
         selected

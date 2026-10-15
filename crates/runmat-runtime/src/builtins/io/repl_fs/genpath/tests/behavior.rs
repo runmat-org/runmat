@@ -6,7 +6,6 @@ use runmat_value::{CharArray, StringArray, Value};
 use tempfile::tempdir;
 
 use super::support::{call, canonical, segments, text};
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
 struct CurrentDirectoryGuard(PathBuf);
 
@@ -39,9 +38,7 @@ fn returns_a_character_row_for_a_folder() {
 
 #[test]
 fn uses_current_directory_without_arguments() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempdir().expect("directory");
     fs::create_dir(directory.path().join("alpha")).expect("alpha");
     fs::create_dir(directory.path().join("beta")).expect("beta");

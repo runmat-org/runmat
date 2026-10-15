@@ -4,9 +4,7 @@ use tempfile::tempdir;
 
 #[test]
 fn identical_path_and_containing_directory_are_successful_noops() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let directory = temp.path().join("docs");
     fs::create_dir(&directory).unwrap();
@@ -27,9 +25,7 @@ fn identical_path_and_containing_directory_are_successful_noops() {
 
 #[test]
 fn force_preserves_self_through_canonical_path_aliases() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("stable.txt");
     fs::write(&source, b"preserved").unwrap();
@@ -59,9 +55,7 @@ fn force_preserves_self_through_canonical_path_aliases() {
 #[test]
 fn force_preserves_symbolic_alias_and_moves_dangling_source_link() {
     use std::os::unix::fs::symlink;
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("source");
     let alias = temp.path().join("alias");
@@ -92,9 +86,7 @@ fn force_preserves_symbolic_alias_and_moves_dangling_source_link() {
 
 #[test]
 fn rejects_descendant_target_before_force_removal() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("tree");
     let destination = source.join("nested");

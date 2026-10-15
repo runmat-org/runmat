@@ -166,7 +166,6 @@ fn color_type_name(color: image::ColorType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -174,7 +173,7 @@ mod tests {
 
     #[test]
     fn imfinfo_reports_png_dimensions() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let root = tempfile::TempDir::new().unwrap();
         let path = root.path().join("image.png");
         let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
@@ -192,7 +191,7 @@ mod tests {
 
     #[test]
     fn supported_format_adds_extension_only_when_original_path_is_missing() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let root = tempfile::TempDir::new().unwrap();
         let bare = root.path().join("sample");
         let with_extension = root.path().join("sample.png");

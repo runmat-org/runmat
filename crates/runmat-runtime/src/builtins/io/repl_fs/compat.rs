@@ -855,7 +855,6 @@ fn query_windows_registry(_root: &str, _key: &str, _value: Option<&str>) -> Buil
 mod tests {
     use super::memmapfile::{shape_from_value, MemmapDataType};
     use super::*;
-    use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{
         BuiltinIntegerAuditKind, FILEATTRIB_INTEGER_AUDIT, MEMMAPFILE_INTEGER_CAPABILITIES,
         USERPATH_INTEGER_AUDIT,
@@ -928,7 +927,6 @@ mod tests {
 
     #[test]
     fn memmapfile_decodes_named_typed_format() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_guard = vfs::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_memmapfile_test.bin");
         let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(std::env::temp_dir()));
@@ -1487,7 +1485,7 @@ mod tests {
 
     #[test]
     fn fileattrib_can_toggle_user_write_flag() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_fileattrib_test.txt");
         std::fs::write(&path, "data").unwrap();
         let rejected = run(fileattrib_builtin(vec![
@@ -1517,7 +1515,6 @@ mod tests {
 
     #[test]
     fn fileattrib_read_flag_rejects_before_an_earlier_write_flag_mutates() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_lock = vfs::provider_override_lock();
         #[cfg(not(target_arch = "wasm32"))]
         let root = std::env::temp_dir().join("runmat-fileattrib-preflight");
@@ -1545,7 +1542,6 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileattrib_output_count_admits_zero_one_two_and_rejects_three_before_mutation() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_lock = vfs::provider_override_lock();
         #[cfg(windows)]
         let root = PathBuf::from("C:\\runmat-fileattrib-output-count");
@@ -1593,7 +1589,6 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_text_controls_reject_character_pages_without_filesystem_effects() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_lock = vfs::provider_override_lock();
         #[cfg(windows)]
         let root = PathBuf::from("C:\\runmat-fileattrib-paged-text");
@@ -1631,7 +1626,6 @@ mod tests {
 
     #[test]
     fn fileattrib_captured_path_retains_provider_for_mutation_and_metadata() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_lock = vfs::provider_override_lock();
         #[cfg(not(target_arch = "wasm32"))]
         let root = std::env::temp_dir().join("runmat-fileattrib-selected");
@@ -1660,7 +1654,6 @@ mod tests {
 
     #[test]
     fn fileattrib_reports_unavailable_permission_facts_as_nan() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_lock = vfs::provider_override_lock();
         #[cfg(not(target_arch = "wasm32"))]
         let root = std::env::temp_dir().join("runmat-fileattrib-unknown-facts");

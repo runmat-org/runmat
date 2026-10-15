@@ -1,6 +1,5 @@
 use super::*;
 use crate::builtins::common::path_state::{current_path_string, set_path_string};
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use futures::executor::block_on;
 use runmat_value::CharArray;
 use std::env;
@@ -47,7 +46,7 @@ fn runtime_fallback_requires_vm_context() {
 
 #[test]
 fn resolves_script_from_current_directory_with_implicit_m_extension() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(temp.path().join("worker.m"), "generated = 41;\n").expect("write script");
     let _cwd = push_cwd(temp.path());
@@ -59,7 +58,7 @@ fn resolves_script_from_current_directory_with_implicit_m_extension() {
 
 #[test]
 fn resolves_bare_m_filename_from_search_path() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let scripts = temp.path().join("scripts");
     std::fs::create_dir_all(&scripts).expect("create scripts dir");
@@ -75,7 +74,7 @@ fn resolves_bare_m_filename_from_search_path() {
 
 #[test]
 fn resolves_script_from_char_row_path() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let path = temp.path().join("direct_script.m");
     std::fs::write(&path, "x = 1;\n").expect("write script");
@@ -88,7 +87,7 @@ fn resolves_script_from_char_row_path() {
 
 #[test]
 fn missing_script_reports_stable_identifier() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _cwd = push_cwd(temp.path());
 
@@ -119,7 +118,7 @@ fn rejects_numeric_residency_and_character_pages_before_provider_access() {
 
 #[test]
 fn trailing_singleton_character_row_resolves_normally() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("trailing.m");
     std::fs::write(&path, "value = 4;").unwrap();

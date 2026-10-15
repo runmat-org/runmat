@@ -1,4 +1,3 @@
-use super::super::REPL_FS_TEST_LOCK;
 use super::*;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
@@ -54,9 +53,7 @@ fn resolve_symbolic_links_accepts_every_integer_class_only_at_zero_or_one() {
 fn delete_symbolic_link_can_remove_link_or_target_and_leaves_link_when_resolved() {
     use std::os::unix::fs::symlink;
 
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let target = temp.path().join("target.txt");
     let link = temp.path().join("target-link");
@@ -104,9 +101,7 @@ fn delete_symbolic_link_can_remove_link_or_target_and_leaves_link_when_resolved(
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_removes_single_file() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let target = temp.path().join("single.txt");
@@ -120,9 +115,7 @@ fn delete_removes_single_file() {
 
 #[test]
 fn delete_rejects_malformed_options_before_deleting_any_path() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let target = temp.path().join("must-remain.txt");
     File::create(&target).unwrap();
@@ -227,9 +220,7 @@ fn delete_listener_preserves_resident_referents() {
 
 #[test]
 fn delete_uses_documented_sequential_multi_target_mutation() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let first = temp.path().join("first.txt");
     let missing = temp.path().join("missing.txt");
@@ -246,9 +237,7 @@ fn delete_uses_documented_sequential_multi_target_mutation() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_removes_files_with_wildcard() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let file_a = temp.path().join("log-01.txt");
@@ -265,9 +254,7 @@ fn delete_removes_files_with_wildcard() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_accepts_string_array() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let file_a = temp.path().join("stageA.dat");
@@ -292,9 +279,7 @@ fn delete_accepts_string_array() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_accepts_char_array() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let paths: Vec<_> = ["stageA.tmp", "stageB.tmp"]
@@ -328,9 +313,7 @@ fn delete_accepts_char_array() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_accepts_cell_array_of_paths() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let file_a = temp.path().join("cellA.dat");
@@ -400,9 +383,7 @@ fn delete_errors_on_invalid_pattern() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_errors_on_missing_file() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let missing = temp.path().join("missing.txt");
@@ -423,9 +404,7 @@ fn delete_errors_on_missing_file() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_errors_on_directory() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let temp = tempdir().expect("temp dir");
     let dir = temp.path().join("dir");
@@ -439,9 +418,7 @@ fn delete_errors_on_directory() {
 fn captured_virtual_provider_and_cwd_govern_wildcard_after_provider_swap() {
     use runmat_filesystem::MemoryFsProvider;
 
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     memory
         .write_project_path("/workspace/log-01.txt", b"first")
@@ -482,9 +459,7 @@ fn cancelled_invocation_rejects_before_filesystem_mutation_with_typed_cause() {
     use runmat_filesystem::MemoryFsProvider;
     use std::rc::Rc;
 
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     memory
         .write_project_path("/workspace/keep.txt", b"retained")
@@ -600,9 +575,7 @@ fn delete_accepts_cell_of_handles() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn delete_runs_with_wgpu_provider_registered() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
 
     let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

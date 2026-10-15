@@ -16,7 +16,7 @@ fn run(args: &[Value], predicate: fn(&runmat_filesystem::FsMetadata) -> bool) ->
 
 #[test]
 fn scalar_and_cell_inputs_preserve_predicate_semantics_and_shape() {
-    let _guard = super::super::REPL_FS_TEST_LOCK.lock().expect("test lock");
+    let _guard = runmat_filesystem::provider_override_lock();
     let root = tempfile::tempdir().expect("temporary directory");
     let file = root.path().join("sample.txt");
     std::fs::write(&file, b"sample").expect("test file");
@@ -68,7 +68,7 @@ fn invalid_input_rejects_before_provider_access() {
 
 #[test]
 fn cell_predicates_preserve_semantic_order_including_nd_and_empty_arrays() {
-    let _lock = super::super::REPL_FS_TEST_LOCK.lock().unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("sample");
     std::fs::write(&file, b"value").unwrap();

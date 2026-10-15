@@ -4,8 +4,6 @@ use runmat_value::{IntegerStorage, Tensor};
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
-use super::super::super::REPL_FS_TEST_LOCK;
-
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     futures::executor::block_on(dir_builtin(args))
 }
@@ -43,9 +41,7 @@ impl Drop for CurrentDirectoryGuard {
 
 #[test]
 fn lists_current_directory_and_metadata_fields() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let folder = tempdir().expect("temporary directory");
     let _guard = CurrentDirectoryGuard::enter(folder.path());
     File::create("alpha.txt").expect("file");
@@ -61,9 +57,7 @@ fn lists_current_directory_and_metadata_fields() {
 
 #[test]
 fn wildcard_and_folder_pattern_select_entries() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let folder = tempdir().expect("temporary directory");
     File::create(folder.path().join("one.m")).expect("m file");
     File::create(folder.path().join("two.txt")).expect("text file");

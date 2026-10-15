@@ -5,9 +5,7 @@ use tempfile::tempdir;
 
 #[test]
 fn renames_file_and_removes_source_path() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("source.txt");
     let target = temp.path().join("target.txt");
@@ -23,9 +21,7 @@ fn renames_file_and_removes_source_path() {
 
 #[test]
 fn moves_file_into_existing_directory() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("report.txt");
     let target = temp.path().join("reports");
@@ -40,9 +36,7 @@ fn moves_file_into_existing_directory() {
 
 #[test]
 fn force_replaces_existing_file_and_default_preserves_it() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("draft.txt");
     let target = temp.path().join("final.txt");
@@ -62,9 +56,7 @@ fn force_replaces_existing_file_and_default_preserves_it() {
 
 #[test]
 fn wildcard_moves_every_match() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let target = temp.path().join("logs");
     fs::create_dir(&target).unwrap();
@@ -84,9 +76,7 @@ fn wildcard_moves_every_match() {
 
 #[test]
 fn force_preserves_nonempty_destination_directory_on_replacement_failure() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("source");
     let parent = temp.path().join("destination");

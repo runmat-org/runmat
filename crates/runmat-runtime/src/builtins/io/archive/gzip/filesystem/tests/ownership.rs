@@ -13,9 +13,7 @@ use super::support::{encoded, runtime, RecordingProvider, ReplacingHttpService};
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let replacement = Arc::new(RecordingProvider::new("/replacement"));
     replacement
         .memory
@@ -72,9 +70,7 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected"));
     let replacement = Arc::new(RecordingProvider::new("/replacement"));
     let swap = Arc::new(Mutex::new(None));
@@ -132,9 +128,7 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn read_revocation_stops_codec_and_output_effects_with_typed_source() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected").with_read_revocation());
     selected
         .memory
@@ -165,9 +159,7 @@ fn read_revocation_stops_codec_and_output_effects_with_typed_source() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn provider_error_remains_primary_when_the_same_failed_read_revokes_its_lease() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(
         RecordingProvider::new("/selected").with_read_error_and_revocation(io::ErrorKind::NotFound),
     );
@@ -200,9 +192,7 @@ fn provider_error_remains_primary_when_the_same_failed_read_revokes_its_lease() 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn wildcard_enumeration_stops_between_provider_awaits_when_authority_is_revoked() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected").with_read_dir_revocation());
     selected
         .memory
@@ -234,9 +224,7 @@ fn wildcard_enumeration_stops_between_provider_awaits_when_authority_is_revoked(
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn revoked_metadata_errors_remain_primary_and_never_start_a_fallback_operation() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let cases = [
         (
             "/selected/folder",

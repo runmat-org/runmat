@@ -64,9 +64,7 @@ impl FsProvider for DeniedDirectory {
 }
 #[test]
 fn wildcard_permission_errors_are_not_empty_matches() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     for deny_metadata in [false, true] {
         let inner = MemoryFsProvider::with_current_dir("/workspace");
         inner

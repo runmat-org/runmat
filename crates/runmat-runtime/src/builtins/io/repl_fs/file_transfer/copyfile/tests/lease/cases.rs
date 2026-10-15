@@ -2,9 +2,7 @@ use super::*;
 
 #[test]
 fn revoked_lease_after_first_chunk_prevents_next_provider_effect() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = MemoryFsProvider::with_current_dir("/selected");
     memory
         .write_project_path("/selected/source.bin", &vec![9u8; 32 * 1024])
@@ -42,9 +40,7 @@ fn revoked_lease_after_first_chunk_prevents_next_provider_effect() {
 
 #[test]
 fn move_reports_resource_lease_retirement_after_provider_rename() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = MemoryFsProvider::with_current_dir("/selected");
     memory
         .write_project_path("/selected/source.bin", b"source")
@@ -76,9 +72,7 @@ fn move_reports_resource_lease_retirement_after_provider_rename() {
 
 #[test]
 fn selected_move_builtin_drops_pending_provider_without_replay() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = MemoryFsProvider::with_current_dir("/selected");
     memory
         .write_project_path("/selected/source.bin", b"source")
@@ -119,9 +113,7 @@ fn selected_move_builtin_drops_pending_provider_without_replay() {
 
 #[test]
 fn selected_move_builtin_cancels_pending_provider_with_typed_error() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let memory = MemoryFsProvider::with_current_dir("/selected");
     memory
         .write_project_path("/selected/source.bin", b"source")

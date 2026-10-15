@@ -96,6 +96,7 @@ fn imported_author_study_fixture_loads_through_analysis_artifact_contract() {
     };
 
     let _guard = analysis_test_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
     let geometry = crate::geometry::geometry_load(TETRA_PATH, TETRA_STL.as_bytes())
         .expect("public tetra STL should import");
     let files = author_study_example_files(&geometry).expect("typed fixture should validate");

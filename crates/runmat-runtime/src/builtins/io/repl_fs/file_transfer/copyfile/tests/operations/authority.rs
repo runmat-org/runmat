@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 #[test]
 fn captured_copy_owner_survives_global_provider_swap() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
     selected
         .write_project_path("/selected/source.bin", b"selected")
@@ -38,9 +36,7 @@ fn captured_copy_owner_survives_global_provider_swap() {
 
 #[test]
 fn captured_copy_owner_applies_to_wildcards_and_recursive_children() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
     selected
         .write_project_path("/selected/tree/child/item.bin", b"selected child")

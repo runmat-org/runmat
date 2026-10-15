@@ -6,9 +6,7 @@ use tempfile::tempdir;
 
 #[test]
 fn copies_file_to_new_name_and_retains_source() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("source.txt");
     let target = temp.path().join("target.txt");
@@ -24,9 +22,7 @@ fn copies_file_to_new_name_and_retains_source() {
 
 #[test]
 fn copies_file_into_existing_directory() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("report.txt");
     let target = temp.path().join("reports");
@@ -41,9 +37,7 @@ fn copies_file_into_existing_directory() {
 
 #[test]
 fn force_replaces_existing_file_and_default_preserves_it() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("draft.txt");
     let target = temp.path().join("final.txt");
@@ -63,9 +57,7 @@ fn force_replaces_existing_file_and_default_preserves_it() {
 
 #[test]
 fn copies_directory_tree() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("data");
     let target = temp.path().join("data-copy");
@@ -81,9 +73,7 @@ fn copies_directory_tree() {
 
 #[test]
 fn wildcard_copies_all_matches_to_existing_directory() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let target = temp.path().join("logs");
     fs::create_dir(&target).unwrap();
@@ -99,9 +89,7 @@ fn wildcard_copies_all_matches_to_existing_directory() {
 
 #[test]
 fn wildcard_requires_existing_destination_directory() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     File::create(temp.path().join("file.log")).unwrap();
     let outcome = evaluate(&[

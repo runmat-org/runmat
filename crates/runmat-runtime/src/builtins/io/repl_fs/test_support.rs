@@ -1,8 +1,3 @@
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
-
-pub static REPL_FS_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
 /// A genuine resident Double input for filesystem metadata-admission tests.
 /// There is deliberately no registered provider: these tests must reject the
 /// argument or a later invalid option before attempting any device read.

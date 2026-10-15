@@ -226,10 +226,8 @@ fn which_variable_search_respects_workspace() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn which_finds_files() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let (_guard, _lock) = test_guard();
-    let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = tempdir().expect("tempdir");
     let script_path = temp.path().join("script.m");
     File::create(&script_path)
@@ -473,10 +471,8 @@ fn which_accepts_char_and_string_array_inputs() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn which_file_option_finds_directories() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let (_guard, _lock) = test_guard();
-    let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = tempdir().expect("tempdir");
     let subdir = temp.path().join("helpers");
     std::fs::create_dir_all(&subdir).expect("create dir");

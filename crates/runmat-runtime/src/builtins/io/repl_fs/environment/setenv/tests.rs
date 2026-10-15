@@ -1,5 +1,4 @@
 use super::*;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_value::{IntValue, StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -9,7 +8,7 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[test]
 fn scalar_and_exact_integer_values_update_the_portable_environment() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     for (suffix, value, expected) in [
         ("TEXT", Value::String("ready".into()), "ready"),
         (
@@ -30,7 +29,7 @@ fn scalar_and_exact_integer_values_update_the_portable_environment() {
 
 #[test]
 fn shaped_values_are_validated_before_batch_mutation() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     let names = StringArray::new(
         vec!["RUNMAT_SETENV_TEST_A".into(), "RUNMAT_SETENV_TEST_B".into()],
         vec![1, 2],
@@ -52,7 +51,7 @@ fn shaped_values_are_validated_before_batch_mutation() {
 
 #[test]
 fn invalid_later_name_does_not_apply_an_earlier_update() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     crate::builtins::common::env::remove_var("RUNMAT_SETENV_TEST_ATOMIC");
     let names = StringArray::new(
         vec!["RUNMAT_SETENV_TEST_ATOMIC".into(), "BAD=NAME".into()],
@@ -69,7 +68,7 @@ fn invalid_later_name_does_not_apply_an_earlier_update() {
 
 #[test]
 fn dictionary_updates_use_typed_dictionary_identity() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     let dictionary = super::super::dictionary::from_pairs(vec![(
         "RUNMAT_SETENV_TEST_DICT".into(),
         "value".into(),
@@ -85,7 +84,7 @@ fn dictionary_updates_use_typed_dictionary_identity() {
 
 #[test]
 fn invalid_name_is_a_failure_result_without_partial_mutation() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     let result = execute::evaluate(&[
         Value::String("BAD=NAME".into()),
         Value::String("value".into()),

@@ -7,9 +7,7 @@ pub(in crate::builtins::io::repl_fs) struct PathGuard {
 
 impl PathGuard {
     pub(in crate::builtins::io::repl_fs) fn new() -> Self {
-        let lock = super::super::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let lock = runmat_filesystem::provider_override_lock();
         Self {
             previous: crate::builtins::common::path_state::current_path_string(),
             _lock: lock,

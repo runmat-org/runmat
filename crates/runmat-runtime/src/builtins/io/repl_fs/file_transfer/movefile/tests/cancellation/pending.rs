@@ -2,9 +2,7 @@ use super::*;
 
 #[test]
 fn dropped_pending_move_has_no_rename_effect_and_retires_turn() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     filesystem
         .write_project_path("/workspace/source.bin", b"unchanged")
@@ -52,9 +50,7 @@ fn dropped_pending_move_has_no_rename_effect_and_retires_turn() {
 
 #[test]
 fn dropped_pending_wildcard_preserves_completed_move_without_replay() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     filesystem
         .write_project_path("/workspace/a.log", b"first")

@@ -18,9 +18,7 @@ fn path_guards_use_portable_memory_vfs_and_preserve_false_on_metadata_error() {
 }
 
 fn assert_configured_path_guards(provider: std::sync::Arc<dyn runmat_filesystem::FsProvider>) {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let _provider = runmat_filesystem::replace_provider(provider);
     block_on(runmat_filesystem::create_dir_all_async("/validator-domain")).unwrap();
     block_on(runmat_filesystem::write_async(

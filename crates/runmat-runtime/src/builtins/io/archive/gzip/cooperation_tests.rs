@@ -245,9 +245,7 @@ impl ArchiveOperation {
 
 #[test]
 fn selected_builtin_cancel_or_drop_retires_pending_turn_before_publication() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     for operation in [ArchiveOperation::Gzip, ArchiveOperation::Gunzip] {
         for cancel in [false, true] {
             let fixture = fixture(1);
@@ -300,9 +298,7 @@ fn selected_builtin_cancel_or_drop_retires_pending_turn_before_publication() {
 
 #[test]
 fn selected_url_gunzip_cancel_or_drop_retires_codec_turn_before_publication() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     for cancel in [false, true] {
         let fixture = fixture(1);
         let sends = Rc::new(Cell::new(0));
@@ -356,9 +352,7 @@ fn selected_url_gunzip_cancel_or_drop_retires_codec_turn_before_publication() {
 
 #[test]
 fn multi_input_keeps_prior_publication_when_later_item_is_abandoned() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     for operation in [ArchiveOperation::Gzip, ArchiveOperation::Gunzip] {
         // gzip charges encode+finish for the first member; gunzip completes the
         // first member in one decoder step. Suspend on the next member.

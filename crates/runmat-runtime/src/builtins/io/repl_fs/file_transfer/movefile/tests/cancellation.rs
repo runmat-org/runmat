@@ -28,9 +28,7 @@ impl Drop for PendingTurn {
 
 #[test]
 fn cancelled_move_rejects_before_provider_effects_with_typed_cause() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     filesystem
         .write_project_path("/workspace/source.bin", b"unchanged")
@@ -68,9 +66,7 @@ fn cancelled_move_rejects_before_provider_effects_with_typed_cause() {
 
 #[test]
 fn captured_move_owner_survives_global_provider_swap() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
     selected
         .write_project_path("/selected/source.bin", b"selected")

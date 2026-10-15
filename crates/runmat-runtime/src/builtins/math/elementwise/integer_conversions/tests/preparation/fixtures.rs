@@ -3,8 +3,7 @@ use crate::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationObservation, PreparedBuiltinOperands,
 };
 use crate::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
 use crate::RuntimeError;
 use runmat_builtins::BuiltinPreparationOperation;
@@ -61,14 +60,12 @@ impl RuntimeAccelerationService for Service {
     }
 }
 
-pub(super) fn enter(events: &Events, replace_invalid: bool) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
-                Service {
-                    events: events.clone(),
-                    replace_invalid,
-                },
-            ))),
-    )
+pub(super) fn runtime(events: &Events, replace_invalid: bool) -> RuntimeContext {
+    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_acceleration(Rc::new(Service {
+                events: events.clone(),
+                replace_invalid,
+            })),
+        )
 }

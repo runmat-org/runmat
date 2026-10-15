@@ -2,11 +2,9 @@ use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
 
+use super::*;
 use runmat_value::{CharArray, Value};
 use tempfile::tempdir;
-
-use super::super::REPL_FS_TEST_LOCK;
-use super::*;
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     futures::executor::block_on(pwd_builtin(args))
@@ -33,9 +31,7 @@ impl Drop for DirGuard {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn returns_current_directory_as_character_row() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
 
     let expected = env::current_dir().expect("current directory");
@@ -54,9 +50,7 @@ fn returns_current_directory_as_character_row() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn observes_directory_changes() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
     let temporary = tempdir().expect("temporary directory");
     env::set_current_dir(temporary.path()).expect("change directory");
@@ -71,9 +65,7 @@ fn observes_directory_changes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn rejects_arguments_with_stable_error() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
 
     let error = call(vec![Value::Num(1.0)]).expect_err("pwd input must fail");

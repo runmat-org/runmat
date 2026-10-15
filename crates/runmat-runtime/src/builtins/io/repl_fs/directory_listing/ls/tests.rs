@@ -4,8 +4,6 @@ use runmat_value::{IntegerStorage, Tensor};
 use std::sync::Arc;
 use tempfile::tempdir;
 
-use super::super::super::REPL_FS_TEST_LOCK;
-
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     futures::executor::block_on(ls_builtin(args))
 }
@@ -27,9 +25,7 @@ fn rows(value: Value) -> Vec<String> {
 
 #[test]
 fn runmat_mode_lists_one_name_per_row() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let folder = tempdir().expect("temporary directory");
     File::create(folder.path().join("alpha.txt")).expect("file");
@@ -46,9 +42,7 @@ fn runmat_mode_lists_one_name_per_row() {
 
 #[test]
 fn wildcard_uses_the_filesystem_enumerator() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let folder = tempdir().expect("temporary directory");
     File::create(folder.path().join("one.m")).expect("m file");
@@ -61,9 +55,7 @@ fn wildcard_uses_the_filesystem_enumerator() {
 
 #[test]
 fn relative_wildcard_output_is_independent_of_provider_path_style() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
@@ -82,9 +74,7 @@ fn relative_wildcard_output_is_independent_of_provider_path_style() {
 #[cfg(not(windows))]
 #[test]
 fn strict_mode_uses_a_unix_character_vector() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let folder = tempdir().expect("temporary directory");
     File::create(folder.path().join("a.txt")).expect("first file");
@@ -124,9 +114,7 @@ fn output_and_character_shape_admission_precede_enumeration() {
 
 #[test]
 fn console_listing_occurs_only_without_captured_outputs() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/listed.m", b"")

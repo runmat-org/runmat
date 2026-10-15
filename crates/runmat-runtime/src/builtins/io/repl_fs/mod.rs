@@ -36,5 +36,3 @@ pub mod uigetfile;
 pub mod uiputfile;
 mod working_directory;
 pub mod xml;
-
-pub use self::test_support::REPL_FS_TEST_LOCK;

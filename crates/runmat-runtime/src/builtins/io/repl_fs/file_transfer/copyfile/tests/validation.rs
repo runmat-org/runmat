@@ -9,9 +9,7 @@ use tempfile::tempdir;
 
 #[test]
 fn reports_missing_empty_and_same_path_inputs() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let missing = temp.path().join("missing.txt");
     let target = temp.path().join("target.txt");
@@ -43,9 +41,7 @@ fn reports_missing_empty_and_same_path_inputs() {
 fn validates_force_flag_and_accepts_uppercase_character_row() {
     let error = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)]).unwrap_err();
     assert_eq!(error.message(), COPYFILE_ERROR_FLAG_ARG.message);
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let temp = tempdir().unwrap();
     let source = temp.path().join("source.txt");
     let target = temp.path().join("target.txt");

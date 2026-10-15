@@ -91,9 +91,7 @@ fn matlab_mode_rejects_resident_numeric_before_provider_lookup() {
 #[test]
 fn resident_numeric_root_uses_its_exact_provider_and_retains_the_source() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _lock = runmat_filesystem::provider_override_lock();
         let directory = tempdir().expect("directory");
         let path_text = directory.path().to_string_lossy();
         let tensor = Tensor::new(

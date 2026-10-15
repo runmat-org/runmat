@@ -1,4 +1,3 @@
-use super::super::REPL_FS_TEST_LOCK;
 use super::*;
 use crate::BuiltinResult;
 use runmat_filesystem as vfs;
@@ -94,10 +93,8 @@ fn test_guard() -> (
     std::sync::MutexGuard<'static, ()>,
     std::sync::MutexGuard<'static, ()>,
 ) {
+    let fs_lock = runmat_filesystem::provider_override_lock();
     let workspace = workspace_guard();
-    let fs_lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
     (workspace, fs_lock)
 }
 

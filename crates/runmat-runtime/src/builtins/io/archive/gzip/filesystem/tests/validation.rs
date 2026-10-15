@@ -13,9 +13,7 @@ use super::support::{encoded, runtime, RecordingProvider, ReplacingHttpService};
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn public_call_rejects_an_initially_invalid_resource_lease_before_provider_effects() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected"));
     selected.valid.store(false, Ordering::SeqCst);
     let _selected = runmat_filesystem::replace_provider(selected.clone());
@@ -41,9 +39,7 @@ fn public_call_rejects_an_initially_invalid_resource_lease_before_provider_effec
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn invalid_local_gunzip_filename_rejects_before_provider_effects() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected"));
     let error = runmat_filesystem::with_provider_override(selected.clone(), || {
         futures::executor::block_on(super::super::super::gunzip_builtin(
@@ -62,9 +58,7 @@ fn invalid_local_gunzip_filename_rejects_before_provider_effects() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn invalid_url_gunzip_filename_rejects_before_http_or_filesystem_effects() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(RecordingProvider::new("/selected"));
     let replacement = Arc::new(RecordingProvider::new("/replacement"));
     let sends = Arc::new(AtomicUsize::new(0));

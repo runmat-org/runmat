@@ -996,9 +996,7 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn scene_chunk_reader_resolves_provider_relative_paths() {
-        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _fs_lock = runmat_filesystem::provider_override_lock();
         let root = std::env::temp_dir().join(format!(
             "runmat_scene_relpath_{}",
             std::time::SystemTime::now()

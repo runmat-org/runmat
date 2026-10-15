@@ -5,13 +5,10 @@ use runmat_value::{CharArray, Value};
 use tempfile::tempdir;
 
 use super::support::{call, canonical, DirGuard};
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
 #[test]
 fn query_returns_current_directory_as_character_row() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
     let expected = env::current_dir().expect("current directory");
     let value = call(Vec::new()).expect("cd query");
@@ -24,9 +21,7 @@ fn query_returns_current_directory_as_character_row() {
 
 #[test]
 fn change_returns_previous_directory() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
     let original = env::current_dir().expect("current directory");
     let target = tempdir().expect("temporary directory");
@@ -44,9 +39,7 @@ fn change_returns_previous_directory() {
 
 #[test]
 fn relative_character_path_is_resolved_from_current_directory() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
     let root = tempdir().expect("temporary root");
     let child = root.path().join("child");
@@ -64,9 +57,7 @@ fn relative_character_path_is_resolved_from_current_directory() {
 
 #[test]
 fn scalar_string_array_is_accepted() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = DirGuard::new();
     let current = env::current_dir().expect("current directory");
     let input =

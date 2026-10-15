@@ -315,11 +315,27 @@ fn abandoning_suspended_rhs_drops_owned_future_without_replaying_effects() {
             workspace: None,
         })
         .unwrap();
-    assert!(matches!(
-        invocation.advance().unwrap(),
-        runmat_native_executor::execute::NativeInvocationStep::Suspended { .. }
-    ));
-    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    // A generated pre-callback stage may complete before the semantic RHS is
+    // polled. Abandon the exact pending callback, not an earlier ready stage.
+    loop {
+        let runmat_native_executor::execute::NativeInvocationStep::Suspended {
+            continuation,
+            generation,
+        } = invocation.advance().unwrap()
+        else {
+            panic!("generated RHS must suspend");
+        };
+        let mut resume = Box::pin(invocation.resume_suspension(continuation, generation));
+        match futures::executor::block_on(async { futures::poll!(resume.as_mut()) }) {
+            std::task::Poll::Ready(Ok(())) => drop(resume),
+            std::task::Poll::Ready(Err(error)) => panic!("RHS resume failed: {error}"),
+            std::task::Poll::Pending => {
+                assert_eq!(calls.load(Ordering::SeqCst), 1);
+                drop(resume);
+                break;
+            }
+        }
+    }
     drop(invocation);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(calls.load(Ordering::SeqCst), 1);

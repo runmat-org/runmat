@@ -1,12 +1,9 @@
 use runmat_value::{CharArray, StringArray, Value};
 
 use super::support::{call, DirGuard};
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
 fn locked() -> (std::sync::MutexGuard<'static, ()>, DirGuard) {
-    let lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let lock = runmat_filesystem::provider_override_lock();
     let guard = DirGuard::new();
     (lock, guard)
 }

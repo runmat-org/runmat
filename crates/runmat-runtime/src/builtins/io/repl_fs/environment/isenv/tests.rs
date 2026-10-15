@@ -1,5 +1,4 @@
 use super::*;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_value::{StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -17,7 +16,7 @@ fn direct_requested_output_boundary_rejects_before_name_parsing() {
 
 #[test]
 fn scalar_and_string_array_queries_follow_environment_state() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     crate::builtins::common::env::set_var("RUNMAT_ISENV_TEST_A", "");
     crate::builtins::common::env::remove_var("RUNMAT_ISENV_TEST_B");
     assert_eq!(

@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
 use super::support::{call, PathGuard};
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
 fn codes() -> Value {
     Value::Tensor(
@@ -17,9 +16,7 @@ fn codes() -> Value {
 
 #[test]
 fn runmat_mode_accepts_typed_numeric_character_codes() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let _guard = PathGuard::new();
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     call(vec![codes()]).expect("numeric path");
@@ -31,9 +28,7 @@ fn runmat_mode_accepts_typed_numeric_character_codes() {
 
 #[test]
 fn matlab_mode_rejects_numeric_codes_before_mutation() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let guard = PathGuard::new();
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = call(vec![codes()]).expect_err("numeric extension");
@@ -49,9 +44,7 @@ fn matlab_mode_rejects_numeric_codes_before_mutation() {
 
 #[test]
 fn matlab_mode_rejects_resident_codes_before_provider_lookup() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|value| value.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let guard = PathGuard::new();
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
     let allocation =
@@ -79,9 +72,7 @@ fn matlab_mode_rejects_resident_codes_before_provider_lookup() {
 #[test]
 fn resident_numeric_path_uses_its_exact_provider_and_retains_the_source() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let _lock = REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|value| value.into_inner());
+        let _lock = runmat_filesystem::provider_override_lock();
         let _guard = PathGuard::new();
         let text = "resident-path";
         let tensor = Tensor::new(

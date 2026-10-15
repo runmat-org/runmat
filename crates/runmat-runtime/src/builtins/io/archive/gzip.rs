@@ -398,7 +398,6 @@ fn gunzip_output_name(filename: &str) -> BuiltinResult<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -406,7 +405,7 @@ mod tests {
 
     #[test]
     fn gzip_and_gunzip_round_trip_file() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let dir = std::env::temp_dir().join("runmat_gzip_test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -431,7 +430,7 @@ mod tests {
 
     #[test]
     fn gzip_accepts_string_array_inputs() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let dir = std::env::temp_dir().join("runmat_gzip_array_test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -456,7 +455,7 @@ mod tests {
 
     #[test]
     fn wildcard_round_trip_uses_active_memory_filesystem_and_sorted_paths() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let filesystem = vfs::MemoryFsProvider::with_current_dir("/workspace");
         filesystem
             .write_project_path("/workspace/in/b.txt", b"second")

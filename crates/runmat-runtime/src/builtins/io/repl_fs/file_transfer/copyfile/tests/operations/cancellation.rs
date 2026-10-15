@@ -28,9 +28,7 @@ impl Drop for PendingTurn {
 
 #[test]
 fn cancelled_copy_rejects_before_provider_effects_with_typed_cause() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     filesystem
         .write_project_path("/workspace/source.bin", b"unchanged")
@@ -66,9 +64,7 @@ fn cancelled_copy_rejects_before_provider_effects_with_typed_cause() {
 
 #[test]
 fn pending_copy_byte_checkpoint_drops_without_replaying_completed_chunk() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
     filesystem
         .write_project_path("/workspace/source.bin", &vec![7u8; 32 * 1024])

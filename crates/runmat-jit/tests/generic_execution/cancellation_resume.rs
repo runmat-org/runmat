@@ -73,7 +73,8 @@ fn deopt_ownership(cancel: bool) {
             DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(safepoint)),
         )
         .unwrap();
-    let NativeInvocationStep::Deoptimized { target, frame, .. } = invocation.advance().unwrap()
+    let NativeInvocationStep::Deoptimized { target, frame, .. } =
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("real second-call safepoint must deoptimize");
     };
@@ -104,7 +105,9 @@ fn deopt_ownership(cancel: bool) {
         );
     } else {
         invocation.resume_deoptimization().unwrap();
-        let NativeInvocationStep::Completed(execution) = invocation.advance().unwrap() else {
+        let NativeInvocationStep::Completed(execution) =
+            advance_after_suspended_work(&mut invocation).unwrap()
+        else {
             panic!("uncancelled exact continuation must complete");
         };
         assert!(

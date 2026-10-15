@@ -3,15 +3,11 @@ mod validation;
 
 use std::sync::MutexGuard;
 
+use super::super::result::DirectoryOutcome;
 use runmat_value::Value;
 
-use super::super::super::REPL_FS_TEST_LOCK;
-use super::super::result::DirectoryOutcome;
-
 pub(super) fn lock() -> MutexGuard<'static, ()> {
-    REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
+    runmat_filesystem::provider_override_lock()
 }
 
 pub(super) fn evaluate(args: Vec<Value>) -> crate::BuiltinResult<DirectoryOutcome> {

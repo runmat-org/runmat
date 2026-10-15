@@ -29,9 +29,7 @@ fn rooted_provider_entry_is_not_rebased_under_cwd() {
 
 #[test]
 fn missing_and_file_prefixes_have_no_native_matches() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let folder = tempdir().unwrap();
     std::fs::write(folder.path().join("file"), b"").unwrap();
     for prefix in ["missing", "file"] {
@@ -47,9 +45,7 @@ fn missing_and_file_prefixes_have_no_native_matches() {
 
 #[test]
 fn missing_and_file_prefixes_have_no_memory_provider_matches() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/file", b"")
@@ -69,9 +65,7 @@ fn missing_and_file_prefixes_have_no_memory_provider_matches() {
 
 #[test]
 fn recursive_component_matches_files_at_every_depth() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let folder = tempdir().expect("temporary directory");
     std::fs::create_dir_all(folder.path().join("one/two")).expect("nested folders");
     File::create(folder.path().join("root.m")).expect("root file");
@@ -92,9 +86,7 @@ fn recursive_component_matches_files_at_every_depth() {
 #[test]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn wildcard_traversal_uses_the_installed_filesystem_provider() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/source/root.m", b"")

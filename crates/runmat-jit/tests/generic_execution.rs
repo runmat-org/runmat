@@ -682,7 +682,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
 
         invocation.resume_deoptimization().unwrap();
         let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-            invocation.advance().unwrap()
+            advance_after_suspended_work(&mut invocation).unwrap()
         else {
             panic!("safepoint deoptimization must resume")
         };
@@ -753,7 +753,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
         )
         .unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
-        invocation.advance().unwrap()
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("second safepoint must deoptimize")
     };
@@ -768,7 +768,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
 
     invocation.resume_deoptimization().unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-        invocation.advance().unwrap()
+        advance_after_suspended_work(&mut invocation).unwrap()
     else {
         panic!("GC-stressed deoptimization must resume")
     };
@@ -1146,10 +1146,14 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
 
     let executor = compile_executor(super_method_fixture()).unwrap();
     assert_eq!(
-        executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-            .unwrap()
-            .outputs,
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(6.0)]
     );
 
@@ -1363,9 +1367,13 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
         SequenceDestinationFixture::Dynamic,
     ] {
         let executor = compile_executor(sequence_member_assignment_fixture(destination)).unwrap();
-        let execution = executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap();
+        let execution = futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime_context(),
+        ))
+        .unwrap();
         let Value::StructArray(array) = execution.outputs.first().unwrap() else {
             panic!("expected updated structure array")
         };
@@ -1379,9 +1387,13 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
         SequenceDestinationFixture::Indexed,
     ))
     .unwrap();
-    let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-        .unwrap();
+    let execution = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        Vec::new(),
+        1,
+        runtime_context(),
+    ))
+    .unwrap();
     let Value::StructArray(array) = execution.outputs.first().unwrap() else {
         panic!("expected indexed structure-array update")
     };
@@ -1441,9 +1453,13 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
         drop(activation);
 
         let executor = compile_executor(sequence_member_order_fixture(dynamic)).unwrap();
-        let execution = executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-            .unwrap();
+        let execution = futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap();
         let Value::StructArray(array) = execution.outputs.first().unwrap() else {
             panic!("expected updated structure array")
         };
@@ -1961,14 +1977,28 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
             workspace: None,
         })
         .unwrap();
-    let runmat_native_executor::execute::NativeInvocationStep::Suspended {
-        continuation,
-        generation,
-    } = invocation.advance().unwrap()
-    else {
-        panic!("second contextual call must suspend")
+    let mut retained_transferred = false;
+    let resume = loop {
+        let runmat_native_executor::execute::NativeInvocationStep::Suspended {
+            continuation,
+            generation,
+        } = invocation.advance().unwrap()
+        else {
+            panic!("contextual calls must suspend before site replay")
+        };
+        let resume = invocation.resume_state();
+        futures::executor::block_on(invocation.resume_suspension(continuation, generation))
+            .unwrap();
+        if calls.load(Ordering::SeqCst) == 1 && !retained_transferred {
+            rooted
+                .unroot()
+                .expect("transfer handle ownership to contextual native roots");
+            retained_transferred = true;
+        }
+        if calls.load(Ordering::SeqCst) == 2 {
+            break resume;
+        }
     };
-    let resume = invocation.resume_state();
     let suspended_safepoint = assembly.functions[0].blocks[resume.block as usize]
         .instructions
         .iter()
@@ -1985,10 +2015,6 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
         .and_then(|instruction| instruction.safepoint)
         .expect("suspended contextual site has a safepoint");
     invocation.inject_deoptimization_fault(FaultInjection::Safepoint(suspended_safepoint));
-    rooted
-        .unroot()
-        .expect("transfer handle ownership to contextual native roots");
-    futures::executor::block_on(invocation.resume_suspension(continuation, generation)).unwrap();
     completion_root
         .unroot()
         .expect("transfer handle ownership to completed-call native roots");
@@ -4481,7 +4507,9 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
-                catch_scopes: Default::default(),
+                catch_scopes: [(BasicBlockId(2), vec![runmat_mir::CatchScopeId(0)])]
+                    .into_iter()
+                    .collect(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),

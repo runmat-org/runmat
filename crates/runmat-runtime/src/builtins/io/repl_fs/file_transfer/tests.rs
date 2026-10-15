@@ -6,9 +6,7 @@ use runmat_value::Value;
 #[test]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn copy_and_move_use_the_portable_filesystem_provider() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/source.bin", b"typed bytes")

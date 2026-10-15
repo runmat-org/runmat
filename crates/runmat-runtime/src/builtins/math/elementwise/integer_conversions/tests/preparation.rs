@@ -1,5 +1,5 @@
 mod fixtures;
-use fixtures::{enter, Events};
+use fixtures::{runtime, Events};
 use futures::executor::block_on;
 use runmat_builtins::{
     BuiltinAsyncBehavior, BuiltinOperandPreparation, BuiltinPreparationOperation,
@@ -34,14 +34,17 @@ fn all_eight_contracts_declare_real_suspension_and_typed_unary_form() {
 #[test]
 fn invalid_calls_do_not_prepare_and_valid_shapes_observe_once() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     for name in NAMES {
         for args in [
             vec![],
             vec![Value::String("invalid".into())],
             vec![Value::Num(1.0), Value::Num(2.0)],
         ] {
-            assert!(block_on(crate::dispatcher::call_builtin_async(name, &args)).is_err());
+            assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+                &runtime, name, &args
+            ))
+            .is_err());
             assert!(events.borrow().is_empty());
         }
         for (data, shape) in [
@@ -49,7 +52,10 @@ fn invalid_calls_do_not_prepare_and_valid_shapes_observe_once() {
             (vec![f64::NAN, 3.5], vec![1, 1, 2]),
         ] {
             let args = [Value::Tensor(Tensor::new(data, shape.clone()).unwrap())];
-            let output = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
+            let output = block_on(crate::dispatcher::call_builtin_async_in_context(
+                &runtime, name, &args,
+            ))
+            .unwrap();
             let Value::Tensor(output) = output.value() else {
                 panic!("shape-preserving typed array")
             };
@@ -64,7 +70,7 @@ fn invalid_calls_do_not_prepare_and_valid_shapes_observe_once() {
 #[test]
 fn wide_integer_contents_survive_preparation_without_float_materialization() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     let args = [Value::Tensor(
         Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
@@ -72,7 +78,10 @@ fn wide_integer_contents_survive_preparation_without_float_materialization() {
         )
         .unwrap(),
     )];
-    let result = block_on(crate::dispatcher::call_builtin_async("uint64", &args)).unwrap();
+    let result = block_on(crate::dispatcher::call_builtin_async_in_context(
+        &runtime, "uint64", &args,
+    ))
+    .unwrap();
     let Value::Tensor(output) = result.value() else {
         panic!("typed output")
     };
@@ -86,29 +95,36 @@ fn wide_integer_contents_survive_preparation_without_float_materialization() {
 #[test]
 fn unpolled_call_has_no_service_effect_and_service_replacement_is_revalidated() {
     let events = Events::default();
-    let _context = enter(&events, true);
+    let runtime = runtime(&events, true);
     let args = [Value::Num(1.0)];
-    drop(crate::dispatcher::call_builtin_async("int8", &args));
+    drop(crate::dispatcher::call_builtin_async_in_context(
+        &runtime, "int8", &args,
+    ));
     assert!(events.borrow().is_empty());
-    assert!(block_on(crate::dispatcher::call_builtin_async("int8", &args)).is_err());
+    assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
+        &runtime, "int8", &args
+    ))
+    .is_err());
     assert_eq!(&*events.borrow(), &["prepare", "begin", "failure"]);
 }
 
 #[test]
 fn requested_output_bound_precedes_preparation_but_discard_executes() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     for name in NAMES {
         let args = [Value::Num(3.5)];
-        assert!(block_on(crate::dispatcher::call_builtin_async_with_outputs(
-            name, &args, 2
-        ))
+        assert!(block_on(
+            crate::dispatcher::call_builtin_async_with_outputs_in_context(&runtime, name, &args, 2)
+        )
         .is_err());
         assert!(events.borrow().is_empty());
         for count in [0, 1] {
-            block_on(crate::dispatcher::call_builtin_async_with_outputs(
-                name, &args, count,
-            ))
+            block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &runtime, name, &args, count,
+                ),
+            )
             .unwrap();
             assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
             events.borrow_mut().clear();
@@ -119,13 +135,14 @@ fn requested_output_bound_precedes_preparation_but_discard_executes() {
 #[test]
 fn unsupported_complex_sparse_is_structured_error_before_preparation() {
     let events = Events::default();
-    let _context = enter(&events, false);
+    let runtime = runtime(&events, false);
     let value = Value::SparseTensor(
         runmat_value::SparseTensor::new_complex(2, 1, vec![0, 1], vec![1], vec![(1.0, 2.0)])
             .unwrap(),
     );
     for name in NAMES {
-        let error = block_on(crate::dispatcher::call_builtin_async(
+        let error = block_on(crate::dispatcher::call_builtin_async_in_context(
+            &runtime,
             name,
             std::slice::from_ref(&value),
         ))

@@ -58,9 +58,7 @@ fn trailing_singleton_dimensions_still_describe_a_character_row() {
 
 #[test]
 fn zero_output_mutation_still_executes_and_cell_string_pairing_is_positional() {
-    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap();
+    let _lock = runmat_filesystem::provider_override_lock();
     let names = (0..8)
         .map(|index| format!("RUNMAT_ENV_ND_PAIR_{index}"))
         .collect::<Vec<_>>();

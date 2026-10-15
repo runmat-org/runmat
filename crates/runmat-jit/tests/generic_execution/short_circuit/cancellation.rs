@@ -39,8 +39,8 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
             .begin(ProgramFunctionId(0), vec![], 1, runtime)
             .unwrap();
         let NativeInvocationStep::Suspended {
-            continuation,
-            generation,
+            mut continuation,
+            mut generation,
         } = invocation.advance().unwrap()
         else {
             panic!("generated body must suspend");
@@ -51,8 +51,26 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
             0,
             "unpolled resume preserves work"
         );
-        let mut resume = Box::pin(invocation.resume_suspension(continuation, generation));
-        assert!(resume.as_mut().now_or_never().is_none());
+        let mut resume = loop {
+            let mut resume = Box::pin(invocation.resume_suspension(continuation, generation));
+            match resume.as_mut().now_or_never() {
+                None => break resume,
+                Some(Ok(())) => {
+                    drop(resume);
+                    let NativeInvocationStep::Suspended {
+                        continuation: next_continuation,
+                        generation: next_generation,
+                    } = invocation.advance().unwrap()
+                    else {
+                        panic!("generated callback must suspend");
+                    };
+                    continuation = next_continuation;
+                    generation = next_generation;
+                }
+                Some(Err(error)) => panic!("generated callback resume failed: {error}"),
+            }
+        };
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         if cancel {
             cancellation.cancel(CancellationReason::User);
             assert!(matches!(

@@ -1,5 +1,4 @@
 use super::*;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_filesystem::MemoryFsProvider;
 use runmat_value::{CharArray, IntValue, Value};
 use std::sync::Arc;
@@ -33,9 +32,7 @@ fn names(value: &Value) -> Vec<String> {
 
 #[test]
 fn classifies_and_sorts_direct_children_through_the_filesystem_provider() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/project/zeta.m", b"")
@@ -77,9 +74,7 @@ fn classifies_and_sorts_direct_children_through_the_filesystem_provider() {
 
 #[test]
 fn default_input_uses_the_provider_current_directory() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .write_project_path("/workspace/current.m", b"")
@@ -132,9 +127,7 @@ fn output_and_character_shape_admission_precede_enumeration() {
 
 #[test]
 fn empty_folder_has_empty_column_groups_even_without_outputs() {
-    let _lock = REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let _lock = runmat_filesystem::provider_override_lock();
     let filesystem = MemoryFsProvider::with_current_dir("/workspace");
     filesystem
         .create_dir_project_path("/workspace/empty", true)

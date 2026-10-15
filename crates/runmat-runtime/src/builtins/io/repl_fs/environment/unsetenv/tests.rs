@@ -1,5 +1,4 @@
 use super::*;
-use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_value::{StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -9,7 +8,7 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[test]
 fn removes_scalar_and_shaped_names_idempotently() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     for name in ["RUNMAT_UNSETENV_TEST_A", "RUNMAT_UNSETENV_TEST_B"] {
         crate::builtins::common::env::set_var(name, "value");
     }
@@ -35,7 +34,7 @@ fn removes_scalar_and_shaped_names_idempotently() {
 
 #[test]
 fn validates_the_whole_batch_before_removing_any_name() {
-    let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = runmat_filesystem::provider_override_lock();
     crate::builtins::common::env::set_var("RUNMAT_UNSETENV_TEST_ATOMIC", "value");
     let names = StringArray::new(
         vec!["RUNMAT_UNSETENV_TEST_ATOMIC".into(), "BAD=NAME".into()],

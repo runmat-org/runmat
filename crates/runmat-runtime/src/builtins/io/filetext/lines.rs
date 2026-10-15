@@ -166,7 +166,6 @@ fn cell_lines(array: &CellArray) -> BuiltinResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -174,7 +173,7 @@ mod tests {
 
     #[test]
     fn readlines_returns_column_string_array() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_readlines_test.txt");
         std::fs::write(&path, "a\nb\n").unwrap();
         let value = run(readlines_builtin(vec![Value::String(
@@ -193,7 +192,7 @@ mod tests {
 
     #[test]
     fn writelines_writes_each_string_array_element() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_writelines_test.txt");
         let lines = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![2, 1]).unwrap();
         run(writelines_builtin(vec![
@@ -240,7 +239,7 @@ mod tests {
 
     #[test]
     fn invalid_write_options_do_not_modify_existing_file() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _guard = runmat_filesystem::provider_override_lock();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("unchanged.txt");
         std::fs::write(&path, "original").unwrap();
@@ -321,7 +320,7 @@ mod tests {
 
     #[test]
     fn output_bounds_and_byte_count_gate_precede_filesystem_effects() {
-        let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _lock = runmat_filesystem::provider_override_lock();
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("lines.txt");
         let args = || {

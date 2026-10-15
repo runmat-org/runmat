@@ -4,9 +4,7 @@ use std::path::Path;
 use runmat_value::Value;
 
 pub(super) fn lock() -> std::sync::MutexGuard<'static, ()> {
-    super::super::super::REPL_FS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
+    runmat_filesystem::provider_override_lock()
 }
 
 pub(super) fn run(
