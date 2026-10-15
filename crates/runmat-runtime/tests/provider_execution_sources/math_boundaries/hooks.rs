@@ -151,7 +151,7 @@ impl AccelProvider for Provider {
         _: &GpuTensorHandle,
         _: &[usize],
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
-        let result = (|| -> anyhow::Result<GpuTensorHandle> { self.fail("permute") })();
+        let result: anyhow::Result<GpuTensorHandle> = self.fail("permute");
         result.map(Some).map_err(|source| {
             runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
         })

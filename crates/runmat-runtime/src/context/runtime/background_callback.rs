@@ -57,8 +57,12 @@ impl RuntimeContext {
 /// A sealed projection reconstructs only its original invocation selection.
 /// The exact state/executor are weak; GUI attachment cannot grant other ports.
 #[cfg(feature = "plot-core")]
+type BackgroundCallbackResume =
+    dyn Fn(&RuntimeContext) -> Result<RuntimeContext, crate::RuntimeError>;
+
+#[cfg(feature = "plot-core")]
 pub(crate) struct BackgroundCallbackAuthority {
-    resume: Box<dyn Fn(&RuntimeContext) -> Result<RuntimeContext, crate::RuntimeError>>,
+    resume: Box<BackgroundCallbackResume>,
 }
 
 #[cfg(feature = "plot-core")]
@@ -70,7 +74,7 @@ impl std::fmt::Debug for BackgroundCallbackAuthority {
 
 #[cfg(feature = "plot-core")]
 impl std::ops::Deref for BackgroundCallbackAuthority {
-    type Target = dyn Fn(&RuntimeContext) -> Result<RuntimeContext, crate::RuntimeError>;
+    type Target = BackgroundCallbackResume;
 
     fn deref(&self) -> &Self::Target {
         self.resume.as_ref()

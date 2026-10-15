@@ -2,6 +2,7 @@
 use super::*;
 
 #[cfg(test)]
+#[path = "gpu/tests.rs"]
 mod tests;
 
 pub(super) fn try_meshgrid_gpu_from_vector_axes(

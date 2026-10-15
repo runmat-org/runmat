@@ -856,10 +856,10 @@ impl RuntimeGraphicsCallbackQueue {
                 .await;
             *self.0.in_flight.borrow_mut() = None;
             if callback.representation() == IngressRepresentation::Bound
-                && !(payload_valid()
-                    && claim.is_live()
-                    && !self.is_closed()
-                    && !selected.is_cancelled())
+                && (!payload_valid()
+                    || !claim.is_live()
+                    || self.is_closed()
+                    || selected.is_cancelled())
             {
                 // Effects may already have occurred. Retire the ticket without
                 // publishing success or replacing the callback's primary error.
