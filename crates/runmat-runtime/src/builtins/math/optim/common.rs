@@ -10,6 +10,42 @@ pub(crate) use scalar_cooperation::ScalarCooperation;
 mod scalar_options;
 pub(crate) use scalar_options::ScalarOptionFields;
 
+/// Reuse the canonical metadata contract before provider work. Payload values,
+/// finite checks and authentic resident allocation admission remain runtime-owned.
+pub(crate) fn preflight_catalog_inputs<'a>(
+    entry: &'static runmat_builtins::BuiltinCatalogEntry,
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+    values: impl IntoIterator<Item = &'a Value>,
+) -> BuiltinResult<()> {
+    let inference = runmat_builtins::infer_catalog_call(
+        entry,
+        &runmat_types::CallRequest {
+            arguments: values
+                .into_iter()
+                .map(crate::value_fact::value_fact)
+                .collect(),
+            literals: runmat_types::LiteralContext::default(),
+            outputs: runmat_types::OutputSelection::new(
+                runmat_types::RequestedOutputCount::Exactly(1),
+            ),
+        },
+    );
+    if let Some(diagnostic) = inference
+        .diagnostics
+        .into_iter()
+        .find(|diagnostic| diagnostic.severity == runmat_types::InferenceSeverity::Error)
+    {
+        let mut builder =
+            build_runtime_error(format!("{}: {}", entry.identity.name, diagnostic.message))
+                .with_builtin(entry.identity.name);
+        if let Some(identifier) = error.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        return Err(builder.build());
+    }
+    Ok(())
+}
+
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -461,17 +497,8 @@ pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
 }
 
 pub(crate) fn canonical_option_name(name: &str) -> String {
-    match name.to_ascii_lowercase().as_str() {
-        "tolx" => "TolX".to_string(),
-        "tolfun" | "functiontolerance" | "optimalitytolerance" => "TolFun".to_string(),
-        "steptolerance" => "TolX".to_string(),
-        "maxiter" => "MaxIter".to_string(),
-        "maxfunevals" => "MaxFunEvals".to_string(),
-        "display" => "Display".to_string(),
-        "algorithm" => "Algorithm".to_string(),
-        "specifyobjectivegradient" | "gradobj" => "SpecifyObjectiveGradient".to_string(),
-        _ => name.to_string(),
-    }
+    runmat_builtins::OptimOptionField::parse(name)
+        .map_or_else(|| name.to_string(), |field| field.name().to_string())
 }
 
 pub(crate) fn lookup_option<'a>(options: &'a StructValue, name: &str) -> Option<&'a Value> {
@@ -492,6 +519,30 @@ pub(crate) fn option_f64(
         return Ok(default);
     };
     option_f64_value(builtin, lookup_option(options, field), field, default)
+}
+
+pub(crate) fn preflight_option_scalar(
+    builtin: &str,
+    value: &Value,
+    field: runmat_builtins::OptimOptionField,
+) -> BuiltinResult<()> {
+    let fact = crate::value_fact::value_fact(value);
+    let numeric = matches!(fact.kind, runmat_types::ValueKindFact::Numeric(numeric)
+        if numeric.domain == runmat_types::NumericDomain::Real)
+        || matches!(fact.kind, runmat_types::ValueKindFact::Unknown);
+    if !numeric
+        || fact.storage == runmat_types::StorageFact::Sparse
+        || fact.shape.element_count().is_some_and(|count| count != 1)
+    {
+        return Err(optim_error(
+            builtin,
+            format!(
+                "{builtin}: option {} must be numeric scalar, got {value:?}",
+                field.name()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn option_f64_value(

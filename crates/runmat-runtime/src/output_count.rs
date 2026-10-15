@@ -6,7 +6,9 @@ use std::rc::Rc;
 use crate::context::output_projection::{InvocationOutputProjection, RequestedOutputToken};
 
 mod validation;
-pub(crate) use validation::{validate_fixed_form_outputs, validate_fixed_outputs};
+pub(crate) use validation::{
+    validate_bounded_outputs, validate_fixed_form_outputs, validate_fixed_outputs,
+};
 
 runmat_thread_local! {
     static OUTPUT_COUNT_PROJECTION: RefCell<InvocationOutputProjection> =
@@ -93,6 +95,33 @@ pub fn output_list_with_padding(out_count: usize, mut outputs: Vec<Value>) -> Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn requested_prefix_bounds_are_explicit_and_descriptor_derived() {
+        for (descriptor, maximum, error) in [
+            (
+                &runmat_builtins::LINPROG_DESCRIPTOR,
+                4,
+                &runmat_builtins::LINPROG_ERROR_INVALID_ARGUMENT,
+            ),
+            (
+                &runmat_builtins::CONEPROG_DESCRIPTOR,
+                5,
+                &runmat_builtins::CONEPROG_ERROR_INVALID_ARGUMENT,
+            ),
+        ] {
+            for requested in 0..=maximum {
+                let _outputs = push_output_count(Some(requested));
+                validate_bounded_outputs(descriptor, error, "solver").expect("valid prefix");
+            }
+            let _outputs = push_output_count(Some(maximum + 1));
+            assert!(validate_bounded_outputs(descriptor, error, "solver").is_err());
+            // ByRequestedOutputCount owners are not globally reinterpreted.
+            validate_fixed_outputs(descriptor, error, "solver")
+                .expect("fixed-only wrapper unchanged");
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

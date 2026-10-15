@@ -142,6 +142,14 @@ impl OptimAlgorithm {
 }
 
 impl OptimSolver {
+    /// Existing positional options-struct recognition uses canonical field
+    /// spellings; aliases remain available at the option-name parser boundary.
+    pub fn recognizes_options_field(self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("Solver")
+            || OptimOptionField::parse(name)
+                .is_some_and(|field| self.accepts(field) && name.eq_ignore_ascii_case(field.name()))
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Coneprog => "coneprog",

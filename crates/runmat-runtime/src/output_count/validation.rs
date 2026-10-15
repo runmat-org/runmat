@@ -13,17 +13,28 @@ pub(crate) fn validate_fixed_outputs(
     error: &'static BuiltinErrorDescriptor,
     builtin: &str,
 ) -> crate::BuiltinResult<()> {
+    if descriptor.output_mode != BuiltinOutputMode::Fixed {
+        return Ok(());
+    }
+    validate_bounded_outputs(descriptor, error, builtin)
+}
+
+/// Opt-in bound for a descriptor whose advertised fixed signatures enumerate
+/// every output prefix. Other requested-count owners may have unbounded output.
+pub(crate) fn validate_bounded_outputs(
+    descriptor: &'static BuiltinDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &str,
+) -> crate::BuiltinResult<()> {
     let Some(requested) = super::current_output_count() else {
         return Ok(());
     };
-    if descriptor.output_mode != BuiltinOutputMode::Fixed
-        || descriptor.signatures.iter().any(|signature| {
-            signature
-                .outputs
-                .iter()
-                .any(|output| output.arity == BuiltinParamArity::Variadic)
-        })
-    {
+    if descriptor.signatures.iter().any(|signature| {
+        signature
+            .outputs
+            .iter()
+            .any(|output| output.arity == BuiltinParamArity::Variadic)
+    }) {
         return Ok(());
     }
     let Some(maximum) = descriptor
