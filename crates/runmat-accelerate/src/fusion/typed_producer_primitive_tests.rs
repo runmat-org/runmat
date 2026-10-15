@@ -214,7 +214,7 @@ fn left_division_emits_rhs_over_lhs_for_scalars_and_broadcast_arrays() {
 }
 
 #[test]
-fn mixed_class_left_division_keeps_unknown_admission_and_host_semantics() {
+fn mixed_class_left_division_keeps_represented_recipe_and_host_semantics() {
     runmat_gc::gc_test_context(|| {
         let plan = binary(PrimitiveOp::ElemLeftDiv);
         for (inputs, expected) in [
@@ -228,14 +228,20 @@ fn mixed_class_left_division_keeps_unknown_admission_and_host_semantics() {
             ),
         ] {
             let program = resolve(&plan, &inputs, ProviderPrecision::F64);
-            // The shared operator owner does not yet prove mixed-class
-            // promotion. Preserve that fact rather than inventing a class in
-            // the emitter to make this fixture compile a kernel.
+            assert_eq!(program.floating_class(2).unwrap(), NumericClass::Single);
+            let checked = TypedProducer::emit_checked_program(&plan, &program, ScalarType::F64, 2)
+                .unwrap()
+                .expect("canonical mixed left-division recipe");
             assert!(matches!(
-                program.fact(2).unwrap().kind,
-                runmat_types::ValueKindFact::Unknown
+                checked.wire().nodes.last(),
+                Some(runmat_accelerate_api::scalar_program::ScalarNode::Apply {
+                    operation: runmat_types::ScalarOperation::RealArithmetic(recipe),
+                    ..
+                }) if recipe.operator() == runmat_types::OperatorKind::ElementwiseLeftDivide
+                    && recipe.computation_class() == NumericClass::Double
+                    && recipe.result_class() == NumericClass::Single
             ));
-            assert!(TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None).is_err());
+            assert!(TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None).is_ok());
             let actual = host("ldivide", &inputs);
             assert_eq!(
                 runmat_runtime::value_fact::value_fact(&actual)

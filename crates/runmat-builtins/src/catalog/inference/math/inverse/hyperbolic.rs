@@ -98,6 +98,8 @@ pub(super) fn infer_inverse_hyperbolic(
                 materialize(&mut output);
             } else {
                 preserve_shape_as_dynamic(&mut output);
+                // Domain promotion does not change the materialized carrier.
+                materialize(&mut output);
                 output.residency = input.residency.clone();
             }
         }
@@ -109,6 +111,7 @@ pub(super) fn infer_inverse_hyperbolic(
                 materialize(&mut output);
             } else {
                 preserve_shape_as_dynamic(&mut output);
+                materialize(&mut output);
                 output.residency = input.residency.clone();
             }
         }
@@ -120,6 +123,7 @@ pub(super) fn infer_inverse_hyperbolic(
                 materialize(&mut output);
             } else {
                 preserve_shape_as_dynamic(&mut output);
+                materialize(&mut output);
                 output.residency = input.residency.clone();
             }
         }

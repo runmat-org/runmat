@@ -3,6 +3,9 @@ mod hyperbolic;
 mod prototype;
 mod trigonometric;
 
+#[cfg(test)]
+mod tests;
+
 use domain::{inverse_hyperbolic_literal_domain, inverse_trigonometric_literal_domain};
 use prototype::apply_inverse_trigonometric_like;
 
