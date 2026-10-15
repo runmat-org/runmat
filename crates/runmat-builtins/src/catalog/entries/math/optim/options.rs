@@ -237,7 +237,11 @@ impl OptimSolver {
                 algorithm,
                 OptimAlgorithm::InteriorPoint | OptimAlgorithm::InteriorPointConvex
             ),
-            Self::Lsqcurvefit | Self::Lsqnonlin | Self::Generic => matches!(
+            Self::Lsqcurvefit | Self::Lsqnonlin => matches!(
+                algorithm,
+                OptimAlgorithm::LevenbergMarquardt | OptimAlgorithm::TrustRegionReflective
+            ),
+            Self::Generic => matches!(
                 algorithm,
                 OptimAlgorithm::QuasiNewton
                     | OptimAlgorithm::Bfgs

@@ -7,47 +7,31 @@ use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 mod scalar_cooperation;
 pub(crate) use scalar_cooperation::ScalarCooperation;
+mod host_arrays;
+pub(crate) use host_arrays::{first_nonfinite, logical_values, tensor_values};
 mod scalar_options;
-pub(crate) use scalar_options::ScalarOptionFields;
-
-/// Reuse the canonical metadata contract before provider work. Payload values,
-/// finite checks and authentic resident allocation admission remain runtime-owned.
-pub(crate) fn preflight_catalog_inputs<'a>(
-    entry: &'static runmat_builtins::BuiltinCatalogEntry,
-    error: &'static runmat_builtins::BuiltinErrorDescriptor,
-    values: impl IntoIterator<Item = &'a Value>,
-) -> BuiltinResult<()> {
-    let inference = runmat_builtins::infer_catalog_call(
-        entry,
-        &runmat_types::CallRequest {
-            arguments: values
-                .into_iter()
-                .map(crate::value_fact::value_fact)
-                .collect(),
-            literals: runmat_types::LiteralContext::default(),
-            outputs: runmat_types::OutputSelection::new(
-                runmat_types::RequestedOutputCount::Exactly(1),
-            ),
-        },
-    );
-    if let Some(diagnostic) = inference
-        .diagnostics
-        .into_iter()
-        .find(|diagnostic| diagnostic.severity == runmat_types::InferenceSeverity::Error)
-    {
-        let mut builder =
-            build_runtime_error(format!("{}: {}", entry.identity.name, diagnostic.message))
-                .with_builtin(entry.identity.name);
-        if let Some(identifier) = error.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        return Err(builder.build());
-    }
-    Ok(())
-}
+pub(crate) use scalar_options::{prepare_solver_options, ScalarOptionFields};
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
+}
+
+pub(crate) fn preflight_real_array(
+    name: &str,
+    value: &Value,
+    role: &str,
+    empty: bool,
+) -> BuiltinResult<()> {
+    if !runmat_builtins::nonlinear_real_numeric_metadata(
+        &crate::value_fact::value_fact(value),
+        empty,
+    ) {
+        return Err(optim_error(
+            name,
+            format!("{name}: {role} must be a supported real numeric array"),
+        ));
+    }
+    Ok(())
 }
 
 fn canonicalize_callback_handle(handle: &Value) -> Value {
@@ -265,20 +249,65 @@ pub(crate) async fn prepare_floating_value(
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
 ) -> BuiltinResult<Value> {
+    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    gather_exact_floating_value(name, value, role).await
+}
+
+pub(crate) async fn prepare_floating_value_with_cooperation(
+    name: &str,
+    value: Value,
+    numeric_extension: &BuiltinExtensionDescriptor,
+    resident_extension: &BuiltinExtensionDescriptor,
+    role: &str,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<Value> {
+    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    gather_exact_floating_value_with_cooperation(name, value, role, cooperation).await
+}
+
+fn preflight_floating_value(
+    name: &str,
+    value: &Value,
+    numeric_extension: &BuiltinExtensionDescriptor,
+    resident_extension: &BuiltinExtensionDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
     if matches!(value, Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
     }
-    if is_typed_integer_value(&value) || is_logical_value(&value) {
+    if is_typed_integer_value(value) || is_logical_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
-    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value) {
+    preflight_real_array(name, value, role, true)
+}
+
+async fn gather_exact_floating_value(name: &str, value: Value, role: &str) -> BuiltinResult<Value> {
+    let mut cooperation = ScalarCooperation::for_builtin(
+        runmat_builtins::BuiltinCatalogIdentity { name: "optim" },
+        None,
+    );
+    gather_exact_floating_value_with_cooperation(name, value, role, &mut cooperation).await
+}
+
+pub(crate) async fn gather_exact_floating_value_with_cooperation(
+    name: &str,
+    value: Value,
+    role: &str,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<Value> {
+    let prepared = cooperation.integer_boundary(&value).await?;
+    if !prepared.is_exact() {
         return Err(optim_error(
             name,
             format!("{name}: integer {role} must be exactly representable as double"),
         ));
     }
-    Ok(value)
+    if let Some(payload) = prepared.into_resident_payload() {
+        return payload
+            .into_value()
+            .map_err(|error| optim_error(name, format!("{name}: {error}")));
+    }
+    crate::dispatcher::gather_if_needed_async(&value).await
 }
 
 pub(crate) async fn initial_guess_with_extensions(
@@ -286,16 +315,20 @@ pub(crate) async fn initial_guess_with_extensions(
     value: Value,
     numeric_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<InitialGuess> {
-    let value = prepare_floating_value(
+    preflight_floating_value(
         name,
-        value,
+        &value,
         numeric_extension,
         resident_extension,
         "initial point",
-    )
-    .await?;
-    initial_guess(name, value).await
+    )?;
+    preflight_real_array(name, &value, "initial guess", false)?;
+    let value =
+        gather_exact_floating_value_with_cooperation(name, value, "initial point", cooperation)
+            .await?;
+    initial_guess_with_cooperation(name, value, cooperation).await
 }
 
 pub(crate) async fn value_to_real_vector_with_extensions(
@@ -304,10 +337,12 @@ pub(crate) async fn value_to_real_vector_with_extensions(
     numeric_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Vec<f64>> {
+    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
     let value =
-        prepare_floating_value(name, value, numeric_extension, resident_extension, role).await?;
-    value_to_real_vector(name, value).await
+        gather_exact_floating_value_with_cooperation(name, value, role, cooperation).await?;
+    value_to_real_vector_with_cooperation(name, value, cooperation).await
 }
 
 pub(crate) async fn value_to_scalar_with_extensions(
@@ -317,8 +352,15 @@ pub(crate) async fn value_to_scalar_with_extensions(
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
 ) -> BuiltinResult<f64> {
-    let value =
-        prepare_floating_value(name, value, numeric_extension, resident_extension, role).await?;
+    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    if crate::value_fact::value_fact(&value)
+        .shape
+        .element_count()
+        .is_some_and(|count| count != 1)
+    {
+        return Err(optim_error(name, format!("{name}: {role} must be scalar")));
+    }
+    let value = gather_exact_floating_value(name, value, role).await?;
     value_to_scalar(name, value)
 }
 
@@ -367,9 +409,8 @@ pub(crate) fn value_to_scalar(name: &str, value: Value) -> BuiltinResult<f64> {
         Value::Int(i) => ensure_finite(name, i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64(&tensor);
-            if values.len() == 1 {
-                ensure_finite(name, values[0])
+            if tensor.len() == 1 {
+                ensure_finite(name, tensor::tensor_value_f64(&tensor, 0))
             } else {
                 Err(optim_error(
                     name,
@@ -394,18 +435,33 @@ pub(crate) fn value_to_scalar(name: &str, value: Value) -> BuiltinResult<f64> {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn value_to_real_vector(name: &str, value: Value) -> BuiltinResult<Vec<f64>> {
+    let mut cooperation = ScalarCooperation::for_builtin(
+        runmat_builtins::BuiltinCatalogIdentity { name: "optim" },
+        None,
+    );
+    value_to_real_vector_with_cooperation(name, value, &mut cooperation).await
+}
+
+pub(crate) async fn value_to_real_vector_with_cooperation(
+    name: &str,
+    value: Value,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     match value {
         Value::Num(n) => Ok(vec![ensure_finite(name, n)?]),
         Value::Int(i) => Ok(vec![ensure_finite(name, i.to_f64())?]),
         Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => finite_vec(name, tensor::tensor_values_f64(&tensor)),
-        Value::LogicalArray(logical) => Ok(logical
-            .data
-            .iter()
-            .map(|&v| if v != 0 { 1.0 } else { 0.0 })
-            .collect()),
+        Value::Tensor(tensor) => {
+            let values = tensor_values(&tensor, cooperation).await?;
+            if let Some(value) = first_nonfinite(&values, cooperation).await? {
+                ensure_finite(name, value)?;
+            }
+            Ok(values)
+        }
+        Value::LogicalArray(logical) => logical_values(&logical.data, cooperation).await,
         other => Err(optim_error(
             name,
             format!("{name}: function value must be a real numeric vector, got {other:?}"),
@@ -413,7 +469,21 @@ pub(crate) async fn value_to_real_vector(name: &str, value: Value) -> BuiltinRes
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn initial_guess(name: &str, value: Value) -> BuiltinResult<InitialGuess> {
+    let mut cooperation = ScalarCooperation::for_builtin(
+        runmat_builtins::BuiltinCatalogIdentity { name: "optim" },
+        None,
+    );
+    initial_guess_with_cooperation(name, value, &mut cooperation).await
+}
+
+pub(crate) async fn initial_guess_with_cooperation(
+    name: &str,
+    value: Value,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<InitialGuess> {
+    preflight_real_array(name, &value, "initial guess", false)?;
     let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     match value {
         Value::Num(n) => Ok(InitialGuess {
@@ -432,15 +502,18 @@ pub(crate) async fn initial_guess(name: &str, value: Value) -> BuiltinResult<Ini
             scalar: true,
         }),
         Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64(&tensor);
+            let values = tensor_values(&tensor, cooperation).await?;
             if values.is_empty() {
                 return Err(optim_error(
                     name,
                     format!("{name}: initial guess cannot be empty"),
                 ));
             }
+            if let Some(value) = first_nonfinite(&values, cooperation).await? {
+                ensure_finite(name, value)?;
+            }
             Ok(InitialGuess {
-                values: finite_vec(name, values)?,
+                values,
                 shape: tensor.shape().to_vec(),
                 scalar: false,
             })
@@ -453,11 +526,7 @@ pub(crate) async fn initial_guess(name: &str, value: Value) -> BuiltinResult<Ini
                 ));
             }
             Ok(InitialGuess {
-                values: logical
-                    .data
-                    .iter()
-                    .map(|&v| if v != 0 { 1.0 } else { 0.0 })
-                    .collect(),
+                values: logical_values(&logical.data, cooperation).await?,
                 shape: logical.shape,
                 scalar: false,
             })
@@ -623,17 +692,6 @@ pub(crate) fn option_usize_value(
     Ok(value as usize)
 }
 
-pub(crate) fn option_string(
-    options: Option<&StructValue>,
-    field: &str,
-    default: &str,
-) -> BuiltinResult<String> {
-    let Some(options) = options else {
-        return Ok(default.to_string());
-    };
-    option_string_value(lookup_option(options, field), field, default)
-}
-
 pub(crate) fn option_string_value(
     value: Option<&Value>,
     field: &str,
@@ -658,17 +716,6 @@ pub(crate) fn option_string_value(
 fn ensure_finite(name: &str, value: f64) -> BuiltinResult<f64> {
     if value.is_finite() {
         Ok(value)
-    } else {
-        Err(optim_error(
-            name,
-            format!("{name}: function value must be finite"),
-        ))
-    }
-}
-
-fn finite_vec(name: &str, values: Vec<f64>) -> BuiltinResult<Vec<f64>> {
-    if values.iter().all(|value| value.is_finite()) {
-        Ok(values)
     } else {
         Err(optim_error(
             name,
@@ -763,6 +810,7 @@ mod tests {
                 value,
                 &super::super::fsolve::FSOLVE_INPUT_NUMERIC_EXTENSION,
                 &super::super::fsolve::FSOLVE_RESIDENT_EXTENSION,
+                &mut super::ScalarCooperation::new(runmat_builtins::OptimSolver::Fsolve, None),
             ))
             .unwrap();
             assert_eq!(guess.values, vec![1.0]);
@@ -775,6 +823,7 @@ mod tests {
             wide,
             &super::super::fsolve::FSOLVE_INPUT_NUMERIC_EXTENSION,
             &super::super::fsolve::FSOLVE_RESIDENT_EXTENSION,
+            &mut super::ScalarCooperation::new(runmat_builtins::OptimSolver::Fsolve, None),
         ))
         .expect_err("wide integer cannot cross exactly");
         assert!(error.message().contains("exactly representable"));
@@ -784,8 +833,8 @@ mod tests {
     fn optimizer_integer_metadata_covers_every_runmat_only_role() {
         let capability_sets: [&[runmat_builtins::BuiltinIntegerCapabilityDescriptor]; 4] = [
             &runmat_builtins::FMINBND_INTEGER_CAPABILITIES,
-            &super::super::fminunc::FMINUNC_INTEGER_CAPABILITIES,
-            &super::super::fsolve::FSOLVE_INTEGER_CAPABILITIES,
+            &runmat_builtins::FMINUNC_INTEGER_CAPABILITIES,
+            &runmat_builtins::FSOLVE_INTEGER_CAPABILITIES,
             &runmat_builtins::FZERO_INTEGER_CAPABILITIES,
         ];
         assert_eq!(
@@ -886,9 +935,25 @@ mod tests {
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
 
+        let parsed = option_usize("optim_test", Some(&options), "MaxIter", 400);
+        if let Ok(expected) = usize::try_from(wide) {
+            assert_eq!(parsed.unwrap(), expected);
+        } else {
+            assert!(
+                parsed.is_err(),
+                "a structural count must fit the actual target"
+            );
+        }
+        let field = runmat_builtins::OptimOptionField::MaxFunEvals;
+        assert!(ScalarOptionFields::from_struct(None)
+            .count_product_default("fsolve", field, 100, usize::MAX)
+            .is_err());
+        options.insert("MaxFunEvals", Value::Int(runmat_value::IntValue::U64(17)));
         assert_eq!(
-            option_usize("optim_test", Some(&options), "MaxIter", 400).unwrap(),
-            wide as usize
+            ScalarOptionFields::from_struct(Some(&options))
+                .count_product_default("fsolve", field, 100, usize::MAX)
+                .unwrap(),
+            17
         );
     }
 

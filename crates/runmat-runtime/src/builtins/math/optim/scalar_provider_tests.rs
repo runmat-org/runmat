@@ -126,6 +126,99 @@ impl AccelProvider for RejectDownloadProvider {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn canonical_nonlinear_family_preflights_outputs_and_preserves_failed_transfer_causes() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = Box::leak(Box::new(RejectDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![3.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    for (entry, maximum, output_error) in [
+        (
+            &runmat_builtins::FMINUNC_CATALOG_ENTRY,
+            6,
+            &runmat_builtins::FMINUNC_ERROR_INVALID_ARGUMENT,
+        ),
+        (
+            &runmat_builtins::FSOLVE_CATALOG_ENTRY,
+            5,
+            &runmat_builtins::FSOLVE_ERROR_INVALID_ARGUMENT,
+        ),
+        (
+            &runmat_builtins::LSQNONLIN_CATALOG_ENTRY,
+            7,
+            &runmat_builtins::LSQNONLIN_ERROR_TOO_MANY_OUTPUTS,
+        ),
+        (
+            &runmat_builtins::LSQCURVEFIT_CATALOG_ENTRY,
+            7,
+            &runmat_builtins::LSQCURVEFIT_ERROR_TOO_MANY_OUTPUTS,
+        ),
+    ] {
+        let mut args = vec![
+            Value::FunctionHandle("sin".into()),
+            Value::GpuTensor(resident.handle.clone()),
+        ];
+        if entry.identity == runmat_builtins::LSQCURVEFIT_CATALOG_ENTRY.identity {
+            args.extend([Value::Num(1.0), Value::Num(1.0)]);
+        }
+        let before = provider.downloads.load(Ordering::SeqCst);
+        let error = block_on(crate::call_builtin_async_with_outputs_in_context(
+            &runtime,
+            entry.identity.name,
+            &args,
+            maximum + 1,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            output_error.identifier,
+            "{}",
+            entry.identity.name
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), before);
+        let failed = block_on(crate::call_builtin_async_with_outputs_in_context(
+            &runtime,
+            entry.identity.name,
+            &args,
+            1,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            provider.downloads.load(Ordering::SeqCst),
+            before + 1,
+            "{}",
+            entry.identity.name
+        );
+        assert_eq!(failed.identifier(), Some("RunMat:gather:DownloadFailed"));
+        assert_eq!(failed.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        let mut source: &(dyn std::error::Error + 'static) = &failed;
+        while !source.is::<std::io::Error>() {
+            source = source
+                .source()
+                .expect("original transfer cause must survive solver mapping");
+        }
+        assert_eq!(
+            source.to_string(),
+            "scalar optimization fixture rejected transfer"
+        );
+        assert_eq!(resident.probe.retirements(), 0);
+    }
+    resident.handle.release().unwrap();
+}
+
 #[test]
 fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_lease() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();

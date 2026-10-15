@@ -38,28 +38,44 @@ impl ScalarCooperation {
             budget
                 .checkpoint(units)
                 .await
-                .map_err(|source| match source {
-                    source @ ExecutionServiceError::Cancelled => {
-                        let namespace = self.namespace.as_deref().unwrap_or("RunMat");
-                        build_runtime_error(format!(
-                            "{}: execution was cancelled",
-                            self.builtin.name
-                        ))
-                        .with_identifier(format!("{namespace}:Cancelled"))
-                        .with_builtin(self.builtin.name)
-                        .with_source(source)
-                        .with_gpu_gather_retry(GpuGatherRetry::Never)
-                        .build()
-                    }
-                    other => {
-                        let mut failure = other.into_runtime_error();
-                        failure.context = failure.context.with_builtin(self.builtin.name);
-                        failure.gpu_gather_retry = GpuGatherRetry::Never;
-                        failure
-                    }
-                })?;
+                .map_err(|source| self.execution_error(source))?;
         }
         Ok(())
+    }
+
+    pub(crate) async fn integer_boundary<'a>(
+        &mut self,
+        value: &'a runmat_value::Value,
+    ) -> BuiltinResult<crate::builtins::common::validation::PreparedIntegerBoundary<'a>> {
+        use crate::builtins::common::validation::{
+            prepare_direct_integer_f64_boundary, IntegerBoundaryFailure,
+        };
+        prepare_direct_integer_f64_boundary(value, self.budget.as_mut())
+            .await
+            .map_err(|error| match error {
+                IntegerBoundaryFailure::Execution(source) => self.execution_error(source),
+                other => other.into_runtime_error(),
+            })
+    }
+
+    fn execution_error(&self, source: ExecutionServiceError) -> crate::RuntimeError {
+        match source {
+            source @ ExecutionServiceError::Cancelled => {
+                let namespace = self.namespace.as_deref().unwrap_or("RunMat");
+                build_runtime_error(format!("{}: execution was cancelled", self.builtin.name))
+                    .with_identifier(format!("{namespace}:Cancelled"))
+                    .with_builtin(self.builtin.name)
+                    .with_source(source)
+                    .with_gpu_gather_retry(GpuGatherRetry::Never)
+                    .build()
+            }
+            other => {
+                let mut failure = other.into_runtime_error();
+                failure.context = failure.context.with_builtin(self.builtin.name);
+                failure.gpu_gather_retry = GpuGatherRetry::Never;
+                failure
+            }
+        }
     }
 
     #[cfg(test)]

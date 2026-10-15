@@ -29,6 +29,13 @@ fn solver_policies_keep_typed_option_and_control_identities() {
     assert!(!OptimSolver::Fzero.accepts_display(OptimDisplay::Notify));
     assert!(OptimSolver::Fminunc.accepts_algorithm(OptimAlgorithm::Bfgs));
     assert!(!OptimSolver::Fzero.accepts_algorithm(OptimAlgorithm::Bfgs));
+    for solver in [OptimSolver::Lsqcurvefit, OptimSolver::Lsqnonlin] {
+        assert!(solver.accepts_algorithm(OptimAlgorithm::LevenbergMarquardt));
+        assert!(solver.accepts_algorithm(OptimAlgorithm::TrustRegionReflective));
+        assert!(!solver.accepts_algorithm(OptimAlgorithm::Bfgs));
+        assert!(!solver.accepts_algorithm(OptimAlgorithm::QuasiNewton));
+    }
+    assert!(OptimSolver::Generic.accepts_algorithm(OptimAlgorithm::Bfgs));
     assert_eq!(OptimDisplay::parse(" iter "), Some(OptimDisplay::Iter));
     assert_eq!(OptimAlgorithm::parse(" bfgs "), Some(OptimAlgorithm::Bfgs));
     assert_eq!(OptimSwitch::parse("yes"), Some(OptimSwitch::On));
