@@ -87,6 +87,7 @@ pub fn value_contains_native_integer_class(value: &Value) -> bool {
             .values()
             .any(value_contains_native_integer_class),
         Value::StructArray(value) => value.any_value(value_contains_native_integer_class),
+        Value::ObjectArray(value) => value.data().iter().any(value_contains_native_integer_class),
         Value::Object(value) => value
             .properties
             .values()
@@ -108,6 +109,7 @@ pub fn value_contains_explicit_gpu(value: &Value) -> bool {
         Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
         Value::StructArray(value) => value.any_value(value_contains_explicit_gpu),
+        Value::ObjectArray(value) => value.data().iter().any(value_contains_explicit_gpu),
         Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),

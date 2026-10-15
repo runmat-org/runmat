@@ -51,9 +51,10 @@ pub fn gathered_value_fact(input: &ValueFact) -> ValueFact {
             }
         }
         ValueKindFact::Object(object) if object.handle_semantics != Some(true) => {
-            // ObjectFact cannot distinguish Value::Object (properties gathered)
-            // from ObjectArray (passed through), including singleton arrays.
-            // Preserve facts true on both routes rather than claiming Host.
+            // Gather visits value-object properties, including value elements
+            // of ObjectArray; handle objects pass through. ObjectFact may leave
+            // those handle semantics unknown, so preserve the conservative
+            // identity/gather join rather than claiming every property is Host.
             for property in object.properties.values_mut() {
                 *property = property.join(&gathered_value_fact(property));
             }

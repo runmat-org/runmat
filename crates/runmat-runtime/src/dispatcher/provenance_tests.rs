@@ -41,6 +41,84 @@ fn owned_object_array_projection_preserves_class_shape_and_source_aliases() {
     })
     .unwrap();
     assert_eq!(allocation.handle.view().provenance(), None);
+
+    // Same-named old/new class products are distinct owners even after all
+    // elements have been deleted. A no-work gather must retain both exact Rc
+    // identities and the independent unselected-origin marker.
+    use runmat_value::{
+        BoundFunctionBinding, FunctionDefinitionOwner, LocalExport, ObjectArray,
+        SelectedObjectClassFacts, SelectedReceiverClassDeclaration,
+        SelectedReceiverDeclarationSeal, SelectedReceiverDeclarations,
+    };
+    use std::{collections::HashMap, rc::Rc, sync::Arc};
+    let class = ClassIdentity::new("ProvenanceValue").unwrap();
+    let issuer = Arc::new(());
+    let selected = || {
+        let definition = Arc::new(FunctionDefinitionOwner::default());
+        let declarations = Arc::new(
+            SelectedReceiverDeclarations::new(
+                class.clone(),
+                false,
+                vec![class.clone()],
+                HashMap::from([(
+                    class.clone(),
+                    SelectedReceiverClassDeclaration {
+                        parent: None,
+                        properties: HashMap::new(),
+                        events: HashMap::new(),
+                    },
+                )]),
+                HashMap::new(),
+            )
+            .unwrap(),
+        );
+        let (seal, key) = SelectedReceiverDeclarationSeal::issue();
+        assert!(definition.admit_selected_receiver_seal(Arc::clone(&seal)));
+        assert!(seal.fill(&key, Arc::clone(&declarations)));
+        Rc::new(
+            SelectedObjectClassFacts::new(
+                declarations,
+                BoundFunctionBinding::local(
+                    1,
+                    Arc::downgrade(&issuer),
+                    FunctionDefinitionOwner::issue(&definition, 1),
+                    Vec::new(),
+                    LocalExport::Ephemeral,
+                ),
+                HashMap::new(),
+            )
+            .unwrap(),
+        )
+    };
+    let old = selected();
+    let new = selected();
+    assert!(!Rc::ptr_eq(&old, &new));
+    for unselected in [false, true] {
+        let mut empty = ObjectArray::empty(class.clone(), vec![0, 2, 3])
+            .unwrap()
+            .with_selected_provenance([old.clone(), new.clone()])
+            .unwrap();
+        if unselected {
+            empty = empty.with_unselected_provenance();
+        }
+        let source = Value::ObjectArray(empty);
+        let mut projected = source.clone();
+        propagate_gpu_provenance(&[], &mut projected).unwrap();
+        for value in [
+            projected,
+            futures::executor::block_on(gather_if_needed_async(&source)).unwrap(),
+        ] {
+            let Value::ObjectArray(array) = value else {
+                panic!("empty object array")
+            };
+            assert_eq!(array.class_name(), &class);
+            assert_eq!(array.shape(), &[0, 2, 3]);
+            assert_eq!(array.has_unselected_provenance(), unselected);
+            assert_eq!(array.selected_provenance().len(), 2);
+            assert!(Rc::ptr_eq(&array.selected_provenance()[0], &old));
+            assert!(Rc::ptr_eq(&array.selected_provenance()[1], &new));
+        }
+    }
 }
 
 #[test]

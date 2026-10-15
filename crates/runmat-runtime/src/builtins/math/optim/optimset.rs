@@ -353,6 +353,162 @@ mod tests {
                 physical.acquire().is_none(),
                 "final returned option releases its allocation"
             );
+
+            // These are actual owned ObjectArray elements, nested through both
+            // a struct and cell. Compatibility and retention must traverse the
+            // same owned graph as gather, without following managed referents.
+            fn nested_objects(payload: Value) -> Value {
+                let mut object = runmat_value::ObjectInstance::new("OptimsetPayload");
+                object.properties.insert("payload".into(), payload);
+                let array = runmat_value::ObjectArray::from_objects(
+                    "OptimsetPayload",
+                    vec![object.clone(), object],
+                    vec![1, 2],
+                )
+                .expect("homogeneous value objects");
+                let mut structure = StructValue::new();
+                structure.insert("items".into(), Value::ObjectArray(array));
+                Value::Cell(
+                    runmat_value::CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap(),
+                )
+            }
+            fn objects(payload: &Value) -> &runmat_value::ObjectArray {
+                let Value::Cell(cell) = payload else {
+                    panic!("outer cell")
+                };
+                let Value::Struct(structure) = &cell.data[0] else {
+                    panic!("nested struct")
+                };
+                let Value::ObjectArray(array) = &structure.fields["items"] else {
+                    panic!("object array")
+                };
+                assert_eq!(array.class_name().display_name(), "OptimsetPayload");
+                assert_eq!(array.shape(), &[1, 2]);
+                array
+            }
+            let upload = |intent| {
+                provider
+                    .upload(&HostTensorView {
+                        data: &values,
+                        shape: &shape,
+                    })
+                    .unwrap()
+                    .with_provenance(intent)
+                    .unwrap()
+            };
+            let explicit = upload(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let automatic = upload(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let explicit_lease = explicit.allocation_lease().downgrade();
+            let automatic_lease = automatic.allocation_lease().downgrade();
+            let mixed = nested_objects(Value::Cell(
+                runmat_value::CellArray::new(
+                    vec![
+                        Value::GpuTensor(explicit.clone()),
+                        Value::GpuTensor(automatic.clone()),
+                    ],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                mixed.clone(),
+            ]))
+            .expect_err("nested explicit ObjectArray value must be gated before gather");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_OPTION_EXTENSION.error_identifier
+            );
+            drop(strict);
+            let Value::Struct(result) = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                mixed.clone(),
+            ]))
+            .unwrap() else {
+                panic!("options struct")
+            };
+            let stored = &result.fields["FutureOption"];
+            assert_eq!(stored, &mixed, "entire mixed payload is retained");
+            assert_eq!(objects(stored).len(), 2);
+            let mut handles = Vec::new();
+            crate::dispatcher::try_visit_gpu_handles(stored, &mut |handle| {
+                handles.push(handle.clone())
+            })
+            .unwrap();
+            assert_eq!(handles.len(), 4);
+            for pair in handles.chunks_exact(2) {
+                assert!(pair[0].shares_allocation_with(&explicit));
+                assert!(runmat_accelerate_api::handle_is_explicit(&pair[0]));
+                assert!(pair[1].shares_allocation_with(&automatic));
+                assert!(!runmat_accelerate_api::handle_is_explicit(&pair[1]));
+            }
+            drop(handles);
+            drop(mixed);
+            drop(explicit);
+            drop(automatic);
+            assert!(explicit_lease.acquire().is_some());
+            assert!(
+                automatic_lease.acquire().is_some(),
+                "retained automatic sibling owns its lease"
+            );
+            drop(result);
+            assert!(explicit_lease.acquire().is_none());
+            assert!(automatic_lease.acquire().is_none());
+
+            let automatic = nested_objects(Value::GpuTensor(upload(
+                runmat_accelerate_api::GpuHandleProvenance::Automatic,
+            )));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let Value::Struct(result) = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                automatic,
+            ]))
+            .unwrap() else {
+                panic!("options struct")
+            };
+            for value in objects(&result.fields["FutureOption"]).data() {
+                let Value::Object(object) = value else {
+                    panic!("value object")
+                };
+                assert!(
+                    matches!(&object.properties["payload"], Value::Tensor(tensor) if tensor.materialize_f64() == values)
+                );
+            }
+            drop(strict);
+
+            let integer = nested_objects(Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+            ));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                integer.clone(),
+            ]))
+            .expect_err("nested native ObjectArray property must be gated");
+            assert_eq!(
+                error.identifier(),
+                INTEGER_OPTION_EXTENSION.error_identifier
+            );
+            drop(strict);
+            let Value::Struct(result) =
+                block_on(optimset_builtin(vec![Value::from("FutureOption"), integer])).unwrap()
+            else {
+                panic!("options struct")
+            };
+            for value in objects(&result.fields["FutureOption"]).data() {
+                let Value::Object(object) = value else {
+                    panic!("value object")
+                };
+                let Value::Tensor(tensor) = &object.properties["payload"] else {
+                    panic!("integer tensor")
+                };
+                assert!(matches!(
+                    tensor.numeric_value_at(0),
+                    Some(runmat_value::NumericScalar::U64(u64::MAX))
+                ));
+            }
         });
     }
 }

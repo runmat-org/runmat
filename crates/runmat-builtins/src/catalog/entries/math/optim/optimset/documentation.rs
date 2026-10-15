@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Typed and resident payloads", paragraphs: &[
             "Documented numeric option values use single or double. Native integer payloads are a gated RunMat extension: optimset preserves their exact class and bits inside the returned struct. A consuming solver may impose a narrower value contract.",
-            "Options are host metadata, not an elementwise GPU operation. Automatically resident payloads gather transparently; preserving explicitly resident gpuArray payloads is a separately gated RunMat extension. The struct itself is host-resident and marks a fusion boundary.",
+            "Options are host metadata, not an elementwise GPU operation. Each top-level option field is prepared independently. A payload without explicit gpuArray handles gathers automatically resident values recursively. If any explicit gpuArray handle occurs in a payload, preserving that entire payload is a separately gated RunMat extension: its nested automatic resident siblings also remain resident, including within cells, structs, and value-object arrays. The options struct itself is host-resident and marks a fusion boundary.",
         ]},
     ],
     examples: &[

@@ -251,6 +251,13 @@ fn gather_if_needed_async_impl<'a>(
                 Ok(Value::Object(cloned))
             }
             Value::ObjectArray(array) => {
+                // No elements can require materialization. In particular keep
+                // the exact selected/unselected class products retained after
+                // an array became empty; a fresh constructor cannot recover
+                // those owners from its class name.
+                if array.is_empty() {
+                    return Ok(Value::ObjectArray(array.clone()));
+                }
                 let mut gathered = Vec::with_capacity(array.len());
                 for value in array.data() {
                     gathered.push(gather_if_needed_async_impl(value).await?);
