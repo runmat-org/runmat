@@ -560,21 +560,21 @@ impl Accelerator {
             (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
                 let ha = self.gather_handle(ga).await?;
                 let hb = self.gather_handle(gb).await?;
-                self.elementwise_add_resolved(&ha, &hb)
+                self.elementwise_add_resolved(&ha, &hb).await
             }
             (Value::GpuTensor(ga), other) => {
                 let ha = self.gather_handle(ga).await?;
-                self.elementwise_add_resolved(&ha, other)
+                self.elementwise_add_resolved(&ha, other).await
             }
             (other, Value::GpuTensor(gb)) => {
                 let hb = self.gather_handle(gb).await?;
-                self.elementwise_add_resolved(other, &hb)
+                self.elementwise_add_resolved(other, &hb).await
             }
-            _ => self.elementwise_add_resolved(a, b),
+            _ => self.elementwise_add_resolved(a, b).await,
         }
     }
 
-    fn elementwise_add_resolved(
+    async fn elementwise_add_resolved(
         &self,
         a: &Value,
         b: &Value,
@@ -583,7 +583,8 @@ impl Accelerator {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
-                    runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                    runmat_runtime::call_builtin_async("plus", &[a.clone(), b.clone()])
+                        .await
                         .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
                 ExecutionTarget::Gpu(_) => {
@@ -599,7 +600,8 @@ impl Accelerator {
                         .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
             },
-            _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+            _ => runmat_runtime::call_builtin_async("plus", &[a.clone(), b.clone()])
+                .await
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from_source),
         }
     }

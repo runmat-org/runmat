@@ -103,6 +103,7 @@ impl RuntimeGraphicsScene {
         self.snapshot.figure.as_ref()
     }
 
+    #[cfg(any(all(feature = "gui", not(target_arch = "wasm32")), test))]
     pub(crate) fn retained_byte_upper_bound(&self) -> Option<usize> {
         std::mem::size_of::<GraphicsReceiverRef>()
             .checked_add(self.snapshot.retained_byte_upper_bound()?)

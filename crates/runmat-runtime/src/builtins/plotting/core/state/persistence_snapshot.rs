@@ -31,6 +31,7 @@ pub struct FigureSnapshotEntry {
 }
 
 impl FigureSnapshotEntry {
+    #[cfg(any(all(feature = "gui", not(target_arch = "wasm32")), test))]
     pub(crate) fn retained_byte_upper_bound(&self) -> Option<usize> {
         Self::retained_byte_upper_bound_for_payload(self.figure.retained_snapshot_bytes()?)
     }

@@ -21,10 +21,10 @@ pub(crate) fn preparation_after_effect(
     )
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "plot-core")]
 #[path = "gpu_exports.rs"]
 mod exports;
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "plot-core")]
 pub(crate) use exports::GpuBufferExports;
 
 #[path = "gpu_bounds.rs"]

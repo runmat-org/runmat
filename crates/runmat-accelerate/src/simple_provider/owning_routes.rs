@@ -159,6 +159,23 @@ fn linear_indexing_preserves_native_single_gather_and_rejects_invalid_owner() {
         &gather_error
     ));
     assert!(gather_error.to_string().contains("unknown buffer"));
+    let download =
+        runmat_accelerate_api::ProviderFeasibilityQuery::exact_numeric_download(&single).unwrap();
+    let runmat_accelerate_api::ProviderFeasibility::Supported { estimate } =
+        provider.query_numeric_download_feasibility(&single, &download)
+    else {
+        panic!("actual native F32 registry readback must be admitted on the F64 owner")
+    };
+    assert_eq!(estimate.output_bytes, Some(8));
+    assert_eq!(estimate.transient_bytes, Some(0));
+    assert_eq!(estimate.dispatches, Some(0));
+    assert!(!foreign
+        .query_numeric_download_feasibility(&single, &download)
+        .is_supported());
+    assert!(
+        !provider.query_feasibility(&download).is_supported(),
+        "exact native readback does not widen the general preferred-class snapshot"
+    );
     assert_eq!(
         block_on(provider.download_numeric(&single)).unwrap().data,
         HostNumericDataOwned::F32(vec![1.0, 2.0])

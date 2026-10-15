@@ -17,6 +17,7 @@ mod matmul;
 mod median;
 mod nan;
 mod numeric_reduction;
+mod numeric_download;
 #[cfg(test)]
 mod owning_routes;
 mod power;
@@ -4210,6 +4211,14 @@ impl AccelProvider for InProcessProvider {
             output.validate()?;
             Ok(output)
         })
+    }
+
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.native_numeric_download_feasibility(source, query)
     }
 
     fn download_numeric_host_workspace_bound(
