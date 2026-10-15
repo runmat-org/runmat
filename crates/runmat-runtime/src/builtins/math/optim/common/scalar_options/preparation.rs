@@ -231,13 +231,16 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(matches!(
-            prepared.get("StepTolerance"),
+            prepared.fields.get("StepTolerance"),
             Some(Value::Num(0.125))
         ));
-        assert!(matches!(prepared.get("Algorithm"), Some(Value::Num(42.0))));
+        assert!(matches!(
+            prepared.fields.get("Algorithm"),
+            Some(Value::Num(42.0))
+        ));
         assert!(
-            matches!(prepared.get("UnknownResidentLikeField"), Some(Value::String(value)) if value == "untouched")
+            matches!(prepared.fields.get("UnknownResidentLikeField"), Some(Value::String(value)) if value == "untouched")
         );
-        assert!(prepared.get("TolX").is_none());
+        assert!(prepared.fields.get("TolX").is_none());
     }
 }

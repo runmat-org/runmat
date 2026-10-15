@@ -1838,6 +1838,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::NumericDType;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
