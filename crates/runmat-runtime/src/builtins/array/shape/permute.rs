@@ -24,7 +24,7 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::permute"
 )]
-async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &PERMUTE_DESCRIPTOR,
         &PERMUTE_ERROR_INVALID_ORDER,
@@ -378,23 +378,42 @@ pub(crate) async fn permute_gpu(
     if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
         let native = provider.permute(&handle, &zero_based);
 
-        if let Ok(out) = native {
-            if valid_native_permute_output(&handle, &out, provider, order) {
+        match native {
+            Ok(Some(mut out)) => {
+                if !gpu_helpers::permutation_output_matches(&handle, &out, provider, &zero_based) {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        out,
+                        permute_error(
+                            builtin,
+                            format!("{builtin}: provider returned an invalid permute result"),
+                        ),
+                    ));
+                }
+                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
-            return Err(gpu_helpers::reject_gpu_output(
-                out,
-                permute_error(
-                    builtin,
-                    format!("{builtin}: provider returned an invalid permute result"),
-                ),
-            ));
+            Ok(None) => {}
+            Err(source) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    permute_error(
+                        builtin,
+                        format!("{builtin}: provider permutation failed: {source}"),
+                    ),
+                    source,
+                ))
+            }
         }
     }
     let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
 
-    let host_tensor = match host? {
-        Value::Tensor(tensor) => tensor,
+    let permuted = match host? {
+        Value::Tensor(value) => tensor::tensor_into_value(permute_tensor(builtin, value, order)?),
+        Value::LogicalArray(value) => {
+            Value::LogicalArray(permute_logical_array(builtin, value, order)?)
+        }
+        Value::ComplexTensor(value) => {
+            Value::ComplexTensor(permute_complex_tensor(builtin, value, order)?)
+        }
         other => {
             return Err(permute_error(
                 builtin,
@@ -402,42 +421,7 @@ pub(crate) async fn permute_gpu(
             ))
         }
     };
-    let permuted = permute_tensor(builtin, host_tensor, order)?;
-    gpu_helpers::restore_class_preserving_value(
-        &handle,
-        tensor::tensor_into_value(permuted),
-        builtin,
-    )
-}
-
-fn valid_native_permute_output(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    order: &[usize],
-) -> bool {
-    let mut padded = input.shape().to_vec();
-    padded.resize(order.len(), 1);
-    let expected_shape: Vec<usize> = order.iter().map(|&dim| padded[dim - 1]).collect();
-    output.shape() == expected_shape
-        && output.device_id() == provider.device_id()
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && !input.shares_allocation_with(output)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_integer_type(output)
-            == runmat_accelerate_api::handle_integer_type(input)
-        && runmat_accelerate_api::handle_is_logical(output)
-            == runmat_accelerate_api::handle_is_logical(input)
-        && gpu_helpers::gpu_class_metadata_matches(
-            output,
-            runmat_accelerate_api::handle_precision(input),
-            runmat_accelerate_api::handle_integer_type(input),
-            runmat_accelerate_api::handle_is_logical(input),
-        )
+    gpu_helpers::restore_class_preserving_value(&handle, permuted, builtin)
 }
 
 pub(crate) fn permute_generic<T: Clone>(
@@ -461,7 +445,19 @@ pub(crate) fn permute_generic<T: Clone>(
     if src_shape.len() < rank {
         src_shape.extend(std::iter::repeat_n(1, rank - src_shape.len()));
     }
-    let total: usize = src_shape.iter().product();
+    let total = if src_shape.contains(&0) {
+        0
+    } else {
+        src_shape
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| {
+                permute_error(
+                    builtin,
+                    format!("{builtin}: input shape product exceeds platform limits"),
+                )
+            })?
+    };
     if total != data.len() {
         return Err(permute_error(
             builtin,
@@ -478,9 +474,12 @@ pub(crate) fn permute_generic<T: Clone>(
     for (dst_dim, &src_dim) in zero_based.iter().enumerate() {
         dst_shape[dst_dim] = src_shape[src_dim];
     }
+    if total == 0 {
+        return Ok((Vec::new(), dst_shape));
+    }
 
     let src_strides = compute_strides(&src_shape);
-    let dst_total: usize = dst_shape.iter().product();
+    let dst_total = total;
     let mut dst_coords = vec![0usize; rank];
     let mut src_coords = vec![0usize; rank];
     let mut out = Vec::with_capacity(dst_total);
@@ -811,6 +810,11 @@ pub(crate) mod tests {
 
     #[test]
     fn permute_preserves_native_single_storage() {
+        let shape = [u32::MAX as usize, u32::MAX as usize, 2, 0];
+        let (empty, output_shape) =
+            permute_generic::<f32>("permute", &[], &shape, &[4, 3, 2, 1]).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(output_shape, [0, 2, u32::MAX as usize, u32::MAX as usize]);
         let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single");
         let output = permute_tensor("permute", input, &[2, 1]).expect("permute");
         assert_eq!(

@@ -27,6 +27,21 @@ impl WgpuProvider {
         entry: &BufferEntry,
         order: &[usize],
     ) -> Result<BufferEntry> {
+        self.permute_buffer_optional_exec(entry, order, &std::cell::Cell::new(false), &|_| Ok(()))?
+            .ok_or_else(|| {
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "permute: unsupported physical request",
+                )
+            })
+    }
+
+    pub(in super::super) fn permute_buffer_optional_exec(
+        &self,
+        entry: &BufferEntry,
+        order: &[usize],
+        allocated: &std::cell::Cell<bool>,
+        on_buffer_created: &dyn Fn(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<Option<BufferEntry>> {
         ensure!(!order.is_empty(), "permute: order must not be empty");
         let logical_rank = order.len();
         let integer_type = entry.integer_type();
@@ -48,11 +63,7 @@ impl WgpuProvider {
         let lane_factor = word_factor * component_factor;
         let kernel_rank = logical_rank + usize::from(lane_factor > 1);
         if kernel_rank > crate::backend::wgpu::params::PERMUTE_MAX_RANK {
-            return Err(anyhow!(
-                "permute: rank {} exceeds GPU support (max {})",
-                logical_rank,
-                crate::backend::wgpu::params::PERMUTE_MAX_RANK
-            ));
+            return Ok(None);
         }
 
         ensure!(
@@ -66,11 +77,21 @@ impl WgpuProvider {
         if src_shape.len() < logical_rank {
             src_shape.extend(std::iter::repeat_n(1usize, logical_rank - src_shape.len()));
         }
-
-        let logical_total = src_shape
+        if src_shape
             .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?;
+            .any(|&dimension| dimension > u32::MAX as usize)
+        {
+            return Ok(None);
+        }
+
+        let logical_total = if src_shape.contains(&0) {
+            0
+        } else {
+            src_shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?
+        };
         let storage_total = logical_total
             .checked_mul(lane_factor)
             .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?;
@@ -88,7 +109,7 @@ impl WgpuProvider {
             entry.len
         );
         if storage_total > u32::MAX as usize {
-            return Err(anyhow!("permute: tensor too large for GPU kernel"));
+            return Ok(None);
         }
         let submission_geometry = crate::backend::wgpu_geometry::permutation_submission_geometry(
             u64::try_from(storage_total).map_err(|_| anyhow!("permute: storage size overflow"))?,
@@ -120,7 +141,7 @@ impl WgpuProvider {
         if src_shape.iter().any(|&d| d > u32::MAX as usize)
             || dst_shape.iter().any(|&d| d > u32::MAX as usize)
         {
-            return Err(anyhow!("permute: dimensions exceed GPU kernel limits"));
+            return Ok(None);
         }
 
         let mut kernel_src_shape = Vec::with_capacity(kernel_rank);
@@ -141,18 +162,19 @@ impl WgpuProvider {
 
         let mut src_strides = vec![0usize; kernel_rank];
         let mut stride = 1usize;
-        for (idx, &dim) in kernel_src_shape.iter().enumerate() {
-            src_strides[idx] = stride;
-            stride = stride
-                .checked_mul(dim)
-                .ok_or_else(|| anyhow!("permute: dimension product exceeds GPU limits"))?;
+        if storage_total != 0 {
+            for (idx, &dim) in kernel_src_shape.iter().enumerate() {
+                src_strides[idx] = stride;
+                stride = stride
+                    .checked_mul(dim)
+                    .ok_or_else(|| anyhow!("permute: dimension product exceeds GPU limits"))?;
+            }
         }
 
         ensure!(
-            kernel_dst_shape.iter().try_fold(1usize, |acc, &dim| {
-                acc.checked_mul(dim)
-                    .ok_or_else(|| anyhow!("permute: output dimension product exceeds GPU limits"))
-            })? == storage_total,
+            product_checked(&kernel_dst_shape)
+                .ok_or_else(|| anyhow!("permute: output dimension product exceeds GPU limits"))?
+                == storage_total,
             "permute: output shape/product mismatch"
         );
 
@@ -190,6 +212,8 @@ impl WgpuProvider {
             } else {
                 self.create_storage_buffer(emission, storage_total, "runmat-permute-out")?
             };
+            allocated.set(true);
+            on_buffer_created(&out_buffer)?;
             if storage_total > 0 {
                 let pipeline = bundle.get(emission)?;
                 let mut enc = pending.profiled_encoder(
@@ -210,7 +234,7 @@ impl WgpuProvider {
         })??;
         let out_shape = dst_shape;
         if storage_total == 0 {
-            return Ok(BufferEntry {
+            return Ok(Some(BufferEntry {
                 logical: entry.logical,
                 allocated_bytes: out_buffer.size(),
                 buffer: out_buffer,
@@ -219,7 +243,7 @@ impl WgpuProvider {
                 usage: BufferUsageClass::Generic,
                 last_submission_id: None,
                 ..entry.clone()
-            });
+            }));
         }
 
         self.access.poll(wgpu::Maintain::Poll);
@@ -288,7 +312,7 @@ impl WgpuProvider {
 
             Ok(())
         })??;
-        Ok(BufferEntry {
+        Ok(Some(BufferEntry {
             logical: entry.logical,
             allocated_bytes: out_buffer.size(),
             buffer: out_buffer,
@@ -296,6 +320,6 @@ impl WgpuProvider {
             usage: BufferUsageClass::Generic,
             last_submission_id: None,
             ..entry.clone()
-        })
+        }))
     }
 }

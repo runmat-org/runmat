@@ -197,9 +197,19 @@ pub(in crate::builtins::deep_learning) async fn reverse(
             ResidentStageKind::Transpose { materialize } => {
                 let output = provider_result(
                     if *materialize {
-                        provider.permute(&gradient, &[1, 0])
+                        provider.permute(&gradient, &[1, 0]).and_then(|output| {
+                            output.ok_or_else(|| {
+                                runmat_accelerate_api::ProviderExecutionError::from(
+                                    anyhow::anyhow!("required resident permutation unavailable"),
+                                )
+                                .with_unproven_effects()
+                            })
+                        })
                     } else {
-                        provider.transpose(&gradient)
+                        provider.transpose(&gradient).map_err(|error| {
+                            runmat_accelerate_api::ProviderExecutionError::from(error)
+                                .with_unproven_effects()
+                        })
                     },
                     "resident transpose adjoint",
                 )?;

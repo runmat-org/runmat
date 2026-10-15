@@ -48,7 +48,7 @@ fn repmat_internal(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
-async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty()
         && !shape_transform_input_supported(
             &crate::value_fact::value_fact(&value),
@@ -139,11 +139,17 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         Value::Struct(structure) => {
             let mut shape = raw_reps.clone();
             shape.resize(shape.len().max(2), 1);
-            let count = shape.iter().try_fold(1usize, |total, extent| {
-                total.checked_mul(*extent).ok_or_else(|| {
-                    repmat_internal("repmat: structure array replication exceeds platform limits")
-                })
-            })?;
+            let count = if shape.contains(&0) {
+                0
+            } else {
+                shape.iter().try_fold(1usize, |total, extent| {
+                    total.checked_mul(*extent).ok_or_else(|| {
+                        repmat_internal(
+                            "repmat: structure array replication exceeds platform limits",
+                        )
+                    })
+                })?
+            };
             let fields = structure.field_names().cloned().collect();
             runmat_value::StructArray::normalize(fields, vec![structure; count], shape)
                 .map_err(repmat_internal)
@@ -435,24 +441,45 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
 }
 
 async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Ok(tiled) = provider.repmat(&handle, reps) {
-                return Ok(Value::GpuTensor(tiled));
+    let provider = gpu_helpers::exact_provider_for_handle(&handle)
+        .ok_or_else(|| repmat_internal("repmat: no acceleration provider is registered"))?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let shape = gpu_helpers::replication_shape(handle.shape(), reps)
+        .ok_or_else(|| repmat_invalid_factors("repmat: requested output dimensions overflow"))?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        match provider.repmat(&handle, reps) {
+            Ok(Some(mut output)) => {
+                if !gpu_helpers::replication_output_matches(&handle, &output, provider, &shape) {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        output,
+                        repmat_internal("repmat: provider returned an invalid tiling result"),
+                    ));
+                }
+                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+                return Ok(Value::GpuTensor(output));
+            }
+            Ok(None) => {}
+            Err(source) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    repmat_internal(format!("repmat: provider tiling failed: {source}")),
+                    source,
+                ))
             }
         }
-        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        let tiled = repmat_tensor(&gathered, reps)?;
-        gpu_helpers::restore_class_preserving_value(
-            &handle,
-            tensor::tensor_into_value(tiled),
-            BUILTIN_NAME,
-        )
-    } else {
-        Err(repmat_internal(
-            "repmat: no acceleration provider is registered",
-        ))
     }
+    let gathered =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let tiled = match gathered {
+        Value::Tensor(value) => tensor::tensor_into_value(repmat_tensor(&value, reps)?),
+        Value::LogicalArray(value) => Value::LogicalArray(repmat_logical(&value, reps)?),
+        Value::ComplexTensor(value) => Value::ComplexTensor(repmat_complex_tensor(&value, reps)?),
+        other => {
+            return Err(repmat_internal(format!(
+                "repmat: unexpected downloaded input {other:?}"
+            )))
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, tiled, BUILTIN_NAME)
 }
 
 fn repmat_column_major<T: Clone>(
@@ -488,7 +515,9 @@ fn repmat_column_major<T: Clone>(
 
     let mut new_shape = Vec::with_capacity(rank);
     for i in 0..rank {
-        new_shape.push(base_shape[i].saturating_mul(factors[i]));
+        new_shape.push(base_shape[i].checked_mul(factors[i]).ok_or_else(|| {
+            repmat_invalid_factors(format!("{context}: requested output exceeds maximum size"))
+        })?);
     }
 
     let orig_total = checked_total(&base_shape, context)?;
@@ -587,6 +616,9 @@ fn column_major_strides(dims: &[usize]) -> Vec<usize> {
 }
 
 fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> {
+    if shape.contains(&0) {
+        return Ok(0);
+    }
     shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim).ok_or_else(|| {
             repmat_invalid_factors(format!("{context}: requested output exceeds maximum size"))
@@ -849,6 +881,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zero_replication_yields_empty_dimension() {
+        let shape = [u32::MAX as usize, u32::MAX as usize, 2, 0];
+        let (empty, output_shape) =
+            repmat_column_major::<f64>(&[], &shape, &[1, 1, 1, 1], "repmat").unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(output_shape, shape);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = repmat_builtin(
             Value::Tensor(tensor),

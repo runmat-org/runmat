@@ -333,7 +333,18 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     }
     let permuted = provider
         .permute(handle, &order)
-        .map_err(mean_provider_error)?;
+        .map_err(|error| mean_provider_error(error.with_unproven_effects()))?;
+    let Some(permuted) = permuted else {
+        return Err(MeanProviderFailure::Unsupported);
+    };
+    if !gpu_helpers::permutation_output_matches(handle, &permuted, provider, &order) {
+        return Err(MeanProviderFailure::Execution(Box::new(
+            gpu_helpers::reject_gpu_output(
+                permuted,
+                mean_internal_error("mean: invalid provider permutation output"),
+            ),
+        )));
+    }
     let num_slices = total_elems / reduce_len;
     // Reshape permuted view to [rows, cols]
     let reshaped2d = provider
@@ -369,6 +380,19 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     let out = provider
         .permute(&expanded, &inv_order)
         .map_err(mean_provider_error_after_effect)?;
+    let out = out.ok_or_else(|| {
+        mean_provider_error_after_effect(anyhow::anyhow!(
+            "mean: required inverse permutation unavailable"
+        ))
+    })?;
+    if !gpu_helpers::permutation_output_matches(&expanded, &out, provider, &inv_order) {
+        return Err(MeanProviderFailure::Execution(Box::new(
+            gpu_helpers::reject_gpu_output(
+                out,
+                mean_internal_error("mean: invalid inverse permutation output"),
+            ),
+        )));
+    }
     Ok(out)
 }
 

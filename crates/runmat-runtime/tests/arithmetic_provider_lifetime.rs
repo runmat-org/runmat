@@ -64,18 +64,30 @@ impl AccelProvider for Provider {
         &self,
         handle: &GpuTensorHandle,
         repetitions: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let index = self.repmats.fetch_add(1, Ordering::SeqCst);
         match (self.mode.load(Ordering::SeqCst), index) {
-            (1, 0) => Ok(self.right.lock().unwrap().as_ref().unwrap().acquire()?),
-            (1, _) => Err(anyhow::anyhow!("second expansion failed")),
-            (2, 1) => Ok(self.first.lock().unwrap().as_ref().unwrap().acquire()?),
+            (1, 0) => Ok(Some(
+                self.right.lock().unwrap().as_ref().unwrap().acquire()?,
+            )),
+            (1, _) => Err(
+                runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                    "second expansion failed"
+                ))
+                .with_unproven_effects(),
+            ),
+            (2, 1) => Ok(Some(
+                self.first.lock().unwrap().as_ref().unwrap().acquire()?,
+            )),
             _ => {
-                let expanded = self.observe(self.inner.repmat(handle, repetitions)?);
+                let Some(output) = self.inner.repmat(handle, repetitions)? else {
+                    return Ok(None);
+                };
+                let expanded = self.observe(output);
                 if index == 0 {
                     *self.first.lock().unwrap() = Some(expanded.downgrade());
                 }
-                Ok(expanded)
+                Ok(Some(expanded))
             }
         }
     }

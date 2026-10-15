@@ -432,6 +432,9 @@ pub(super) fn conv1d_window(
 }
 
 pub(super) fn product_checked(dims: &[usize]) -> Option<usize> {
+    if dims.contains(&0) {
+        return Some(0);
+    }
     dims.iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }

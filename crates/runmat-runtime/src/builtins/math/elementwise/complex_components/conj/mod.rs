@@ -1,6 +1,7 @@
 //! Complex conjugation.
 
 mod host;
+pub(crate) use host::execute as conjugate_host_value;
 mod admission;
 mod provider;
 mod specification;

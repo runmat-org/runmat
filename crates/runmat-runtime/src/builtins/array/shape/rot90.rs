@@ -571,57 +571,80 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
+            if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps)? {
+                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
         }
     }
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let rotated = rot90_tensor(host_tensor, steps)?;
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        gpu_helpers::upload_tensor(provider, &rotated)
-            .map(Value::GpuTensor)
-            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
-    } else {
-        Ok(tensor::tensor_into_value(rotated))
-    }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        rot90_error_with_message("rot90: no provider owns the input", &ROT90_ERROR_INTERNAL)
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let rotated = match host {
+        Value::Tensor(value) => tensor::tensor_into_value(rot90_tensor(value, steps)?),
+        Value::ComplexTensor(value) => Value::ComplexTensor(rot90_complex_tensor(value, steps)?),
+        Value::LogicalArray(value) => Value::LogicalArray(rot90_logical(value, steps)?),
+        other => {
+            return Err(rot90_error_with_message(
+                format!("rot90: unexpected downloaded input {other:?}"),
+                &ROT90_ERROR_INTERNAL,
+            ))
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, rotated, "rot90")
 }
 
 fn rot90_gpu_via_provider(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     steps: usize,
-) -> Option<GpuTensorHandle> {
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    let failure = |source| {
+        crate::runtime_error::with_provider_execution_source(
+            rot90_error_with_message("rot90: provider rotation failed", &ROT90_ERROR_INTERNAL),
+            source,
+        )
+    };
     let rank = handle.shape().len();
     if rank < 2 {
-        return None;
+        return Ok(None);
     }
-    match steps {
-        1 => {
-            let mut order: Vec<usize> = (0..rank).collect();
-            order.swap(0, 1);
-            match provider.permute(handle, &order) {
-                Ok(perm_handle) => {
-                    let result = provider.flip(&perm_handle, &[0]);
-                    result.ok()
-                }
-                Err(_) => None,
-            }
-        }
-        2 => provider.flip(handle, &[0, 1]).ok(),
-        3 => {
-            let mut order: Vec<usize> = (0..rank).collect();
-            order.swap(0, 1);
-            match provider.permute(handle, &order) {
-                Ok(perm_handle) => {
-                    let result = provider.flip(&perm_handle, &[1]);
-                    result.ok()
-                }
-                Err(_) => None,
-            }
-        }
-        _ => None,
+    if steps == 2 {
+        // Independent legacy flip-only route; no typed permutation preceded it.
+        return Ok(provider.flip(handle, &[0, 1]).ok());
     }
+    if !matches!(steps, 1 | 3) {
+        return Ok(None);
+    }
+    let mut order: Vec<usize> = (0..rank).collect();
+    order.swap(0, 1);
+    let Some(permuted) = provider.permute(handle, &order).map_err(failure)? else {
+        return Ok(None);
+    };
+    if !gpu_helpers::permutation_output_matches(handle, &permuted, provider, &order) {
+        return Err(gpu_helpers::reject_gpu_output(
+            permuted,
+            rot90_error_with_message(
+                "rot90: invalid provider permutation output",
+                &ROT90_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    let output = provider
+        .flip(&permuted, &[if steps == 1 { 0 } else { 1 }])
+        .map_err(|source| {
+            failure(runmat_accelerate_api::ProviderExecutionError::from(source).after_effect())
+        })?;
+    if !gpu_helpers::replication_output_matches(&permuted, &output, provider, permuted.shape())
+        || output.shares_allocation_with(handle)
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            rot90_error_with_message("rot90: invalid provider flip output", &ROT90_ERROR_INTERNAL),
+        ));
+    }
+    Ok(Some(output))
 }
 
 fn rot90_generic<T: Clone>(
@@ -636,7 +659,19 @@ fn rot90_generic<T: Clone>(
     } else {
         shape.to_vec()
     };
-    let total: usize = ext_shape.iter().product();
+    let total = if ext_shape.contains(&0) {
+        0
+    } else {
+        ext_shape
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| {
+                rot90_error_with_message(
+                    "rot90: shape product exceeds platform limits",
+                    &ROT90_ERROR_INTERNAL,
+                )
+            })?
+    };
     if total != data.len() {
         return Err(rot90_error_with_message(
             "rot90: data length does not match shape product",
@@ -650,7 +685,10 @@ fn rot90_generic<T: Clone>(
         out_shape[0] = cols;
         out_shape[1] = rows;
     }
-    let total_out: usize = out_shape.iter().product();
+    if total == 0 {
+        return Ok((Vec::new(), out_shape));
+    }
+    let total_out = total;
     let mut out = if total_out == 0 {
         Vec::new()
     } else {

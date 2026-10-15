@@ -34,13 +34,24 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
-    fn permute(&self, input: &GpuTensorHandle, order: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        let shape = order.iter().map(|&axis| input.shape()[axis]).collect();
-        let allocation =
-            self.owner
-                .allocate_zeroed(shape, NumericElementType::F64, GpuTensorStorage::Real)?;
-        self.permutations.lock().unwrap().push(allocation.probe);
-        Ok(allocation.handle)
+    fn permute(
+        &self,
+        input: &GpuTensorHandle,
+        order: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result = (|| -> anyhow::Result<GpuTensorHandle> {
+            let shape = order.iter().map(|&axis| input.shape()[axis]).collect();
+            let allocation = self.owner.allocate_zeroed(
+                shape,
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )?;
+            self.permutations.lock().unwrap().push(allocation.probe);
+            Ok(allocation.handle)
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn reshape(&self, input: &GpuTensorHandle, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Ok(input.with_view(input.view().clone().with_shape(shape.to_vec()))?)
@@ -67,17 +78,18 @@ impl AccelProvider for Provider {
 
 #[test]
 fn pending_mean_retires_permuted_reshape_aliases_without_releasing_input() {
-    let provider = Provider {
+    let provider = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
         permutations: Mutex::new(Vec::new()),
         mode: Mode::Pending,
-    };
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let input = provider
         .owner
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let mut future = Box::pin(provider_execution::reduce_mean_vecdim_nd_gpu(
-        &provider,
+        provider,
         &input.handle,
         &[1],
     ));

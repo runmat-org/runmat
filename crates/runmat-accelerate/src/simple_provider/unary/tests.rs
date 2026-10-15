@@ -34,7 +34,7 @@ fn every_native_integer_class_is_explicitly_unsupported_not_missing() {
             )
             .unwrap();
         for operation in OPERATIONS {
-            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            assert!(runmat_accelerate_api::is_unsupported_provider_error(
                 &execute(&provider, &input, operation).unwrap_err()
             ));
         }
@@ -180,7 +180,15 @@ fn execute(
     provider: &InProcessProvider,
     input: &GpuTensorHandle,
     operation: Unary,
-) -> Result<GpuTensorHandle> {
+) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+    if matches!(operation, Unary::Conj) {
+        return block_on(provider.unary_conj(input))?.ok_or_else(|| {
+            runmat_accelerate_api::unsupported_provider_operation(
+                "fixture requires an admitted conjugation",
+            )
+            .into()
+        });
+    }
     block_on(match operation {
         Unary::Sin => provider.unary_sin(input),
         Unary::Cos => provider.unary_cos(input),
@@ -188,8 +196,9 @@ fn execute(
         Unary::Exp => provider.unary_exp(input),
         Unary::Log => provider.unary_log(input),
         Unary::Sqrt => provider.unary_sqrt(input),
-        Unary::Conj => provider.unary_conj(input),
+        Unary::Conj => unreachable!("handled typed optional hook above"),
     })
+    .map_err(Into::into)
 }
 
 #[test]
@@ -335,7 +344,7 @@ fn complex_trig_and_magnitude_preserve_native_class() {
             }
         }
         for operation in [Unary::Exp, Unary::Log, Unary::Sqrt] {
-            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            assert!(runmat_accelerate_api::is_unsupported_provider_error(
                 &execute(&provider, &input, operation).unwrap_err()
             ));
         }
@@ -421,7 +430,7 @@ fn authentication_precedes_unsupported_and_future_drop_preserves_borrowed_input(
         .unwrap();
     let input_wire = input.wire_descriptor();
     for operation in OPERATIONS {
-        assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        assert!(!runmat_accelerate_api::is_unsupported_provider_error(
             &execute(&other, &input, operation).unwrap_err()
         ));
     }
@@ -445,7 +454,7 @@ fn authentication_precedes_unsupported_and_future_drop_preserves_borrowed_input(
         )
         .unwrap();
     for operation in OPERATIONS {
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        assert!(runmat_accelerate_api::is_unsupported_provider_error(
             &execute(&provider, &logical, operation).unwrap_err()
         ));
     }

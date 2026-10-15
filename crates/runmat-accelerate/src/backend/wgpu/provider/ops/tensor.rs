@@ -229,16 +229,49 @@ impl WgpuProvider {
         Ok(handle.with_view(handle.view().clone().with_shape(new_shape.to_vec()))?)
     }
 
+    #[cfg(test)]
     pub(crate) fn repmat_exec(
         &self,
         handle: &GpuTensorHandle,
         reps: &[usize],
     ) -> Result<GpuTensorHandle> {
+        self.repmat_optional_exec(handle, reps, &std::cell::Cell::new(false), &|_| Ok(()))?
+            .ok_or_else(|| {
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "repmat: unsupported physical request",
+                )
+            })
+    }
+
+    pub(crate) fn repmat_optional_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        reps: &[usize],
+        allocated: &std::cell::Cell<bool>,
+        on_buffer_created: &dyn Fn(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<Option<GpuTensorHandle>> {
         ensure!(
             !reps.is_empty(),
             "repmat: replication factors must be specified"
         );
-        let entry = self.get_entry_for_storage_move(handle, "repmat")?;
+        if handle.shape().contains(&0) && handle.physical().element_capacity() != 0 {
+            self.allocations.validate_empty_view(handle)?;
+            return Ok(None);
+        }
+        let entry = self.get_entry_raw(handle)?;
+        ensure!(
+            handle.physical().element_type() == entry.element_type
+                && handle.physical().storage() == entry.storage,
+            "repmat: physical descriptor mismatch"
+        );
+        if handle.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous
+            || handle.shape() != entry.shape
+            || (entry.integer_type().is_none() && entry.precision != self.precision)
+            || (entry.integer_type().is_some()
+                && entry.storage == GpuTensorStorage::ComplexInterleaved)
+        {
+            return Ok(None);
+        }
         let orig_rank = if entry.shape.is_empty() {
             1
         } else {
@@ -250,11 +283,7 @@ impl WgpuProvider {
             orig_rank.max(reps.len())
         };
         if rank > crate::backend::wgpu::params::REPMAT_MAX_RANK {
-            return Err(anyhow!(
-                "repmat: rank {} exceeds GPU support (max {})",
-                rank,
-                crate::backend::wgpu::params::REPMAT_MAX_RANK
-            ));
+            return Ok(None);
         }
 
         let mut base_shape = vec![1usize; rank];
@@ -283,10 +312,21 @@ impl WgpuProvider {
             new_shape.push(new_dim);
         }
 
-        let orig_total = base_shape.iter().try_fold(1usize, |acc, &dim| {
-            acc.checked_mul(dim)
-                .ok_or_else(|| anyhow!("repmat: dimension product exceeds GPU limits"))
-        })?;
+        if base_shape
+            .iter()
+            .chain(&new_shape)
+            .any(|&dimension| dimension > u32::MAX as usize)
+        {
+            return Ok(None);
+        }
+        let orig_total = if base_shape.contains(&0) {
+            0
+        } else {
+            base_shape.iter().try_fold(1usize, |acc, &dim| {
+                acc.checked_mul(dim)
+                    .ok_or_else(|| anyhow!("repmat: dimension product exceeds GPU limits"))
+            })?
+        };
 
         let storage = if runmat_accelerate_api::handle_storage(handle)
             == GpuTensorStorage::ComplexInterleaved
@@ -318,40 +358,42 @@ impl WgpuProvider {
             "repmat: internal shape mismatch"
         );
 
-        let new_total = new_shape.iter().try_fold(1usize, |acc, &dim| {
-            acc.checked_mul(dim)
-                .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))
-        })?;
+        let new_total = if new_shape.contains(&0) {
+            0
+        } else {
+            new_shape.iter().try_fold(1usize, |acc, &dim| {
+                acc.checked_mul(dim)
+                    .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))
+            })?
+        };
 
         let storage_total = new_total
             .checked_mul(word_factor)
             .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))?;
 
         if storage_total > u32::MAX as usize {
-            return Err(anyhow!("repmat: tensor too large for GPU kernel"));
+            return Ok(None);
         }
 
         if base_shape.iter().any(|&d| d > u32::MAX as usize)
             || new_shape.iter().any(|&d| d > u32::MAX as usize)
         {
-            return Err(anyhow!(
-                "repmat: dimensions exceed GPU kernel coordinate precision"
-            ));
+            return Ok(None);
         }
 
         let mut base_strides = vec![0usize; rank];
         let mut stride = 1usize;
-        for i in 0..rank {
-            base_strides[i] = stride;
-            stride = stride
-                .checked_mul(base_shape[i].max(1))
-                .ok_or_else(|| anyhow!("repmat: stride computation exceeds GPU limits"))?;
+        if storage_total != 0 {
+            for i in 0..rank {
+                base_strides[i] = stride;
+                stride = stride
+                    .checked_mul(base_shape[i].max(1))
+                    .ok_or_else(|| anyhow!("repmat: stride computation exceeds GPU limits"))?;
+            }
         }
 
         if base_strides.iter().any(|&s| s > u32::MAX as usize) {
-            return Err(anyhow!(
-                "repmat: source strides exceed GPU kernel coordinate precision"
-            ));
+            return Ok(None);
         }
 
         let mut base_shape_arr = [crate::backend::wgpu::params::AlignedU32::new(0);
@@ -381,24 +423,38 @@ impl WgpuProvider {
         // creating an invalid WebGPU buffer (which later triggers a validation error).
         let out_buffer = if integer_type.is_some() {
             self.with_emission(|emission, _| {
-                self.create_integer_word_buffer(
+                let output = self.create_integer_word_buffer(
                     emission,
                     storage_total,
                     "runmat-integer-repmat-out",
-                )
+                )?;
+                allocated.set(true);
+                on_buffer_created(&output)?;
+                Ok::<_, anyhow::Error>(output)
             })??
         } else {
             self.with_emission(|emission, _| {
-                self.create_storage_buffer_checked(emission, storage_total, "runmat-repmat-out")
+                let output = self.create_storage_buffer_checked(
+                    emission,
+                    storage_total,
+                    "runmat-repmat-out",
+                )?;
+                allocated.set(true);
+                on_buffer_created(&output)?;
+                Ok::<_, anyhow::Error>(output)
             })??
         };
         let out_shape = new_shape.clone();
         if storage_total == 0 {
-            return if let Some(element_type) = integer_type {
-                self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0)
-            } else {
-                self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage)
-            };
+            return self
+                .register_storage_move_buffer(
+                    out_buffer.clone(),
+                    &entry,
+                    out_shape,
+                    0,
+                    out_buffer.size(),
+                )
+                .map(Some);
         }
 
         self.with_emission(|emission, pending| -> Result<()> {
@@ -480,22 +536,18 @@ impl WgpuProvider {
             Ok(())
         })??;
 
-        if let Some(element_type) = integer_type {
-            self.register_integer_buffer(
-                out_buffer,
-                out_shape,
-                new_total,
-                element_type,
-                (storage_total as u64) * std::mem::size_of::<u32>() as u64,
-            )
-        } else {
-            self.register_existing_buffer_with_storage(
-                out_buffer,
-                out_shape,
-                storage_total,
-                storage,
-            )
-        }
+        self.register_storage_move_buffer(
+            out_buffer.clone(),
+            &entry,
+            out_shape,
+            if integer_type.is_some() {
+                new_total
+            } else {
+                storage_total
+            },
+            out_buffer.size(),
+        )
+        .map(Some)
     }
     pub(crate) fn cat_exec(
         &self,
@@ -919,7 +971,26 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         order: &[usize],
     ) -> Result<GpuTensorHandle> {
+        self.permute_optional_exec(handle, order, &std::cell::Cell::new(false), &|_| Ok(()))?
+            .ok_or_else(|| {
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "permute: unsupported physical request",
+                )
+            })
+    }
+
+    pub(crate) fn permute_optional_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        order: &[usize],
+        allocated: &std::cell::Cell<bool>,
+        on_buffer_created: &dyn Fn(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<Option<GpuTensorHandle>> {
         ensure!(!order.is_empty(), "permute: order must not be empty");
+        if handle.shape().contains(&0) && handle.physical().element_capacity() != 0 {
+            self.allocations.validate_empty_view(handle)?;
+            return Ok(None);
+        }
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
             // A 2-D lazy transpose already describes the permuted coordinates.
             // Its inverse restores the original contiguous interpretation of
@@ -928,20 +999,29 @@ impl WgpuProvider {
             // a second time.
             self.get_entry_raw(handle)?;
             if order == [0, 1] {
-                return Ok(handle.clone());
+                return Ok(Some(handle.clone()));
             }
             if order == [1, 0] {
-                return Ok(handle.with_view(
-                    handle
-                        .view()
-                        .clone()
-                        .with_shape(vec![info.base_rows, info.base_cols])
-                        .with_layout(runmat_accelerate_api::GpuTensorLayout::Contiguous),
-                )?);
+                return Ok(Some(
+                    handle.with_view(
+                        handle
+                            .view()
+                            .clone()
+                            .with_shape(vec![info.base_rows, info.base_cols])
+                            .with_layout(runmat_accelerate_api::GpuTensorLayout::Contiguous),
+                    )?,
+                ));
             }
         }
+        if handle.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous {
+            return Ok(None);
+        }
         let entry = self.get_entry_for_bitwise_move(handle, "permute")?;
-        let output = self.permute_buffer_exec(&entry, order)?;
+        let Some(output) =
+            self.permute_buffer_optional_exec(&entry, order, allocated, on_buffer_created)?
+        else {
+            return Ok(None);
+        };
         self.register_storage_move_buffer(
             output.buffer.clone(),
             &output,
@@ -949,6 +1029,7 @@ impl WgpuProvider {
             output.len,
             output.allocated_bytes,
         )
+        .map(Some)
     }
     pub(crate) fn circshift_exec(
         &self,

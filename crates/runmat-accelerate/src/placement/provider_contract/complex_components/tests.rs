@@ -77,12 +77,18 @@ fn real_and_complex_component_declarations_match_actual_provider_results() {
             )
             .unwrap()
             .is_supported());
-            let output = block_on(match rule {
-                NumericComponentRule::Conjugate => provider.unary_conj(&handle),
-                NumericComponentRule::RealPart => provider.unary_real(&handle),
-                NumericComponentRule::ImaginaryPart => provider.unary_imag(&handle),
-            })
-            .unwrap();
+            let output = if matches!(rule, NumericComponentRule::Conjugate) {
+                block_on(provider.unary_conj(&handle))
+                    .unwrap()
+                    .expect("admitted conjugation")
+            } else {
+                block_on(match rule {
+                    NumericComponentRule::Conjugate => unreachable!("typed hook handled above"),
+                    NumericComponentRule::RealPart => provider.unary_real(&handle),
+                    NumericComponentRule::ImaginaryPart => provider.unary_imag(&handle),
+                })
+                .unwrap()
+            };
             let expected = match (rule, complex) {
                 (NumericComponentRule::Conjugate, true) => vec![2.0, -3.0, -4.0, -5.0],
                 (NumericComponentRule::ImaginaryPart, true) => vec![3.0, 5.0],

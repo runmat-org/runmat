@@ -4898,7 +4898,10 @@ mod tests {
             return;
         };
         let scalar = complex_pair(provider, &[2.0], &[-3.0], &[1, 1]).await;
-        let tiled = provider.repmat(&scalar, &[3, 1]).expect("complex repmat");
+        let tiled = provider
+            .repmat(&scalar, &[3, 1])
+            .expect("complex repmat")
+            .expect("supported");
 
         assert_eq!(tiled.shape(), vec![3, 1]);
         assert_eq!(

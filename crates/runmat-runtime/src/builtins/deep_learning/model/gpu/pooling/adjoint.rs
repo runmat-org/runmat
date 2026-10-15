@@ -107,12 +107,16 @@ pub(in crate::builtins::deep_learning::model::gpu) async fn adjoint(
         }
         let inverse = provider
             .permute(&seed, &source_to_target)
+            .and_then(|output| {
+                output.ok_or_else(|| {
+                    runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                        "required pooling inverse presentation unavailable"
+                    ))
+                    .with_unproven_effects()
+                })
+            })
             .map_err(|error| {
-                provider_failure(
-                    function,
-                    "resident pooling inverse presentation",
-                    error.into(),
-                )
+                provider_failure(function, "resident pooling inverse presentation", error)
             })?;
         seed = checked_seed_view(
             inverse,

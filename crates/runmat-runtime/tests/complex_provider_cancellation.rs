@@ -63,8 +63,13 @@ impl AccelProvider for PendingProvider {
     fn unary_conj<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        self.pending(&[handle])
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        let pending = self.pending(&[handle]);
+        Box::pin(async move {
+            pending.await.map(Some).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
     fn unary_real<'a>(
         &'a self,

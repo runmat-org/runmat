@@ -15,6 +15,8 @@ pub(super) enum Mode {
     UploadAlias,
     ConjAlias,
     ConjOriginal,
+    ConjUnavailable,
+    ConjFailure,
     Identity,
     Pending,
 }
@@ -156,20 +158,26 @@ impl AccelProvider for Provider {
     fn unary_conj<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         self.conj.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             match self.mode {
                 Mode::Pending => std::future::pending().await,
-                Mode::ConjAlias => Ok(input.clone()),
-                Mode::ConjOriginal => Ok(self
-                    .original
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .acquire()?
-                    .with_view(GpuTensorView::contiguous(input.shape().to_vec()))?),
+                Mode::ConjUnavailable => Ok(None),
+                Mode::ConjFailure => Err(ProviderExecutionError::from(
+                    unsupported_provider_operation("conjugation operational cause"),
+                )
+                .with_unproven_effects()),
+                Mode::ConjAlias => Ok(Some(input.clone())),
+                Mode::ConjOriginal => Ok(Some(
+                    self.original
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .acquire()?
+                        .with_view(GpuTensorView::contiguous(input.shape().to_vec()))?,
+                )),
                 _ => self.inner.unary_conj(input).await,
             }
         })

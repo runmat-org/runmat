@@ -1767,8 +1767,19 @@ impl AccelProvider for WgpuProvider {
     fn unary_conj<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.unary_conj_exec(a) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            let result = (|| -> Result<Option<GpuTensorHandle>> {
+                let entry = self.get_entry_raw(a)?;
+                if entry.integer_type().is_some() || entry.precision != self.precision {
+                    return Ok(None);
+                }
+                self.unary_conj_exec(a).map(Some)
+            })();
+            result.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
     fn unary_imag<'a>(
@@ -1994,8 +2005,21 @@ impl AccelProvider for WgpuProvider {
         self.transpose_exec(a)
     }
 
-    fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
-        self.permute_exec(handle, order)
+    fn permute(
+        &self,
+        handle: &GpuTensorHandle,
+        order: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let allocated = std::cell::Cell::new(false);
+        self.permute_optional_exec(handle, order, &allocated, &|_| Ok(()))
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if allocated.get() {
+                    error.after_effect()
+                } else {
+                    error.with_unproven_effects()
+                }
+            })
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
@@ -2326,8 +2350,21 @@ impl AccelProvider for WgpuProvider {
         self.cat_exec(dim, inputs)
     }
 
-    fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
-        self.repmat_exec(handle, reps)
+    fn repmat(
+        &self,
+        handle: &GpuTensorHandle,
+        reps: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let allocated = std::cell::Cell::new(false);
+        self.repmat_optional_exec(handle, reps, &allocated, &|_| Ok(()))
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if allocated.get() {
+                    error.after_effect()
+                } else {
+                    error.with_unproven_effects()
+                }
+            })
     }
 
     fn kron(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

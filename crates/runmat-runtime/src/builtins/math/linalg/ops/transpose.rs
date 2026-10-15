@@ -391,26 +391,42 @@ async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
     let shape = resident::shape(&handle);
     let result = if rank <= 2 {
-        provider.transpose(&handle)
+        match provider.transpose(&handle) {
+            Ok(output) => Some(output),
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+            Err(error) => return Err(native_provider_error(error)),
+        }
     } else {
         let order: Vec<_> = transpose_order(rank)
             .into_iter()
             .map(|axis| axis - 1)
             .collect();
-        provider.permute(&handle, &order)
+        let output = provider
+            .permute(&handle, &order)
+            .map_err(native_provider_error)?;
+        if let Some(output) = output {
+            if !gpu_helpers::permutation_output_matches(&handle, &output, provider, &order) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    internal_error("transpose: invalid provider permutation output"),
+                ));
+            }
+            Some(output)
+        } else {
+            None
+        }
     };
     match result {
-        Ok(output) if resident::output_matches(&handle, &output, provider, &shape) => {
+        Some(output) if resident::output_matches(&handle, &output, provider, &shape) => {
             return resident::adopt(&handle, output, native_provider_error);
         }
-        Ok(output) => {
+        Some(output) => {
             return Err(gpu_helpers::reject_gpu_output(
                 output,
                 native_provider_error(anyhow::anyhow!("malformed transpose output")),
             ))
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-        Err(error) => return Err(native_provider_error(error)),
+        None => {}
     }
     let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
     let result = match host {
@@ -427,10 +443,13 @@ async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
 }
 
-fn native_provider_error(source: anyhow::Error) -> RuntimeError {
+fn native_provider_error(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let source = source.into();
     crate::runtime_error::with_provider_execution_source(
         internal_error(format!("transpose: provider failed: {source}")),
-        source.into(),
+        source,
     )
 }
 
