@@ -66,6 +66,7 @@ pub async fn prepare_admitted(
 /// Keep ownership/observation alive across every poll of the admitted body.
 /// Returned aliases are visible to the service's completion/adoption hook.
 /// Dropping this future (including cancellation) records an abort, not success.
+#[cfg(test)]
 pub(crate) fn execute_prepared<F, Fut>(
     prepared: PreparedBuiltinOperands,
     execute: F,

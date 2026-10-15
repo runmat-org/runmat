@@ -4,8 +4,9 @@ use super::super::reduction::FrozenAnySnapshot;
 use super::*;
 use runmat_accelerate_api::{
     power_service::{PowerPairPhysicalProjection, PowerProbePhysicalProposal},
-    NumericElementType, PowerInputDescription, ProviderElementType, ProviderExecutionResult,
-    ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,
+    NumericElementType, PowerInputDescription, ProviderElementType, ProviderExecutionError,
+    ProviderExecutionResult, ProviderLayout, ProviderRepresentation, ProviderResidency,
+    ProviderStorage,
 };
 
 impl WgpuProvider {
@@ -40,7 +41,8 @@ impl WgpuProvider {
                 .iter()
                 .copied()
                 .map(usize::try_from)
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(ProviderExecutionError::from_source)?;
             match description {
                 PowerInputDescription::PlannedDense { requested_bytes } => {
                     if self.plan_dense_real_output_buffer_bytes_exec(input)?
@@ -50,7 +52,8 @@ impl WgpuProvider {
                     }
                 }
                 PowerInputDescription::Live { physical, view } => {
-                    view.validate(physical)?;
+                    view.validate(physical)
+                        .map_err(ProviderExecutionError::from_source)?;
                     let element = match input_precision {
                         NumericPrecision::F32 => NumericElementType::F32,
                         NumericPrecision::F64 => NumericElementType::F64,
@@ -67,7 +70,8 @@ impl WgpuProvider {
             }
             shapes.push(shape);
         }
-        let shape = runmat_types::geometry::broadcast_concrete_shape(&shapes[0], &shapes[1])?;
+        let shape = runmat_types::geometry::broadcast_concrete_shape(&shapes[0], &shapes[1])
+            .map_err(ProviderExecutionError::from_source)?;
         let len = if shape.contains(&0) {
             0
         } else {

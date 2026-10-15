@@ -238,6 +238,7 @@ impl ImageSourceInvocation {
                             }
                             ProviderRealElementwiseOperation::FloatingCast { .. } => None,
                             ProviderRealElementwiseOperation::Sqrt
+                            | ProviderRealElementwiseOperation::UnaryMath(_)
                             | ProviderRealElementwiseOperation::ExactSingleBasePower { .. } => {
                                 return true
                             }

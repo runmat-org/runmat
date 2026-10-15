@@ -319,6 +319,7 @@ async fn native_class_mul_max_share_ordinary_scalar_physical_execution() {
                 },
                 Operation::ScalarAdd { .. }
                 | Operation::Sqrt
+                | Operation::UnaryMath(_)
                 | Operation::FloatingCast { .. }
                 | Operation::ExactSingleBasePower { .. } => {
                     unreachable!("test scalar case")
