@@ -9,7 +9,9 @@ use runmat_accelerate_api::{
     ProviderPreparationSnapshot, ProviderResidency,
 };
 use runmat_execution::{CandidatePreparationState, Digest};
+#[path = "preparation/real_unary.rs"]
 mod real_unary;
+#[path = "preparation/power_pair.rs"]
 mod power_pair;
 
 fn preparation_key_is_warm(

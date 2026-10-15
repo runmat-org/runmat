@@ -123,7 +123,10 @@ impl PowerProbeRecipe {
     pub fn identity(&self) -> anyhow::Result<Digest> {
         Ok(Digest::sha256_serialized(&(
             "power-domain-probe-v1",
-            self.sources.each_ref().map(GpuTensorHandle::view_identity),
+            self.sources.each_ref().map(|source| {
+                let identity = source.view_identity();
+                (identity.allocation(), identity.view())
+            }),
             &self.physical,
         ))?)
     }

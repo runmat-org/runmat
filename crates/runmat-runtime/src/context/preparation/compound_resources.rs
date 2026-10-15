@@ -62,8 +62,8 @@ pub(super) fn with_observation(
         .ok_or_else(overflow)?;
     let add = |bound| {
         ResourceAccount::default()
-            .add(bound)
-            .and_then(|account| account.add(bytes.into()))
+            .checked_add(bound)
+            .and_then(|account| account.checked_add(bytes.into()))
             .map(ResourceAccount::bound)
             .ok_or_else(overflow)
     };

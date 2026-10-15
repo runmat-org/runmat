@@ -4,7 +4,7 @@ use crate::placement::compound_execution::{
     check_cancelled, retire_output_after_failure, with_prior_effect,
 };
 use crate::{AccelProvider, GpuTensorHandle, PowerResultDomain, ProviderExecutionResult};
-use runmat_execution::{CancellationToken, Digest};
+use runmat_execution::{cancellation::CancellationToken, Digest};
 
 #[derive(Clone)]
 pub struct PowerPairCompound {

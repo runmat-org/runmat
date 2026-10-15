@@ -1,7 +1,7 @@
 //! Shared cancellation and accumulated-effect adaptation for actual compound
 //! physical children. No resource, numerical or completion grant is minted.
 use crate::{ProviderExecutionError, ProviderExecutionResult};
-use runmat_execution::CancellationToken;
+use runmat_execution::cancellation::CancellationToken;
 
 /// Only for an authenticated private output after protected borrowed aliases
 /// have been excluded. Failure retirement keeps both the original execution

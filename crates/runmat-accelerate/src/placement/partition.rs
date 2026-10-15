@@ -364,15 +364,15 @@ fn retain_public_output(
     };
     let fact = facts.get(output.index() as usize)?;
     match fact.residency {
-        CandidateOutputResidency::Host => *host = host.add(fact.retained_bytes)?,
+        CandidateOutputResidency::Host => *host = host.checked_add(fact.retained_bytes)?,
         CandidateOutputResidency::Provider { device_id } => {
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(fact.retained_bytes)?;
+            *retained = retained.checked_add(fact.retained_bytes)?;
         }
         CandidateOutputResidency::Mirrored { device_id } => {
-            *host = host.add(fact.retained_bytes)?;
+            *host = host.checked_add(fact.retained_bytes)?;
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(fact.retained_bytes)?;
+            *retained = retained.checked_add(fact.retained_bytes)?;
         }
         _ => return None,
     }
@@ -426,24 +426,24 @@ fn retain_output(
 ) -> Option<()> {
     match candidate.descriptor.output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
-            *host = host.add(candidate.resources.retained_bytes)?;
+            *host = host.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::Provider { device_id } => {
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(candidate.resources.retained_bytes)?;
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::Mirrored { device_id } => {
-            *host = host.add(candidate.resources.retained_bytes)?;
+            *host = host.checked_add(candidate.resources.retained_bytes)?;
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(candidate.resources.retained_bytes)?;
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::ProviderAndHost {
             device_id,
             host_bytes,
         } => {
-            *host = host.add(host_bytes)?;
+            *host = host.checked_add(host_bytes)?;
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(candidate.resources.retained_bytes)?;
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::ConditionalHostOrProvider {
             device_id,
@@ -451,9 +451,9 @@ fn retain_output(
         } => {
             // The static graph cannot know which branch publishes at runtime;
             // keep both possible values live for future-consumer admission.
-            *host = host.add(host_bytes)?;
+            *host = host.checked_add(host_bytes)?;
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.add(candidate.resources.retained_bytes)?;
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
     }
     Some(())

@@ -205,12 +205,12 @@ pub(super) fn plan(
     let mut widened_live = ResourceAccount::default();
     if let Some(widened) = projection.widened {
         widened_live = widened_live
-            .add(widened.output_requested_bytes.into())
+            .checked_add(widened.output_requested_bytes.into())
             .ok_or_else(overflow)?;
         input_stages.push(ProviderInputStageDemand {
             device_id: owner.device_id(),
             incremental_peak_bytes: widened_live
-                .add(widened.uniform_buffer_bytes.into())
+                .checked_add(widened.uniform_buffer_bytes.into())
                 .ok_or_else(overflow)?
                 .bound(),
             queue_slots: widened.queue_slots,
@@ -219,8 +219,10 @@ pub(super) fn plan(
     input_stages.push(ProviderInputStageDemand {
         device_id: owner.device_id(),
         incremental_peak_bytes: widened_live
-            .add(projection.scalar_upload.output_requested_bytes.into())
-            .and_then(|account| account.add(projection.scalar_upload.provider_scratch_bytes))
+            .checked_add(projection.scalar_upload.output_requested_bytes.into())
+            .and_then(|account| {
+                account.checked_add(projection.scalar_upload.provider_scratch_bytes)
+            })
             .ok_or_else(overflow)?
             .bound(),
         queue_slots: projection.scalar_upload.completion_queue_slots,

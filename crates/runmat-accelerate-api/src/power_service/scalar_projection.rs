@@ -61,6 +61,20 @@ pub struct PowerTypedScalarProjection {
     pub narrow_complex: Option<ProviderFloatingCastPhysicalEvidence>,
 }
 
+impl std::fmt::Debug for PowerTypedScalarProjection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PowerTypedScalarProjection")
+            .field("symbolic", &self.symbolic)
+            .field("widened", &self.widened)
+            .field("scalar_upload", &self.scalar_upload)
+            .field("pair", self.pair.physical())
+            .field("narrow_real", &self.narrow_real)
+            .field("narrow_complex", &self.narrow_complex)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PowerTypedScalarProjection {
     pub fn plan(
         owner: &'static dyn AccelProvider,
@@ -240,8 +254,8 @@ impl PowerTypedScalarProjection {
             None => None,
         };
         let upload = ResourceAccount::default()
-            .add(self.scalar_upload.output_requested_bytes.into())?
-            .add(self.scalar_upload.provider_scratch_bytes)?;
+            .checked_add(self.scalar_upload.output_requested_bytes.into())?
+            .checked_add(self.scalar_upload.provider_scratch_bytes)?;
         let probe = self
             .pair
             .physical()
@@ -267,10 +281,10 @@ impl PowerTypedScalarProjection {
             .max()
             .unwrap_or(0);
         let peak = upload
-            .add(widen.unwrap_or(0).into())?
-            .add(probe.into())?
-            .add(continuation.into())?
-            .add(narrow.into())?;
+            .checked_add(widen.unwrap_or(0).into())?
+            .checked_add(probe.into())?
+            .checked_add(continuation.into())?
+            .checked_add(narrow.into())?;
         let retained_bytes = [
             self.narrow_real.map_or(
                 self.pair.physical().real.work.output_buffer_bytes,

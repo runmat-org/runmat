@@ -197,7 +197,7 @@ pub(super) fn plan(
     let metadata = host.operand_metadata;
     let mirror = payload.checked_add(metadata).ok_or_else(overflow)?;
     let mut host_peak = account(mirror)?
-        .add(provider.download_numeric_host_workspace_bound(source))
+        .checked_add(provider.download_numeric_host_workspace_bound(source))
         .ok_or_else(overflow)?;
     let host_body = mirror
         .checked_add(host.bound.retained_bytes)
@@ -223,7 +223,7 @@ pub(super) fn plan(
             .requested_incremental_peak_bytes()
             .ok_or_else(overflow)?;
         let scalar_peak = account(probe_peak)?
-            .add(readback.provider_scratch_bytes)
+            .checked_add(readback.provider_scratch_bytes)
             .ok_or_else(overflow)?;
         stages.push(ProviderInputStageDemand {
             device_id: provider.device_id(),
@@ -236,7 +236,7 @@ pub(super) fn plan(
         });
         host_peak = host_peak.peak(
             account(probe.output().checked_byte_len().ok_or_else(overflow)?)?
-                .add(readback.host_workspace_bytes)
+                .checked_add(readback.host_workspace_bytes)
                 .ok_or_else(overflow)?,
         );
     }
@@ -303,13 +303,13 @@ pub(super) fn plan(
         };
         host_peak = host_peak.peak(
             account(host_body)?
-                .add(ResourceByteBound::Known(packing))
-                .and_then(|n| n.add(upload.host_workspace_bytes))
+                .checked_add(ResourceByteBound::Known(packing))
+                .and_then(|n| n.checked_add(upload.host_workspace_bytes))
                 .ok_or_else(overflow)?,
         );
         provider_peak = provider_peak.peak(
             account(upload.output_requested_bytes)?
-                .add(upload.provider_scratch_bytes)
+                .checked_add(upload.provider_scratch_bytes)
                 .ok_or_else(overflow)?,
         );
         retained = retained.max(upload.output_requested_bytes);
@@ -411,7 +411,7 @@ pub(super) fn plan(
 
 fn account(bytes: u64) -> BuiltinResult<ResourceAccount> {
     ResourceAccount::default()
-        .add(bytes.into())
+        .checked_add(bytes.into())
         .ok_or_else(overflow)
 }
 fn overflow() -> crate::RuntimeError {

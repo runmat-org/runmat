@@ -6,7 +6,7 @@ use crate::power_service::{PowerPhysicalRoute, PowerTypedScalarProjection};
 pub async fn execute_resident_scalar_power_projected(
     prepared: PreparedResidentScalarPower,
     projection: &PowerTypedScalarProjection,
-    cancellation: Option<&runmat_execution::CancellationToken>,
+    cancellation: Option<&runmat_execution::cancellation::CancellationToken>,
 ) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
     crate::placement::compound_execution::check_cancelled(cancellation, false)
         .map_err(PowerServiceError)?;

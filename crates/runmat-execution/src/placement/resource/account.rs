@@ -88,7 +88,7 @@ impl ResourceAccount {
         })
     }
 
-    pub fn add(self, bound: ResourceByteBound) -> Option<Self> {
+    pub fn checked_add(self, bound: ResourceByteBound) -> Option<Self> {
         Some(match bound {
             ResourceByteBound::Known(bytes) => Self {
                 known_bytes: self.known_bytes.checked_add(bytes)?,
@@ -182,9 +182,9 @@ mod tests {
         let unknown =
             ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound);
         let live = ResourceAccount::default()
-            .add(unknown)
+            .checked_add(unknown)
             .unwrap()
-            .add(ResourceByteBound::Known(12))
+            .checked_add(ResourceByteBound::Known(12))
             .unwrap();
         assert!(matches!(
             live.within(Some(20), ResourceBudgetKind::HostMemory),
@@ -201,9 +201,9 @@ mod tests {
     #[test]
     fn known_sum_overflow_never_becomes_unavailable_or_zero() {
         assert!(ResourceAccount::default()
-            .add(ResourceByteBound::Known(u64::MAX))
+            .checked_add(ResourceByteBound::Known(u64::MAX))
             .unwrap()
-            .add(ResourceByteBound::Known(1))
+            .checked_add(ResourceByteBound::Known(1))
             .is_none());
     }
 }

@@ -95,7 +95,7 @@ pub fn admit_candidate_resources(
                 return Err(ResourceAdmissionError::OverBudget);
             }
             host_peak = host_peak
-                .add(demand.scratch_bytes)
+                .checked_add(demand.scratch_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
         CandidateExecutionLocation::Provider { device_id } => {
@@ -104,7 +104,7 @@ pub fn admit_candidate_resources(
             }
             if let Some(host_workspace) = demand.provider_host_workspace {
                 host_peak = host_peak
-                    .add(host_workspace)
+                    .checked_add(host_workspace)
                     .ok_or(ResourceAdmissionError::Overflow)?;
             }
             let provider = resources
@@ -122,7 +122,7 @@ pub fn admit_candidate_resources(
             // transient storage. Only the genuinely new portion is compared
             // with free capacity; scratch is not added a second time.
             let scratch = ResourceAccount::default()
-                .add(match demand.peak_live {
+                .checked_add(match demand.peak_live {
                     Some(peak) => peak
                         .incremental_bytes()
                         .ok_or(ResourceAdmissionError::Overflow)?
@@ -203,7 +203,7 @@ pub fn admit_candidate_resources(
             return Err(ResourceAdmissionError::OverBudget);
         }
         let mut scratch = ResourceAccount::default()
-            .add(provider_scratch_bytes)
+            .checked_add(provider_scratch_bytes)
             .ok_or(ResourceAdmissionError::Overflow)?;
         if matches!(
             presentation,
@@ -213,7 +213,7 @@ pub fn admit_candidate_resources(
             // conditional upload is a different branch: its newly allocated
             // output coexists with upload staging even when peak_live is set.
             scratch = scratch
-                .add(demand.retained_bytes)
+                .checked_add(demand.retained_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
         scratch.within(
@@ -229,17 +229,19 @@ pub fn admit_candidate_resources(
             CandidateOutputPresentation::ConditionalProviderUpload { .. }
         ) {
             let fallback_peak = host_retained_bytes
-                .add(host_scratch_bytes)
-                .and_then(|peak| peak.add(host_result_bytes.unwrap_or(demand.retained_bytes)))
+                .checked_add(host_scratch_bytes)
+                .and_then(|peak| {
+                    peak.checked_add(host_result_bytes.unwrap_or(demand.retained_bytes))
+                })
                 .ok_or(ResourceAdmissionError::Overflow)?;
             host_peak = host_peak.peak(fallback_peak);
         } else {
             host_peak = host_peak
-                .add(host_scratch_bytes)
+                .checked_add(host_scratch_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             if matches!(output_residency, CandidateOutputResidency::Provider { .. }) {
                 host_peak = host_peak
-                    .add(host_result_bytes.unwrap_or(demand.retained_bytes))
+                    .checked_add(host_result_bytes.unwrap_or(demand.retained_bytes))
                     .ok_or(ResourceAdmissionError::Overflow)?;
             }
         }
@@ -270,7 +272,7 @@ pub fn admit_candidate_resources(
                 return Err(ResourceAdmissionError::OverBudget);
             }
             let scratch = ResourceAccount::default()
-                .add(readback.provider_scratch_bytes)
+                .checked_add(readback.provider_scratch_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             scratch.within(
                 provider.scratch_available_bytes,
@@ -299,7 +301,7 @@ pub fn admit_candidate_resources(
                 return Err(ResourceAdmissionError::OverBudget);
             }
             let peak = ResourceAccount::default()
-                .add(stage.incremental_peak_bytes)
+                .checked_add(stage.incremental_peak_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             peak.within(
                 provider.scratch_available_bytes,
@@ -332,7 +334,7 @@ pub fn admit_candidate_resources(
             return Err(ResourceAdmissionError::OverBudget);
         }
         let scratch = ResourceAccount::default()
-            .add(*provider_scratch_bytes)
+            .checked_add(*provider_scratch_bytes)
             .ok_or(ResourceAdmissionError::Overflow)?;
         scratch.within(
             provider.scratch_available_bytes,
@@ -361,24 +363,24 @@ pub fn admit_candidate_resources(
     match output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
             host_peak = host_peak
-                .add(demand.retained_bytes)
+                .checked_add(demand.retained_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
         CandidateOutputResidency::Provider { device_id } => {
             let retained = provider_demands.entry(device_id).or_default();
             if demand.peak_live.is_none() {
                 *retained = retained
-                    .add(demand.retained_bytes)
+                    .checked_add(demand.retained_bytes)
                     .ok_or(ResourceAdmissionError::Overflow)?;
             }
         }
         CandidateOutputResidency::Mirrored { device_id } => {
             host_peak = host_peak
-                .add(host_published_bound)
+                .checked_add(host_published_bound)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             let retained = provider_demands.entry(device_id).or_default();
             *retained = retained
-                .add(demand.retained_bytes)
+                .checked_add(demand.retained_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
         CandidateOutputResidency::ProviderAndHost {
@@ -386,12 +388,12 @@ pub fn admit_candidate_resources(
             host_bytes,
         } => {
             host_peak = host_peak
-                .add(host_bytes)
+                .checked_add(host_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             let retained = provider_demands.entry(device_id).or_default();
             if demand.peak_live.is_none() {
                 *retained = retained
-                    .add(demand.retained_bytes)
+                    .checked_add(demand.retained_bytes)
                     .ok_or(ResourceAdmissionError::Overflow)?;
             }
         }
@@ -405,13 +407,13 @@ pub fn admit_candidate_resources(
             // than counting it twice. The provider branch's physical peak is
             // independently covered by peak_live below.
             let host_fallback_peak = host_retained_bytes
-                .add(host_bytes)
+                .checked_add(host_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             host_peak = host_peak.peak(host_fallback_peak);
             let retained = provider_demands.entry(device_id).or_default();
             if demand.peak_live.is_none() {
                 *retained = retained
-                    .add(demand.retained_bytes)
+                    .checked_add(demand.retained_bytes)
                     .ok_or(ResourceAdmissionError::Overflow)?;
             }
         }

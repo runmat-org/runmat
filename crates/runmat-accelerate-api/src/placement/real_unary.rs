@@ -8,7 +8,7 @@ use crate::{
     ProviderGlobalExtremaRecipe, ProviderRealElementwiseOperation, ProviderRealElementwiseRecipe,
     ProviderRealElementwiseRequest,
 };
-use runmat_execution::{CancellationToken, Digest};
+use runmat_execution::{cancellation::CancellationToken, Digest};
 use runmat_types::{RealUnaryClassification, RealUnaryPredicate, ScalarUnaryMath};
 mod continuation;
 pub use continuation::{
