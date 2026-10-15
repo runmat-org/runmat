@@ -162,7 +162,7 @@ pub const SPDIAGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
     BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)", inputs: &SPDIAGS_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed offsets and dimensions are gated RunMat extensions decoded exactly before diagonal selection or allocation." },
 ];
 
-pub use runmat_builtins::{SPARSE_DESCRIPTOR, SPARSE_INTEGER_CAPABILITIES};
+pub use runmat_builtins::SPARSE_DESCRIPTOR;
 use runmat_builtins::{
     SPARSE_ERRORS, SPARSE_ERROR_INTERNAL, SPARSE_ERROR_INVALID_INDEX, SPARSE_ERROR_INVALID_INPUT,
     SPARSE_INPUT_A, SPARSE_INPUT_DIMS,

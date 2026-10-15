@@ -5,19 +5,23 @@ use runmat_types::{NumericDomain, ValueKindFact};
 
 enum Operand<T> {
     Host(T),
-    Resident(Value),
+    Resident(runmat_accelerate_api::GpuTensorHandle),
 }
 impl<T> Operand<T> {
     fn count(&self, host_count: impl FnOnce(&T) -> usize) -> Option<usize> {
         match self {
             Self::Host(value) => Some(host_count(value)),
-            Self::Resident(value) => crate::value_fact::value_fact(value).shape.element_count(),
+            Self::Resident(handle) => handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent)),
         }
     }
     async fn resolve(self, parse: impl FnOnce(Value) -> BuiltinResult<T>) -> BuiltinResult<T> {
         match self {
             Self::Host(value) => Ok(value),
-            Self::Resident(value) => {
+            Self::Resident(handle) => {
+                let value = Value::GpuTensor(handle);
                 let host = gpu_helpers::gather_value_async(&value).await?;
                 parse(host)
             }
@@ -37,10 +41,10 @@ fn operand<T>(
     role: Role,
     parse: impl FnOnce(Value) -> BuiltinResult<T>,
 ) -> BuiltinResult<Operand<T>> {
-    let Value::GpuTensor(handle) = &value else {
+    let Value::GpuTensor(handle) = value else {
         return parse(value).map(Operand::Host);
     };
-    let fact = crate::value_fact::value_fact(&value);
+    let fact = crate::value_fact::value_fact(&Value::GpuTensor(handle.clone()));
     let numeric = fact.numeric();
     let supported = matches!(fact.kind, ValueKindFact::Logical)
         || numeric.is_some_and(|numeric| {
@@ -68,7 +72,7 @@ fn operand<T>(
             "sparse: dimensions and nzmax must be scalar sizes",
         ));
     }
-    Ok(Operand::Resident(value))
+    Ok(Operand::Resident(handle))
 }
 
 pub(super) struct PreparedSparse(Construction);
