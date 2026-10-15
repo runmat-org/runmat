@@ -69,11 +69,36 @@ impl Temporaries<'_> {
     }
 }
 
+/// Binary64 scalar evidence decoded by the existing scalar owner: F64 is
+/// retained and F32 widened exactly. Existing integer plotting conversions are
+/// unchanged. This does not upgrade a provider's preceding reduction policy.
+/// Rendering projection is deliberately separate from numerical bin geometry.
+pub(crate) struct NumericBounds {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl NumericBounds {
+    pub(crate) fn rendering(&self) -> (f32, f32) {
+        (self.min as f32, self.max as f32)
+    }
+}
+
 pub(super) async fn axis_bounds_protecting(
     input: &GpuTensorHandle,
     protected: &[&GpuTensorHandle],
     context: &'static str,
 ) -> BuiltinResult<(f32, f32)> {
+    numeric_bounds_protecting(input, protected, context)
+        .await
+        .map(|bounds| bounds.rendering())
+}
+
+pub(super) async fn numeric_bounds_protecting(
+    input: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    context: &'static str,
+) -> BuiltinResult<NumericBounds> {
     let provider = gpu::exact_provider_for_handle(input).ok_or_else(|| {
         plotting_error(context, format!("{context}: no provider owns bounds input"))
     })?;
@@ -120,5 +145,8 @@ pub(super) async fn axis_bounds_protecting(
     let maximum = value_to_scalar_async(Value::GpuTensor(maximum), context)
         .await
         .map_err(|error| super::preparation_after_effect(error, context))?;
-    Ok((minimum as f32, maximum as f32))
+    Ok(NumericBounds {
+        min: minimum,
+        max: maximum,
+    })
 }

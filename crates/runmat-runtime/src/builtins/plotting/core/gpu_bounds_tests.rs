@@ -164,6 +164,37 @@ fn bounds_reject_logical_reinterpretation_and_keep_admitted_output_type() {
         .iter()
         .all(|wire| provider.inner.acquire_live(wire).is_err()));
     assert!(block_on(provider.inner.download(&input)).is_ok());
+    let minimum = 1.0 + 2.0f64.powi(-40);
+    let maximum = 2.0 + 2.0f64.powi(-40);
+    let precise = provider
+        .upload(&HostTensorView {
+            data: &[minimum, maximum],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    provider.produced.lock().unwrap().clear();
+    let bounds = block_on(super::super::numeric_bounds_protecting(
+        &precise,
+        &[&precise],
+        "hist",
+    ))
+    .expect("native numerical bounds");
+    assert_eq!((bounds.min, bounds.max), (minimum, maximum));
+    assert_eq!(bounds.rendering(), (1.0f32, 2.0f32));
+    let produced = provider.produced.lock().unwrap().clone();
+    assert_eq!(
+        produced.len(),
+        2,
+        "one reduction pair, not a second numerical scan"
+    );
+    assert!(produced
+        .iter()
+        .all(|wire| provider.inner.acquire_live(wire).is_err()));
+    assert_eq!(
+        block_on(provider.inner.download(&precise)).unwrap().data,
+        vec![minimum, maximum]
+    );
+    precise.release().unwrap();
     input.release().unwrap();
 }
 
@@ -174,6 +205,39 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
     let _current = ThreadProviderGuard::set(Some(provider));
     let x = upload(provider);
     let y = upload(provider);
+    #[cfg(feature = "wgpu")]
+    {
+        // A missing exact rendering context is pure absence even if an export
+        // hook would fail operationally if called. Do not probe that hook.
+        *provider.mode.lock().unwrap() = Mode::ExportError;
+        assert!(super::super::GpuBufferExports::prepare(&[&x, &y], "plot")
+            .unwrap()
+            .is_none());
+        use crate::builtins::plotting::op_common::surface_inputs::{
+            AxisSource, PreparedSurfaceGpu,
+        };
+        let horizontal = AxisSource::Host(vec![1.0, 2.0]);
+        let singleton = AxisSource::Host(vec![1.0]);
+        assert!(block_on(PreparedSurfaceGpu::prepare(
+            "surf",
+            &horizontal,
+            &singleton,
+            &x
+        ))
+        .unwrap()
+        .is_none());
+        assert!(
+            block_on(PreparedSurfaceGpu::prepare(
+                "surf",
+                &horizontal,
+                &horizontal,
+                &x
+            ))
+            .is_err(),
+            "invalid grid geometry must fail before context/export/bounds work"
+        );
+        assert!(provider.produced.lock().unwrap().is_empty());
+    }
     #[cfg(feature = "wgpu")]
     for mode in [Mode::ExportNone, Mode::ExportError, Mode::ExportAfterEffect] {
         *provider.mode.lock().unwrap() = mode.clone();
@@ -188,6 +252,43 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
             };
             assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
             assert!(error.to_string().contains("injected export failure"));
+        }
+        for completed in [false, true] {
+            let mut stage = super::super::GpuBufferExports::default();
+            if completed {
+                stage.record_completed_effect();
+            }
+            let source = runmat_accelerate_api::WgpuAccessError::WrongDevice;
+            let error = stage
+                .complete::<()>(
+                    Err(crate::builtins::plotting::plotting_error_with_source(
+                        "plot",
+                        "original emission refusal",
+                        source,
+                    )),
+                    "plot",
+                )
+                .unwrap_err();
+            assert_eq!(error.message(), "original emission refusal");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            let mut cursor: &(dyn std::error::Error + 'static) = &error;
+            let mut found_source = false;
+            let mut found_phase = false;
+            loop {
+                found_source |= cursor.downcast_ref::<runmat_accelerate_api::WgpuAccessError>()
+                    == Some(&source);
+                if let Some(provider) =
+                    cursor.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                {
+                    found_phase |= provider.is_after_effect();
+                }
+                let Some(next) = cursor.source() else {
+                    break;
+                };
+                cursor = next;
+            }
+            assert!(found_source, "typed access cause must survive completion");
+            assert_eq!(found_phase, completed);
         }
         assert!(provider.produced.lock().unwrap().is_empty());
         assert!(block_on(provider.inner.download(&x)).is_ok());
@@ -289,9 +390,10 @@ fn plot_input_clones_retain_exact_export_allocation_until_last_drop() {
         } else {
             input
         };
-        let exported = runmat_accelerate_api::export_wgpu_buffer(&input)
+        let (_, mut exports) = super::super::GpuBufferExports::prepare(&[&input], "plot")
             .unwrap()
-            .unwrap();
+            .expect("actual owner/context supports floating rendering");
+        let exported = exports.export(&input, "plot").unwrap().unwrap();
         if transpose {
             use runmat_accelerate_api::{
                 GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
@@ -303,7 +405,20 @@ fn plot_input_clones_retain_exact_export_allocation_until_last_drop() {
                     storage: GpuTensorStorage::Real,
                 })
                 .unwrap();
-            let mut exports = super::super::GpuBufferExports::default();
+            assert!(
+                super::super::GpuBufferExports::prepare(&[&input, &integer], "plot")
+                    .unwrap()
+                    .is_none(),
+                "known integer carrier declines before any view export"
+            );
+            let protected = exports.protected_handles();
+            assert!(protected
+                .iter()
+                .any(|handle| handle.shares_allocation_with(&input)));
+            assert!(protected
+                .iter()
+                .any(|handle| handle.shares_allocation_with(exported.owning_handle())));
+            drop(protected);
             let materialized = exports.export(&input, "plot").unwrap().unwrap();
             assert!(!materialized.owning_handle().shares_allocation_with(&input));
             let repeated = exports.export(&input, "plot").unwrap().unwrap();
@@ -336,6 +451,7 @@ fn plot_input_clones_retain_exact_export_allocation_until_last_drop() {
             scalar,
         };
         drop(buffer);
+        drop(exports);
         drop(input);
         let live = provider.acquire_live(&wire).unwrap();
         let expected = if transpose {

@@ -597,7 +597,6 @@ async fn build_quiver_gpu_plot(
     parsed: &ParsedQuiverStyle,
     label: &str,
 ) -> crate::BuiltinResult<Option<QuiverPlot>> {
-    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let count = super::gpu_helpers::GpuBufferExports::element_count(u, BUILTIN_NAME)?;
     if count == 0 {
         return Err(plotting_error(
@@ -659,150 +658,196 @@ async fn build_quiver_gpu_plot(
     {
         return Ok(None);
     }
-    let (Some(u_ref), Some(v_ref)) = (
-        gpu_exports.export(u, BUILTIN_NAME)?,
-        gpu_exports.export(v, BUILTIN_NAME)?,
-    ) else {
-        return Ok(None);
-    };
+    let mut inputs = vec![u, v];
     for coordinate in [x, y] {
         if let QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) = coordinate {
-            if !gpu_exports
-                .export(handle, BUILTIN_NAME)?
-                .is_some_and(|exported| exported.precision == u_ref.precision)
-            {
-                return Ok(None);
+            inputs.push(handle);
+        }
+    }
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&inputs, BUILTIN_NAME)?
+    else {
+        return Ok(None);
+    };
+    let result = async {
+        let (Some(u_ref), Some(v_ref)) = (
+            gpu_exports.export(u, BUILTIN_NAME)?,
+            gpu_exports.export(v, BUILTIN_NAME)?,
+        ) else {
+            return Err(super::plotting_error(
+                BUILTIN_NAME,
+                "quiver: admitted physical buffers became unavailable",
+            ));
+        };
+        for coordinate in [x, y] {
+            if let QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) = coordinate {
+                if !gpu_exports
+                    .export(handle, BUILTIN_NAME)?
+                    .is_some_and(|exported| exported.precision == u_ref.precision)
+                {
+                    return Err(super::plotting_error(
+                        BUILTIN_NAME,
+                        "quiver: admitted physical buffers became unavailable",
+                    ));
+                }
             }
         }
-    }
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    if u_ref.precision != v_ref.precision {
-        return Ok(None);
-    }
-    if u_ref.len != v_ref.len {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: U and V GPU inputs must match",
-        ));
-    }
-    let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
-        u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
-    );
-    let x_axis = quiver_axis_source(x, u_ref.precision, "X", &mut gpu_exports)?;
-    let y_axis = quiver_axis_source(y, u_ref.precision, "Y", &mut gpu_exports)?;
-    let rows = u_ref.shape.first().copied().unwrap_or(u_ref.len).max(1);
-    let cols = u_ref.shape.get(1).copied().unwrap_or(1).max(1);
-    let count = u_ref.len;
-    if count == 0 {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: GPU U/V inputs must be non-empty",
-        ));
-    }
-    let x_len = x_axis.len();
-    let y_len = y_axis.len();
-    let xy_mode = if x_len == count && y_len == count {
-        0u32
-    } else if x_len == cols && y_len == rows {
-        1u32
-    } else {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: GPU X/Y inputs must match U/V as full coordinates or meshgrid vectors",
-        ));
-    };
-    if xy_mode == 1 && rows.checked_mul(cols) != Some(count) {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "quiver: meshgrid GPU metadata does not match U/V element count",
-        ));
-    }
-    let mut protected = vec![u, v];
-    for axis in [&x_axis, &y_axis] {
-        if let QuiverAxisSource::Gpu { handle, .. } = axis {
-            protected.push(handle);
-        }
-    }
-    let (min_x, max_x) = x_axis.bounds(BUILTIN_NAME, &protected).await?;
-    let (min_y, max_y) = y_axis.bounds(BUILTIN_NAME, &protected).await?;
-    let (min_u, max_u) =
-        super::gpu_helpers::axis_bounds_protecting(u, &protected, BUILTIN_NAME).await?;
-    let (min_v, max_v) =
-        super::gpu_helpers::axis_bounds_protecting(v, &protected, BUILTIN_NAME).await?;
-    let bounds = runmat_plot::core::BoundingBox::new(
-        glam::Vec3::new(
-            min_x + min_u.min(0.0) * parsed.scale,
-            min_y + min_v.min(0.0) * parsed.scale,
-            0.0,
-        ),
-        glam::Vec3::new(
-            max_x + max_u.max(0.0) * parsed.scale,
-            max_y + max_v.max(0.0) * parsed.scale,
-            0.0,
-        ),
-    );
-    let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
-        x_data: x_axis.axis_data(),
-        y_data: y_axis.axis_data(),
-        u_buffer: u_ref.clone().into(),
-        v_buffer: v_ref.clone().into(),
-        count: count_u32,
-        rows: rows_u32,
-        cols: cols_u32,
-        xy_mode,
-        scalar,
-    };
-    let gpu_source = runmat_plot::plots::QuiverGpuSource {
-        x_data: OwnedAxisData::from_axis(&inputs.x_data),
-        y_data: OwnedAxisData::from_axis(&inputs.y_data),
-        u_buffer: inputs.u_buffer.clone(),
-        v_buffer: inputs.v_buffer.clone(),
-        count,
-        rows,
-        cols,
-        xy_mode,
-        scalar,
-    };
-    let gpu_vertices = context
-        .access
-        .with_shared(|emission| {
-            runmat_plot::gpu::quiver::pack_vertices(
-                emission,
-                &inputs,
-                &runmat_plot::gpu::quiver::QuiverGpuParams {
-                    color: parsed.color,
-                    scale: parsed.scale,
-                    head_size: parsed.head_size,
-                },
-            )
-        })
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        .map_err(|e| {
-            plotting_error(
+        if u_ref.precision != v_ref.precision {
+            return Err(super::plotting_error(
                 BUILTIN_NAME,
-                format!("quiver: failed to build GPU vertices: {e}"),
-            )
-        })?;
-    let mut plot = QuiverPlot::from_gpu_buffer(
-        parsed.color,
-        parsed.line_width,
-        parsed.scale,
-        parsed.head_size,
-        gpu_vertices,
-        count * 6,
-        bounds,
-    )
-    .with_gpu_source(gpu_source)
-    .with_label(label);
-    plot.x = Vec::new();
-    plot.y = Vec::new();
-    plot.u = Vec::new();
-    plot.v = Vec::new();
-    if let Some(visible) = parsed.visible {
-        plot.set_visible(visible);
+                "quiver: admitted physical buffers became unavailable",
+            ));
+        }
+        if u_ref.len != v_ref.len {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "quiver: U and V GPU inputs must match",
+            ));
+        }
+        let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
+            u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
+        );
+        let x_axis = quiver_axis_source(x, u_ref.precision, "X", &mut gpu_exports)?;
+        let y_axis = quiver_axis_source(y, u_ref.precision, "Y", &mut gpu_exports)?;
+        let rows = u_ref.shape.first().copied().unwrap_or(u_ref.len).max(1);
+        let cols = u_ref.shape.get(1).copied().unwrap_or(1).max(1);
+        let count = u_ref.len;
+        if count == 0 {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "quiver: GPU U/V inputs must be non-empty",
+            ));
+        }
+        let x_len = x_axis.len();
+        let y_len = y_axis.len();
+        let xy_mode = if x_len == count && y_len == count {
+            0u32
+        } else if x_len == cols && y_len == rows {
+            1u32
+        } else {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "quiver: GPU X/Y inputs must match U/V as full coordinates or meshgrid vectors",
+            ));
+        };
+        if xy_mode == 1 && rows.checked_mul(cols) != Some(count) {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "quiver: meshgrid GPU metadata does not match U/V element count",
+            ));
+        }
+        let mut protected = gpu_exports.protected_handles();
+        protected.extend([u, v]);
+        for axis in [&x_axis, &y_axis] {
+            if let QuiverAxisSource::Gpu { handle, .. } = axis {
+                protected.push(handle);
+            }
+        }
+        let (min_x, max_x) = x_axis.bounds(BUILTIN_NAME, &protected).await?;
+        let mut completed_bounds = matches!(&x_axis, QuiverAxisSource::Gpu { .. });
+        let (min_y, max_y) = y_axis
+            .bounds(BUILTIN_NAME, &protected)
+            .await
+            .map_err(|error| {
+                super::gpu_helpers::preparation_failure(error, BUILTIN_NAME, completed_bounds)
+            })?;
+        completed_bounds |= matches!(&y_axis, QuiverAxisSource::Gpu { .. });
+        let (min_u, max_u) =
+            super::gpu_helpers::axis_bounds_protecting(u, &protected, BUILTIN_NAME)
+                .await
+                .map_err(|error| {
+                    super::gpu_helpers::preparation_failure(error, BUILTIN_NAME, completed_bounds)
+                })?;
+        let (min_v, max_v) =
+            super::gpu_helpers::axis_bounds_protecting(v, &protected, BUILTIN_NAME)
+                .await
+                .map_err(|error| {
+                    super::gpu_helpers::preparation_after_effect(error, BUILTIN_NAME)
+                })?;
+        drop(protected);
+        gpu_exports.record_completed_effect();
+        let bounds = runmat_plot::core::BoundingBox::new(
+            glam::Vec3::new(
+                min_x + min_u.min(0.0) * parsed.scale,
+                min_y + min_v.min(0.0) * parsed.scale,
+                0.0,
+            ),
+            glam::Vec3::new(
+                max_x + max_u.max(0.0) * parsed.scale,
+                max_y + max_v.max(0.0) * parsed.scale,
+                0.0,
+            ),
+        );
+        let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
+            x_data: x_axis.axis_data(),
+            y_data: y_axis.axis_data(),
+            u_buffer: u_ref.clone().into(),
+            v_buffer: v_ref.clone().into(),
+            count: count_u32,
+            rows: rows_u32,
+            cols: cols_u32,
+            xy_mode,
+            scalar,
+        };
+        let gpu_source = runmat_plot::plots::QuiverGpuSource {
+            x_data: OwnedAxisData::from_axis(&inputs.x_data),
+            y_data: OwnedAxisData::from_axis(&inputs.y_data),
+            u_buffer: inputs.u_buffer.clone(),
+            v_buffer: inputs.v_buffer.clone(),
+            count,
+            rows,
+            cols,
+            xy_mode,
+            scalar,
+        };
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::quiver::pack_vertices(
+                    emission,
+                    &inputs,
+                    &runmat_plot::gpu::quiver::QuiverGpuParams {
+                        color: parsed.color,
+                        scale: parsed.scale,
+                        head_size: parsed.head_size,
+                    },
+                )
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("{}: GPU emission unavailable: {source}", BUILTIN_NAME),
+                    source,
+                )
+            })?
+            .map_err(|e| {
+                plotting_error(
+                    BUILTIN_NAME,
+                    format!("quiver: failed to build GPU vertices: {e}"),
+                )
+            })?;
+        let mut plot = QuiverPlot::from_gpu_buffer(
+            parsed.color,
+            parsed.line_width,
+            parsed.scale,
+            parsed.head_size,
+            gpu_vertices,
+            count * 6,
+            bounds,
+        )
+        .with_gpu_source(gpu_source)
+        .with_label(label);
+        plot.x = Vec::new();
+        plot.y = Vec::new();
+        plot.u = Vec::new();
+        plot.v = Vec::new();
+        if let Some(visible) = parsed.visible {
+            plot.set_visible(visible);
+        }
+        Ok(Some(plot))
     }
-    Ok(Some(plot))
+    .await;
+    gpu_exports.complete(result, BUILTIN_NAME)
 }
 
 enum QuiverAxisSource {

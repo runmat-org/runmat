@@ -1,7 +1,6 @@
 //! MATLAB-compatible `surf` builtin.
 
 use glam::Vec3;
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -336,39 +335,31 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             Err(axis_err) => return Err(map_surf_invalid_argument(axis_err)),
         };
     let mut surface = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME,
-                &x_axis,
-                &y_axis,
-                &z_gpu,
-                min_z,
-                max_z,
-                style.colormap.clone(),
-                style.alpha,
-                style.flatten_z,
-            )
-            .await
-            {
-                Ok(surface) => surface,
-                Err(err) => {
-                    if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
-                        return Err(err);
-                    }
-                    warn!("surf GPU path unavailable: {err}");
-                    let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
-                        .await
-                        .map_err(map_surf_invalid_argument)?;
-                    build_surface_cpu(&z_input, x_host, y_host, rows, cols)
-                        .await
-                        .map_err(map_surf_invalid_argument)?
-                }
-            },
-            Err(err) => {
-                if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
-                    return Err(err);
-                }
-                warn!("surf GPU bounds unavailable: {err}");
+        match super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+        )
+        .await?
+        {
+            Some(mut prepared) => {
+                let (min_z, max_z) = prepared.z_bounds;
+                build_surface_gpu_plot_with_bounds_async(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    min_z,
+                    max_z,
+                    style.colormap.clone(),
+                    style.alpha,
+                    style.flatten_z,
+                )
+                .await?
+            }
+            None => {
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
                     .await
                     .map_err(map_surf_invalid_argument)?;
@@ -495,200 +486,181 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     x_axis: &AxisSource,
     y_axis: &AxisSource,
     z: &GpuTensorHandle,
+    prepared: &mut super::op_common::surface_inputs::PreparedSurfaceGpu<'_>,
     min_z: f32,
     max_z: f32,
     colormap: ColorMap,
     alpha: f32,
     flatten_z: bool,
 ) -> BuiltinResult<SurfacePlot> {
-    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
-    if x_axis.is_empty() || y_axis.is_empty() {
-        return Err(plotting_error(
-            name,
-            format!("{name}: axis vectors must be non-empty"),
-        ));
-    }
+    prepared.validate_sources(name, x_axis, y_axis, z)?;
+    let (min_x, max_x) = prepared.x_bounds;
+    let (min_y, max_y) = prepared.y_bounds;
+    let context = &prepared.context;
+    let gpu_exports = &mut prepared.exports;
+    let result = (|| {
+        let z_ref = gpu_exports.export(z, name)?.ok_or_else(|| {
+            plotting_error(
+                name,
+                format!("{name}: admitted GPU Z export became unavailable"),
+            )
+        })?;
+        let x_len = x_axis.len();
+        let y_len = y_axis.len();
+        let bounds = runmat_plot::core::scene::BoundingBox::new(
+            Vec3::new(min_x, min_y, min_z),
+            Vec3::new(max_x, max_y, max_z),
+        );
+        let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
 
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
+        let color_table = build_color_lut(&colormap, 512, 1.0);
+        let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
 
-    let z_ref = gpu_exports
-        .export(z, name)?
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
+        let mut x_axis_f32: Vec<f32> = Vec::new();
+        let mut y_axis_f32: Vec<f32> = Vec::new();
 
-    let x_len = x_axis.len();
-    let y_len = y_axis.len();
-    let expected_len = x_len
-        .checked_mul(y_len)
-        .ok_or_else(|| plotting_error(name, format!("{name}: grid dimensions overflowed")))?;
-    if z_ref.len != expected_len {
-        return Err(plotting_error(
-            name,
-            format!(
-                "{name}: Z must contain exactly {} elements ({}×{})",
-                expected_len, x_len, y_len
-            ),
-        ));
-    }
+        let x_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match x_axis {
+            AxisSource::Gpu(h) => {
+                let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
+                    plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+                })?;
+                if exported.len != x_len {
+                    return Err(plotting_error(
+                        name,
+                        format!(
+                            "{name}: X axis length mismatch (expected {x_len}, got {})",
+                            exported.len
+                        ),
+                    ));
+                }
+                if exported.precision != z_ref.precision {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: X axis precision must match Z precision"),
+                    ));
+                }
+                Some(exported.clone().into())
+            }
+            AxisSource::Host(v) => {
+                if scalar == ScalarType::F32 {
+                    x_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
+                }
+                None
+            }
+        };
 
-    let (min_x, max_x) = match x_axis {
-        AxisSource::Host(v) => (
-            v.iter()
-                .fold(f32::INFINITY, |acc, &val| acc.min(val as f32)),
-            v.iter()
-                .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32)),
-        ),
-        AxisSource::Gpu(h) => super::gpu_helpers::axis_bounds_async(h, name).await?,
-    };
-    let (min_y, max_y) = match y_axis {
-        AxisSource::Host(v) => (
-            v.iter()
-                .fold(f32::INFINITY, |acc, &val| acc.min(val as f32)),
-            v.iter()
-                .fold(f32::NEG_INFINITY, |acc, &val| acc.max(val as f32)),
-        ),
-        AxisSource::Gpu(h) => super::gpu_helpers::axis_bounds_async(h, name).await?,
-    };
-    let bounds = runmat_plot::core::scene::BoundingBox::new(
-        Vec3::new(min_x, min_y, min_z),
-        Vec3::new(max_x, max_y, max_z),
-    );
-    let extent_hint = ((max_x - min_x).powi(2) + (max_y - min_y).powi(2)).sqrt();
+        let y_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match y_axis {
+            AxisSource::Gpu(h) => {
+                let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
+                    plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
+                })?;
+                if exported.len != y_len {
+                    return Err(plotting_error(
+                        name,
+                        format!(
+                            "{name}: Y axis length mismatch (expected {y_len}, got {})",
+                            exported.len
+                        ),
+                    ));
+                }
+                if exported.precision != z_ref.precision {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: Y axis precision must match Z precision"),
+                    ));
+                }
+                Some(exported.clone().into())
+            }
+            AxisSource::Host(v) => {
+                if scalar == ScalarType::F32 {
+                    y_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
+                }
+                None
+            }
+        };
 
-    let color_table = build_color_lut(&colormap, 512, 1.0);
-    let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
+        let inputs = runmat_plot::gpu::surface::SurfaceGpuInputs {
+            x_axis: if let Some(buffer) = x_axis_gpu.as_ref() {
+                runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
+            } else if z_ref.precision == ProviderPrecision::F64 {
+                match x_axis {
+                    AxisSource::Host(v) => {
+                        runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice())
+                    }
+                    AxisSource::Gpu(_) => unreachable!("gpu X axis handled above"),
+                }
+            } else {
+                runmat_plot::gpu::surface::SurfaceAxis::F32(x_axis_f32.as_slice())
+            },
+            y_axis: if let Some(buffer) = y_axis_gpu.as_ref() {
+                runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
+            } else if z_ref.precision == ProviderPrecision::F64 {
+                match y_axis {
+                    AxisSource::Host(v) => {
+                        runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice())
+                    }
+                    AxisSource::Gpu(_) => unreachable!("gpu Y axis handled above"),
+                }
+            } else {
+                runmat_plot::gpu::surface::SurfaceAxis::F32(y_axis_f32.as_slice())
+            },
+            z_buffer: z_ref.clone().into(),
+            color_table: &color_table,
+            x_len: x_len as u32,
+            y_len: y_len as u32,
+            scalar,
+        };
+        let gpu_source = runmat_plot::plots::SurfaceGpuSource {
+            x_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_axis),
+            y_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_axis),
+            z_buffer: inputs.z_buffer.clone(),
+            x_len,
+            y_len,
+            scalar,
+        };
+        let lod = compute_surface_lod(x_len, y_len, extent_hint);
+        let params = runmat_plot::gpu::surface::SurfaceGpuParams {
+            min_z,
+            max_z,
+            alpha,
+            flatten_z,
+            x_stride: lod.stride_x,
+            y_stride: lod.stride_y,
+            lod_x_len: lod.lod_x_len,
+            lod_y_len: lod.lod_y_len,
+        };
 
-    let mut x_axis_f32: Vec<f32> = Vec::new();
-    let mut y_axis_f32: Vec<f32> = Vec::new();
-
-    let x_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match x_axis {
-        AxisSource::Gpu(h) => {
-            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
-                plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::surface::pack_surface_vertices(emission, &inputs, &params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    name,
+                    format!("{}: GPU emission unavailable: {source}", name),
+                    source,
+                )
+            })?
+            .map_err(|e| {
+                plotting_error(name, format!("{name}: failed to build GPU vertices: {e}"))
             })?;
-            if exported.len != x_len {
-                return Err(plotting_error(
-                    name,
-                    format!(
-                        "{name}: X axis length mismatch (expected {x_len}, got {})",
-                        exported.len
-                    ),
-                ));
-            }
-            if exported.precision != z_ref.precision {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: X axis precision must match Z precision"),
-                ));
-            }
-            Some(exported.clone().into())
-        }
-        AxisSource::Host(v) => {
-            if scalar == ScalarType::F32 {
-                x_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
-            }
-            None
-        }
-    };
 
-    let y_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match y_axis {
-        AxisSource::Gpu(h) => {
-            let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
-                plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
-            })?;
-            if exported.len != y_len {
-                return Err(plotting_error(
-                    name,
-                    format!(
-                        "{name}: Y axis length mismatch (expected {y_len}, got {})",
-                        exported.len
-                    ),
-                ));
-            }
-            if exported.precision != z_ref.precision {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: Y axis precision must match Z precision"),
-                ));
-            }
-            Some(exported.clone().into())
-        }
-        AxisSource::Host(v) => {
-            if scalar == ScalarType::F32 {
-                y_axis_f32 = v.iter().map(|&val| val as f32).collect::<Vec<f32>>();
-            }
-            None
-        }
-    };
-
-    let inputs = runmat_plot::gpu::surface::SurfaceGpuInputs {
-        x_axis: if let Some(buffer) = x_axis_gpu.as_ref() {
-            runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
-        } else if z_ref.precision == ProviderPrecision::F64 {
-            match x_axis {
-                AxisSource::Host(v) => runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice()),
-                AxisSource::Gpu(_) => unreachable!("gpu X axis handled above"),
-            }
-        } else {
-            runmat_plot::gpu::surface::SurfaceAxis::F32(x_axis_f32.as_slice())
-        },
-        y_axis: if let Some(buffer) = y_axis_gpu.as_ref() {
-            runmat_plot::gpu::surface::SurfaceAxis::Buffer(buffer.clone())
-        } else if z_ref.precision == ProviderPrecision::F64 {
-            match y_axis {
-                AxisSource::Host(v) => runmat_plot::gpu::surface::SurfaceAxis::F64(v.as_slice()),
-                AxisSource::Gpu(_) => unreachable!("gpu Y axis handled above"),
-            }
-        } else {
-            runmat_plot::gpu::surface::SurfaceAxis::F32(y_axis_f32.as_slice())
-        },
-        z_buffer: z_ref.clone().into(),
-        color_table: &color_table,
-        x_len: x_len as u32,
-        y_len: y_len as u32,
-        scalar,
-    };
-    let gpu_source = runmat_plot::plots::SurfaceGpuSource {
-        x_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.x_axis),
-        y_axis: runmat_plot::gpu::axis::OwnedAxisData::from_axis(&inputs.y_axis),
-        z_buffer: inputs.z_buffer.clone(),
-        x_len,
-        y_len,
-        scalar,
-    };
-    let lod = compute_surface_lod(x_len, y_len, extent_hint);
-    let params = runmat_plot::gpu::surface::SurfaceGpuParams {
-        min_z,
-        max_z,
-        alpha,
-        flatten_z,
-        x_stride: lod.stride_x,
-        y_stride: lod.stride_y,
-        lod_x_len: lod.lod_x_len,
-        lod_y_len: lod.lod_y_len,
-    };
-
-    let gpu_vertices = context
-        .access
-        .with_shared(|emission| {
-            runmat_plot::gpu::surface::pack_surface_vertices(emission, &inputs, &params)
-        })
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
-
-    let vertex_count = lod.vertex_count();
-    let lod_x_len = usize::try_from(lod.lod_x_len)
-        .map_err(|_| plotting_error(name, format!("{name}: LOD X size overflowed")))?;
-    let lod_y_len = usize::try_from(lod.lod_y_len)
-        .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
-    let mut surface =
-        SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds)
-            .with_gpu_source(gpu_source)
-            .with_scalar_color_extent(min_z as f64, max_z as f64);
-    surface.colormap = colormap;
-    surface.alpha = alpha;
-    surface.flatten_z = flatten_z;
-    Ok(surface)
+        let vertex_count = lod.vertex_count();
+        let lod_x_len = usize::try_from(lod.lod_x_len)
+            .map_err(|_| plotting_error(name, format!("{name}: LOD X size overflowed")))?;
+        let lod_y_len = usize::try_from(lod.lod_y_len)
+            .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
+        let mut surface =
+            SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds)
+                .with_gpu_source(gpu_source)
+                .with_scalar_color_extent(min_z as f64, max_z as f64);
+        surface.colormap = colormap;
+        surface.alpha = alpha;
+        surface.flatten_z = flatten_z;
+        Ok(surface)
+    })();
+    gpu_exports.complete(result, name)
 }
 
 pub(crate) fn build_color_lut(colormap: &ColorMap, samples: usize, alpha: f32) -> Vec<[f32; 4]> {

@@ -1,16 +1,64 @@
 //! Exact-owner exports used by one rendering preparation stage.
-use super::{plotting_error, preparation_after_effect, BuiltinResult, GpuTensorHandle};
+use super::{plotting_error, preparation_failure, BuiltinResult, GpuTensorHandle};
 
-/// One rendering-preparation export stage. A materialized view is an effect;
+/// One rendering-preparation export stage. A materialized view or completed numerical stage is an effect;
 /// a later capability miss cannot silently restart preparation on the host.
 #[derive(Default)]
 pub(crate) struct GpuBufferExports {
-    materialized: bool,
+    completed_effect: bool,
     unavailable: bool,
     retained: Vec<(GpuTensorHandle, runmat_accelerate_api::WgpuBufferRef)>,
+    access: Option<runmat_accelerate_api::WgpuDeviceAccess>,
 }
 
 impl GpuBufferExports {
+    pub(crate) fn has_completed_effect(&self) -> bool {
+        self.completed_effect
+    }
+    /// All actual live inputs, including independently materialized views,
+    /// remain borrowed operands of subsequent reduction/packing stages.
+    pub(crate) fn protected_handles(&self) -> Vec<&GpuTensorHandle> {
+        self.retained
+            .iter()
+            .flat_map(|(input, output)| [input, output.owning_handle()])
+            .collect()
+    }
+    /// Called only by the owning stage after actual reduction/packing success.
+    pub(crate) fn record_completed_effect(&mut self) {
+        self.completed_effect = true;
+    }
+    /// One shared physical admission and retained export stage. Numerical
+    /// forms, geometry and optional rendering policy remain caller-owned.
+    pub(crate) fn prepare(
+        inputs: &[&GpuTensorHandle],
+        name: &'static str,
+    ) -> BuiltinResult<Option<(runmat_plot::SharedWgpuContext, Self)>> {
+        let Some(context) = super::prepare_shared_wgpu_context(inputs, name)? else {
+            return Ok(None);
+        };
+        // These are the existing WgpuBufferRef floating-real carrier limits,
+        // not a new builtin support policy. Integer/logical rendering stays host.
+        if inputs.iter().any(|input| {
+            runmat_accelerate_api::handle_precision(input).is_none()
+                || input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_is_logical(input)
+        }) {
+            return Ok(None);
+        }
+        let mut exports = Self::for_context(&context);
+        for input in inputs {
+            if exports.export(input, name)?.is_none() {
+                return Ok(None);
+            }
+        }
+        Ok(Some((context, exports)))
+    }
+    pub(crate) fn for_context(context: &runmat_plot::SharedWgpuContext) -> Self {
+        Self {
+            access: Some(context.access.clone()),
+            ..Self::default()
+        }
+    }
     pub(crate) fn element_count(
         input: &GpuTensorHandle,
         name: &'static str,
@@ -30,13 +78,7 @@ impl GpuBufferExports {
         result: BuiltinResult<T>,
         name: &'static str,
     ) -> BuiltinResult<T> {
-        result.map_err(|error| {
-            if self.materialized {
-                preparation_after_effect(error, name)
-            } else {
-                error
-            }
-        })
+        result.map_err(|error| preparation_failure(error, name, self.completed_effect))
     }
 
     pub(crate) fn export(
@@ -67,7 +109,7 @@ impl GpuBufferExports {
             None => runmat_accelerate_api::export_wgpu_buffer(input),
         }
         .map_err(|error| {
-            let error = if self.materialized {
+            let error = if self.completed_effect {
                 error.after_effect()
             } else {
                 error
@@ -78,15 +120,15 @@ impl GpuBufferExports {
             )
         })?;
         let Some(output) = result else {
-            if self.materialized {
+            if self.completed_effect {
                 return Err(crate::runtime_error::with_provider_execution_source(
                     plotting_error(
                         name,
-                        format!("{name}: GPU buffer export unavailable after materialization"),
+                        format!("{name}: GPU buffer export unavailable after completed preparation"),
                     ),
                     runmat_accelerate_api::ProviderExecutionError::from(
                         runmat_accelerate_api::unsupported_provider_operation(
-                            "rendering export unavailable after an earlier materialized view",
+                            "rendering export unavailable after an earlier completed preparation stage",
                         ),
                     )
                     .after_effect(),
@@ -95,8 +137,12 @@ impl GpuBufferExports {
             self.unavailable = true;
             return Ok(None);
         };
-        self.materialized |= !output.owning_handle().shares_allocation_with(input);
+        self.completed_effect |= !output.owning_handle().shares_allocation_with(input);
         let valid = output.shape == input.shape()
+            && self
+                .access
+                .as_ref()
+                .is_none_or(|access| access.same_device(output.access()))
             && runmat_accelerate_api::handle_precision(input) == Some(output.precision)
             && output.owning_handle().device_id() == input.device_id()
             && runmat_accelerate_api::handle_is_logical(output.owning_handle())

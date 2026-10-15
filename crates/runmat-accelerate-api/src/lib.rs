@@ -71,6 +71,7 @@ mod numerical_domain;
 pub mod reduction;
 pub use reduction::ProviderDoubleSumPreflight;
 pub mod scalar_program;
+pub mod wgpu_ieee_words;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;
 #[cfg(feature = "wgpu")]

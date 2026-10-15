@@ -23,8 +23,12 @@ pub(crate) fn inject(source: &str) -> String {
 /// Exact widening of a binary32 storage word, without a floating binary32
 /// intermediate (which could flush subnormals). Same enabled F64/INT64 gate
 /// as the word helpers above. NaN payloads are not a language promise.
-pub(crate) fn binary32_widening() -> &'static str {
-    BINARY32_WIDENING
+pub(crate) fn binary32_widening() -> String {
+    format!(
+        "{}\n{}",
+        runmat_accelerate_api::wgpu_ieee_words::BINARY32_TO_BINARY64_WORDS_WGSL,
+        BINARY32_WIDENING
+    )
 }
 
 pub(crate) fn binary32_widening_implementation(
@@ -45,20 +49,8 @@ pub(crate) fn binary32_widening_implementation(
 
 const BINARY32_WIDENING: &str = r#"
 fn runmat_f32_words_to_f64(bits: u32) -> f64 {
-    let sign = bits & 0x80000000u;
-    let encoded = (bits >> 23u) & 255u;
-    var fraction = bits & 0x7fffffu;
-    if encoded == 255u {
-        return runmat_f64_from_words(0u, sign | 0x7ff00000u | select(0u, 0x80000u, fraction != 0u));
-    }
-    if encoded == 0u && fraction == 0u { return runmat_f64_from_words(0u, sign); }
-    var exponent = i32(encoded) + 896;
-    if encoded == 0u {
-        let highest = 31u - countLeadingZeros(fraction);
-        exponent = i32(highest) + 874;
-        fraction = (fraction << (23u - highest)) & 0x7fffffu;
-    }
-    return runmat_f64_from_words(fraction << 29u, sign | (u32(exponent) << 20u) | (fraction >> 3u));
+    let words = runmat_f32_to_binary64_words(bits);
+    return runmat_f64_from_words(words.x, words.y);
 }
 "#;
 

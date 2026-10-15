@@ -1,5 +1,6 @@
 //! Validate actual generated source independently of adapter availability.
 use super::*;
+use crate::gpu::ScalarType;
 
 #[test]
 fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
@@ -21,6 +22,7 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
         ("surface", surface::F32, surface::F64),
     ];
     let mut failures = Vec::new();
+    let mut variants = 0;
     for workgroup in [64, 256] {
         for (name, f32, f64) in pairs {
             for (precision, template) in [("f32", f32), ("f64", f64)] {
@@ -29,22 +31,19 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
                     &compute_source(template, workgroup),
                     &mut failures,
                 );
+                variants += 1;
             }
         }
-        for (name, template) in [
-            ("histogram/f32", histogram::counts::F32_UNIFORM),
-            ("histogram/f32-f32", histogram::counts::F32_WEIGHTS_F32),
-            ("histogram/f32-f64", histogram::counts::F32_WEIGHTS_F64),
-            ("histogram/f64", histogram::counts::F64_UNIFORM),
-            ("histogram/f64-f32", histogram::counts::F64_WEIGHTS_F32),
-            ("histogram/f64-f64", histogram::counts::F64_WEIGHTS_F64),
-            ("histogram/convert", histogram::convert::TEMPLATE),
+        for (name, scalar) in [
+            ("histogram/f32", ScalarType::F32),
+            ("histogram/f64", ScalarType::F64),
         ] {
             validate(
                 &format!("{name}/{workgroup}"),
-                &compute_source(template, workgroup),
+                &histogram::source(scalar, workgroup),
                 &mut failures,
             );
+            variants += 1;
         }
     }
     for (name, source) in [
@@ -58,7 +57,9 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
         ("vertex/triangle", vertex::TRIANGLE),
     ] {
         validate(name, source, &mut failures);
+        variants += 1;
     }
+    assert_eq!(variants, 72, "the declared shader inventory changed");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 

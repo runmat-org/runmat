@@ -193,6 +193,11 @@ pub enum AxisSource {
     Gpu(GpuTensorHandle),
 }
 
+#[cfg(feature = "plot-core")]
+mod gpu;
+#[cfg(feature = "plot-core")]
+pub(crate) use gpu::PreparedSurfaceGpu;
+
 impl AxisSource {
     pub fn len(&self) -> usize {
         match self {

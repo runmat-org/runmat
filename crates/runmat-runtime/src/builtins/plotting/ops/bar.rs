@@ -2,7 +2,6 @@
 
 use futures::executor::block_on;
 use glam::{Vec3, Vec4};
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
@@ -31,7 +30,6 @@ use crate::gather_if_needed_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::numeric_vector;
-use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 use crate::builtins::plotting::type_resolvers::handle_array_type;
@@ -733,8 +731,8 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
         let arg = input.take().expect("bar input consumed once");
         if !style.requires_cpu_path() {
             if let Some(handle) = arg.gpu_handle() {
-                match build_bar_gpu_series(arg.x_tensor().cloned(), handle, &style, config) {
-                    Ok(charts) if !charts.is_empty() => {
+                match build_bar_gpu_series(arg.x_tensor().cloned(), handle, &style, config)? {
+                    Some(charts) if !charts.is_empty() => {
                         let total = charts.len();
                         for (idx, mut bar) in charts.into_iter().enumerate() {
                             let default_label = default_series_label(idx, total);
@@ -744,13 +742,7 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
                         }
                         return Ok(());
                     }
-                    Ok(_) => {}
-                    Err(err) => {
-                        if err.gpu_gather_retry == crate::GpuGatherRetry::Never {
-                            return Err(err);
-                        }
-                        warn!("{} GPU path unavailable: {err}", config.builtin_name);
-                    }
+                    Some(_) | None => {}
                 }
             }
         }
@@ -859,76 +851,124 @@ fn build_bar_gpu_series(
     values: &GpuTensorHandle,
     style: &BarStyle,
     config: BarRenderConfig,
-) -> BuiltinResult<Vec<BarChart>> {
-    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(config.builtin_name)?;
-    let exported = gpu_exports
-        .export(values, config.builtin_name)?
-        .ok_or_else(|| config.internal("unable to export GPU values"))?;
+) -> BuiltinResult<Option<Vec<BarChart>>> {
     let x_count = x_tensor.as_ref().map(numeric_tensor_len);
     let shape = BarMatrixShape::from_handle(values, x_count, config)?;
     if shape.rows == 0 {
         return Err(config.invalid("input cannot be empty"));
     }
-    if exported.len != shape.rows * shape.cols {
+    for dimension in [shape.rows, shape.cols, shape.source_rows] {
+        u32::try_from(dimension)
+            .map_err(|_| config.invalid("GPU dimensions exceed supported range"))?;
+    }
+    let expected = shape
+        .rows
+        .checked_mul(shape.cols)
+        .ok_or_else(|| config.invalid("GPU dimensions overflow"))?;
+    if super::gpu_helpers::GpuBufferExports::element_count(values, config.builtin_name)? != expected
+    {
         return Err(config.invalid("gpuArray shape mismatch"));
     }
-    let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
-    let inputs = BarGpuInputs {
-        values_buffer: exported.clone().into(),
-        row_count: shape.rows as u32,
-        scalar,
+    let labels = category_labels_from_x(x_tensor, shape.rows, config)?;
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&[values], config.builtin_name)?
+    else {
+        return Ok(None);
     };
-    if shape.cols == 1 {
-        let params = BarGpuParams {
-            color: style.face_rgba(),
-            bar_width: style.bar_width,
-            series_index: 0,
-            series_count: 1,
-            source_row_count: shape.source_rows as u32,
-            transpose_source: shape.transposed,
-            group_index: 0,
-            group_count: 1,
-            orientation: config.gpu_orientation,
-            layout: BarLayoutMode::Grouped,
+    let result = (|| {
+        let exported = gpu_exports
+            .export(values, config.builtin_name)?
+            .ok_or_else(|| config.internal("unable to export GPU values"))?;
+        if exported.len != shape.rows * shape.cols {
+            return Err(config.invalid("gpuArray shape mismatch"));
+        }
+        let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
+        let inputs = BarGpuInputs {
+            values_buffer: exported.clone().into(),
+            row_count: shape.rows as u32,
+            scalar,
         };
-        let gpu_vertices = context
-            .access
-            .with_shared(|emission| {
-                runmat_plot::gpu::bar::pack_vertices_from_values(emission, &inputs, &params)
-            })
-            .map_err(|error| error.to_string())
-            .and_then(|result| result)
-            .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
-        let labels = category_labels_from_x(x_tensor, shape.rows, config)?;
-        let bounds = build_bar_gpu_bounds(values, shape.rows, params.bar_width, config)?;
-        let vertex_count = gpu_vertices.vertex_count;
-        let chart = BarChart::from_gpu_buffer(
+        if shape.cols == 1 {
+            let params = BarGpuParams {
+                color: style.face_rgba(),
+                bar_width: style.bar_width,
+                series_index: 0,
+                series_count: 1,
+                source_row_count: shape.source_rows as u32,
+                transpose_source: shape.transposed,
+                group_index: 0,
+                group_count: 1,
+                orientation: config.gpu_orientation,
+                layout: BarLayoutMode::Grouped,
+            };
+            let gpu_vertices = context
+                .access
+                .with_shared(|emission| {
+                    runmat_plot::gpu::bar::pack_vertices_from_values(emission, &inputs, &params)
+                })
+                .map_err(|source| {
+                    super::plotting_error_with_source(
+                        config.builtin_name,
+                        format!(
+                            "{}: GPU emission unavailable: {source}",
+                            config.builtin_name
+                        ),
+                        source,
+                    )
+                })?
+                .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
+            gpu_exports.record_completed_effect();
+            let bounds = build_bar_gpu_bounds(
+                values,
+                shape.rows,
+                params.bar_width,
+                config,
+                &gpu_exports.protected_handles(),
+            )?;
+            let vertex_count = gpu_vertices.vertex_count;
+            let chart = BarChart::from_gpu_buffer(
+                labels,
+                shape.rows,
+                gpu_vertices,
+                vertex_count,
+                bounds,
+                params.color,
+                params.bar_width,
+            )
+            .with_orientation(config.orientation)
+            .with_gpu_source_layout(
+                inputs.clone(),
+                0,
+                1,
+                shape.source_rows,
+                shape.transposed,
+            );
+            return Ok(vec![chart]);
+        }
+        build_bar_gpu_matrix_charts(
+            &context,
+            values,
+            &inputs,
             labels,
-            shape.rows,
-            gpu_vertices,
-            vertex_count,
-            bounds,
-            params.color,
-            params.bar_width,
+            shape,
+            style,
+            config,
+            &mut gpu_exports,
         )
-        .with_orientation(config.orientation)
-        .with_gpu_source_layout(inputs.clone(), 0, 1, shape.source_rows, shape.transposed);
-        return Ok(vec![chart]);
-    }
-    build_bar_gpu_matrix_charts(&context, values, &inputs, x_tensor, shape, style, config)
+    })();
+    gpu_exports.complete(result, config.builtin_name).map(Some)
 }
 
 fn build_bar_gpu_matrix_charts(
     context: &runmat_plot::SharedWgpuContext,
     values: &GpuTensorHandle,
     inputs: &BarGpuInputs,
-    x_tensor: Option<Tensor>,
+    labels: Vec<String>,
     shape: BarMatrixShape,
     style: &BarStyle,
     config: BarRenderConfig,
+    gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
 ) -> BuiltinResult<Vec<BarChart>> {
-    let labels = category_labels_from_x(x_tensor, shape.rows, config)?;
     let layout_mode = match style.layout {
         BarLayout::Grouped => BarLayoutMode::Grouped,
         BarLayout::Stacked => BarLayoutMode::Stacked,
@@ -936,8 +976,15 @@ fn build_bar_gpu_matrix_charts(
     let bounds = if style.layout == BarLayout::Stacked {
         build_stacked_bar_gpu_bounds(values, shape, style.bar_width, config)?
     } else {
-        build_bar_gpu_bounds(values, shape.rows, style.bar_width, config)?
+        build_bar_gpu_bounds(
+            values,
+            shape.rows,
+            style.bar_width,
+            config,
+            &gpu_exports.protected_handles(),
+        )?
     };
+    gpu_exports.record_completed_effect();
     let mut charts = Vec::with_capacity(shape.cols);
     for col in 0..shape.cols {
         let params = BarGpuParams {
@@ -965,8 +1012,16 @@ fn build_bar_gpu_matrix_charts(
             .with_shared(|emission| {
                 runmat_plot::gpu::bar::pack_vertices_from_values(emission, inputs, &params)
             })
-            .map_err(|error| error.to_string())
-            .and_then(|result| result)
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    config.builtin_name,
+                    format!(
+                        "{}: GPU emission unavailable: {source}",
+                        config.builtin_name
+                    ),
+                    source,
+                )
+            })?
             .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
         let vertex_count = gpu_vertices.vertex_count;
         let mut chart = BarChart::from_gpu_buffer(
@@ -1122,8 +1177,11 @@ fn build_bar_gpu_bounds(
     rows: usize,
     bar_width: f32,
     config: BarRenderConfig,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<BoundingBox> {
-    let (min_value, max_value) = axis_bounds(values, config.builtin_name)?;
+    let (min_value, max_value) = futures::executor::block_on(
+        super::gpu_helpers::axis_bounds_protecting(values, protected, config.builtin_name),
+    )?;
     let min_value = min_value.min(0.0);
     let max_value = max_value.max(0.0);
     let min_category = 1.0 - bar_width * 0.5;

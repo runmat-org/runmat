@@ -323,10 +323,21 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .map_err(map_imagesc_invalid_argument)?
         }
         super::image::ImageInputKind::TrueColorGpu(handle, channels) => {
-            super::image::build_truecolor_image_surface_gpu(
+            match super::image::build_truecolor_image_surface_gpu(
                 &handle, &x_axis, &y_axis, rows, cols, channels,
-            )
-            .map_err(map_imagesc_invalid_argument)?
+            )? {
+                Some(surface) => surface,
+                None => {
+                    let (x_host, y_host) =
+                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    super::image::build_truecolor_image_surface(
+                        retained_c_data.clone(),
+                        x_host,
+                        y_host,
+                    )
+                    .map_err(map_imagesc_invalid_argument)?
+                }
+            }
         }
         super::image::ImageInputKind::Indexed(c_input) => {
             super::image::build_indexed_image_surface(

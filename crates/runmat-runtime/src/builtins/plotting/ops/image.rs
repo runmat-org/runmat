@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use log::warn;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -294,8 +293,17 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .map_err(map_image_invalid_argument)?
         }
         ImageInputKind::TrueColorGpu(handle, channels) => {
-            build_truecolor_image_surface_gpu(&handle, &x_axis, &y_axis, rows, cols, channels)
-                .map_err(map_image_invalid_argument)?
+            match build_truecolor_image_surface_gpu(
+                &handle, &x_axis, &y_axis, rows, cols, channels,
+            )? {
+                Some(surface) => surface,
+                None => {
+                    let (x_host, y_host) =
+                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    build_truecolor_image_surface(retained_c_data.clone(), x_host, y_host)
+                        .map_err(map_image_invalid_argument)?
+                }
+            }
         }
         ImageInputKind::Indexed(input) => build_indexed_image_surface(
             &input,
@@ -498,96 +506,123 @@ pub(crate) fn build_truecolor_image_surface_gpu(
     rows: usize,
     cols: usize,
     channels: u32,
-) -> crate::BuiltinResult<SurfacePlot> {
-    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let image_ref = gpu_exports.export(handle, BUILTIN_NAME)?.ok_or_else(|| {
-        crate::builtins::plotting::plotting_error(
+) -> crate::BuiltinResult<Option<SurfacePlot>> {
+    let actual = truecolor_gpu_shape(handle, BUILTIN_NAME)?;
+    if actual != (rows, cols, channels) || x_axis.len() != cols || y_axis.len() != rows {
+        return Err(super::plotting_error(
             BUILTIN_NAME,
-            "image: unable to export truecolor GPU image",
-        )
-    })?;
-    let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
-        image_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
-    );
-    // Axis buffers can have a different native class, precision, provider, or storage
-    // layout than CData. Materialize only the small axes and encode them with the
-    // image scalar type; CData itself remains resident and is consumed zero-copy.
-    let (x_host, y_host) =
-        futures::executor::block_on(axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME))?;
-    let x_f32;
-    let y_f32;
-    let x_f64;
-    let y_f64;
-    let (x_data, y_data) = match scalar {
-        runmat_plot::gpu::ScalarType::F32 => {
-            x_f32 = x_host.iter().map(|value| *value as f32).collect::<Vec<_>>();
-            y_f32 = y_host.iter().map(|value| *value as f32).collect::<Vec<_>>();
-            (
-                runmat_plot::gpu::axis::AxisData::F32(&x_f32),
-                runmat_plot::gpu::axis::AxisData::F32(&y_f32),
-            )
-        }
-        runmat_plot::gpu::ScalarType::F64 => {
-            x_f64 = x_host.clone();
-            y_f64 = y_host.clone();
-            (
-                runmat_plot::gpu::axis::AxisData::F64(&x_f64),
-                runmat_plot::gpu::axis::AxisData::F64(&y_f64),
-            )
-        }
-    };
-    let gpu_vertices = context
-        .access
-        .with_shared(|emission| {
-            runmat_plot::gpu::image::pack_truecolor_vertices(
-                emission,
-                &runmat_plot::gpu::image::TrueColorImageGpuInputs {
-                    x_axis: x_data,
-                    y_axis: y_data,
-                    image_buffer: image_ref.clone().into(),
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    channels,
-                    scalar,
-                },
-            )
-        })
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        .map_err(|e| {
-            crate::builtins::plotting::plotting_error(
+            "image: truecolor axes/data dimensions mismatch",
+        ));
+    }
+    u32::try_from(rows)
+        .and_then(|_| u32::try_from(cols))
+        .map_err(|_| {
+            super::plotting_error(
                 BUILTIN_NAME,
-                format!("image: failed to build GPU truecolor vertices: {e}"),
+                "image: image dimensions exceed supported GPU range",
             )
         })?;
-    let bounds = runmat_plot::core::BoundingBox::new(
-        glam::Vec3::new(
-            x_host.first().copied().unwrap_or(0.0) as f32,
-            y_host.first().copied().unwrap_or(0.0) as f32,
-            0.0,
-        ),
-        glam::Vec3::new(
-            x_host.last().copied().unwrap_or(0.0) as f32,
-            y_host.last().copied().unwrap_or(0.0) as f32,
-            0.0,
-        ),
-    );
-    let mut surface = SurfacePlot::from_gpu_buffer(cols, rows, gpu_vertices, rows * cols, bounds)
-        .with_flatten_z(true)
-        .with_image_mode(true)
-        .with_shading(ShadingMode::None)
-        .with_gpu_color_grid_source(runmat_plot::plots::SurfaceGpuColorGridSource {
-            image_buffer: image_ref.clone().into(),
-            rows,
-            cols,
-            channels: channels as usize,
-            scalar,
-        });
-    surface.x_data = x_host;
-    surface.y_data = y_host;
-    surface.z_data = Some(vec![vec![0.0; rows]; cols]);
-    Ok(surface)
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&[handle], BUILTIN_NAME)?
+    else {
+        return Ok(None);
+    };
+    let result = (|| {
+        let image_ref = gpu_exports.export(handle, BUILTIN_NAME)?.ok_or_else(|| {
+            crate::builtins::plotting::plotting_error(
+                BUILTIN_NAME,
+                "image: unable to export truecolor GPU image",
+            )
+        })?;
+        let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
+            image_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
+        );
+        // Axis buffers can have a different native class, precision, provider, or storage
+        // layout than CData. Materialize only the small axes and encode them with the
+        // image scalar type; CData itself remains resident and is consumed zero-copy.
+        let (x_host, y_host) =
+            futures::executor::block_on(axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME))?;
+        let x_f32;
+        let y_f32;
+        let x_f64;
+        let y_f64;
+        let (x_data, y_data) = match scalar {
+            runmat_plot::gpu::ScalarType::F32 => {
+                x_f32 = x_host.iter().map(|value| *value as f32).collect::<Vec<_>>();
+                y_f32 = y_host.iter().map(|value| *value as f32).collect::<Vec<_>>();
+                (
+                    runmat_plot::gpu::axis::AxisData::F32(&x_f32),
+                    runmat_plot::gpu::axis::AxisData::F32(&y_f32),
+                )
+            }
+            runmat_plot::gpu::ScalarType::F64 => {
+                x_f64 = x_host.clone();
+                y_f64 = y_host.clone();
+                (
+                    runmat_plot::gpu::axis::AxisData::F64(&x_f64),
+                    runmat_plot::gpu::axis::AxisData::F64(&y_f64),
+                )
+            }
+        };
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::image::pack_truecolor_vertices(
+                    emission,
+                    &runmat_plot::gpu::image::TrueColorImageGpuInputs {
+                        x_axis: x_data,
+                        y_axis: y_data,
+                        image_buffer: image_ref.clone().into(),
+                        rows: rows as u32,
+                        cols: cols as u32,
+                        channels,
+                        scalar,
+                    },
+                )
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("{}: GPU emission unavailable: {source}", BUILTIN_NAME),
+                    source,
+                )
+            })?
+            .map_err(|e| {
+                crate::builtins::plotting::plotting_error(
+                    BUILTIN_NAME,
+                    format!("image: failed to build GPU truecolor vertices: {e}"),
+                )
+            })?;
+        let bounds = runmat_plot::core::BoundingBox::new(
+            glam::Vec3::new(
+                x_host.first().copied().unwrap_or(0.0) as f32,
+                y_host.first().copied().unwrap_or(0.0) as f32,
+                0.0,
+            ),
+            glam::Vec3::new(
+                x_host.last().copied().unwrap_or(0.0) as f32,
+                y_host.last().copied().unwrap_or(0.0) as f32,
+                0.0,
+            ),
+        );
+        let mut surface =
+            SurfacePlot::from_gpu_buffer(cols, rows, gpu_vertices, rows * cols, bounds)
+                .with_flatten_z(true)
+                .with_image_mode(true)
+                .with_shading(ShadingMode::None)
+                .with_gpu_color_grid_source(runmat_plot::plots::SurfaceGpuColorGridSource {
+                    image_buffer: image_ref.clone().into(),
+                    rows,
+                    cols,
+                    channels: channels as usize,
+                    scalar,
+                });
+        surface.x_data = x_host;
+        surface.y_data = y_host;
+        surface.z_data = Some(vec![vec![0.0; rows]; cols]);
+        Ok(surface)
+    })();
+    gpu_exports.complete(result, BUILTIN_NAME).map(Some)
 }
 
 fn truecolor_gpu_shape(
@@ -671,34 +706,33 @@ pub(crate) async fn build_indexed_image_surface(
     });
     let effective_limits = direct_limits.or(color_limits);
     if let Some(c_gpu) = c_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&c_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match super::surf::build_surface_gpu_plot_with_bounds_async(
+        if let Some(mut prepared) = super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+            BUILTIN_NAME,
+            x_axis,
+            y_axis,
+            &c_gpu,
+        )
+        .await?
+        {
+            let (min_z, max_z) = prepared.z_bounds;
+            let surface = super::surf::build_surface_gpu_plot_with_bounds_async(
                 BUILTIN_NAME,
                 x_axis,
                 y_axis,
                 &c_gpu,
+                &mut prepared,
                 min_z,
                 max_z,
                 colormap.clone(),
                 1.0,
                 true,
             )
-            .await
-            {
-                Ok(surface) => {
-                    return Ok(surface
-                        .with_flatten_z(true)
-                        .with_image_mode(true)
-                        .with_color_mapping(color_mapping)
-                        .with_color_limits(effective_limits));
-                }
-                Err(err) if err.gpu_gather_retry == crate::GpuGatherRetry::Never => {
-                    return Err(err)
-                }
-                Err(err) => warn!("image GPU path unavailable: {err}"),
-            },
-            Err(err) if err.gpu_gather_retry == crate::GpuGatherRetry::Never => return Err(err),
-            Err(err) => warn!("image GPU bounds unavailable: {err}"),
+            .await?;
+            return Ok(surface
+                .with_flatten_z(true)
+                .with_image_mode(true)
+                .with_color_mapping(color_mapping)
+                .with_color_limits(effective_limits));
         }
     }
 

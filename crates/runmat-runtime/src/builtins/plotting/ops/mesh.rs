@@ -1,6 +1,5 @@
 //! MATLAB-compatible `mesh` builtin.
 
-use log::warn;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -326,34 +325,33 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     };
 
     let mut surface = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match super::surf::build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME,
-                &x_axis,
-                &y_axis,
-                &z_gpu,
-                min_z,
-                max_z,
-                style.colormap.clone(),
-                style.alpha,
-                style.flatten_z,
-            )
-            .await
-            {
-                Ok(surface_gpu) => surface_gpu,
-                Err(err) => {
-                    warn!("mesh GPU path unavailable: {err}");
-                    build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols)
-                        .await
-                        .map_err(map_mesh_invalid_argument)?
-                }
-            },
-            Err(err) => {
-                warn!("mesh GPU bounds unavailable: {err}");
-                build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols)
-                    .await
-                    .map_err(map_mesh_invalid_argument)?
+        match super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+        )
+        .await?
+        {
+            Some(mut prepared) => {
+                let (min_z, max_z) = prepared.z_bounds;
+                super::surf::build_surface_gpu_plot_with_bounds_async(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    min_z,
+                    max_z,
+                    style.colormap.clone(),
+                    style.alpha,
+                    style.flatten_z,
+                )
+                .await?
             }
+            None => build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols)
+                .await
+                .map_err(map_mesh_invalid_argument)?,
         }
     } else {
         build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols)

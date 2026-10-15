@@ -15,9 +15,34 @@ pub(crate) fn preparation_after_effect(
     error: crate::RuntimeError,
     name: &'static str,
 ) -> crate::RuntimeError {
+    preparation_failure(error, name, true)
+}
+
+/// A required rendering stage cannot authorize host replay. Join known
+/// completed effects with the original typed provider disposition.
+pub(crate) fn preparation_failure(
+    error: crate::RuntimeError,
+    name: &'static str,
+    mut after_effect: bool,
+) -> crate::RuntimeError {
+    let mut cursor: &(dyn std::error::Error + 'static) = &error;
+    loop {
+        after_effect |= cursor
+            .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+            .is_some_and(runmat_accelerate_api::ProviderExecutionError::is_after_effect);
+        let Some(source) = cursor.source() else {
+            break;
+        };
+        cursor = source;
+    }
+    let source = runmat_accelerate_api::ProviderExecutionError::from_source(error);
     crate::runtime_error::with_provider_execution_source(
-        plotting_error(name, format!("{name}: GPU preparation failed: {error}")),
-        runmat_accelerate_api::ProviderExecutionError::from_source(error).after_effect(),
+        plotting_error(name, format!("{name}: GPU preparation failed: {source}")),
+        if after_effect {
+            source.after_effect()
+        } else {
+            source.with_unproven_effects()
+        },
     )
 }
 
@@ -29,6 +54,15 @@ pub(crate) use exports::GpuBufferExports;
 
 #[path = "gpu_bounds.rs"]
 mod bounds;
+pub(crate) use bounds::NumericBounds;
+
+pub(crate) async fn numeric_bounds_protecting(
+    handle: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    context: &'static str,
+) -> BuiltinResult<NumericBounds> {
+    bounds::numeric_bounds_protecting(handle, protected, context).await
+}
 
 pub(crate) async fn axis_bounds_protecting(
     handle: &GpuTensorHandle,
@@ -52,10 +86,60 @@ use runmat_plot::SharedWgpuContext;
 /// seed the shared context from the active acceleration provider.
 #[cfg(feature = "plot-core")]
 pub fn ensure_shared_wgpu_context(name: &'static str) -> BuiltinResult<SharedWgpuContext> {
-    super::context::ensure_context_from_provider()
-        .map_err(|err| plotting_error(name, format!("{name}: {}", err.message())))?;
+    super::context::ensure_context_from_provider().map_err(|err| {
+        super::plotting_error_with_source(name, format!("{name}: {}", err.message()), err)
+    })?;
     runmat_plot::shared_wgpu_context()
         .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))
+}
+
+/// Optional rendering admission borrows the inputs' actual device authority,
+/// never a context cached from a different ambient provider.
+#[cfg(feature = "plot-core")]
+pub(crate) fn prepare_shared_wgpu_context(
+    inputs: &[&GpuTensorHandle],
+    name: &'static str,
+) -> BuiltinResult<Option<SharedWgpuContext>> {
+    let mut owner = None;
+    for input in inputs {
+        input.allocation_lease().validate_live().map_err(|source| {
+            crate::runtime_error::with_provider_execution_source(
+                plotting_error(name, format!("{name}: plotting input has retired")),
+                runmat_accelerate_api::ProviderExecutionError::from_source(source),
+            )
+        })?;
+        let current = runmat_accelerate_api::provider_for_handle(input).ok_or_else(|| {
+            preparation_failure(
+                plotting_error(name, format!("{name}: no provider owns plotting input")),
+                name,
+                false,
+            )
+        })?;
+        if let Some(previous) = owner {
+            if !runmat_accelerate_api::same_provider_instance(previous, current) {
+                return Ok(None);
+            }
+        } else {
+            owner = Some(current);
+        }
+    }
+    let Some(owner) = owner else {
+        return Ok(None);
+    };
+    let Some(runmat_accelerate_api::AccelContextHandle::Wgpu(context)) =
+        owner.export_context(runmat_accelerate_api::AccelContextKind::Plotting)
+    else {
+        return Ok(None);
+    };
+    super::context::install_wgpu_context(&context);
+    Ok(Some(SharedWgpuContext {
+        instance: context.instance,
+        access: context.access,
+        adapter: context.adapter,
+        adapter_info: context.adapter_info,
+        limits: context.limits,
+        features: context.features,
+    }))
 }
 
 /// Compute global bounds through the exact owner's reduction hooks. Temporary

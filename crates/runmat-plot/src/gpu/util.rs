@@ -178,6 +178,25 @@ pub async fn copy_readback_bytes(
         .map_err(|error| error.to_string())
 }
 
+/// Exact integer histogram evidence. Mapping/cancellation and original causes
+/// belong to the same typed copy-readback owner as the other scalar decoders.
+pub async fn copy_readback_u32_buffer(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
+    element_count: usize,
+) -> Result<Vec<u32>, PlotReadbackError> {
+    let byte_len = element_count
+        .checked_mul(4)
+        .ok_or(PlotReadbackError::ByteSizeOverflow)?;
+    copy_readback_mapped(access, buffer, byte_len, |bytes| {
+        Ok(bytes
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four-byte chunk")))
+            .collect())
+    })
+    .await
+}
+
 async fn copy_readback_mapped<T>(
     access: &WgpuDeviceAccess,
     buffer: &GpuInputBuffer,

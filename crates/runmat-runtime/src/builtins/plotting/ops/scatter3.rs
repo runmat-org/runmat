@@ -967,7 +967,6 @@ async fn build_scatter3_gpu_plot(
     z: &GpuTensorHandle,
     style: &Scatter3ResolvedStyle,
 ) -> BuiltinResult<Option<Scatter3Plot>> {
-    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
     let count = super::gpu_helpers::GpuBufferExports::element_count;
     let point_count = count(x, BUILTIN_NAME)?;
     if point_count == 0 {
@@ -1011,99 +1010,127 @@ async fn build_scatter3_gpu_plot(
     {
         return Ok(None);
     }
-    let (Some(x_ref), Some(y_ref), Some(z_ref)) = (
-        gpu_exports.export(x, BUILTIN_NAME)?,
-        gpu_exports.export(y, BUILTIN_NAME)?,
-        gpu_exports.export(z, BUILTIN_NAME)?,
-    ) else {
+    let mut inputs = vec![x, y, z];
+    inputs.extend(style.gpu_sizes.iter());
+    inputs.extend(style.gpu_colors.iter().map(|color| &color.handle));
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&inputs, BUILTIN_NAME)?
+    else {
         return Ok(None);
     };
-    for handle in style
-        .gpu_sizes
-        .iter()
-        .chain(style.gpu_colors.iter().map(|color| &color.handle))
-    {
-        if !gpu_exports
-            .export(handle, BUILTIN_NAME)?
-            .is_some_and(|exported| exported.precision == ProviderPrecision::F32)
+    let result = async {
+        let (Some(x_ref), Some(y_ref), Some(z_ref)) = (
+            gpu_exports.export(x, BUILTIN_NAME)?,
+            gpu_exports.export(y, BUILTIN_NAME)?,
+            gpu_exports.export(z, BUILTIN_NAME)?,
+        ) else {
+            return Err(super::plotting_error(
+                BUILTIN_NAME,
+                "scatter3: admitted physical buffers became unavailable",
+            ));
+        };
+        for handle in style
+            .gpu_sizes
+            .iter()
+            .chain(style.gpu_colors.iter().map(|color| &color.handle))
         {
-            return Ok(None);
+            if !gpu_exports
+                .export(handle, BUILTIN_NAME)?
+                .is_some_and(|exported| exported.precision == ProviderPrecision::F32)
+            {
+                return Err(super::plotting_error(
+                    BUILTIN_NAME,
+                    "scatter3: admitted physical buffers became unavailable",
+                ));
+            }
         }
+
+        if x_ref.len == 0 {
+            return Err(scatter3_err("scatter3: empty input tensor"));
+        }
+        if x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+            return Err(scatter3_err(
+                "scatter3: X, Y, and Z inputs must have identical lengths",
+            ));
+        }
+        if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
+            return Err(super::plotting_error(
+                BUILTIN_NAME,
+                "scatter3: admitted physical buffers became unavailable",
+            ));
+        }
+        let point_count = x_ref.len;
+        let len_u32 = u32::try_from(point_count)
+            .map_err(|_| scatter3_err("scatter3: point count exceeds supported range"))?;
+        let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
+        let mut protected = gpu_exports.protected_handles();
+        protected.extend([x, y, z]);
+        protected.extend(style.gpu_sizes.iter());
+        protected.extend(style.gpu_colors.iter().map(|color| &color.handle));
+        let bounds = build_gpu_bounds(x, y, z, &protected).await?;
+        drop(protected);
+        gpu_exports.record_completed_effect();
+        let extent_hint = scatter3_extent_hint(&bounds);
+        let lod_stride = scatter3_lod_stride(len_u32, extent_hint);
+
+        let size_buffer = build_scatter3_size_buffer(style, point_count, &mut gpu_exports)?;
+        let color_buffer = build_scatter3_color_buffer(style, point_count, &mut gpu_exports)?;
+
+        let inputs = Scatter3GpuInputs {
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
+            z_buffer: z_ref.clone().into(),
+            len: len_u32,
+            scalar,
+            colors: color_buffer.clone(),
+        };
+        let params = Scatter3GpuParams {
+            color: style.uniform_color,
+            point_size: style.point_size,
+            sizes: size_buffer,
+            colors: color_buffer,
+            lod_stride,
+        };
+
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::scatter3::pack_vertices_from_xyz(emission, &inputs, &params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("{}: GPU emission unavailable: {source}", BUILTIN_NAME),
+                    source,
+                )
+            })?
+            .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
+
+        let drawn_points = gpu_vertices.vertex_count;
+        let gpu_style = Scatter3GpuStyle {
+            color: style.uniform_color,
+            edge_color: style.edge_color,
+            edge_thickness: style.edge_thickness,
+            marker_style: style.marker_style,
+            filled: style.filled,
+            has_per_point_colors: style.per_point_colors.is_some() || style.gpu_colors.is_some(),
+            edge_from_vertex_colors: style.marker_edge_flat,
+        };
+
+        Ok(Some(
+            Scatter3Plot::from_gpu_buffer(
+                gpu_vertices,
+                drawn_points,
+                gpu_style,
+                style.point_size,
+                bounds,
+            )
+            .with_gpu_source_inputs(inputs)
+            .with_label(style.label.clone()),
+        ))
     }
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-
-    if x_ref.len == 0 {
-        return Err(scatter3_err("scatter3: empty input tensor"));
-    }
-    if x_ref.len != y_ref.len || x_ref.len != z_ref.len {
-        return Err(scatter3_err(
-            "scatter3: X, Y, and Z inputs must have identical lengths",
-        ));
-    }
-    if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Ok(None);
-    }
-    let point_count = x_ref.len;
-    let len_u32 = u32::try_from(point_count)
-        .map_err(|_| scatter3_err("scatter3: point count exceeds supported range"))?;
-    let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
-    let mut protected = vec![x, y, z];
-    protected.extend(style.gpu_sizes.iter());
-    protected.extend(style.gpu_colors.iter().map(|color| &color.handle));
-    let bounds = build_gpu_bounds(x, y, z, &protected).await?;
-    let extent_hint = scatter3_extent_hint(&bounds);
-    let lod_stride = scatter3_lod_stride(len_u32, extent_hint);
-
-    let size_buffer = build_scatter3_size_buffer(style, point_count, &mut gpu_exports)?;
-    let color_buffer = build_scatter3_color_buffer(style, point_count, &mut gpu_exports)?;
-
-    let inputs = Scatter3GpuInputs {
-        x_buffer: x_ref.clone().into(),
-        y_buffer: y_ref.clone().into(),
-        z_buffer: z_ref.clone().into(),
-        len: len_u32,
-        scalar,
-        colors: color_buffer.clone(),
-    };
-    let params = Scatter3GpuParams {
-        color: style.uniform_color,
-        point_size: style.point_size,
-        sizes: size_buffer,
-        colors: color_buffer,
-        lod_stride,
-    };
-
-    let gpu_vertices = context
-        .access
-        .with_shared(|emission| {
-            runmat_plot::gpu::scatter3::pack_vertices_from_xyz(emission, &inputs, &params)
-        })
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
-
-    let drawn_points = gpu_vertices.vertex_count;
-    let gpu_style = Scatter3GpuStyle {
-        color: style.uniform_color,
-        edge_color: style.edge_color,
-        edge_thickness: style.edge_thickness,
-        marker_style: style.marker_style,
-        filled: style.filled,
-        has_per_point_colors: style.per_point_colors.is_some() || style.gpu_colors.is_some(),
-        edge_from_vertex_colors: style.marker_edge_flat,
-    };
-
-    Ok(Some(
-        Scatter3Plot::from_gpu_buffer(
-            gpu_vertices,
-            drawn_points,
-            gpu_style,
-            style.point_size,
-            bounds,
-        )
-        .with_gpu_source_inputs(inputs)
-        .with_label(style.label.clone()),
-    ))
+    .await;
+    gpu_exports.complete(result, BUILTIN_NAME)
 }
 
 async fn build_gpu_bounds(
@@ -1113,8 +1140,12 @@ async fn build_gpu_bounds(
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<BoundingBox> {
     let (min_x, max_x) = axis_bounds_protecting(x, protected, BUILTIN_NAME).await?;
-    let (min_y, max_y) = axis_bounds_protecting(y, protected, BUILTIN_NAME).await?;
-    let (min_z, max_z) = axis_bounds_protecting(z, protected, BUILTIN_NAME).await?;
+    let (min_y, max_y) = axis_bounds_protecting(y, protected, BUILTIN_NAME)
+        .await
+        .map_err(|error| super::gpu_helpers::preparation_after_effect(error, BUILTIN_NAME))?;
+    let (min_z, max_z) = axis_bounds_protecting(z, protected, BUILTIN_NAME)
+        .await
+        .map_err(|error| super::gpu_helpers::preparation_after_effect(error, BUILTIN_NAME))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),

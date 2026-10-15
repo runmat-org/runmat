@@ -1,6 +1,5 @@
 //! MATLAB-compatible `contourf` builtin (filled contour plot).
 
-use log::warn;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -15,9 +14,8 @@ use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
 use super::contour::{
-    build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_gpu_plot,
-    build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
-    CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
+    build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_plot, parse_contour_args,
+    ContourArgs, ContourLineColor, CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
 };
 use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle};
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -436,46 +434,57 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         let color_map = ColorMap::Parula;
         let base_z = 0.0;
 
+        let x_source = super::op_common::surface_inputs::AxisSource::Host(x_axis);
+        let y_source = super::op_common::surface_inputs::AxisSource::Host(y_axis);
+        let super::op_common::surface_inputs::AxisSource::Host(x_axis) = &x_source else {
+            unreachable!()
+        };
+        let super::op_common::surface_inputs::AxisSource::Host(y_axis) = &y_source else {
+            unreachable!()
+        };
         if let Some(handle) = z_input.gpu_handle() {
-            match build_contour_fill_gpu_plot(
-                name,
-                &x_axis,
-                &y_axis,
-                handle,
-                color_map.clone(),
-                base_z,
-                &level_spec,
-            ) {
-                Ok(fill_plot) => {
-                    figure.add_contour_fill_plot_on_axes(fill_plot, axes);
-                    *plot_index_slot.borrow_mut() = Some((axes, before));
-                    if !matches!(line_color, ContourLineColor::None) {
-                        match build_contour_gpu_plot(
+            if let Some(mut prepared) = futures::executor::block_on(
+                super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+                    name, &x_source, &y_source, handle,
+                ),
+            )? {
+                let fill_plot = build_contour_fill_gpu_plot(
+                    name,
+                    &x_axis,
+                    &y_axis,
+                    handle,
+                    &mut prepared,
+                    color_map.clone(),
+                    base_z,
+                    &level_spec,
+                )?;
+                let contours = if matches!(line_color, ContourLineColor::None) {
+                    None
+                } else {
+                    Some(
+                        super::contour::build_contour_gpu_plot_prepared(
                             name,
-                            &x_axis,
-                            &y_axis,
+                            &x_source,
+                            &y_source,
                             handle,
+                            &mut prepared,
                             color_map.clone(),
                             base_z,
                             &level_spec,
                             &line_color,
-                        ) {
-                            Ok(contours) => {
-                                figure.add_contour_plot_on_axes(
-                                    contours.with_line_width(line_width),
-                                    axes,
-                                );
-                            }
-                            Err(err) => {
-                                warn!("contourf contour overlay unavailable: {err}");
-                            }
-                        }
-                    }
-                    return Ok(());
+                            super::contour::ContourZMode::Base,
+                        )?
+                        .with_line_width(line_width),
+                    )
+                };
+                // Publish the requested composite only after every required
+                // stage succeeds; never silently omit an overlay.
+                figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+                *plot_index_slot.borrow_mut() = Some((axes, before));
+                if let Some(contours) = contours {
+                    figure.add_contour_plot_on_axes(contours, axes);
                 }
-                Err(err) => {
-                    warn!("contourf GPU path unavailable: {err}");
-                }
+                return Ok(());
             }
         }
 
@@ -498,26 +507,28 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             &level_spec,
         )
         .map_err(map_contourf_invalid_argument)?;
+        let contours = if matches!(line_color, ContourLineColor::None) {
+            None
+        } else {
+            Some(
+                build_contour_plot(
+                    name,
+                    &x_axis,
+                    &y_axis,
+                    &grid,
+                    color_map,
+                    base_z,
+                    &level_spec,
+                    &line_color,
+                )
+                .map_err(map_contourf_invalid_argument)?
+                .with_line_width(line_width),
+            )
+        };
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, before));
-        if !matches!(line_color, ContourLineColor::None) {
-            match build_contour_plot(
-                name,
-                &x_axis,
-                &y_axis,
-                &grid,
-                color_map,
-                base_z,
-                &level_spec,
-                &line_color,
-            ) {
-                Ok(contours) => {
-                    figure.add_contour_plot_on_axes(contours.with_line_width(line_width), axes);
-                }
-                Err(err) => {
-                    warn!("contourf overlay contour unavailable: {err}");
-                }
-            }
+        if let Some(contours) = contours {
+            figure.add_contour_plot_on_axes(contours, axes);
         }
         Ok(())
     });

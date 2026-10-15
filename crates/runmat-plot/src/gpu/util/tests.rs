@@ -160,6 +160,156 @@ fn readback_releases_access_and_mapping_for_reuse() {
         }));
         assert!(panic.is_err(), "decoder panic must remain observable");
     }
+    // Numerical histogram evidence uses this same actual mapping/lease owner.
+    // Binary64 words require no native shader-f64 feature on this device.
+    let cases = [
+        (
+            vec![1.0f64, 1.0 + 2.0f64.powi(-30), 1.0 + 2.0f64.powi(-29)],
+            vec![1.0, 1.0 + 2.0f64.powi(-30), 1.0 + 2.0f64.powi(-29)],
+            vec![1.0, 2.0],
+        ),
+        (
+            vec![2.5e-6, -1.0, 8.0, f64::NAN],
+            vec![0.0, 1.0e-6, 3.0e-6, 4.0e-6],
+            vec![1.0, 1.0, 2.0],
+        ),
+    ];
+    for (samples, edges, expected) in cases {
+        let allocation = TestAllocationOwner::default()
+            .allocate_zeroed(
+                vec![samples.len()],
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let bytes = samples
+            .iter()
+            .flat_map(|value| value.to_bits().to_le_bytes())
+            .collect::<Vec<_>>();
+        let source = access
+            .with_shared(|emission| {
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("histogram-native-word-numerical-fixture"),
+                        contents: &bytes,
+                        usage: wgpu::BufferUsages::STORAGE,
+                    },
+                ))
+            })
+            .unwrap();
+        let exported =
+            WgpuBufferRef::from_owned_buffer(source, allocation.handle.clone(), access.clone())
+                .unwrap();
+        let exact_edges = crate::gpu::histogram::ExactHistogramEdges::new(&edges).unwrap();
+        let actual = crate::gpu::histogram::histogram_counts(&access, exported, &exact_edges)
+            .block_on()
+            .unwrap()
+            .into_double_counts();
+        assert_eq!(actual, expected);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+    let samples = [
+        f32::NEG_INFINITY,
+        -2.0,
+        -1.0,
+        -f32::from_bits(1),
+        -0.0,
+        0.0,
+        f32::from_bits(1),
+        f32::INFINITY,
+        f32::NAN,
+    ];
+    let allocation = TestAllocationOwner::default()
+        .allocate_zeroed(
+            vec![samples.len()],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let bytes = samples
+        .iter()
+        .flat_map(|value| value.to_bits().to_le_bytes())
+        .collect::<Vec<_>>();
+    let source = access
+        .with_shared(|emission| {
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("histogram-binary32-word-boundaries"),
+                    contents: &bytes,
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ))
+        })
+        .unwrap();
+    let exported =
+        WgpuBufferRef::from_owned_buffer(source, allocation.handle.clone(), access.clone())
+            .unwrap();
+    let edges = crate::gpu::histogram::ExactHistogramEdges::new(&[
+        f64::NEG_INFINITY,
+        -1.0,
+        0.0,
+        f64::from(f32::from_bits(1)),
+        1.0,
+        f64::INFINITY,
+    ])
+    .unwrap();
+    assert_eq!(
+        crate::gpu::histogram::histogram_counts(&access, exported, &edges)
+            .block_on()
+            .unwrap()
+            .into_double_counts(),
+        vec![2.0, 2.0, 2.0, 1.0, 2.0]
+    );
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+
+    // One real bin above the binary32 consecutive-integer limit. A fresh WGPU
+    // storage buffer is zero-initialized; no fabricated count receipt is used.
+    let sample_count = (1usize << 24) + 1;
+    let allocation = TestAllocationOwner::default()
+        .allocate_zeroed(
+            vec![sample_count],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let source = access
+        .with_shared(|emission| {
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("histogram-u32-count-above-f32-integer-limit"),
+                    size: (sample_count as u64) * 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                },
+            ))
+        })
+        .unwrap();
+    let exported =
+        WgpuBufferRef::from_owned_buffer(source, allocation.handle.clone(), access.clone())
+            .unwrap();
+    let edges = crate::gpu::histogram::ExactHistogramEdges::new(&[-1.0, 1.0]).unwrap();
+    assert_eq!(
+        crate::gpu::histogram::histogram_counts(&access, exported, &edges)
+            .block_on()
+            .unwrap()
+            .into_double_counts(),
+        vec![sample_count as f64]
+    );
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+
     // Decoder error/panic must end the mapped view and unmap before remapping.
     assert_eq!(
         readback_f32_buffer(&access, &buffer, expected.len())
