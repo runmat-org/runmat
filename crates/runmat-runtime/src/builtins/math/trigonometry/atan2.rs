@@ -7,7 +7,9 @@ use runmat_builtins::{
     ATAN2_ERROR_TOO_MANY_OUTPUTS, ATAN2_INTEGER_INPUT_EXTENSION, ATAN2_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
+#[cfg(test)]
+use runmat_value::NumericStorage;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -24,6 +26,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "atan2";
 
 mod admission;
+pub(in crate::builtins::math::trigonometry) mod binary_angle;
 mod preparation;
 mod tabular;
 
@@ -256,47 +259,19 @@ fn atan2_host(y: Value, x: Value) -> BuiltinResult<Value> {
 }
 
 fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(y.shape(), x.shape())
-        .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_SIZE_MISMATCH, e))?;
-    let y_dtype = y.numeric_dtype();
-    let x_dtype = x.numeric_dtype();
-    let output_f32 = y_dtype == NumericDType::F32 || x_dtype == NumericDType::F32;
-    let both_f32 = y_dtype == NumericDType::F32 && x_dtype == NumericDType::F32;
-    if plan.is_empty() {
-        let storage = if output_f32 {
-            NumericStorage::F32(Vec::new())
-        } else {
-            NumericStorage::F64(Vec::new())
-        };
-        let empty = Tensor::from_numeric_storage(storage, plan.output_shape().to_vec())
-            .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
-        return Ok(tensor::tensor_into_value(empty));
-    }
-    let y_data = tensor::tensor_values_f64_cow(y);
-    let x_data = tensor::tensor_values_f64_cow(x);
-    let storage = if output_f32 {
-        let mut out = vec![0.0f32; plan.len()];
-        for (out_index, idx_y, idx_x) in plan.iter() {
-            out[out_index] = if both_f32 {
-                matlab_atan2_f32(y_data[idx_y] as f32, x_data[idx_x] as f32)
-            } else {
-                matlab_atan2_f64(y_data[idx_y], x_data[idx_x]) as f32
-            };
-        }
-        NumericStorage::F32(out)
-    } else {
-        let mut out = vec![0.0f64; plan.len()];
-        for (out_index, idx_y, idx_x) in plan.iter() {
-            out[out_index] = matlab_atan2_f64(y_data[idx_y], x_data[idx_x]);
-        }
-        NumericStorage::F64(out)
-    };
-    let tensor = Tensor::from_numeric_storage(storage, plan.output_shape().to_vec())
-        .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
-    Ok(tensor::tensor_into_value(tensor))
+    let result =
+        binary_angle::compute(y, x, binary_angle::Unit::Radians).map_err(|cause| match cause {
+            binary_angle::ComputeError::SizeMismatch(detail) => {
+                atan2_error_with_detail(&ATAN2_ERROR_SIZE_MISMATCH, detail)
+            }
+            binary_angle::ComputeError::Internal(detail) => {
+                atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, detail)
+            }
+        })?;
+    Ok(tensor::tensor_into_value(result))
 }
 
-fn matlab_atan2_f64(y: f64, x: f64) -> f64 {
+pub(super) fn matlab_atan2_f64(y: f64, x: f64) -> f64 {
     if y == 0.0 && x == 0.0 && x.is_sign_negative() {
         0.0
     } else {
@@ -304,7 +279,7 @@ fn matlab_atan2_f64(y: f64, x: f64) -> f64 {
     }
 }
 
-fn matlab_atan2_f32(y: f32, x: f32) -> f32 {
+pub(super) fn matlab_atan2_f32(y: f32, x: f32) -> f32 {
     if y == 0.0 && x == 0.0 && x.is_sign_negative() {
         0.0
     } else {

@@ -1,0 +1,3 @@
+use super::contract::define_degree_inverse_contract;
+
+define_degree_inverse_contract!("asecd", "ASECD", super::inference::Function::Asec);

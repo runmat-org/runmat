@@ -14,20 +14,14 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::eig_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value};
 
@@ -35,273 +29,11 @@ const BUILTIN_NAME: &str = "eig";
 
 const REAL_EPS: f64 = 1e-12;
 
-const EIG_NONFLOATING_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "eig-nonfloating-coefficient",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "eig with an integer or logical coefficient matrix is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EigNonfloatingCoefficientExtension"),
-    };
-
-pub const EIG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [EIG_NONFLOATING_COEFFICIENT_EXTENSION];
-
-const EIG_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Admitted integer coefficients must be exactly representable at the explicit binary64 eigensolver boundary.",
-}];
-const EIG_INTEGER_AB_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "First generalized coefficient matrix.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Second generalized coefficient matrix.",
-    },
-];
-
-pub const EIG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eig(A, ...) with typed-integer A",
-        inputs: &EIG_INTEGER_A_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only coefficient extension with double outputs.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eig(A, B, ...) with a typed-integer coefficient",
-        inputs: &EIG_INTEGER_AB_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each integer coefficient is checked independently before binary64 materialization.",
-    },
-];
-
-const EIG_OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Eigenvalues as a column vector.",
-}];
-
-const EIG_OUTPUT_VD: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix (or vector when `vector` option is used).",
-    },
-];
-
-const EIG_OUTPUT_VDW: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix (or vector when `vector` option is used).",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left eigenvectors.",
-    },
-];
-
-const EIG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input square matrix.",
-}];
-
-const EIG_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
-    },
-];
-
-const EIG_INPUTS_AB: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
-    },
-];
-
-const EIG_INPUTS_AB_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
-    },
-];
-
-const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-];
-
-const EIG_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INVALID_ARGUMENT",
-    identifier: Some("RunMat:eig:InvalidArgument"),
-    when: "Option arguments or requested output count are invalid.",
-    message: "eig currently supports at most three outputs",
-};
-
-const EIG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INVALID_INPUT",
-    identifier: Some("RunMat:eig:InvalidInput"),
-    when: "Input is unsupported or matrix shape is invalid.",
-    message: "eig: input matrix must be square",
-};
-
-const EIG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INTERNAL",
-    identifier: Some("RunMat:eig:Internal"),
-    when: "Runtime cannot compute or materialize eig outputs.",
-    message: "eig: internal runtime failure",
-};
-
-const EIG_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    EIG_ERROR_INVALID_ARGUMENT,
-    EIG_ERROR_INVALID_INPUT,
-    EIG_ERROR_INTERNAL,
-];
-
-pub const EIG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &EIG_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EIG_ERRORS,
+#[cfg(test)]
+use runmat_builtins::{EIG_DESCRIPTOR, EIG_EXTENSIONS};
+use runmat_builtins::{
+    EIG_ERROR_INTERNAL, EIG_ERROR_INVALID_ARGUMENT, EIG_ERROR_INVALID_INPUT,
+    EIG_NONFLOATING_COEFFICIENT_EXTENSION,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::eig")]
@@ -372,15 +104,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "eig",
-    category = "math/linalg/factor",
-    summary = "Compute eigenvalue decompositions.",
-    keywords = "eig,eigenvalues,eigenvectors,linalg",
-    accel = "sink",
-    sink = true,
-    type_resolver(eig_type),
-    descriptor(crate::builtins::math::linalg::factor::eig::EIG_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::eig::EIG_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::eig::EIG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
 async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -885,14 +609,15 @@ fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
     let mut b = None;
     for (idx, arg) in args.iter().enumerate() {
         if let Some(text) = option_text(arg)? {
-            match text.trim().to_ascii_lowercase().as_str() {
-                "balance" => opts.balance = true,
-                "nobalance" => opts.balance = false,
-                "vector" => opts.vector_output = true,
-                "matrix" => opts.vector_output = false,
-                other => {
+            match FactorOption::parse(&text) {
+                Some(FactorOption::Balance) => opts.balance = true,
+                Some(FactorOption::NoBalance) => opts.balance = false,
+                Some(FactorOption::Vector) => opts.vector_output = true,
+                Some(FactorOption::Matrix) => opts.vector_output = false,
+                _ => {
                     return Err(eig_invalid_argument(format!(
-                        "eig: unknown option '{other}'"
+                        "eig: unknown option '{}'",
+                        text.trim().to_ascii_lowercase()
                     )));
                 }
             }

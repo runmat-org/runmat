@@ -5,196 +5,23 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
 const BUILTIN_NAME: &str = "lu";
 
-const LU_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lu-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lu with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LuIntegerInputExtension"),
-};
-const LU_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lu-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lu with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LuLogicalInputExtension"),
-};
-pub const LU_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [LU_INTEGER_EXTENSION, LU_LOGICAL_EXTENSION];
-const LU_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat mode admits integer matrices at an explicit binary64 factorization boundary.",
-}];
-pub const LU_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[L,U,P] = lu(integer_A)",
-        inputs: &LU_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Gated RunMat extension; documented MATLAB input classes remain single and double.",
-    }];
-
-const LU_OUTPUT_COMBINED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "LU",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Combined LU factors.",
-}];
-
-const LU_OUTPUT_LU: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "L",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper-triangular factor.",
-    },
-];
-
-const LU_OUTPUT_LUP: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "L",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Permutation matrix or vector based on pivot mode.",
-    },
-];
-
-const LU_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix to factorize.",
-}];
-
-const LU_INPUTS_A_MODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to factorize.",
-    },
-    BuiltinParamDescriptor {
-        name: "pivotMode",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"matrix\""),
-        description: "Permutation mode (`\"matrix\"` or `\"vector\"`).",
-    },
-];
-
-const LU_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "LU = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_COMBINED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "LU = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_COMBINED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U] = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_LU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U] = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_LU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U, P] = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_LUP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U, P] = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_LUP,
-    },
-];
-
-const LU_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INVALID_ARGUMENT",
-    identifier: Some("RunMat:lu:InvalidArgument"),
-    when: "Option arguments or requested output count are invalid.",
-    message: "lu currently supports at most three outputs",
-};
-
-const LU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INVALID_INPUT",
-    identifier: Some("RunMat:lu:InvalidInput"),
-    when: "Input is unsupported for LU factorization.",
-    message: "lu: expected numeric or logical input values",
-};
-
-const LU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INTERNAL",
-    identifier: Some("RunMat:lu:Internal"),
-    when: "Runtime cannot materialize LU outputs.",
-    message: "lu: internal runtime failure",
-};
-
-const LU_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LU_ERROR_INVALID_ARGUMENT,
-    LU_ERROR_INVALID_INPUT,
-    LU_ERROR_INTERNAL,
-];
-
-pub const LU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LU_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LU_ERRORS,
+#[cfg(test)]
+use runmat_builtins::LU_DESCRIPTOR;
+use runmat_builtins::{
+    LU_ERROR_INTERNAL, LU_ERROR_INVALID_ARGUMENT, LU_ERROR_INVALID_INPUT, LU_INTEGER_EXTENSION,
+    LU_LOGICAL_EXTENSION,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
@@ -265,15 +92,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "lu",
-    category = "math/linalg/factor",
-    summary = "Compute LU decompositions with partial pivoting.",
-    keywords = "lu,factorization,decomposition,permutation",
-    accel = "sink",
-    sink = true,
-    type_resolver(matrix_unary_type),
-    descriptor(crate::builtins::math::linalg::factor::lu::LU_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::lu::LU_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::lu::LU_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
 async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -637,10 +456,13 @@ fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
             "lu: option must be a string or character vector",
         ));
     };
-    match option.trim().to_ascii_lowercase().as_str() {
-        "matrix" => Ok(PivotMode::Matrix),
-        "vector" => Ok(PivotMode::Vector),
-        other => Err(lu_invalid_argument(format!("lu: unknown option '{other}'"))),
+    match FactorOption::parse(&option) {
+        Some(FactorOption::Matrix) => Ok(PivotMode::Matrix),
+        Some(FactorOption::Vector) => Ok(PivotMode::Vector),
+        _ => Err(lu_invalid_argument(format!(
+            "lu: unknown option '{}'",
+            option.trim().to_ascii_lowercase()
+        ))),
     }
 }
 

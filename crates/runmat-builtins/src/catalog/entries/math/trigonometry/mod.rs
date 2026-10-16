@@ -21,27 +21,31 @@ mod sinpi;
 mod tan;
 mod tand;
 mod tanh;
+mod atan2d;
+mod inverse_degree;
 
-pub use acos::*;
-pub use acosh::*;
-pub use angle_conversion::*;
-pub use asin::*;
-pub use asinh::*;
-pub use atan::*;
-pub use atan2::*;
-pub use atanh::*;
-pub use cos::*;
-pub use cosd::*;
-pub use cosh::*;
-pub use cospi::*;
-pub use pol2cart::*;
-pub use sin::*;
-pub use sind::*;
-pub use sinh::*;
-pub use sinpi::*;
-pub use tan::*;
-pub use tand::*;
-pub use tanh::*;
+pub use self::acos::*;
+pub use self::acosh::*;
+pub use self::angle_conversion::*;
+pub use self::asin::*;
+pub use self::asinh::*;
+pub use self::atan::*;
+pub use self::atan2::*;
+pub use self::atan2d::*;
+pub use self::atanh::*;
+pub use self::cos::*;
+pub use self::cosd::*;
+pub use self::cosh::*;
+pub use self::cospi::*;
+pub use self::inverse_degree::*;
+pub use self::pol2cart::*;
+pub use self::sin::*;
+pub use self::sind::*;
+pub use self::sinh::*;
+pub use self::sinpi::*;
+pub use self::tan::*;
+pub use self::tand::*;
+pub use self::tanh::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(acos::ENTRIES.iter().copied());
@@ -64,4 +68,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(tan::ENTRIES.iter().copied());
     values.extend(tand::ENTRIES.iter().copied());
     values.extend(tanh::ENTRIES.iter().copied());
+    values.extend(atan2d::ENTRIES.iter().copied());
+    values.extend(inverse_degree::ENTRIES.iter().copied());
 }

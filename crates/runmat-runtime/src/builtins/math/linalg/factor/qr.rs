@@ -5,20 +5,16 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::{matrix_dims, numeric_tensor_from_shape};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+#[cfg(test)]
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
+#[cfg(test)]
+use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
@@ -26,264 +22,12 @@ use super::lu::PivotMode;
 
 const BUILTIN_NAME: &str = "qr";
 
-pub const QR_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "qr-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "qr with a typed-integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QrIntegerInputExtension"),
-};
-
-pub const QR_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "qr-integer-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "qr with a typed-integer economy selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QrIntegerOptionExtension"),
-};
-pub const QR_RESIDENT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "qr-resident-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "qr with a gpuArray option value is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QrResidentOptionExtension"),
-};
-pub const QR_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "qr-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "qr with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QrLogicalInputExtension"),
-};
-pub const QR_LOGICAL_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "qr-logical-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "qr with a logical economy selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QrLogicalOptionExtension"),
-};
-
-pub const QR_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    QR_INTEGER_INPUT_EXTENSION,
-    QR_INTEGER_OPTION_EXTENSION,
-    QR_RESIDENT_OPTION_EXTENSION,
-    QR_LOGICAL_INPUT_EXTENSION,
-    QR_LOGICAL_OPTION_EXTENSION,
-];
-
-const QR_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The public full-matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
-}];
-
-const QR_INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "economy_selector",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented legacy economy selector is the numeric literal 0; RunMat mode additionally accepts typed integer scalar zero without a floating conversion.",
-    }];
-
-pub const QR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[Q, R, P] = qr(integer_A, options...)",
-        inputs: &QR_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector, and automatic residency may restore outputs to the owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[Q, R, P] = qr(A, integer_zero)",
-        inputs: &QR_INTEGER_OPTION_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed integer scalar zero selects the legacy economy/vector form exactly in RunMat mode; every nonzero or nonscalar integer option rejects as an invalid option, and an explicit resident option is independently gated before exact-owner download.",
-    },
-];
-
-const QR_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Upper triangular (or trapezoidal) factor.",
-}];
-
-const QR_OUTPUT_QR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Q",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Orthogonal/unitary factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper triangular (or trapezoidal) factor.",
-    },
-];
-
-const QR_OUTPUT_QRP: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "Q",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Orthogonal/unitary factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper triangular (or trapezoidal) factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Permutation matrix or vector based on pivot mode.",
-    },
-];
-
-const QR_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix to factorize.",
-}];
-
-const QR_INPUTS_A_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to factorize.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option token (`0`, `econ`, `matrix`, or `vector`).",
-    },
-];
-
-const QR_INPUTS_A_OPTION_OPTION: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to factorize.",
-    },
-    BuiltinParamDescriptor {
-        name: "option1",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First option token (`0`, `econ`, `matrix`, or `vector`).",
-    },
-    BuiltinParamDescriptor {
-        name: "option2",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second option token (`0`, `econ`, `matrix`, or `vector`).",
-    },
-];
-
-const QR_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
-    BuiltinSignatureDescriptor {
-        label: "R = qr(A)",
-        inputs: &QR_INPUTS_A,
-        outputs: &QR_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "R = qr(A, option)",
-        inputs: &QR_INPUTS_A_OPTION,
-        outputs: &QR_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "R = qr(A, option1, option2)",
-        inputs: &QR_INPUTS_A_OPTION_OPTION,
-        outputs: &QR_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R] = qr(A)",
-        inputs: &QR_INPUTS_A,
-        outputs: &QR_OUTPUT_QR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R] = qr(A, option)",
-        inputs: &QR_INPUTS_A_OPTION,
-        outputs: &QR_OUTPUT_QR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R] = qr(A, option1, option2)",
-        inputs: &QR_INPUTS_A_OPTION_OPTION,
-        outputs: &QR_OUTPUT_QR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R, P] = qr(A)",
-        inputs: &QR_INPUTS_A,
-        outputs: &QR_OUTPUT_QRP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R, P] = qr(A, option)",
-        inputs: &QR_INPUTS_A_OPTION,
-        outputs: &QR_OUTPUT_QRP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R, P] = qr(A, option1, option2)",
-        inputs: &QR_INPUTS_A_OPTION_OPTION,
-        outputs: &QR_OUTPUT_QRP,
-    },
-];
-
-const QR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:qr:InvalidArgument"),
-    when: "Options are invalid or output count exceeds supported forms.",
-    message: "qr currently supports at most three outputs",
-};
-
-const QR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QR.INVALID_INPUT",
-    identifier: Some("RunMat:qr:InvalidInput"),
-    when: "Input is non-numeric or has rank greater than two.",
-    message: "qr: expected a numeric 2-D input matrix",
-};
-
-const QR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QR.INTERNAL",
-    identifier: Some("RunMat:qr:Internal"),
-    when: "QR runtime fails to materialize output values.",
-    message: "qr: internal runtime failure",
-};
-
-const QR_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    QR_ERROR_INVALID_ARGUMENT,
-    QR_ERROR_INVALID_INPUT,
-    QR_ERROR_INTERNAL,
-];
-
-pub const QR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &QR_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &QR_ERRORS,
+#[cfg(test)]
+use runmat_builtins::QR_DESCRIPTOR;
+use runmat_builtins::{
+    QR_ERROR_INTERNAL, QR_ERROR_INVALID_ARGUMENT, QR_ERROR_INVALID_INPUT,
+    QR_INTEGER_INPUT_EXTENSION, QR_INTEGER_OPTION_EXTENSION, QR_LOGICAL_INPUT_EXTENSION,
+    QR_LOGICAL_OPTION_EXTENSION, QR_RESIDENT_OPTION_EXTENSION,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
@@ -336,6 +80,7 @@ fn qr_internal_error(message: impl Into<String>) -> RuntimeError {
     qr_error_with_message(message, &QR_ERROR_INTERNAL)
 }
 
+#[cfg(test)]
 fn qr_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -386,15 +131,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "qr",
-    category = "math/linalg/factor",
-    summary = "Compute QR factorizations with optional pivoting.",
-    keywords = "qr,factorization,decomposition,householder",
-    accel = "sink",
-    sink = true,
-    type_resolver(qr_type),
-    descriptor(crate::builtins::math::linalg::factor::qr::QR_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::qr::QR_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::qr::QR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
 async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -629,20 +366,13 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
             continue;
         }
         if let Some(text) = tensor::value_to_string(arg) {
-            let normalized = text.trim().to_ascii_lowercase();
-            if normalized == "0" || normalized == "econ" || normalized == "economy" {
-                opts.mode = QrMode::Economy;
-                continue;
+            match FactorOption::parse(&text) {
+                Some(FactorOption::Economy) => opts.mode = QrMode::Economy,
+                Some(FactorOption::Vector) => opts.pivot = PivotMode::Vector,
+                Some(FactorOption::Matrix) => opts.pivot = PivotMode::Matrix,
+                _ => return Err(qr_invalid_argument(format!("qr: unknown option '{text}'"))),
             }
-            if normalized == "vector" {
-                opts.pivot = PivotMode::Vector;
-                continue;
-            }
-            if normalized == "matrix" {
-                opts.pivot = PivotMode::Matrix;
-                continue;
-            }
-            return Err(qr_invalid_argument(format!("qr: unknown option '{text}'")));
+            continue;
         }
         return Err(qr_invalid_argument(
             "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')",
