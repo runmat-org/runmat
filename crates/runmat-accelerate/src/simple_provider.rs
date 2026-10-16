@@ -5528,40 +5528,49 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move { self.native_imfilter(image, kernel, options) })
     }
 
-    fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
-        ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
-        let k = k.min(n);
-        let mut values: Vec<f64> = if n == 0 {
-            Vec::new()
-        } else {
-            (1..=n).map(|v| v as f64).collect()
-        };
+    fn random_permutation(
+        &self,
+        n: usize,
+        k: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        (|| -> Result<GpuTensorHandle> {
+            ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
+            let k = k.min(n);
+            let mut values: Vec<f64> = if n == 0 {
+                Vec::new()
+            } else {
+                (1..=n).map(|v| v as f64).collect()
+            };
 
-        if k > 0 {
-            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
-            for i in 0..k {
-                let span = n - i;
-                if span == 0 {
-                    break;
+            if k > 0 {
+                let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
+                for i in 0..k {
+                    let span = n - i;
+                    if span == 0 {
+                        break;
+                    }
+                    let mut u = next_uniform(&mut guard);
+                    if u >= 1.0 {
+                        u = 0.9999999999999999;
+                    }
+                    let mut offset = (u * span as f64).floor() as usize;
+                    if offset >= span {
+                        offset = span - 1;
+                    }
+                    let j = i + offset;
+                    values.swap(i, j);
                 }
-                let mut u = next_uniform(&mut guard);
-                if u >= 1.0 {
-                    u = 0.9999999999999999;
-                }
-                let mut offset = (u * span as f64).floor() as usize;
-                if offset >= span {
-                    offset = span - 1;
-                }
-                let j = i + offset;
-                values.swap(i, j);
             }
-        }
 
-        if values.len() > k {
-            values.truncate(k);
-        }
+            if values.len() > k {
+                values.truncate(k);
+            }
 
-        self.allocate_tensor_with_storage(values, vec![1, k], GpuTensorStorage::Real)
+            self.allocate_tensor_with_storage(values, vec![1, k], GpuTensorStorage::Real)
+        })()
+        .map_err(|cause| {
+            runmat_accelerate_api::ProviderExecutionError::from(cause).with_unproven_effects()
+        })
     }
 
     fn random_permutation_like(
@@ -5569,7 +5578,7 @@ impl AccelProvider for InProcessProvider {
         _prototype: &GpuTensorHandle,
         n: usize,
         k: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.random_permutation(n, k)
     }
 

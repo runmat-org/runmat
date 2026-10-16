@@ -4,8 +4,10 @@ use super::{
     AllocationRegistrationError, AllocationReleaseError, AllocationReleaseOutcome,
     AllocationRetirementOutcome, GpuPhysicalDescriptor, GpuViewError,
 };
+use runmat_execution::resource::{RetainedHostAllocationClaim, RetainedHostViewIssuer};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 struct LeaseInner {
@@ -14,6 +16,30 @@ struct LeaseInner {
     armed: AtomicBool,
     physical: OnceLock<GpuPhysicalDescriptor>,
     next_view: AtomicU64,
+    // An authenticated finite lease can mint another view only through the
+    // original resource owner. The issuer holds no tensor or provider payload.
+    view_issuer: Option<Arc<dyn RetainedHostViewIssuer>>,
+}
+
+/// One already-admitted physical lease claim paired with the exact issuer for
+/// later views of that allocation. Neither a wire descriptor nor a claim alone
+/// can mint a new view outside the selected resource ledger.
+#[derive(Debug)]
+pub struct RetainedLeaseHostMetadata {
+    lease_claim: Arc<dyn RetainedHostAllocationClaim>,
+    view_issuer: Arc<dyn RetainedHostViewIssuer>,
+}
+
+impl RetainedLeaseHostMetadata {
+    pub fn new(
+        lease_claim: Arc<dyn RetainedHostAllocationClaim>,
+        view_issuer: Arc<dyn RetainedHostViewIssuer>,
+    ) -> Self {
+        Self {
+            lease_claim,
+            view_issuer,
+        }
+    }
 }
 
 impl LeaseInner {
@@ -53,9 +79,21 @@ impl Drop for LeaseInner {
 #[derive(Clone)]
 pub struct AllocationLease {
     inner: Shared<LeaseInner>,
+    // The claim drops after the Shared backing, including its last weak owner.
+    _host_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 
 impl AllocationLease {
+    /// Conservative host allocation including the shared counters and lease.
+    pub fn host_upper_bytes() -> Option<u64> {
+        use std::mem::{align_of, size_of};
+        let bytes = size_of::<usize>()
+            .checked_mul(2)?
+            .checked_add(size_of::<LeaseInner>())?
+            .checked_add(align_of::<LeaseInner>())?;
+        u64::try_from(bytes).ok()
+    }
+
     /// Register against the captured owner before making the lease acquirable.
     /// Identity values are not enough: the owner must admit an existing payload
     /// and reject duplicate registration through its own allocation map.
@@ -63,6 +101,20 @@ impl AllocationLease {
         identity: AllocationIdentity,
         owner: AllocationOwnerHandle,
     ) -> Result<Self, AllocationRegistrationError> {
+        Self::register_with_retained_metadata(identity, owner, None)
+    }
+
+    /// A finite provider supplies its paired lease claim and view issuer before
+    /// the ref-counted lease is allocated. Ordinary registrations remain unbounded.
+    pub fn register_with_retained_metadata(
+        identity: AllocationIdentity,
+        owner: AllocationOwnerHandle,
+        metadata: Option<RetainedLeaseHostMetadata>,
+    ) -> Result<Self, AllocationRegistrationError> {
+        let (host_claim, view_issuer) = match metadata {
+            Some(metadata) => (Some(metadata.lease_claim), Some(metadata.view_issuer)),
+            None => (None, None),
+        };
         let lease = Self {
             inner: Shared::new(LeaseInner {
                 identity,
@@ -70,7 +122,9 @@ impl AllocationLease {
                 armed: AtomicBool::new(false),
                 physical: OnceLock::new(),
                 next_view: AtomicU64::new(1),
+                view_issuer,
             }),
+            _host_claim: host_claim,
         };
         let physical = lease
             .inner
@@ -105,6 +159,10 @@ impl AllocationLease {
         self.inner.owner.validate_view(self.identity(), view)
     }
 
+    pub(super) fn view_issuer(&self) -> Option<&Arc<dyn RetainedHostViewIssuer>> {
+        self.inner.view_issuer.as_ref()
+    }
+
     pub(super) fn next_view_identity(&self) -> Result<u64, GpuViewError> {
         self.inner
             .next_view
@@ -117,7 +175,9 @@ impl AllocationLease {
     /// Extract unique ownership without a separate strong_count/free sequence.
     /// On native targets, losing to a concurrent weak upgrade releases only this reference.
     pub fn release(self) -> Result<AllocationReleaseOutcome, AllocationReleaseError> {
-        match Shared::try_unwrap(self.inner) {
+        let Self { inner, _host_claim } = self;
+        // Keep the claim through owner retirement and Shared destruction.
+        match Shared::try_unwrap(inner) {
             Err(reference) => {
                 drop(reference);
                 Ok(AllocationReleaseOutcome::ReferenceReleased)
@@ -137,6 +197,7 @@ impl AllocationLease {
     pub fn downgrade(&self) -> WeakAllocationLease {
         WeakAllocationLease {
             inner: Shared::downgrade(&self.inner),
+            _host_claim: self._host_claim.clone(),
         }
     }
 
@@ -161,6 +222,7 @@ impl fmt::Debug for AllocationLease {
 #[derive(Clone)]
 pub struct WeakAllocationLease {
     inner: WeakShared<LeaseInner>,
+    _host_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 
 impl WeakAllocationLease {
@@ -183,14 +245,42 @@ impl WeakAllocationLease {
         if lease.physical() != &wire.physical {
             return Err(Error::PhysicalMismatch);
         }
-        super::GpuTensorHandle::from_allocation(lease, wire.view.clone())
+        wire.view
+            .validate(lease.physical())
+            .map_err(Error::InvalidView)?;
+        lease.validate_view(&wire.view)?;
+        // Reserve before cloning the owned shape from this non-owning wire.
+        let grant = lease
+            .view_issuer()
+            .map(|issuer| {
+                let bytes =
+                    super::GpuTensorHandle::view_host_upper_bytes(wire.view.shape_capacity())
+                        .ok_or(Error::RetainedHostView(
+                            runmat_execution::resource::RetainedHostViewError::Overflow,
+                        ))?;
+                issuer
+                    .clone()
+                    .reserve_view(bytes)
+                    .map_err(Error::RetainedHostView)
+            })
+            .transpose()?;
+        let view = wire.view.clone();
+        match grant {
+            Some(grant) => {
+                super::GpuTensorHandle::from_allocation_with_retained_grant(lease, view, grant)
+            }
+            None => super::GpuTensorHandle::from_allocation(lease, view),
+        }
     }
     pub fn acquire(&self) -> Option<AllocationLease> {
         let inner = self.inner.upgrade()?;
         if !inner.armed.load(Ordering::Acquire) {
             return None;
         }
-        Some(AllocationLease { inner })
+        Some(AllocationLease {
+            inner,
+            _host_claim: self._host_claim.clone(),
+        })
     }
 }
 

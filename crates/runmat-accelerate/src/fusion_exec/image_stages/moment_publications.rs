@@ -114,9 +114,29 @@ impl ImageNormalizeStageSession {
             let intent = runmat_accelerate_api::handle_provenance(&current)
                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let metadata_guard = runmat_accelerate_api::ResidencyRestoreGuard::new(&current);
-            let direct = match precision {
-                ProviderPrecision::F32 => self.provider.unary_single(&current).await,
-                ProviderPrecision::F64 => self.provider.unary_double(&current).await,
+            let direct = if let Some(permit) = self.provider_metadata_permit.as_ref() {
+                let recipe = selected
+                    .and_then(|selected| selected.real_recipe.as_ref())
+                    .ok_or_else(|| {
+                        ProviderExecutionError::from(anyhow!(
+                            "finite selected moment cast has no native recipe"
+                        ))
+                        .after_effect()
+                    })?;
+                let protected = std::iter::once(&self.input)
+                    .chain(std::iter::once(&current))
+                    .chain(scratch.iter())
+                    .chain(published.iter().copied())
+                    .collect::<Vec<_>>();
+                recipe
+                    .execute_protected_admitted(&current, &protected, Some(&**permit))
+                    .await
+                    .map(|executed| executed.output)
+            } else {
+                match precision {
+                    ProviderPrecision::F32 => self.provider.unary_single(&current).await,
+                    ProviderPrecision::F64 => self.provider.unary_double(&current).await,
+                }
             };
             // Restore before class/owner validation or propagating a provider
             // failure. The guard also restores on cancellation while awaiting

@@ -31,6 +31,49 @@ pub(super) struct ImageOrderedMeanPlans {
 }
 
 impl ImageOrderedMeanPlans {
+    pub(super) fn registered_output_count(&self) -> Option<usize> {
+        let count = self
+            .mu
+            .iter()
+            .chain(&self.variance)
+            .try_fold(2usize, |count, call| {
+                // The two sigma operations each publish one native output;
+                // every ordered reduction publishes its final step only.
+                count.checked_add(1)?.checked_add(
+                    call.casts
+                        .iter()
+                        .filter(|cast| cast.source.element_type != cast.output.element_type)
+                        .count(),
+                )
+            })?;
+        count.checked_add(
+            self.sigma
+                .as_ref()?
+                .casts
+                .iter()
+                .filter(|cast| cast.source.element_type != cast.output.element_type)
+                .count(),
+        )
+    }
+
+    pub(super) fn admitted_casts_supported(&self) -> bool {
+        self.mu
+            .iter()
+            .chain(&self.variance)
+            .flat_map(|call| &call.casts)
+            .chain(self.sigma.iter().flat_map(|sigma| &sigma.casts))
+            .all(|cast| cast.real_recipe.is_some())
+    }
+
+    pub(super) fn alias_view_count(&self) -> usize {
+        self.mu
+            .iter()
+            .chain(&self.variance)
+            .flat_map(|call| &call.casts)
+            .chain(self.sigma.iter().flat_map(|sigma| &sigma.casts))
+            .filter(|cast| cast.source.element_type == cast.output.element_type)
+            .count()
+    }
     pub(super) fn physical_upper_bound(
         &self,
     ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
@@ -39,6 +82,7 @@ impl ImageOrderedMeanPlans {
             bound.add(
                 call.recipe.requested_incremental_peak_bytes(),
                 u32::try_from(call.recipe.steps().len()).ok()?,
+                Some(call.recipe.queue_submissions()),
             )?;
             for cast in &call.casts {
                 // The cast feasibility peak includes its already-live input.
@@ -49,6 +93,11 @@ impl ImageOrderedMeanPlans {
                         .transient_bytes?
                         .checked_sub(cast.source_bytes)?,
                     cast.resources.dispatches?,
+                    if cast.source.element_type == cast.output.element_type {
+                        Some(0)
+                    } else {
+                        cast.physical.map(|stage| stage.queue_slots)
+                    },
                 )?;
             }
         }
@@ -58,6 +107,7 @@ impl ImageOrderedMeanPlans {
             bound.add(
                 proposal.requested_incremental_peak_bytes()?,
                 proposal.dispatches,
+                Some(proposal.queue_submissions),
             )?;
         }
         for cast in &sigma.casts {
@@ -66,6 +116,11 @@ impl ImageOrderedMeanPlans {
                     .transient_bytes?
                     .checked_sub(cast.source_bytes)?,
                 cast.resources.dispatches?,
+                if cast.source.element_type == cast.output.element_type {
+                    Some(0)
+                } else {
+                    cast.physical.map(|stage| stage.queue_slots)
+                },
             )?;
         }
         Some(bound)
@@ -157,6 +212,11 @@ fn one_call(
     if recipe.source() != source
         || recipe.source_buffer_bytes() != source_bytes
         || recipe.axes() != axes
+        || recipe.steps().len() != axes.len()
+        || recipe.steps().iter().any(|step| {
+            step.input_shape().len() != source.shape.len()
+                || step.output_shape().len() != source.shape.len()
+        })
         || recipe.nan_mode() != ProviderRealMeanNaNMode::Include
         || recipe.output_precision() != output_precision
         || recipe.steps().last().map(|step| step.output_shape()) != expected.as_deref()
@@ -176,6 +236,9 @@ fn one_call(
         return Ok(None);
     };
     let mut casts = Vec::new();
+    casts
+        .try_reserve_exact(publication.conversions.len())
+        .map_err(ProviderExecutionError::from_source)?;
     let Some(mut cast_source) = representation(output_precision, final_step.output_shape()) else {
         return Ok(None);
     };
@@ -223,7 +286,10 @@ fn route(
     }
     let mut source = initial;
     let mut source_bytes = initial_bytes;
-    let mut planned = Vec::with_capacity(calls.len());
+    let mut planned = Vec::new();
+    planned
+        .try_reserve_exact(calls.len())
+        .map_err(ProviderExecutionError::from_source)?;
     for (index, (call, publication)) in calls.iter().zip(publications).enumerate() {
         if index > 0 && publication.source_input != publications[index - 1].public_output {
             return Ok(None);
@@ -255,12 +321,14 @@ fn route(
     Ok(Some(planned))
 }
 
-pub(super) fn plan_selected(
+fn plan_selected_inner(
     provider: &'static dyn AccelProvider,
-    input: &GpuTensorHandle,
+    input_rep: ProviderRepresentation,
+    input_bytes: u64,
     program: &ProviderImageStageWorkload,
     powers: &power::ImagePowerPlans,
     bindings: Option<&ImageSelectedMomentBindings>,
+    live_input: Option<&GpuTensorHandle>,
 ) -> ProviderExecutionResult<Option<ImageOrderedMeanPlans>> {
     let Some(moments) = program.moment_program.as_ref() else {
         return Ok(None);
@@ -271,16 +339,10 @@ pub(super) fn plan_selected(
     let Some(selected_powers) = program.selected_powers.as_ref() else {
         return Ok(None);
     };
-    let Some(input_precision) = runmat_accelerate_api::handle_precision(input) else {
-        return Ok(None);
-    };
-    let Some(input_rep) = representation(input_precision, input.shape()) else {
-        return Ok(None);
-    };
     let Some(mu) = route(
         provider,
         input_rep,
-        input.physical().requested_bytes(),
+        input_bytes,
         &program.mu,
         &moments.mu,
         bindings.map(ImageSelectedMomentBindings::mu),
@@ -289,37 +351,32 @@ pub(super) fn plan_selected(
     else {
         return Ok(None);
     };
-    let Some(prepared_mu) = provider
-        .prepare_ordered_real_mean_against_recipe(input, &mu[0].recipe)
-        .map_err(ProviderExecutionError::from)?
-    else {
-        return Ok(None);
-    };
-    if !prepared_mu
-        .validate_live_source(input)
-        .map_err(ProviderExecutionError::from)?
-        || prepared_mu.recipe() != &mu[0].recipe
-    {
-        return Ok(None);
+    if let Some(input) = live_input {
+        let Some(first) = mu.first() else {
+            return Ok(None);
+        };
+        if !validate_first_live_recipe(provider, input, &first.recipe)? {
+            return Ok(None);
+        }
     }
     let Some(square_work) = powers.square.physical_work(PowerResultDomain::Real) else {
         return Ok(None);
     };
-    let Some(square_bytes) =
-        provider.plan_power_output_buffer_bytes(&powers.square, PowerResultDomain::Real)?
-    else {
+    let Some(square_bytes) = powers.square.output_requested_bytes() else {
         return Ok(None);
     };
-    // The variance source is the future POWER allocation, not just its
-    // logical shape. Preserve the exact proposal's allocator-rounded extent.
+    // The variance source uses the held POWER allocation extent. The exact
+    // route's independent provider quote must still agree with that extent.
+    if powers.square.exact_physical_proposal().is_some()
+        && provider.plan_power_output_buffer_bytes(&powers.square, PowerResultDomain::Real)?
+            != Some(square_bytes)
+    {
+        return Ok(None);
+    }
     if square_work
         .output
         .checked_byte_len()
         .is_none_or(|logical| logical > square_bytes)
-        || powers
-            .square
-            .exact_physical_proposal()
-            .is_some_and(|proposal| proposal.output_buffer_bytes != square_bytes)
     {
         return Ok(None);
     }
@@ -353,6 +410,80 @@ pub(super) fn plan_selected(
     }))
 }
 
+pub(super) fn plan_selected_source(
+    provider: &'static dyn AccelProvider,
+    input_rep: ProviderRepresentation,
+    input_bytes: u64,
+    program: &ProviderImageStageWorkload,
+    powers: &power::ImagePowerPlans,
+    bindings: Option<&ImageSelectedMomentBindings>,
+) -> ProviderExecutionResult<Option<ImageOrderedMeanPlans>> {
+    plan_selected_inner(
+        provider,
+        input_rep,
+        input_bytes,
+        program,
+        powers,
+        bindings,
+        None,
+    )
+}
+
+/// Bind the first symbolic mean recipe only after the selected source has a
+/// real allocation. Host Single reaches this check after its selected upload;
+/// resident sources perform it at their original symbolic-planning boundary.
+pub(super) fn validate_first_live_source(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    plans: &ImageOrderedMeanPlans,
+) -> ProviderExecutionResult<bool> {
+    let Some(first) = plans.mu.first() else {
+        return Ok(false);
+    };
+    validate_first_live_recipe(provider, input, &first.recipe)
+}
+
+fn validate_first_live_recipe(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    recipe: &ProviderOrderedRealMeanRecipe,
+) -> ProviderExecutionResult<bool> {
+    let Some(prepared) = provider
+        .prepare_ordered_real_mean_against_recipe(input, recipe)
+        .map_err(ProviderExecutionError::from)?
+    else {
+        return Ok(false);
+    };
+    Ok(prepared
+        .validate_live_source(input)
+        .map_err(ProviderExecutionError::from)?
+        && prepared.recipe() == recipe)
+}
+
+pub(super) fn plan_selected(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    program: &ProviderImageStageWorkload,
+    powers: &power::ImagePowerPlans,
+    bindings: Option<&ImageSelectedMomentBindings>,
+) -> ProviderExecutionResult<Option<ImageOrderedMeanPlans>> {
+    let Some(input_precision) = runmat_accelerate_api::handle_precision(input) else {
+        return Ok(None);
+    };
+    let Some(input_rep) = representation(input_precision, input.shape()) else {
+        return Ok(None);
+    };
+    plan_selected_inner(
+        provider,
+        input_rep,
+        input.physical().requested_bytes(),
+        program,
+        powers,
+        bindings,
+        Some(input),
+    )
+}
+
 pub(super) struct OrderedMeanExecutionContext<'a> {
     pub current: &'a GpuTensorHandle,
     pub image_input: &'a GpuTensorHandle,
@@ -361,12 +492,24 @@ pub(super) struct OrderedMeanExecutionContext<'a> {
     pub prior_effect: bool,
 }
 
+#[cfg(test)]
 pub(super) fn execute_call(
     provider: &'static dyn AccelProvider,
     context: OrderedMeanExecutionContext<'_>,
     call: &ProviderImageMeanCall,
     publication: &ProviderImageMomentPublication,
     planned: &OrderedMeanCallPlan,
+) -> ProviderExecutionResult<GpuTensorHandle> {
+    execute_call_admitted(provider, context, call, publication, planned, None)
+}
+
+pub(super) fn execute_call_admitted(
+    provider: &'static dyn AccelProvider,
+    context: OrderedMeanExecutionContext<'_>,
+    call: &ProviderImageMeanCall,
+    publication: &ProviderImageMomentPublication,
+    planned: &OrderedMeanCallPlan,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> ProviderExecutionResult<GpuTensorHandle> {
     let OrderedMeanExecutionContext {
         current,
@@ -436,7 +579,7 @@ pub(super) fn execute_call(
             })?;
     }
     let executed = provider
-        .execute_ordered_real_mean(selected)
+        .execute_ordered_real_mean(selected, admission)
         .map_err(ProviderExecutionError::after_effect)?;
     for borrowed in std::iter::once(current)
         .chain(std::iter::once(image_input))

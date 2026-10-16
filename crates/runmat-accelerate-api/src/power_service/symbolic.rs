@@ -2,7 +2,7 @@
 //! preparation and a future whole-work owner. This cannot authenticate an
 //! allocation, reserve resources, or authorize execution by itself.
 use crate::{
-    AccelProvider, NumericalDomainEvidence, PowerResultDomain, PowerScalarControl,
+    AccelProvider, GpuTensorHandle, NumericalDomainEvidence, PowerResultDomain, PowerScalarControl,
     ProviderCapabilitySnapshot, ProviderElementType, ProviderFeasibilityQuery, ProviderLayout,
     ProviderOperationFamily, ProviderOperationIdentity, ProviderPrecision, ProviderRepresentation,
     ProviderResidency, ProviderStorage, ProviderWorkload, RealPowerArithmeticMode,
@@ -87,6 +87,42 @@ impl PowerSymbolicPlan {
     }
     pub fn resident_input_description(&self) -> Option<&crate::PowerInputDescription> {
         self.resident_input.as_ref()
+    }
+    /// The only permitted difference between a selected typed receipt and
+    /// its prepared form is replacement of the future input description by
+    /// the live source's physical/view description. This only compares
+    /// descriptors: the private preparation owner authenticates and retains
+    /// the actual allocation lease, and separately revalidates the selected
+    /// allocator route before making that replacement.
+    pub(crate) fn matches_live_typed_binding(
+        &self,
+        bound: &Self,
+        source: &GpuTensorHandle,
+    ) -> bool {
+        self.route == PowerPhysicalRoute::TypedDomain
+            && bound.route == PowerPhysicalRoute::TypedDomain
+            && self
+                .resident_input
+                .as_ref()
+                .is_none_or(|input| input.matches(source))
+            && matches!(
+                bound.resident_input.as_ref(),
+                Some(crate::PowerInputDescription::Live { .. })
+            )
+            && bound
+                .resident_input
+                .as_ref()
+                .is_some_and(|input| input.matches(source))
+            && self.exact_proposal == bound.exact_proposal
+            && self.resident == bound.resident
+            && self.control == bound.control
+            && self.resident_operand == bound.resident_operand
+            && self.host_shape == bound.host_shape
+            && self.output_shape == bound.output_shape
+            && self.mode == bound.mode
+            && self.provider_precision == bound.provider_precision
+            && self.capability == bound.capability
+            && self.query == bound.query
     }
     pub fn scalar_shape(&self) -> &[usize] {
         &self.host_shape

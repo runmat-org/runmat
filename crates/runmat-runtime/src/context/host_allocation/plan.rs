@@ -12,6 +12,23 @@ pub struct HostAllocationPlan {
 }
 
 impl HostAllocationPlan {
+    pub fn retained_view_issuer_bytes() -> Result<u64, HostAllocationError> {
+        super::receipt::retained_view_issuer_host_upper_bytes()
+    }
+    pub fn retained_view_bytes(view_bytes: u64) -> Result<u64, HostAllocationError> {
+        view_bytes
+            .checked_add(crate::context::host_effect::retained_claim_host_upper_bytes())
+            .and_then(|bytes| {
+                bytes.checked_add(super::receipt::retained_view_grant_host_upper_bytes())
+            })
+            .ok_or(HostAllocationError::Overflow)
+    }
+    /// Variable retained cache-key payload plus the managed claim record.
+    pub fn retained_metadata_bytes(payload_bytes: u64) -> Result<u64, HostAllocationError> {
+        payload_bytes
+            .checked_add(crate::context::host_effect::retained_claim_host_upper_bytes())
+            .ok_or(HostAllocationError::Overflow)
+    }
     pub fn new(
         scratch_peak_bytes: u64,
         retained_output_bytes: u64,

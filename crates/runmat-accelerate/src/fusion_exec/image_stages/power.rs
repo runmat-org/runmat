@@ -4,9 +4,10 @@
 use super::*;
 use runmat_accelerate_api::{
     power_service::{
-        execute_resident_scalar_power, plan_scalar_power_for_dense_output,
-        prepare_resident_scalar_power, prepare_resident_scalar_power_against_plan,
-        PowerSymbolicPlan,
+        execute_resident_scalar_power_admitted, execute_resident_scalar_power_projected_admitted,
+        plan_scalar_power_for_dense_output, prepare_resident_scalar_power,
+        prepare_resident_scalar_power_against_plan, PowerPhysicalRoute, PowerSymbolicPlan,
+        PowerTypedScalarProjection,
     },
     PowerResultDomain, PowerScalarControl, ProviderElementType, ProviderImagePowerCall,
     ProviderLayout, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
@@ -15,23 +16,103 @@ use runmat_accelerate_api::{
 use runmat_types::NumericClass;
 
 pub(super) struct ImagePowerPlans {
-    pub square: PowerSymbolicPlan,
-    pub final_power: PowerSymbolicPlan,
+    pub square: SelectedImagePower,
+    pub final_power: SelectedImagePower,
+}
+
+pub(super) struct SelectedImagePower {
+    symbolic: PowerSymbolicPlan,
+    physical: SelectedPowerPhysical,
+}
+
+enum SelectedPowerPhysical {
+    Exact,
+    Typed(Box<PowerTypedScalarProjection>),
+}
+
+impl std::ops::Deref for SelectedImagePower {
+    type Target = PowerSymbolicPlan;
+
+    fn deref(&self) -> &Self::Target {
+        &self.symbolic
+    }
+}
+
+impl SelectedImagePower {
+    pub(super) fn output_requested_bytes(&self) -> Option<u64> {
+        match &self.physical {
+            SelectedPowerPhysical::Exact => {
+                Some(self.symbolic.exact_physical_proposal()?.output_buffer_bytes)
+            }
+            SelectedPowerPhysical::Typed(projection) => {
+                Some(projection.real_output_requested_bytes())
+            }
+        }
+    }
+
+    fn physical_upper_bound(&self) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
+        match &self.physical {
+            SelectedPowerPhysical::Exact => {
+                let physical = self.symbolic.exact_physical_proposal()?;
+                bound.add(
+                    physical.requested_incremental_peak_bytes()?,
+                    physical.dispatches,
+                    Some(physical.queue_submissions),
+                )?;
+            }
+            SelectedPowerPhysical::Typed(projection) => {
+                let resources = projection.resource_bounds()?;
+                let runmat_execution::ResourceByteBound::Known(peak) = resources.peak_bytes else {
+                    return None;
+                };
+                bound.add(peak, resources.dispatches, Some(resources.queue_slots))?;
+            }
+        }
+        Some(bound)
+    }
+
+    fn registered_output_count(&self) -> Option<usize> {
+        match &self.physical {
+            SelectedPowerPhysical::Exact => Some(1),
+            SelectedPowerPhysical::Typed(projection) => projection.registered_output_count(),
+        }
+    }
+
+    fn provider_host_workspace_bytes(&self) -> Option<u64> {
+        match &self.physical {
+            SelectedPowerPhysical::Exact => Some(0),
+            SelectedPowerPhysical::Typed(projection) => {
+                Some(projection.resource_bounds()?.host_workspace_bytes)
+            }
+        }
+    }
 }
 
 impl ImagePowerPlans {
     pub(super) fn physical_upper_bound(
         &self,
     ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        // The selected route must also have a finite registration inventory;
+        // provider metadata admission consumes this same count before work.
+        self.registered_output_count()?;
         let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
         for plan in [&self.square, &self.final_power] {
-            let physical = plan.exact_physical_proposal()?;
-            bound.add(
-                physical.requested_incremental_peak_bytes()?,
-                physical.dispatches,
-            )?;
+            bound.combine(plan.physical_upper_bound()?)?;
         }
         Some(bound)
+    }
+
+    pub(super) fn registered_output_count(&self) -> Option<usize> {
+        self.square
+            .registered_output_count()?
+            .checked_add(self.final_power.registered_output_count()?)
+    }
+
+    pub(super) fn provider_host_workspace_bytes(&self) -> Option<u64> {
+        self.square
+            .provider_host_workspace_bytes()?
+            .checked_add(self.final_power.provider_host_workspace_bytes()?)
     }
 }
 
@@ -94,6 +175,29 @@ pub(super) fn plan_selected(
     {
         return Ok(None);
     }
+    let selected =
+        |symbolic: PowerSymbolicPlan| -> ProviderExecutionResult<Option<SelectedImagePower>> {
+            let physical = match symbolic.physical_recipe().route {
+                PowerPhysicalRoute::ExactSingleBase => {
+                    if symbolic.exact_physical_proposal().is_none() {
+                        return Ok(None);
+                    }
+                    SelectedPowerPhysical::Exact
+                }
+                PowerPhysicalRoute::TypedDomain => {
+                    let Some(projection) = PowerTypedScalarProjection::plan(provider, &symbolic)?
+                    else {
+                        return Ok(None);
+                    };
+                    SelectedPowerPhysical::Typed(Box::new(projection))
+                }
+                PowerPhysicalRoute::LegacyProvenReal => return Ok(None),
+            };
+            Ok(Some(SelectedImagePower { symbolic, physical }))
+        };
+    let (Some(square), Some(final_power)) = (selected(square)?, selected(final_power)?) else {
+        return Ok(None);
+    };
     Ok(Some(ImagePowerPlans {
         square,
         final_power,
@@ -104,7 +208,7 @@ impl ImageNormalizeStageSession {
     pub(super) async fn execute_stage_power(
         &self,
         base: &GpuTensorHandle,
-        selected: Option<(&ProviderImagePowerCall, &PowerSymbolicPlan)>,
+        selected: Option<(&ProviderImagePowerCall, &SelectedImagePower)>,
         legacy_single_bits: u32,
         protected: &[&GpuTensorHandle],
     ) -> ProviderExecutionResult<GpuTensorHandle> {
@@ -150,9 +254,31 @@ impl ImageNormalizeStageSession {
         let prepared = prepared
             .protect_borrowed(protected)
             .map_err(|error| error.into_execution_error().after_effect())?;
-        let executed = execute_resident_scalar_power(prepared)
-            .await
-            .map_err(|error| error.into_execution_error().after_effect())?;
+        let executed = match selected.map(|(_, plan)| &plan.physical) {
+            Some(SelectedPowerPhysical::Typed(projection)) => {
+                execute_resident_scalar_power_projected_admitted(
+                    prepared,
+                    projection,
+                    None,
+                    self.provider_metadata_permit.as_ref().map(|permit| {
+                        permit.as_ref()
+                            as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                    }),
+                )
+                .await
+            }
+            _ => {
+                execute_resident_scalar_power_admitted(
+                    prepared,
+                    self.provider_metadata_permit.as_ref().map(|permit| {
+                        permit.as_ref()
+                            as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                    }),
+                )
+                .await
+            }
+        }
+        .map_err(|error| error.into_execution_error().after_effect())?;
         if executed.domain != PowerResultDomain::Real {
             let cleanup = executed.handle.release().err();
             let primary = ProviderExecutionError::from(anyhow!(

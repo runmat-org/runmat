@@ -292,6 +292,7 @@ fn try_plan_physical_set_with_context<'a>(
                 ),
             ),
             cpu_admission,
+            publication: LocalPublicationSemantics::Atomic,
             physical,
             compare_profitability: true,
             runtime: runtime.as_ref(),

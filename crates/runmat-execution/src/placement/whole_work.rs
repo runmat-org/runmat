@@ -56,6 +56,7 @@ impl WholeWorkCandidate {
         encoded.update(b"runmat.whole-work.candidate.v2\0");
         encoded.update(&[match self.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
+            ExecutionCandidateKind::OriginalVmRegion => 9,
             ExecutionCandidateKind::GenericNativeCpu => 1,
             ExecutionCandidateKind::SpecializedNativeCpu => 2,
             ExecutionCandidateKind::VectorizedNativeCpu => 3,
@@ -69,6 +70,10 @@ impl WholeWorkCandidate {
             CandidateExecutionLocation::Host => encoded.update(&[0]),
             CandidateExecutionLocation::Provider { device_id } => {
                 encoded.update(&[1]);
+                encoded.update(&device_id.to_le_bytes());
+            }
+            CandidateExecutionLocation::VmRegion { device_id } => {
+                encoded.update(&[2]);
                 encoded.update(&device_id.to_le_bytes());
             }
         }
@@ -120,12 +125,7 @@ impl WholeWorkCandidate {
     }
 
     fn validate(&self) -> Result<(), &'static str> {
-        if self.kind.is_provider()
-            != matches!(
-                self.execution_location,
-                CandidateExecutionLocation::Provider { .. }
-            )
-        {
+        if !self.kind.matches_location(self.execution_location) {
             return Err("whole-work candidate kind and location disagree");
         }
         self.presentation
@@ -238,19 +238,28 @@ impl WholeWorkConstraint {
         {
             return Err("whole-work candidate count is invalid");
         }
+        // The common provider/optional-VM pair needs no heap-backed set.
+        // Larger candidate sets retain the existing duplicate policy below.
         let mut identities = BTreeSet::new();
         for candidate in candidates {
             candidate.validate()?;
             if let WholeWorkConstraint::ProviderRequired { device_id } = self {
-                if candidate.execution_location
-                    != (CandidateExecutionLocation::Provider { device_id })
-                {
+                if !matches!(
+                    candidate.execution_location,
+                    CandidateExecutionLocation::Provider { device_id: selected }
+                        | CandidateExecutionLocation::VmRegion { device_id: selected }
+                        if selected == device_id
+                ) {
                     return Err("provider-required work contains a host or foreign-device route");
                 }
             }
-            if candidates.len() > 1 && !identities.insert(candidate.identity_digest()) {
+            if candidates.len() > 2 && !identities.insert(candidate.identity_digest()) {
                 return Err("whole-work candidate route identity is duplicated");
             }
+        }
+        if matches!(candidates, [left, right] if left.identity_digest() == right.identity_digest())
+        {
+            return Err("whole-work candidate route identity is duplicated");
         }
         Ok(())
     }
@@ -373,6 +382,7 @@ mod tests {
         let mut legacy = b"runmat.whole-work.candidate.v2\0".to_vec();
         legacy.push(match route.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
+            ExecutionCandidateKind::OriginalVmRegion => 9,
             ExecutionCandidateKind::GenericNativeCpu => 1,
             ExecutionCandidateKind::SpecializedNativeCpu => 2,
             ExecutionCandidateKind::VectorizedNativeCpu => 3,
@@ -386,6 +396,10 @@ mod tests {
             CandidateExecutionLocation::Host => legacy.push(0),
             CandidateExecutionLocation::Provider { device_id } => {
                 legacy.push(1);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateExecutionLocation::VmRegion { device_id } => {
+                legacy.push(2);
                 legacy.extend_from_slice(&device_id.to_le_bytes());
             }
         }
@@ -577,6 +591,24 @@ mod tests {
             require_transactional_results: true,
         };
         assert!(request.validate().is_err());
+
+        let mut original = candidate(ExecutionCandidateKind::OriginalVmRegion, b"installed");
+        original.execution_location = CandidateExecutionLocation::VmRegion { device_id: 7 };
+        original.output_residency = CandidateOutputResidency::Unknown;
+        original.transactional_results = false;
+        let source_ordered = WholeWorkPlacementRequest {
+            candidates: vec![original.clone()],
+            require_transactional_results: false,
+            ..request
+        };
+        assert!(source_ordered.validate().is_ok());
+        original.execution_location = CandidateExecutionLocation::VmRegion { device_id: 8 };
+        assert!(WholeWorkPlacementRequest {
+            candidates: vec![original],
+            ..source_ordered
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

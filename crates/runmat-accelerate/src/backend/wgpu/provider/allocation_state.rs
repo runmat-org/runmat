@@ -8,7 +8,6 @@ use crate::backend::wgpu::resources::KernelResourceRegistry;
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::GpuTensorHandle;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -19,13 +18,18 @@ mod lifecycle;
 mod publication;
 #[path = "allocation_state/retirement.rs"]
 mod retirement;
+#[path = "allocation_state/record_table.rs"]
+mod record_table;
+#[path = "allocation_state/managed_admission.rs"]
+mod managed_admission;
 #[path = "allocation_state/owner.rs"]
 mod owner;
 use lifecycle::{AllocationStateError, Disposition, Failure, Phase, Record, Stage};
+use record_table::RecordTable;
 
 pub(super) struct AllocationState {
     device_id: u32,
-    buffers: Mutex<HashMap<u64, Record>>,
+    buffers: Mutex<RecordTable>,
     next_id: AtomicU64,
     lost: AtomicBool,
     pool: BufferResidency,
@@ -47,7 +51,7 @@ impl AllocationState {
     ) -> Self {
         Self {
             device_id,
-            buffers: Mutex::new(HashMap::new()),
+            buffers: Mutex::new(RecordTable::default()),
             next_id: AtomicU64::new(1),
             lost: AtomicBool::new(false),
             pool: BufferResidency::new(pool_limit),
@@ -67,7 +71,7 @@ impl AllocationState {
             .map_err(|_| anyhow!("WGPU reduction cache owner already installed"))
     }
 
-    fn lock_records(&self) -> Result<MutexGuard<'_, HashMap<u64, Record>>> {
+    fn lock_records(&self) -> Result<MutexGuard<'_, RecordTable>> {
         self.buffers
             .lock()
             .map_err(|_| AllocationStateError::Poisoned.into())

@@ -346,6 +346,9 @@ mod readback_demand_tests {
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionCandidateKind {
     SharedRuntime,
+    /// The original, source-ordered VM instructions of one installed region.
+    /// Unlike a host route, these instructions may invoke a provider.
+    OriginalVmRegion,
     GenericNativeCpu,
     SpecializedNativeCpu,
     VectorizedNativeCpu,
@@ -366,13 +369,29 @@ impl ExecutionCandidateKind {
                 | Self::ProviderFusion
         )
     }
+
+    pub const fn matches_location(self, location: CandidateExecutionLocation) -> bool {
+        match (self, location) {
+            (Self::OriginalVmRegion, CandidateExecutionLocation::VmRegion { .. }) => true,
+            (Self::OriginalVmRegion, _) | (_, CandidateExecutionLocation::VmRegion { .. }) => false,
+            (kind, CandidateExecutionLocation::Provider { .. }) => kind.is_provider(),
+            (kind, CandidateExecutionLocation::Host) => !kind.is_provider(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CandidateExecutionLocation {
     Host,
-    Provider { device_id: u32 },
+    Provider {
+        device_id: u32,
+    },
+    /// Execution remains at the original VM instruction boundary. The VM may
+    /// run host operations and operations on this exact resident owner.
+    VmRegion {
+        device_id: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -608,12 +627,7 @@ impl ExecutionCandidateDescriptor {
         if self.cost.checked_total_ns().is_none() {
             return Err("candidate cost components overflow u64");
         }
-        if self.kind.is_provider()
-            != matches!(
-                self.execution_location,
-                CandidateExecutionLocation::Provider { .. }
-            )
-        {
+        if !self.kind.matches_location(self.execution_location) {
             return Err("candidate kind and execution location are inconsistent");
         }
         self.presentation

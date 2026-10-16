@@ -26,9 +26,12 @@ pub(super) fn select(
         physical_facts,
         compare_profitability,
         runtime,
+        publication,
         policy,
+        bounded_host,
     } = request;
-    admitted.sort_by(|left, right| left.identity.cmp(&right.identity));
+    let require_transactional_results = publication == LocalPublicationSemantics::Atomic;
+    admitted.sort_unstable_by(|left, right| left.identity.cmp(&right.identity));
     if admitted
         .windows(2)
         .any(|pair| pair[0].identity == pair[1].identity)
@@ -42,7 +45,20 @@ pub(super) fn select(
     // Snapshot admission is mandatory even without a service, a FullCall
     // revision, or an observation permit. These are physical facts only.
     let (resources, digest, host_epoch, transactional) = physical_facts;
-    let mut candidates = Vec::with_capacity(admitted.len() + 1);
+    let mut candidates = Vec::new();
+    candidates
+        .try_reserve_exact(admitted.len().checked_add(1).ok_or_else(|| {
+            plan_error(crate::placement::PlacementPlanError {
+                code: "RunMat:Placement:ResourceOverflow",
+                message: "physical candidate count overflows".into(),
+            })
+        })?)
+        .map_err(|_| {
+            plan_error(crate::placement::PlacementPlanError {
+                code: "RunMat:Placement:ResourceOverflow",
+                message: "physical candidate allocation failed".into(),
+            })
+        })?;
     if compare_profitability {
         if let Some(resources) = cpu_resources {
             let mut host = cpu.route.clone();
@@ -68,23 +84,33 @@ pub(super) fn select(
                 .expect("physical route facts serialize"),
             cost: entry.cost,
             resources: candidate_resource(entry),
-            transactional_results: transactional,
+            transactional_results: transactional && require_transactional_results,
         });
     }
     // Match the numeric selector's price domain before whole-set validation.
     // A malformed estimate is not unavailable evidence and cannot invalidate
     // otherwise legal routes. Preserve the original sequence for receipts.
     let original_candidates = candidates;
-    let candidates = original_candidates
-        .iter()
-        .filter(|candidate| {
-            candidate
-                .cost
-                .estimate()
-                .is_none_or(|estimate| estimate.checked_risk_adjusted_ns().is_some())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    candidates
+        .try_reserve_exact(original_candidates.len())
+        .map_err(|_| {
+            plan_error(crate::placement::PlacementPlanError {
+                code: "RunMat:Placement:ResourceOverflow",
+                message: "filtered candidate allocation failed".into(),
+            })
+        })?;
+    candidates.extend(
+        original_candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .cost
+                    .estimate()
+                    .is_none_or(|estimate| estimate.checked_risk_adjusted_ns().is_some())
+            })
+            .cloned(),
+    );
     // Apply the same physical owner before either local policy or service
     // selection. Keep the original sequence for receipt/index projection.
     if !candidates.is_empty() {
@@ -104,15 +130,22 @@ pub(super) fn select(
         }));
     }
     let mut insufficient = false;
-    let candidates = candidates.into_iter().filter(|candidate| {
-        match crate::placement::session::candidate_resources_admitted(candidate, &resources, true) {
+    candidates.retain(|candidate| {
+        match crate::placement::session::candidate_resources_admitted(
+            candidate,
+            &resources,
+            require_transactional_results,
+        ) {
             Ok(()) => true,
             Err(reason) => {
-                insufficient |= matches!(reason, crate::placement::partition::ResourceAdmissionError::InsufficientEvidence { .. });
+                insufficient |= matches!(
+                    reason,
+                    crate::placement::partition::ResourceAdmissionError::InsufficientEvidence { .. }
+                );
                 false
             }
         }
-    }).collect::<Vec<_>>();
+    });
     if candidates.is_empty() {
         if vm_decline.is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
         {
@@ -138,7 +171,12 @@ pub(super) fn select(
                 TotalCandidateObservationContract::FullCall
             )
         })
-        .filter(|runtime| runtime.service_ports().placement().is_some())
+        .filter(|runtime| {
+            runtime
+                .service_ports()
+                .placement()
+                .is_some_and(|service| !bounded_host || service.managed_whole_work_available())
+        })
         .and_then(|runtime| {
             let revision = observation_revision(
                 runtime,
@@ -148,18 +186,32 @@ pub(super) fn select(
                 digest,
                 policy,
             )?;
-            let facts = signature::candidate_set_facts(
-                &admitted
+            let facts = if let [entry] = admitted.as_slice() {
+                let source = (&entry.identity, &entry.cost_query, entry.output_bytes);
+                signature::candidate_set_facts(
+                    std::slice::from_ref(&source),
+                    &rejected,
+                    source_digest,
+                    cpu.route.preparation,
+                    &residency,
+                    &resources,
+                    host_epoch,
+                )
+            } else {
+                let sources = admitted
                     .iter()
                     .map(|entry| (&entry.identity, &entry.cost_query, entry.output_bytes))
-                    .collect::<Vec<_>>(),
-                &rejected,
-                source_digest,
-                cpu.route.preparation,
-                &residency,
-                &resources,
-                host_epoch,
-            );
+                    .collect::<Vec<_>>();
+                signature::candidate_set_facts(
+                    &sources,
+                    &rejected,
+                    source_digest,
+                    cpu.route.preparation,
+                    &residency,
+                    &resources,
+                    host_epoch,
+                )
+            };
             let signature = PlacementSignature {
                 region: cpu.region,
                 operation: operation.into(),
@@ -181,45 +233,49 @@ pub(super) fn select(
             Some((runtime, signature))
         });
     let mut feedback = None;
-    let (selected, decision_kind, predicted_total_ns) =
-        if let Some((runtime, signature)) = authority {
+    let (selected, decision_kind, predicted_total_ns) = if bounded_host {
+        if let Some((runtime, signature)) = authority.as_ref().filter(|(runtime, _)| {
+            runtime
+                .service_ports()
+                .placement()
+                .is_some_and(|service| service.managed_whole_work_available())
+        }) {
             let service = runtime
                 .service_ports()
                 .placement()
-                .expect("revision requires selected placement service");
-            let selection = service
-                .select_whole_work_borrowed(WholeWorkPlacementRequestRef {
-                    signature: (&signature).into(),
+                .expect("checked managed placement service");
+            let managed = service
+                .select_whole_work_borrowed_managed(WholeWorkPlacementRequestRef {
+                    signature: signature.into(),
                     constraint,
                     candidates: &candidates,
                     resources: &resources,
                     deterministic: false,
-                    require_transactional_results: true,
+                    require_transactional_results,
                 })
                 .map_err(Box::new)?;
-            if selection.decision.signature != signature {
+            if signature.permit_identity().ok() != Some(managed.identity) {
                 return Err(Box::new(
                     runmat_runtime::build_runtime_error(
-                        "placement returned a different whole-work signature",
+                        "managed placement returned a different whole-work identity",
                     )
                     .with_identifier("RunMat:Placement:InvalidDecision")
                     .build(),
                 ));
             }
-            let decision = &selection.decision;
             let result = (
-                decision.selected.clone(),
-                decision.kind,
-                decision.predicted_total_ns,
+                managed.selected.portable(),
+                managed.kind,
+                managed.predicted_total_ns,
             );
-            if selection.observation_permit.is_some() && selection.observation_is_current() {
+            if managed.observation_is_current() {
                 feedback = Some(Box::new(LocalPlacementFeedback {
-                    runtime: runtime.clone(),
-                    signature: decision.signature.clone(),
-                    candidate: decision.selected.candidate.clone(),
-                    kind: decision.selected.kind,
-                    authority: LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
-                        std::sync::Mutex::new(Some(selection)),
+                    runtime: (**runtime).clone(),
+                    signature: (*signature).clone(),
+                    candidate: result.0.candidate.clone(),
+                    kind: result.0.kind,
+                    authority: LocalPlacementFeedbackAuthority::Managed(std::sync::Arc::new(
+                        std::sync::Mutex::new(Some(managed)),
                     )),
                 }));
             }
@@ -230,10 +286,62 @@ pub(super) fn select(
                 &candidates,
                 constraint,
                 &resources,
-                true,
+                require_transactional_results,
             )
             .map_err(plan_error)?
-        };
+        }
+    } else if let Some((runtime, signature)) = authority {
+        let service = runtime
+            .service_ports()
+            .placement()
+            .expect("revision requires selected placement service");
+        let selection = service
+            .select_whole_work_borrowed(WholeWorkPlacementRequestRef {
+                signature: (&signature).into(),
+                constraint,
+                candidates: &candidates,
+                resources: &resources,
+                deterministic: false,
+                require_transactional_results,
+            })
+            .map_err(Box::new)?;
+        if selection.decision.signature != signature {
+            return Err(Box::new(
+                runmat_runtime::build_runtime_error(
+                    "placement returned a different whole-work signature",
+                )
+                .with_identifier("RunMat:Placement:InvalidDecision")
+                .build(),
+            ));
+        }
+        let decision = &selection.decision;
+        let result = (
+            decision.selected.clone(),
+            decision.kind,
+            decision.predicted_total_ns,
+        );
+        if selection.observation_permit.is_some() && selection.observation_is_current() {
+            feedback = Some(Box::new(LocalPlacementFeedback {
+                runtime: runtime.clone(),
+                signature: decision.signature.clone(),
+                candidate: decision.selected.candidate.clone(),
+                kind: decision.selected.kind,
+                authority: LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
+                    std::sync::Mutex::new(Some(selection)),
+                )),
+            }));
+        }
+        result
+    } else {
+        crate::placement::session::select_unobserved(
+            operation,
+            &candidates,
+            constraint,
+            &resources,
+            require_transactional_results,
+        )
+        .map_err(plan_error)?
+    };
     if !candidates
         .iter()
         .any(|candidate| candidate.selected(operation) == selected)

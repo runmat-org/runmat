@@ -3828,6 +3828,109 @@
       ]
     },
     {
+      "name": "acosd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = acosd(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ACOSD.INVALID_INPUT",
+          "identifier": "RunMat:acosd:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "acosd: invalid input"
+        },
+        {
+          "code": "RM.ACOSD.INTERNAL",
+          "identifier": "RunMat:acosd:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "acosd: internal error"
+        },
+        {
+          "code": "RM.ACOSD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:acosd:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "acosd: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "acosd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "acosd with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOSDIntegerInputExtension"
+        },
+        {
+          "id": "acosd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "acosd with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOSDLogicalInputExtension"
+        },
+        {
+          "id": "acosd-character-input",
+          "mode": "RunMatOnly",
+          "description": "acosd with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOSDCharacterInputExtension"
+        },
+        {
+          "id": "acosd-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "acosd explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOSDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = acosd(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
+        }
+      ]
+    },
+    {
       "name": "acosh",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -3927,6 +4030,212 @@
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
           "notes": "Authoritative integer storage converts explicitly at the binary64 algorithm boundary. Values below one produce complex double output; resident values gather and restore through their owning provider."
+        }
+      ]
+    },
+    {
+      "name": "acotd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = acotd(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ACOTD.INVALID_INPUT",
+          "identifier": "RunMat:acotd:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "acotd: invalid input"
+        },
+        {
+          "code": "RM.ACOTD.INTERNAL",
+          "identifier": "RunMat:acotd:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "acotd: internal error"
+        },
+        {
+          "code": "RM.ACOTD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:acotd:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "acotd: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "acotd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "acotd with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOTDIntegerInputExtension"
+        },
+        {
+          "id": "acotd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "acotd with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOTDLogicalInputExtension"
+        },
+        {
+          "id": "acotd-character-input",
+          "mode": "RunMatOnly",
+          "description": "acotd with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOTDCharacterInputExtension"
+        },
+        {
+          "id": "acotd-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "acotd explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACOTDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = acotd(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
+        }
+      ]
+    },
+    {
+      "name": "acscd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = acscd(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ACSCD.INVALID_INPUT",
+          "identifier": "RunMat:acscd:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "acscd: invalid input"
+        },
+        {
+          "code": "RM.ACSCD.INTERNAL",
+          "identifier": "RunMat:acscd:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "acscd: internal error"
+        },
+        {
+          "code": "RM.ACSCD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:acscd:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "acscd: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "acscd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "acscd with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACSCDIntegerInputExtension"
+        },
+        {
+          "id": "acscd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "acscd with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACSCDLogicalInputExtension"
+        },
+        {
+          "id": "acscd-character-input",
+          "mode": "RunMatOnly",
+          "description": "acscd with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACSCDCharacterInputExtension"
+        },
+        {
+          "id": "acscd-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "acscd explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ACSCDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = acscd(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
         }
       ]
     },
@@ -8059,6 +8368,109 @@
       ]
     },
     {
+      "name": "asecd",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = asecd(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ASECD.INVALID_INPUT",
+          "identifier": "RunMat:asecd:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "asecd: invalid input"
+        },
+        {
+          "code": "RM.ASECD.INTERNAL",
+          "identifier": "RunMat:asecd:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "asecd: internal error"
+        },
+        {
+          "code": "RM.ASECD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:asecd:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "asecd: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "asecd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "asecd with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASECDIntegerInputExtension"
+        },
+        {
+          "id": "asecd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "asecd with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASECDLogicalInputExtension"
+        },
+        {
+          "id": "asecd-character-input",
+          "mode": "RunMatOnly",
+          "description": "asecd with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASECDCharacterInputExtension"
+        },
+        {
+          "id": "asecd-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "asecd explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASECDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = asecd(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
+        }
+      ]
+    },
+    {
       "name": "asin",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -8158,6 +8570,109 @@
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
           "notes": "Authoritative integer storage converts explicitly at the binary64 algorithm boundary; values outside [-1, 1] produce complex double, and resident results return to the owner."
+        }
+      ]
+    },
+    {
+      "name": "asind",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = asind(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ASIND.INVALID_INPUT",
+          "identifier": "RunMat:asind:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "asind: invalid input"
+        },
+        {
+          "code": "RM.ASIND.INTERNAL",
+          "identifier": "RunMat:asind:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "asind: internal error"
+        },
+        {
+          "code": "RM.ASIND.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:asind:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "asind: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "asind-integer-input",
+          "mode": "RunMatOnly",
+          "description": "asind with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASINDIntegerInputExtension"
+        },
+        {
+          "id": "asind-logical-input",
+          "mode": "RunMatOnly",
+          "description": "asind with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASINDLogicalInputExtension"
+        },
+        {
+          "id": "asind-character-input",
+          "mode": "RunMatOnly",
+          "description": "asind with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASINDCharacterInputExtension"
+        },
+        {
+          "id": "asind-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "asind explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ASINDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = asind(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
         }
       ]
     },
@@ -8893,6 +9408,241 @@
       ]
     },
     {
+      "name": "atan2d",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "D = atan2d(Y, X)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real y-coordinate, array, table, or timetable."
+            },
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real x-coordinate, broadcast-compatible array, table, or timetable."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Four-quadrant angle in degrees, preserving a tabular input container."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ATAN2D.INVALID_INPUT",
+          "identifier": "RunMat:atan2d:InvalidInput",
+          "when": "Either coordinate is not supported real numeric or tabular input, tabular variables are incompatible, or resident inputs have different owners.",
+          "message": "atan2d: invalid input"
+        },
+        {
+          "code": "RM.ATAN2D.COMPLEX_UNSUPPORTED",
+          "identifier": "RunMat:atan2d:ComplexUnsupported",
+          "when": "Either coordinate is complex.",
+          "message": "atan2d: complex inputs are not supported"
+        },
+        {
+          "code": "RM.ATAN2D.SIZE_MISMATCH",
+          "identifier": "RunMat:atan2d:SizeMismatch",
+          "when": "Coordinate shapes are not broadcast-compatible.",
+          "message": "atan2d: input sizes are not compatible for implicit expansion"
+        },
+        {
+          "code": "RM.ATAN2D.INTERNAL",
+          "identifier": "RunMat:atan2d:Internal",
+          "when": "Gather, calculation, allocation or owner-preserving restoration fails.",
+          "message": "atan2d: internal error"
+        },
+        {
+          "code": "RM.ATAN2D.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:atan2d:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "atan2d: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "atan2d-integer-input",
+          "mode": "RunMatOnly",
+          "description": "atan2d with integer coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2dIntegerInputExtension"
+        },
+        {
+          "id": "atan2d-logical-input",
+          "mode": "RunMatOnly",
+          "description": "atan2d with logical coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2dLogicalInputExtension"
+        },
+        {
+          "id": "atan2d-character-input",
+          "mode": "RunMatOnly",
+          "description": "atan2d with character coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2dCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = atan2d(integer_Y, integer_X)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Integer values are validated before the floating angle calculation."
+            },
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Integer values are validated before the floating angle calculation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Native integer storage remains authoritative until binary64 computation; a single-precision companion selects single output."
+        }
+      ]
+    },
+    {
+      "name": "atand",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = atand(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex single/double input; integer, logical and character forms are RunMat extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Principal inverse-trigonometric angle in degrees, preserving the input shape."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ATAND.INVALID_INPUT",
+          "identifier": "RunMat:atand:InvalidInput",
+          "when": "Input is not supported numeric, logical or character data.",
+          "message": "atand: invalid input"
+        },
+        {
+          "code": "RM.ATAND.INTERNAL",
+          "identifier": "RunMat:atand:Internal",
+          "when": "Gather, allocation, computation or owner-preserving restoration fails.",
+          "message": "atand: internal error"
+        },
+        {
+          "code": "RM.ATAND.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:atand:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "atand: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "atand-integer-input",
+          "mode": "RunMatOnly",
+          "description": "atand with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ATANDIntegerInputExtension"
+        },
+        {
+          "id": "atand-logical-input",
+          "mode": "RunMatOnly",
+          "description": "atand with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ATANDLogicalInputExtension"
+        },
+        {
+          "id": "atand-character-input",
+          "mode": "RunMatOnly",
+          "description": "atand with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ATANDCharacterInputExtension"
+        },
+        {
+          "id": "atand-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "atand explicit real gpuArray requiring complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ATANDGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = atand(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer value must be exactly representable at the binary64 computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer storage remains authoritative until the explicit binary64 inverse-degree computation and resident output is restored through the input owner."
+        }
+      ]
+    },
+    {
       "name": "atanh",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -9399,7 +10149,7 @@
           "inputs": [
             {
               "name": "target",
-              "ty": "NumericScalar",
+              "ty": "Any",
               "arity": "Optional",
               "default": null,
               "description": "Existing axes handle to make current, or figure handle to parent new axes."
@@ -18347,12 +19097,12 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element color limit vector [cmin cmax], including automatically selected bounds."
             }
           ]
         },
         {
-          "label": "limits = caxis([cmin cmax])",
+          "label": "caxis([cmin cmax])",
           "inputs": [
             {
               "name": "limits",
@@ -18362,25 +19112,30 @@
               "description": "Two-element numeric vector [cmin cmax]."
             }
           ],
-          "outputs": [
-            {
-              "name": "limits",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "limits = caxis(mode)",
+          "label": "caxis('auto'|'manual')",
           "inputs": [
             {
               "name": "mode",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Limit mode string ('auto', 'tight', or 'manual')."
+              "description": "Color-limit mode string ('auto' or 'manual')."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "limits = caxis(axes)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
             }
           ],
           "outputs": [
@@ -18389,9 +19144,49 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element color limit vector [cmin cmax], including automatically selected bounds."
             }
           ]
+        },
+        {
+          "label": "caxis(axes,[cmin cmax])",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "limits",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element numeric vector [cmin cmax]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "caxis(axes,'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Automatic or manual limit mode token."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -18406,6 +19201,12 @@
           "identifier": "RunMat:caxis:Internal",
           "when": "Internal plotting state update fails.",
           "message": "caxis: internal operation failed"
+        },
+        {
+          "code": "RM.CAXIS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:caxis:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "caxis: at most one output is supported"
         }
       ],
       "extensions": [
@@ -18414,6 +19215,12 @@
           "mode": "RunMatOnly",
           "description": "clim/caxis with typed integer limits is a RunMat extension",
           "error_identifier": "RunMat:compatibility:ClimIntegerLimitsExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_audit": {
@@ -21898,12 +22705,12 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element color limit vector [cmin cmax], including automatically selected bounds."
             }
           ]
         },
         {
-          "label": "limits = clim([cmin cmax])",
+          "label": "clim([cmin cmax])",
           "inputs": [
             {
               "name": "limits",
@@ -21913,25 +22720,30 @@
               "description": "Two-element numeric vector [cmin cmax]."
             }
           ],
-          "outputs": [
-            {
-              "name": "limits",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "limits = clim(mode)",
+          "label": "clim('auto'|'manual')",
           "inputs": [
             {
               "name": "mode",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Limit mode string ('auto', 'tight', or 'manual')."
+              "description": "Color-limit mode string ('auto' or 'manual')."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "limits = clim(axes)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
             }
           ],
           "outputs": [
@@ -21940,9 +22752,49 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element color limit vector [cmin cmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element color limit vector [cmin cmax], including automatically selected bounds."
             }
           ]
+        },
+        {
+          "label": "clim(axes,[cmin cmax])",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "limits",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element numeric vector [cmin cmax]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "clim(axes,'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Automatic or manual limit mode token."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -21957,6 +22809,12 @@
           "identifier": "RunMat:clim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "clim: internal operation failed"
+        },
+        {
+          "code": "RM.CLIM.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:clim:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "clim: at most one output is supported"
         }
       ],
       "extensions": [
@@ -21965,6 +22823,12 @@
           "mode": "RunMatOnly",
           "description": "clim/caxis with typed integer limits is a RunMat extension",
           "error_identifier": "RunMat:compatibility:ClimIntegerLimitsExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -23166,6 +24030,12 @@
           "identifier": "RunMat:colororder:Internal",
           "when": "Internal plotting state update fails.",
           "message": "colororder: internal operation failed"
+        },
+        {
+          "code": "RM.COLORORDER.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:colororder:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "colororder: at most one output is supported"
         }
       ],
       "extensions": [
@@ -23174,6 +24044,12 @@
           "mode": "RunMatOnly",
           "description": "colororder with a typed integer RGB matrix is a RunMat extension",
           "error_identifier": "RunMat:compatibility:ColororderIntegerRgbExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -23668,6 +24544,12 @@
           "identifier": "RunMat:compose:InvalidData",
           "when": "A data argument is outside compose's documented numeric, logical, character, or string domain.",
           "message": "compose: unsupported data argument"
+        },
+        {
+          "code": "RM.COMPOSE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:compose:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "compose: too many output arguments"
         }
       ],
       "extensions": [
@@ -24738,6 +25620,258 @@
               "description": "Lagrange multiplier compatibility struct."
             }
           ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = coneprog(f, socConstraints)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "socConstraints",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second-order cone constraints from secondordercone."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = coneprog(f, socConstraints, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "socConstraints",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second-order cone constraints from secondordercone."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = coneprog(f, socConstraints, A, b, Aeq, beq, lb, ub, options)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "socConstraints",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second-order cone constraints from secondordercone."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "optimoptions('coneprog')",
+              "description": "Options struct from optimoptions or optimset."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = coneprog(problem)",
+          "inputs": [
+            {
+              "name": "problem",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Problem struct with f, socConstraints, linear constraints, bounds, and options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
         }
       ],
       "errors": [
@@ -24752,6 +25886,89 @@
           "identifier": "RunMat:coneprog:InvalidInput",
           "when": "Objective, cone, constraint, option, or bound dimensions/types are invalid.",
           "message": "coneprog: invalid input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "coneprog(integer-valued solver data)",
+          "inputs": [
+            {
+              "name": "objective, cone, constraint, or bound numeric data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Existing RunMat forms normalize authoritative native integer values to binary64, including rounding outside its exact integer range. This is not an exact-integer solver or a claim of MATLAB integer-overload parity."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Preserves the existing floating-boundary rounding policy; no new integer rejection or extension gate is introduced."
+        },
+        {
+          "form": "coneprog(..., options)",
+          "inputs": [
+            {
+              "name": "options.MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Native integer structural counts are decoded exactly to platform usize; solver uses at least one iteration-budget unit."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Negative and overflowing structural counts reject before iteration."
+        },
+        {
+          "form": "coneprog(..., options)",
+          "inputs": [
+            {
+              "name": "options.TolX or options.TolFun",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Unlike solver coefficients, integer tolerances must be exactly representable as finite binary64 at the shared options boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Finite checked binary64 tolerance conversion uses the existing shared options owner."
         }
       ]
     },
@@ -42598,7 +43815,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Detected import options struct accepted by readtable/readmatrix."
+              "description": "Typed text or spreadsheet import-options object for tabular readers."
             }
           ]
         },
@@ -42626,7 +43843,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Detected import options struct accepted by readtable/readmatrix."
+              "description": "Typed text or spreadsheet import-options object for tabular readers."
             }
           ]
         }
@@ -72197,10 +73414,10 @@
           "inputs": [
             {
               "name": "fig",
-              "ty": "NumericScalar",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Figure handle whose current axes should be returned."
+              "description": "Exact native Figure receiver or numeric Figure compatibility handle whose current axes should be returned."
             }
           ],
           "outputs": [
@@ -72241,6 +73458,12 @@
           "identifier": "RunMat:gca:InvalidArgument",
           "when": "Unsupported arguments are provided.",
           "message": "gca: unsupported arguments"
+        },
+        {
+          "code": "RM.GCA.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:gca:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "gca: at most one output is supported"
         }
       ],
       "extensions": [
@@ -74444,6 +75667,49 @@
           "backend": "HostOnly",
           "overload": "Multiple",
           "notes": "A stored integer retains its exact class; multiple names produce a cell array."
+        }
+      ]
+    },
+    {
+      "name": "getvaropts",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "variableOpts = getvaropts(opts, selection)",
+          "inputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed delimited-text or spreadsheet import-options object."
+            },
+            {
+              "name": "selection",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Variable name, index, or logical selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "variableOpts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected typed variable-options object or object array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMPORT_OPTIONS.INVALID_ARGUMENT",
+          "identifier": "RunMat:ImportOptions:InvalidArgument",
+          "when": "The options object, selector, type, or variable control is unsupported or malformed.",
+          "message": "invalid import-options argument"
         }
       ]
     },
@@ -79531,6 +80797,83 @@
               "description": "Handle to the heatmap chart."
             }
           ]
+        },
+        {
+          "label": "h = heatmap(SourceTable, XVariable, YVariable)",
+          "inputs": [
+            {
+              "name": "SourceTable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table or timetable whose rows are grouped into cells."
+            },
+            {
+              "name": "XVariable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exactly one table variable for heatmap columns."
+            },
+            {
+              "name": "YVariable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exactly one table variable for heatmap rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the heatmap chart."
+            }
+          ]
+        },
+        {
+          "label": "h = heatmap(SourceTable, XVariable, YVariable, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "SourceTable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table or timetable whose rows are grouped into cells."
+            },
+            {
+              "name": "XVariable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exactly one table variable for heatmap columns."
+            },
+            {
+              "name": "YVariable",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exactly one table variable for heatmap rows."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "ColorVariable, ColorMethod, and heatmap property pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the heatmap chart."
+            }
+          ]
         }
       ],
       "errors": [
@@ -79545,6 +80888,12 @@
           "identifier": "RunMat:heatmap:Internal",
           "when": "Internal render/surface construction fails.",
           "message": "heatmap: internal operation failed"
+        },
+        {
+          "code": "RM.HEATMAP.UNSUPPORTED_COLOR_DATA",
+          "identifier": "RunMat:heatmap:UnsupportedColorData",
+          "when": "An incomplete table grid needs missing ColorData cells but its wide integer observations cannot be represented exactly with the available numeric storage.",
+          "message": "heatmap: exact ColorData with missing grid cells is unsupported"
         }
       ],
       "extensions": [
@@ -79744,6 +81093,65 @@
           "backend": "HostOnly",
           "overload": "StructuralParameter",
           "notes": "The two authoritative endpoints are ordered before their explicit client-renderer conversion."
+        },
+        {
+          "form": "h = heatmap(T, XVariable, YVariable, 'ColorVariable', CVariable)",
+          "inputs": [
+            {
+              "name": "XVariable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer table axis values group by exact integer identity before labels are formatted."
+            },
+            {
+              "name": "YVariable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer table axis values group by exact integer identity before labels are formatted."
+            },
+            {
+              "name": "ColorVariable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Summary methods use floating aggregation; ColorMethod none retains exact native integer ColorData for a complete axis-pair grid and rejects nonrepresentable wide values when an incomplete grid requires NaN cells."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Table grouping keys preserve native integer identity. Summary values enter double ColorData; none retains exact native integer ColorData on complete grids, while incomplete grids need representable double values for NaN holes."
         }
       ]
     },
@@ -91569,7 +92977,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\"."
             }
           ],
           "outputs": [
@@ -91611,7 +93019,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\"."
             }
           ],
           "outputs": [
@@ -91723,14 +93131,14 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\"."
             },
             {
               "name": "extrap",
               "ty": "Any",
               "arity": "Optional",
-              "default": "NaN",
-              "description": "Extrapolation mode: \"extrap\" or scalar fill value."
+              "default": null,
+              "description": "Extrapolation mode: \"extrap\" or scalar fill value; when omitted, the default depends on the method."
             }
           ],
           "outputs": [
@@ -91772,14 +93180,14 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\"."
             },
             {
               "name": "extrap",
               "ty": "Any",
               "arity": "Optional",
-              "default": "NaN",
-              "description": "Extrapolation mode: \"extrap\" or scalar fill value."
+              "default": null,
+              "description": "Extrapolation mode: \"extrap\" or scalar fill value; when omitted, the default depends on the method."
             }
           ],
           "outputs": [
@@ -92179,7 +93587,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\" or \"nearest\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", or not-a-knot \"spline\"."
             }
           ],
           "outputs": [
@@ -92235,7 +93643,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\" or \"nearest\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", or not-a-knot \"spline\"."
             }
           ],
           "outputs": [
@@ -92375,14 +93783,14 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\" or \"nearest\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", or not-a-knot \"spline\"."
             },
             {
               "name": "extrap",
               "ty": "Any",
               "arity": "Optional",
-              "default": "NaN",
-              "description": "Extrapolation mode: \"extrap\" or scalar fill value."
+              "default": null,
+              "description": "Extrapolation: spline defaults to extrapolation; other methods default to NaN. Override with \"extrap\" or a scalar fill value."
             }
           ],
           "outputs": [
@@ -92438,14 +93846,14 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"linear\"",
-              "description": "Interpolation method: \"linear\" or \"nearest\"."
+              "description": "Interpolation method: \"linear\", \"nearest\", or not-a-knot \"spline\"."
             },
             {
               "name": "extrap",
               "ty": "Any",
               "arity": "Optional",
-              "default": "NaN",
-              "description": "Extrapolation mode: \"extrap\" or scalar fill value."
+              "default": null,
+              "description": "Extrapolation: spline defaults to extrapolation; other methods default to NaN. Override with \"extrap\" or a scalar fill value."
             }
           ],
           "outputs": [
@@ -97803,6 +99211,52 @@
           "notes": "Integer values are decoded exactly then clamped to the BMP code-unit range; explicit resident input is mode-gated before exact gather."
         }
       ]
+    },
+    {
+      "name": "isstruct",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isstruct(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value whose structure-container class is queried."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical scalar that is true exactly when the input is a structure array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISSTRUCT.INTERNAL",
+          "identifier": "RunMat:isstruct:InternalError",
+          "when": "Internal value or resident-handle metadata is contradictory.",
+          "message": "isstruct: internal error"
+        },
+        {
+          "code": "RM.ISSTRUCT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:isstruct:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "isstruct: too many output arguments"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isstruct is a universal container predicate; integer inputs return scalar false without payload conversion or inspection."
+      }
     },
     {
       "name": "issymmetric",
@@ -108697,6 +110151,55 @@
           ]
         },
         {
+          "label": "x = lsqcurvefit(fun, x0, xdata, ydata, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            }
+          ]
+        },
+        {
           "label": "x = lsqcurvefit(fun, x0, xdata, ydata, lb, ub)",
           "inputs": [
             {
@@ -110136,6 +111639,153 @@
           ]
         },
         {
+          "label": "x = lsqnonlin(fun, x0, lb, ub, [], [], [], [])",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Residual callback evaluated as fun(x)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial design-variable guess."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds. Empty entries mean unbounded; shorter vectors apply to leading variables."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds. Empty entries mean unbounded; shorter vectors apply to leading variables."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "Aeq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "beq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Solution with the same shape as x0."
+            }
+          ]
+        },
+        {
+          "label": "x = lsqnonlin(fun, x0, lb, ub, [], [], [], [], [])",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Residual callback evaluated as fun(x)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial design-variable guess."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds. Empty entries mean unbounded; shorter vectors apply to leading variables."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds. Empty entries mean unbounded; shorter vectors apply to leading variables."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "Aeq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "beq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "nonlcon",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Solution with the same shape as x0."
+            }
+          ]
+        },
+        {
           "label": "x = lsqnonlin(fun, x0, lb, ub, [], [], [], [], [], options)",
           "inputs": [
             {
@@ -110165,6 +111815,41 @@
               "arity": "Optional",
               "default": "[]",
               "description": "Upper bounds. Empty entries mean unbounded; shorter vectors apply to leading variables."
+            },
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "Aeq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "beq",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
+            },
+            {
+              "name": "nonlcon",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Only an empty constraint placeholder is supported."
             },
             {
               "name": "options",
@@ -110203,6 +111888,89 @@
           "identifier": "RunMat:lsqnonlin:TooManyOutputs",
           "when": "`lsqnonlin` is called with more than seven requested outputs.",
           "message": "lsqnonlin: too many output arguments"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "lsqnonlin(integer solver data)",
+          "inputs": [
+            {
+              "name": "x0, bounds or residual callback result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Existing RunMat forms normalize native integer solver data into binary64, including rounding outside its exact integer range. This is not an exact-integer solver or a claim of MATLAB integer-overload parity."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Preserves the existing floating solver boundary without adding a new rejection or exactness claim."
+        },
+        {
+          "form": "lsqnonlin(integer count options)",
+          "inputs": [
+            {
+              "name": "options.MaxIter or options.MaxFunEvals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Structural native integer counts use exact checked platform usize decoding. The existing solver uses at least one iteration/evaluation budget unit."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Exact structural counts do not change the binary64 solution and diagnostic classes."
+        },
+        {
+          "form": "lsqnonlin(integer tolerances)",
+          "inputs": [
+            {
+              "name": "options.TolX or options.TolFun",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer tolerance values must be exactly representable at the shared finite binary64 option boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Tolerance validation follows the existing shared option owner."
         }
       ]
     },
@@ -111478,7 +113246,14 @@
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.MAT2STR.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:mat2str:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "mat2str: too many output arguments"
+        }
+      ],
       "extensions": [
         {
           "id": "mat2str-integer-precision",
@@ -128239,10 +130014,10 @@
           "inputs": [
             {
               "name": "bytes",
-              "ty": "NumericArray",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric byte vector with values in the range 0 through 255."
+              "description": "Numeric byte vector with values in the range 0 through 255, or a character vector or string scalar returned unchanged."
             },
             {
               "name": "encoding",
@@ -128263,7 +130038,14 @@
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.NATIVE2UNICODE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:native2unicode:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "native2unicode: too many output arguments"
+        }
+      ],
       "integer_capabilities": [
         {
           "form": "text = native2unicode(integer_bytes[, encoding])",
@@ -129130,6 +130912,216 @@
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
           "notes": "Signed minima and wide unsigned values are evaluated from native storage. Resident fallback gathers through the exact owner and restores class and residency."
+        }
+      ]
+    },
+    {
+      "name": "nlparci",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "ci = nlparci(beta, r, 'Jacobian', J)",
+          "inputs": [
+            {
+              "name": "beta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated real single or double parameter vector."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Residual vector with one value per observation."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian or Covar."
+            },
+            {
+              "name": "J or CovB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian matrix or estimated covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ci",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-2 lower and upper confidence interval bounds."
+            }
+          ]
+        },
+        {
+          "label": "ci = nlparci(beta, r, 'Covar', CovB)",
+          "inputs": [
+            {
+              "name": "beta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated real single or double parameter vector."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Residual vector with one value per observation."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian or Covar."
+            },
+            {
+              "name": "J or CovB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian matrix or estimated covariance matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ci",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-2 lower and upper confidence interval bounds."
+            }
+          ]
+        },
+        {
+          "label": "ci = nlparci(beta, r, method, data, 'Alpha', alpha)",
+          "inputs": [
+            {
+              "name": "beta",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated real single or double parameter vector."
+            },
+            {
+              "name": "r",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Residual vector with one value per observation."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian or Covar."
+            },
+            {
+              "name": "J or CovB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian matrix or estimated covariance matrix."
+            },
+            {
+              "name": "Alpha",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Alpha option name."
+            },
+            {
+              "name": "alpha",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "0.05",
+              "description": "Significance level strictly between zero and one."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ci",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "N-by-2 lower and upper confidence interval bounds."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NLPARCI.INVALID_ARGUMENT",
+          "identifier": "RunMat:nlparci:InvalidArgument",
+          "when": "The option, class, shape, or significance level is invalid.",
+          "message": "nlparci: invalid argument"
+        },
+        {
+          "code": "RM.NLPARCI.NUMERICAL",
+          "identifier": "RunMat:nlparci:NumericalFailure",
+          "when": "There are insufficient complete observations, a rank-deficient Jacobian, or the interval calculation cannot be completed.",
+          "message": "nlparci: numerical failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "nlparci-resident-input",
+          "mode": "RunMatOnly",
+          "description": "nlparci host fallback for resident real floating inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NlparciResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ci = nlparci(beta, r, method, data, 'Alpha', alpha)",
+          "inputs": [
+            {
+              "name": "beta",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Public parameter estimates are single or double; native integer storage is rejected."
+            },
+            {
+              "name": "r",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Residuals must be floating point."
+            },
+            {
+              "name": "J or CovB",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Jacobian and covariance values must be floating point."
+            },
+            {
+              "name": "alpha",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The significance level must be a floating scalar."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "All native integer input roles are rejected before host materialization; scalar numeric literals are ordinary double values."
         }
       ]
     },
@@ -135095,7 +137087,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Typed iteration counts and logical flags are RunMat-only option-builder inputs parsed exactly before normalized storage."
+              "notes": "Typed iteration/evaluation counts are RunMat-only controls checked exactly against the platform size range and published in their native signed/unsigned class; scalar integer arrays normalize to native scalars. Typed flags are checked as 0/1 before logical publication."
             }
           ],
           "computation_domain": "Structural",
@@ -135103,7 +137095,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "Counts use exact integer-to-usize parsing and 0/1 logical controls become logical fields; current RunMat returns a struct rather than MATLAB's options object."
+          "notes": "Counts use exact integer-to-usize parsing and retain native class; 0/1 controls become logical fields. Ordinary floating/default count values remain double. This describes RunMat count/publication behavior, not unverified MATLAB integer-overload parity; RunMat returns a struct rather than MATLAB's options object."
         }
       ]
     },
@@ -135141,6 +137133,13 @@
               "arity": "Required",
               "default": null,
               "description": "Option value."
+            },
+            {
+              "name": "additional_pairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional option name/value pairs, admitted as complete pairs."
             }
           ],
           "outputs": [
@@ -135199,7 +137198,7 @@
         {
           "code": "RM.OPTIMSET.INVALID_INPUT",
           "identifier": "RunMat:optimset:InvalidInput",
-          "when": "Option field names are not valid string scalars.",
+          "when": "Option field names are not valid string scalars or payload materialization fails.",
           "message": "optimset: invalid input"
         }
       ],
@@ -135235,7 +137234,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Documented numeric optimset options use single or double; RunMat can preserve exact native integer payloads in its struct extension."
+              "notes": "Documented numeric options use single or double; RunMat preserves exact integer payloads in the returned struct."
             }
           ],
           "computation_domain": "Structural",
@@ -135243,7 +137242,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "Typed integer payloads are gated and retained exactly in the RunMat options struct; automatic resident payloads gather while explicit resident preservation is separately gated."
+          "notes": "Typed integer payloads are gated and retained exactly; automatic resident payloads gather while explicit resident preservation is separately gated."
         }
       ]
     },
@@ -135352,6 +137351,70 @@
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
           "notes": "Integer truth is evaluated from authoritative typed storage; explicitly resident fallback results return to the owning provider."
+        }
+      ]
+    },
+    {
+      "name": "ordeig",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "E = ordeig(T)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Ordinary real quasitriangular or complex triangular Schur form."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "E",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Eigenvalues in Schur-block order."
+            }
+          ]
+        },
+        {
+          "label": "E = ordeig(AA,BB)",
+          "inputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "First retained generalized Schur factor."
+            },
+            {
+              "name": "BB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second retained generalized Schur factor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "E",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Eigenvalues in Schur-block order."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ORDEIG.INVALID_INPUT",
+          "identifier": "RunMat:ordeig:InvalidInput",
+          "when": "Input factors are not finite ordinary or generalized Schur forms.",
+          "message": "ordeig: expected Schur-form factors"
         }
       ]
     },
@@ -135808,6 +137871,166 @@
           "backend": "GatherFallback",
           "overload": "Multiple",
           "notes": "Strictly increasing integer edges are compared exactly; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins."
+        }
+      ]
+    },
+    {
+      "name": "ordqz",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[AAS,BBS,QS,ZS] = ordqz(AA,BB,Q,Z,selector)",
+          "inputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Triangular or real quasitriangular first QZ factor."
+            },
+            {
+              "name": "BB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper triangular second QZ factor."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left transform from the same QZ factorization."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right transform from the same QZ factorization."
+            },
+            {
+              "name": "selector",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical selection, lhp/rhp/udi/udo keyword, or positive-integer cluster vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "AAS",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reordered first generalized Schur factor."
+            },
+            {
+              "name": "BBS",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reordered second generalized Schur factor."
+            },
+            {
+              "name": "QS",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated left orthogonal or unitary transform."
+            },
+            {
+              "name": "ZS",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated right orthogonal or unitary transform."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ORDQZ.INVALID_INPUT",
+          "identifier": "RunMat:ordqz:InvalidInput",
+          "when": "Factors, selector, class, shape, or placement are invalid.",
+          "message": "ordqz: invalid generalized Schur form or selector"
+        },
+        {
+          "code": "RM.ORDQZ.ILL_CONDITIONED",
+          "identifier": "RunMat:ordqz:IllConditioned",
+          "when": "Adjacent generalized Schur blocks cannot be safely separated or swapped.",
+          "message": "ordqz: block exchange is ill-conditioned"
+        }
+      ]
+    },
+    {
+      "name": "ordschur",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[US,TS] = ordschur(U,T,selector)",
+          "inputs": [
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Schur vectors."
+            },
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular or complex triangular Schur form."
+            },
+            {
+              "name": "selector",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical selection, lhp/rhp/udi/udo keyword, or positive-integer clusters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "US",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reordered orthogonal/unitary Schur vectors."
+            },
+            {
+              "name": "TS",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reordered Schur form."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ORDSCHUR.INVALID_INPUT",
+          "identifier": "RunMat:ordschur:InvalidInput",
+          "when": "Factor shapes, classes, structure, or selector are invalid.",
+          "message": "ordschur: invalid Schur factors or selector"
+        },
+        {
+          "code": "RM.ORDSCHUR.ILL_CONDITIONED",
+          "identifier": "RunMat:ordschur:IllConditioned",
+          "when": "Selected adjacent blocks cannot be separated by a stable invariant subspace.",
+          "message": "ordschur: Schur blocks cannot be separated"
+        },
+        {
+          "code": "RM.ORDSCHUR.INVALID_OUTPUTS",
+          "identifier": "RunMat:ordschur:InvalidOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "ordschur: at most two outputs are supported"
         }
       ]
     },
@@ -137331,11 +139554,11 @@
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "info",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Scalar metadata struct with file-derived counts and schema fields."
             }
           ]
         }
@@ -137391,11 +139614,11 @@
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Host table with file-derived row count and variable classes."
             }
           ]
         },
@@ -137419,11 +139642,11 @@
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Host table with file-derived row count and variable classes."
             }
           ]
         }
@@ -137458,6 +139681,35 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = parquetread(filename, 'RowGroups', integer_indices)",
+          "inputs": [
+            {
+              "name": "RowGroups",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "One-based row-group indices are decoded from native integer storage and checked against platform and opened-file bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Indices choose native file row groups, not a numerical GPU kernel. Imported integer columns retain their file-derived native classes."
         }
       ]
     },
@@ -141437,6 +143689,12 @@
           "identifier": "RunMat:plot:Internal",
           "when": "Internal line construction or rendering fails unexpectedly.",
           "message": "plot: internal operation failed"
+        },
+        {
+          "code": "RM.PLOT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:plot:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "plot: too many output arguments"
         }
       ],
       "integer_capabilities": [
@@ -148807,7 +151065,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector, and automatic residency may restore outputs to the owner."
+          "notes": "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector. Exact-owner restoration preserves these classes and input provenance through checked uploads; unsupported transfers report an error. Only requested outputs are materialized."
         },
         {
           "form": "[Q, R, P] = qr(A, integer_zero)",
@@ -150406,6 +152664,223 @@
       ]
     },
     {
+      "name": "qz",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "AA = qz(A,B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite dense square single or double coefficient matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second coefficient matrix of the same order."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex upper triangular or real upper quasitriangular factor."
+            }
+          ]
+        },
+        {
+          "label": "[AA,BB,Q,Z] = qz(A,B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite dense square single or double coefficient matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second coefficient matrix of the same order."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex upper triangular or real upper quasitriangular factor."
+            },
+            {
+              "name": "BB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper triangular second factor; singular B is admitted."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left unitary or orthogonal transform satisfying Q*A*Z=AA."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right unitary or orthogonal transform satisfying Q*B*Z=BB."
+            }
+          ]
+        },
+        {
+          "label": "[AA,BB,Q,Z,V,W] = qz(A,B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite dense square single or double coefficient matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second coefficient matrix of the same order."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex upper triangular or real upper quasitriangular factor."
+            },
+            {
+              "name": "BB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper triangular second factor; singular B is admitted."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left unitary or orthogonal transform satisfying Q*A*Z=AA."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right unitary or orthogonal transform satisfying Q*B*Z=BB."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right generalized eigenvectors in Schur order."
+            },
+            {
+              "name": "W",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left generalized eigenvectors in Schur order."
+            }
+          ]
+        },
+        {
+          "label": "[AA,BB,Q,Z] = qz(A,B,mode)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite dense square single or double coefficient matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second coefficient matrix of the same order."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "'complex' (default) or 'real'; real mode requires real coefficients."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "AA",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex upper triangular or real upper quasitriangular factor."
+            },
+            {
+              "name": "BB",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper triangular second factor; singular B is admitted."
+            },
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left unitary or orthogonal transform satisfying Q*A*Z=AA."
+            },
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right unitary or orthogonal transform satisfying Q*B*Z=BB."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.QZ.INVALID_INPUT",
+          "identifier": "RunMat:qz:InvalidInput",
+          "when": "Coefficient class, shape, mode, output count, or placement is unsupported.",
+          "message": "qz: expected a finite same-order dense floating matrix pair"
+        },
+        {
+          "code": "RM.QZ.NUMERICAL",
+          "identifier": "RunMat:qz:Numerical",
+          "when": "QZ or a retained-factor eigenvector solve cannot be certified.",
+          "message": "qz: generalized Schur factorization failed"
+        }
+      ]
+    },
+    {
       "name": "rad2deg",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -150510,7 +152985,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -150531,7 +153006,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -150552,7 +153027,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -150573,7 +153048,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -150601,7 +153076,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -150636,7 +153111,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Uniform random array in (0,1)."
+              "description": "Uniform random array in [0,1)."
             }
           ]
         },
@@ -161663,6 +164138,62 @@
       ]
     },
     {
+      "name": "rsf2csf",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[Unew,Tnew] = rsf2csf(U,T)",
+          "inputs": [
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real orthogonal Schur vectors."
+            },
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular Schur form."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Unew",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex unitary Schur vectors."
+            },
+            {
+              "name": "Tnew",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex triangular Schur form."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RSF2CSF.INVALID_INPUT",
+          "identifier": "RunMat:rsf2csf:InvalidInput",
+          "when": "Factors are not matching real square Schur matrices.",
+          "message": "rsf2csf: expected matching real Schur factors"
+        },
+        {
+          "code": "RM.RSF2CSF.NUMERICAL",
+          "identifier": "RunMat:rsf2csf:Numerical",
+          "when": "A 2-by-2 block cannot be triangularized within the bounded iteration.",
+          "message": "rsf2csf: complex block conversion failed"
+        }
+      ]
+    },
+    {
       "name": "run",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -164253,6 +166784,145 @@
       ]
     },
     {
+      "name": "schur",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = schur(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense square single or double matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular or complex triangular Schur form."
+            }
+          ]
+        },
+        {
+          "label": "T = schur(A,mode)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense square single or double matrix."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex Schur form; complex input always yields complex form."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular or complex triangular Schur form."
+            }
+          ]
+        },
+        {
+          "label": "[U,T] = schur(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense square single or double matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Orthogonal or unitary Schur vectors."
+            },
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular or complex triangular Schur form."
+            }
+          ]
+        },
+        {
+          "label": "[U,T] = schur(A,mode)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Dense square single or double matrix."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Real or complex Schur form; complex input always yields complex form."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Orthogonal or unitary Schur vectors."
+            },
+            {
+              "name": "T",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real quasitriangular or complex triangular Schur form."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SCHUR.INVALID_ARGUMENT",
+          "identifier": "RunMat:schur:InvalidArgument",
+          "when": "Mode or output count is invalid.",
+          "message": "schur: invalid mode or output count"
+        },
+        {
+          "code": "RM.SCHUR.INVALID_INPUT",
+          "identifier": "RunMat:schur:InvalidInput",
+          "when": "Input is not a finite dense square floating matrix.",
+          "message": "schur: input must be a finite square single or double matrix"
+        },
+        {
+          "code": "RM.SCHUR.NUMERICAL",
+          "identifier": "RunMat:schur:Numerical",
+          "when": "Bounded Schur iteration or result materialization fails.",
+          "message": "schur: numerical factorization failed"
+        }
+      ]
+    },
+    {
       "name": "second",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -164364,6 +167034,35 @@
           "identifier": "RunMat:coneprog:InvalidInput",
           "when": "Objective, cone, constraint, option, or bound dimensions/types are invalid.",
           "message": "coneprog: invalid input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "secondordercone(integer-valued data)",
+          "inputs": [
+            {
+              "name": "A, b, d, or gamma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Existing RunMat constructor forms read native integer storage then normalize to binary64, rounding values outside the exact range. MATLAB integer-overload parity is not asserted."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host constraint metadata retains the existing floating conversion policy, not an exact-integer cone algebra."
         }
       ]
     },
@@ -166029,6 +168728,134 @@
           "backend": "GatherFallback",
           "overload": "Multiple",
           "notes": "Resident integer values are gathered after control admission without float conversion."
+        }
+      ]
+    },
+    {
+      "name": "setvaropts",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "updatedOpts = setvaropts(opts, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed delimited-text or spreadsheet import-options object."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Supported per-variable name/value controls."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedOpts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "An updated typed import-options object; the input is not mutated."
+            }
+          ]
+        },
+        {
+          "label": "updatedOpts = setvaropts(opts, selection, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed delimited-text or spreadsheet import-options object."
+            },
+            {
+              "name": "selection",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Variable name, index, or logical selector."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Supported per-variable name/value controls."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedOpts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "An updated typed import-options object; the input is not mutated."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMPORT_OPTIONS.INVALID_ARGUMENT",
+          "identifier": "RunMat:ImportOptions:InvalidArgument",
+          "when": "The options object, selector, type, or variable control is unsupported or malformed.",
+          "message": "invalid import-options argument"
+        }
+      ]
+    },
+    {
+      "name": "setvartype",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "updatedOpts = setvartype(opts, selection, type)",
+          "inputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed delimited-text or spreadsheet import-options object."
+            },
+            {
+              "name": "selection",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Variable name, index, or logical selector."
+            },
+            {
+              "name": "type",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One type or a type per selected variable."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "updatedOpts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "An updated typed import-options object; the input is not mutated."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMPORT_OPTIONS.INVALID_ARGUMENT",
+          "identifier": "RunMat:ImportOptions:InvalidArgument",
+          "when": "The options object, selector, type, or variable control is unsupported or malformed.",
+          "message": "invalid import-options argument"
         }
       ]
     },
@@ -169234,7 +172061,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Sparse storage type: double or single."
+              "description": "Sparse storage type: double, single, or logical."
             }
           ],
           "outputs": [
@@ -169612,7 +172439,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Diagonal numbers to extract."
+              "description": "Integer-valued diagonal offsets to extract."
             }
           ],
           "outputs": [
@@ -169640,7 +172467,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Diagonal numbers."
+              "description": "Integer-valued diagonal offsets."
             },
             {
               "name": "m",
@@ -169682,7 +172509,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Diagonal numbers to replace."
+              "description": "Integer-valued diagonal offsets to replace."
             },
             {
               "name": "A",
@@ -170154,11 +172981,11 @@
           "label": "S = speye(n)",
           "inputs": [
             {
-              "name": "A",
+              "name": "size",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Full or sparse matrix to convert."
+              "description": "Integer-valued square size or two-element size vector; negative dimensions become zero."
             }
           ],
           "outputs": [
@@ -170179,7 +173006,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Square size or two-element size vector."
+              "description": "Integer-valued square size or two-element size vector; negative dimensions become zero."
             },
             {
               "name": "typename",
@@ -170266,11 +173093,11 @@
           "label": "S = speye(sz)",
           "inputs": [
             {
-              "name": "A",
+              "name": "size",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Full or sparse matrix to convert."
+              "description": "Integer-valued square size or two-element size vector; negative dimensions become zero."
             }
           ],
           "outputs": [
@@ -170291,7 +173118,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Square size or two-element size vector."
+              "description": "Integer-valued square size or two-element size vector; negative dimensions become zero."
             },
             {
               "name": "typename",
@@ -171730,20 +174557,20 @@
           "label": "R = spones(S)",
           "inputs": [
             {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Full or sparse matrix."
-            }
-          ],
-          "outputs": [
-            {
               "name": "S",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Full or sparse matrix supplying the nonzero pattern."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse result matrix."
             }
           ]
         }
@@ -171815,20 +174642,20 @@
           "label": "R = sprand(S)",
           "inputs": [
             {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Full or sparse matrix."
-            }
-          ],
-          "outputs": [
-            {
               "name": "S",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Full or sparse matrix supplying the nonzero pattern."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse result matrix."
             }
           ]
         },
@@ -171840,7 +174667,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Full or sparse matrix."
+              "description": "Full or sparse matrix supplying the nonzero pattern."
             },
             {
               "name": "typename",
@@ -171852,11 +174679,11 @@
           ],
           "outputs": [
             {
-              "name": "S",
+              "name": "R",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Sparse result matrix."
             }
           ]
         },
@@ -171887,11 +174714,11 @@
           ],
           "outputs": [
             {
-              "name": "S",
+              "name": "R",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Sparse result matrix."
             }
           ]
         },
@@ -171929,11 +174756,11 @@
           ],
           "outputs": [
             {
-              "name": "S",
+              "name": "R",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Sparse result matrix."
             }
           ]
         },
@@ -171966,16 +174793,16 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Reciprocal condition number target or singular-value vector."
+              "description": "Reciprocal condition number target or singular-value vector of length at most min(m,n)."
             }
           ],
           "outputs": [
             {
-              "name": "S",
+              "name": "R",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Sparse result matrix."
             }
           ]
         },
@@ -172008,7 +174835,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Reciprocal condition number target or singular-value vector."
+              "description": "Reciprocal condition number target or singular-value vector of length at most min(m,n)."
             },
             {
               "name": "typename",
@@ -172020,11 +174847,11 @@
           ],
           "outputs": [
             {
-              "name": "S",
+              "name": "R",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse matrix."
+              "description": "Sparse result matrix."
             }
           ]
         }
@@ -172144,7 +174971,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Spreadsheet import options struct."
+              "description": "Typed spreadsheet import-options object."
             }
           ]
         },
@@ -172165,7 +174992,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Spreadsheet import options struct."
+              "description": "Typed spreadsheet import-options object."
             }
           ]
         }
@@ -172397,6 +175224,12 @@
           "identifier": "RunMat:sprintf:InternalError",
           "when": "Internal char-array construction failed.",
           "message": "sprintf: internal error"
+        },
+        {
+          "code": "RM.SPRINTF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:sprintf:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "sprintf: too many output arguments"
         }
       ],
       "integer_capabilities": [
@@ -173250,25 +176083,60 @@
               "description": "Input text."
             },
             {
-              "name": "arg",
+              "name": "format",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Optional",
+              "default": "%f",
+              "description": "Scan format."
+            },
+            {
+              "name": "sizeA",
+              "ty": "Any",
+              "arity": "Optional",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Optional positive scalar or two-element output size and read limit."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Scanned numeric values or a character array for character-only formats."
+            },
+            {
+              "name": "count",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of scanned values, returned as double."
+            },
+            {
+              "name": "errmsg",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Scan diagnostic character vector."
+            },
+            {
+              "name": "nextindex",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based next character index, returned as double."
             }
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.SSCANF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:sscanf:TooManyOutputs",
+          "when": "More than four outputs are requested.",
+          "message": "sscanf: too many output arguments"
+        }
+      ],
       "integer_capabilities": [
         {
           "form": "A = sscanf(text, format, integer_sizeA)",
@@ -173295,7 +176163,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double."
+          "notes": "sizeA limits admitted reads and controls output shape. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, character-only formats return char, and mixed numeric/character formats return double."
         }
       ]
     },
@@ -176311,19 +179179,75 @@
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "x",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Primary output."
+            },
+            {
+              "name": "tf",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Secondary output."
+            }
+          ]
+        },
+        {
+          "label": "[x, tf] = str2num(text, Evaluation=method)",
+          "inputs": [
+            {
+              "name": "text",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text."
+            },
+            {
+              "name": "Evaluation",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Name of the evaluation method option."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "'all' (default) or 'restricted'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Primary output."
+            },
+            {
+              "name": "tf",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Secondary output."
             }
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.STR2NUM.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:str2num:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "str2num: too many output arguments"
+        }
+      ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "str2num evaluates scalar string or character text and therefore has no integer input role. Integer, numeric, and provider-resident input rejects before provider access; parsed numeric output is a separate result-class concern."
+        "notes": "str2num accepts host text; integer/numeric and provider-resident input rejects before provider access. Numeric output is a separate result-class concern."
       }
     },
     {
@@ -177941,28 +180865,42 @@
               "description": "Input text."
             },
             {
-              "name": "arg",
+              "name": "delimiters",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Optional",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Delimiter characters."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "tok",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Primary output."
+            },
+            {
+              "name": "rem",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Secondary output."
             }
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.STRTOK.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:strtok:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "strtok: too many output arguments"
+        }
+      ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "strtok accepts host text and an optional text delimiter. Integer, numeric, and provider-resident values in either role reject before provider access and are not interpreted as character codes."
+        "notes": "strtok accepts text and rejects numeric and provider-resident text roles before provider access."
       }
     },
     {
@@ -178730,6 +181668,12 @@
           "identifier": "RunMat:subplot:Internal",
           "when": "Internal subplot state operation fails.",
           "message": "subplot: internal operation failed"
+        },
+        {
+          "code": "RM.SUBPLOT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:subplot:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "subplot: at most one output is supported"
         }
       ],
       "extensions": [
@@ -186809,6 +189753,12 @@
           "identifier": "RunMat:toc:TooManyInputs",
           "when": "More than one input argument is supplied.",
           "message": "toc: too many input arguments"
+        },
+        {
+          "code": "RM.TOC.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:toc:TooManyOutputs",
+          "when": "More than one output is requested from toc.",
+          "message": "toc: too many output arguments"
         }
       ],
       "integer_capabilities": [
@@ -192248,6 +195198,12 @@
           "identifier": "RunMat:unicode2native:InternalError",
           "when": "Internal byte-vector tensor construction failed.",
           "message": "unicode2native: internal error"
+        },
+        {
+          "code": "RM.UNICODE2NATIVE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:unicode2native:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "unicode2native: too many output arguments"
         }
       ]
     },
@@ -194023,25 +196979,62 @@
           "label": "decoded = urldecode(text)",
           "inputs": [
             {
-              "name": "input",
+              "name": "text",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input argument."
+              "description": "Host string scalar (including a singleton string array) or character row; numeric and provider-resident inputs reject."
             }
           ],
           "outputs": [
             {
-              "name": "value",
+              "name": "decoded",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Fresh host character row with content-dependent width."
             }
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.URLDECODE.WRONG_ARITY",
+          "identifier": "RunMat:urldecode:WrongArity",
+          "when": "The input count is not one.",
+          "message": "urldecode: expected exactly one input"
+        },
+        {
+          "code": "RM.URLDECODE.INVALID_TEXT",
+          "identifier": "RunMat:urldecode:InvalidText",
+          "when": "Input is not a host string scalar or character row.",
+          "message": "urldecode: text must be a host string scalar or character vector"
+        },
+        {
+          "code": "RM.URLDECODE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:urldecode:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "urldecode: expected at most one output"
+        },
+        {
+          "code": "RM.URLDECODE.INCOMPLETE_ESCAPE",
+          "identifier": "RunMat:urldecode:IncompleteEscape",
+          "when": "A percent escape has fewer than two following bytes.",
+          "message": "urldecode: incomplete escape"
+        },
+        {
+          "code": "RM.URLDECODE.INVALID_ESCAPE",
+          "identifier": "RunMat:urldecode:InvalidEscape",
+          "when": "A percent escape does not contain two hexadecimal ASCII digits.",
+          "message": "urldecode: invalid escape"
+        },
+        {
+          "code": "RM.URLDECODE.INVALID_UTF8",
+          "identifier": "RunMat:urldecode:InvalidUtf8",
+          "when": "Decoded bytes do not form valid UTF-8 text.",
+          "message": "urldecode: decoded text is not valid UTF-8"
+        }
+      ],
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding."
@@ -194056,25 +197049,44 @@
           "label": "encoded = urlencode(text)",
           "inputs": [
             {
-              "name": "input",
+              "name": "text",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input argument."
+              "description": "Host string scalar (including a singleton string array) or character row; numeric and provider-resident inputs reject."
             }
           ],
           "outputs": [
             {
-              "name": "value",
+              "name": "encoded",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Fresh host character row with content-dependent width."
             }
           ]
         }
       ],
-      "errors": [],
+      "errors": [
+        {
+          "code": "RM.URLENCODE.WRONG_ARITY",
+          "identifier": "RunMat:urlencode:WrongArity",
+          "when": "The input count is not one.",
+          "message": "urlencode: expected exactly one input"
+        },
+        {
+          "code": "RM.URLENCODE.INVALID_TEXT",
+          "identifier": "RunMat:urlencode:InvalidText",
+          "when": "Input is not a host string scalar or character row.",
+          "message": "urlencode: text must be a host string scalar or character vector"
+        },
+        {
+          "code": "RM.URLENCODE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:urlencode:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "urlencode: expected at most one output"
+        }
+      ],
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "urlencode accepts host text only; integer and resident numeric values reject before provider access or encoding."
@@ -201463,12 +204475,12 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [xmin xmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [xmin xmax], including automatically selected bounds."
             }
           ]
         },
         {
-          "label": "limits = xlim([xmin xmax])",
+          "label": "xlim([xmin xmax])",
           "inputs": [
             {
               "name": "limits",
@@ -201478,25 +204490,85 @@
               "description": "Two-element numeric vector [xmin xmax]."
             }
           ],
-          "outputs": [
-            {
-              "name": "limits",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Two-element vector [xmin xmax] or [NaN NaN] when auto."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "limits = xlim(mode)",
+          "label": "mode = xlim('mode')",
           "inputs": [
             {
               "name": "mode",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Limit mode or method ('auto', 'manual', 'mode', 'method', 'tight', 'padded', or 'tickaligned')."
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current automatic or manual axis-limit mode."
+            }
+          ]
+        },
+        {
+          "label": "method = xlim('method')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current tick-aligned, tight, or padded automatic limit method."
+            }
+          ]
+        },
+        {
+          "label": "xlim('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xlim('tickaligned'|'tight'|'padded')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "limits = xlim(axes)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
             }
           ],
           "outputs": [
@@ -201505,9 +204577,49 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [xmin xmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [xmin xmax], including automatically selected bounds."
             }
           ]
+        },
+        {
+          "label": "xlim(axes,[xmin xmax])",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "limits",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element numeric vector [xmin xmax]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xlim(axes,mode)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -201522,6 +204634,20 @@
           "identifier": "RunMat:xlim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xlim: internal operation failed"
+        },
+        {
+          "code": "RM.XLIM.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xlim:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xlim: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -202949,6 +206075,27 @@
           ]
         },
         {
+          "label": "scale = xscale(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis scale, 'linear' or 'log'."
+            }
+          ]
+        },
+        {
           "label": "xscale(scale)",
           "inputs": [
             {
@@ -202994,6 +206141,20 @@
           "identifier": "RunMat:xscale:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xscale: internal operation failed"
+        },
+        {
+          "code": "RM.XSCALE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xscale:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xscale: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ]
     },
@@ -203082,6 +206243,12 @@
           "identifier": "RunMat:xtickangle:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xtickangle: internal operation failed"
+        },
+        {
+          "code": "RM.XTICKANGLE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xtickangle:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xtickangle: at most one output is supported"
         }
       ],
       "extensions": [
@@ -203090,6 +206257,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:XtickangleIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -203234,6 +206407,20 @@
           "identifier": "RunMat:xtickformat:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xtickformat: internal operation failed"
+        },
+        {
+          "code": "RM.XTICKFORMAT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xtickformat:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xtickformat: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ]
     },
@@ -203256,14 +206443,14 @@
           ]
         },
         {
-          "label": "labels = xticklabels(labels)",
+          "label": "labels = xticklabels(ax)",
           "inputs": [
             {
-              "name": "labels",
-              "ty": "Any",
+              "name": "ax",
+              "ty": "AxesHandle",
               "arity": "Required",
               "default": null,
-              "description": "String array or cell array of character vectors for X-axis tick labels."
+              "description": "Target axes handle."
             }
           ],
           "outputs": [
@@ -203277,7 +206464,20 @@
           ]
         },
         {
-          "label": "mode = xticklabels(mode)",
+          "label": "xticklabels(labels)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for X-axis tick labels."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "mode = xticklabels('mode')",
           "inputs": [
             {
               "name": "mode",
@@ -203298,7 +206498,68 @@
           ]
         },
         {
-          "label": "labels = xticklabels(ax, labels)",
+          "label": "mode = xticklabels(ax, 'mode')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick label mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "xticklabels('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick label mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xticklabels(ax, 'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xticklabels(ax, labels)",
           "inputs": [
             {
               "name": "ax",
@@ -203315,15 +206576,7 @@
               "description": "String array or cell array of character vectors for X-axis tick labels."
             }
           ],
-          "outputs": [
-            {
-              "name": "labels",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Current X-axis tick labels as a cell array of character vectors."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -203338,6 +206591,12 @@
           "identifier": "RunMat:xticklabels:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xticklabels: internal operation failed"
+        },
+        {
+          "code": "RM.XTICKLABELS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xticklabels:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xticklabels: at most one output is supported"
         }
       ],
       "extensions": [
@@ -203346,6 +206605,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:XticklabelsIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_audit": {
@@ -203372,14 +206637,14 @@
           ]
         },
         {
-          "label": "ticks = xticks(ticks)",
+          "label": "ticks = xticks(ax)",
           "inputs": [
             {
-              "name": "ticks",
-              "ty": "NumericArray",
+              "name": "ax",
+              "ty": "AxesHandle",
               "arity": "Required",
               "default": null,
-              "description": "Increasing numeric vector of X-axis tick values; [] removes tick marks."
+              "description": "Target axes handle."
             }
           ],
           "outputs": [
@@ -203393,7 +206658,20 @@
           ]
         },
         {
-          "label": "mode = xticks(mode)",
+          "label": "xticks(ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of X-axis tick values; [] removes tick marks."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "mode = xticks('mode')",
           "inputs": [
             {
               "name": "mode",
@@ -203414,7 +206692,68 @@
           ]
         },
         {
-          "label": "ticks = xticks(ax, ticks)",
+          "label": "mode = xticks(ax, 'mode')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current X-axis tick mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "xticks('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xticks(ax, 'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "xticks(ax, ticks)",
           "inputs": [
             {
               "name": "ax",
@@ -203431,15 +206770,7 @@
               "description": "Increasing numeric vector of X-axis tick values."
             }
           ],
-          "outputs": [
-            {
-              "name": "ticks",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current X-axis tick values."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -203454,6 +206785,12 @@
           "identifier": "RunMat:xticks:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xticks: internal operation failed"
+        },
+        {
+          "code": "RM.XTICKS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:xticks:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "xticks: at most one output is supported"
         }
       ],
       "extensions": [
@@ -203462,6 +206799,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:XticksIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -204061,12 +207404,12 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [ymin ymax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [ymin ymax], including automatically selected bounds."
             }
           ]
         },
         {
-          "label": "limits = ylim([ymin ymax])",
+          "label": "ylim([ymin ymax])",
           "inputs": [
             {
               "name": "limits",
@@ -204076,25 +207419,85 @@
               "description": "Two-element numeric vector [ymin ymax]."
             }
           ],
-          "outputs": [
-            {
-              "name": "limits",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Two-element vector [ymin ymax] or [NaN NaN] when auto."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "limits = ylim(mode)",
+          "label": "mode = ylim('mode')",
           "inputs": [
             {
               "name": "mode",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Limit mode or method ('auto', 'manual', 'mode', 'method', 'tight', 'padded', or 'tickaligned')."
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current automatic or manual axis-limit mode."
+            }
+          ]
+        },
+        {
+          "label": "method = ylim('method')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current tick-aligned, tight, or padded automatic limit method."
+            }
+          ]
+        },
+        {
+          "label": "ylim('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "ylim('tickaligned'|'tight'|'padded')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "limits = ylim(axes)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
             }
           ],
           "outputs": [
@@ -204103,9 +207506,49 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [ymin ymax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [ymin ymax], including automatically selected bounds."
             }
           ]
+        },
+        {
+          "label": "ylim(axes,[ymin ymax])",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "limits",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element numeric vector [ymin ymax]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "ylim(axes,mode)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit mode or method token."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -204120,6 +207563,20 @@
           "identifier": "RunMat:ylim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "ylim: internal operation failed"
+        },
+        {
+          "code": "RM.YLIM.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:ylim:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "ylim: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -204500,6 +207957,27 @@
           ]
         },
         {
+          "label": "scale = yscale(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "scale",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis scale, 'linear' or 'log'."
+            }
+          ]
+        },
+        {
           "label": "yscale(scale)",
           "inputs": [
             {
@@ -204545,6 +208023,20 @@
           "identifier": "RunMat:yscale:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yscale: internal operation failed"
+        },
+        {
+          "code": "RM.YSCALE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:yscale:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "yscale: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ]
     },
@@ -204633,6 +208125,12 @@
           "identifier": "RunMat:ytickangle:Internal",
           "when": "Internal plotting state update fails.",
           "message": "ytickangle: internal operation failed"
+        },
+        {
+          "code": "RM.YTICKANGLE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:ytickangle:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "ytickangle: at most one output is supported"
         }
       ],
       "extensions": [
@@ -204641,6 +208139,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:YtickangleIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -204785,6 +208289,20 @@
           "identifier": "RunMat:ytickformat:Internal",
           "when": "Internal plotting state update fails.",
           "message": "ytickformat: internal operation failed"
+        },
+        {
+          "code": "RM.YTICKFORMAT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:ytickformat:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "ytickformat: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ]
     },
@@ -204807,14 +208325,14 @@
           ]
         },
         {
-          "label": "labels = yticklabels(labels)",
+          "label": "labels = yticklabels(ax)",
           "inputs": [
             {
-              "name": "labels",
-              "ty": "Any",
+              "name": "ax",
+              "ty": "AxesHandle",
               "arity": "Required",
               "default": null,
-              "description": "String array or cell array of character vectors for Y-axis tick labels."
+              "description": "Target axes handle."
             }
           ],
           "outputs": [
@@ -204828,7 +208346,20 @@
           ]
         },
         {
-          "label": "mode = yticklabels(mode)",
+          "label": "yticklabels(labels)",
+          "inputs": [
+            {
+              "name": "labels",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cell array of character vectors for Y-axis tick labels."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "mode = yticklabels('mode')",
           "inputs": [
             {
               "name": "mode",
@@ -204849,7 +208380,68 @@
           ]
         },
         {
-          "label": "labels = yticklabels(ax, labels)",
+          "label": "mode = yticklabels(ax, 'mode')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick label mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "yticklabels('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick label mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "yticklabels(ax, 'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "yticklabels(ax, labels)",
           "inputs": [
             {
               "name": "ax",
@@ -204866,15 +208458,7 @@
               "description": "String array or cell array of character vectors for Y-axis tick labels."
             }
           ],
-          "outputs": [
-            {
-              "name": "labels",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Current Y-axis tick labels as a cell array of character vectors."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -204889,6 +208473,12 @@
           "identifier": "RunMat:yticklabels:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yticklabels: internal operation failed"
+        },
+        {
+          "code": "RM.YTICKLABELS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:yticklabels:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "yticklabels: at most one output is supported"
         }
       ],
       "extensions": [
@@ -204897,6 +208487,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:YticklabelsIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_audit": {
@@ -204923,14 +208519,14 @@
           ]
         },
         {
-          "label": "ticks = yticks(ticks)",
+          "label": "ticks = yticks(ax)",
           "inputs": [
             {
-              "name": "ticks",
-              "ty": "NumericArray",
+              "name": "ax",
+              "ty": "AxesHandle",
               "arity": "Required",
               "default": null,
-              "description": "Increasing numeric vector of Y-axis tick values; [] removes tick marks."
+              "description": "Target axes handle."
             }
           ],
           "outputs": [
@@ -204944,7 +208540,20 @@
           ]
         },
         {
-          "label": "mode = yticks(mode)",
+          "label": "yticks(ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Increasing numeric vector of Y-axis tick values; [] removes tick marks."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "mode = yticks('mode')",
           "inputs": [
             {
               "name": "mode",
@@ -204965,7 +208574,68 @@
           ]
         },
         {
-          "label": "ticks = yticks(ax, ticks)",
+          "label": "mode = yticks(ax, 'mode')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current Y-axis tick mode, 'auto' or 'manual'."
+            }
+          ]
+        },
+        {
+          "label": "yticks('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "yticks(ax, 'auto'|'manual')",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Tick mode token."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "yticks(ax, ticks)",
           "inputs": [
             {
               "name": "ax",
@@ -204982,15 +208652,7 @@
               "description": "Increasing numeric vector of Y-axis tick values."
             }
           ],
-          "outputs": [
-            {
-              "name": "ticks",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current Y-axis tick values."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -205005,6 +208667,12 @@
           "identifier": "RunMat:yticks:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yticks: internal operation failed"
+        },
+        {
+          "code": "RM.YTICKS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:yticks:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "yticks: at most one output is supported"
         }
       ],
       "extensions": [
@@ -205013,6 +208681,12 @@
           "mode": "RunMatOnly",
           "description": "Allow a typed-integer alias for an encoded axes handle",
           "error_identifier": "RunMat:compatibility:YticksIntegerAxesHandleExtension"
+        },
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -205780,12 +209454,12 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [zmin zmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [zmin zmax], including automatically selected bounds."
             }
           ]
         },
         {
-          "label": "limits = zlim([zmin zmax])",
+          "label": "zlim([zmin zmax])",
           "inputs": [
             {
               "name": "limits",
@@ -205795,25 +209469,85 @@
               "description": "Two-element numeric vector [zmin zmax]."
             }
           ],
-          "outputs": [
-            {
-              "name": "limits",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Two-element vector [zmin zmax] or [NaN NaN] when auto."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "limits = zlim(mode)",
+          "label": "mode = zlim('mode')",
           "inputs": [
             {
               "name": "mode",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Limit mode or method ('auto', 'manual', 'mode', 'method', 'tight', 'padded', or 'tickaligned')."
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current automatic or manual axis-limit mode."
+            }
+          ]
+        },
+        {
+          "label": "method = zlim('method')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current tick-aligned, tight, or padded automatic limit method."
+            }
+          ]
+        },
+        {
+          "label": "zlim('auto'|'manual')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "zlim('tickaligned'|'tight'|'padded')",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "limits = zlim(axes)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
             }
           ],
           "outputs": [
@@ -205822,9 +209556,49 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Two-element vector [zmin zmax] or [NaN NaN] when auto."
+              "description": "Displayed two-element vector [zmin zmax], including automatically selected bounds."
             }
           ]
+        },
+        {
+          "label": "zlim(axes,[zmin zmax])",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "limits",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element numeric vector [zmin zmax]."
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "label": "zlim(axes,mode)",
+          "inputs": [
+            {
+              "name": "axes",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle; does not change the current axes."
+            },
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit mode or method token."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -205839,6 +209613,20 @@
           "identifier": "RunMat:zlim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "zlim: internal operation failed"
+        },
+        {
+          "code": "RM.ZLIM.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:zlim:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "zlim: at most one output is supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "axes-control-setter-output",
+          "mode": "RunMatOnly",
+          "description": "Allow an assigned result from a graphics axes-control setter",
+          "error_identifier": "RunMat:compatibility:AxesControlSetterOutputExtension"
         }
       ],
       "integer_capabilities": [

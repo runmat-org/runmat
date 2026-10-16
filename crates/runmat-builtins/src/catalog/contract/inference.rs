@@ -1,4 +1,4 @@
-use runmat_types::{CallInference, CallRequest};
+use runmat_types::{CallInference, CallRequest, ValueFact};
 use serde::Serialize;
 
 use super::{
@@ -8,6 +8,7 @@ use super::{
 use crate::BuiltinCatalogEntry;
 
 pub(crate) type BuiltinInferenceHandler = fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference;
+pub(crate) type BuiltinFusionFactHandler = fn(&CallRequest) -> Option<ValueFact>;
 
 /// Connects one catalog entry directly to inference owned by that identity.
 ///
@@ -18,15 +19,38 @@ pub(crate) type BuiltinInferenceHandler = fn(&CallRequest, &BuiltinCatalogEntry)
 pub struct IdentityInferenceRule {
     #[serde(skip)]
     handler: BuiltinInferenceHandler,
+    #[serde(skip)]
+    fusion_fact: Option<BuiltinFusionFactHandler>,
 }
 
 impl IdentityInferenceRule {
     pub(crate) const fn new(handler: BuiltinInferenceHandler) -> Self {
-        Self { handler }
+        Self {
+            handler,
+            fusion_fact: None,
+        }
+    }
+
+    pub(crate) const fn with_fusion_fact(
+        handler: BuiltinInferenceHandler,
+        fusion_fact: BuiltinFusionFactHandler,
+    ) -> Self {
+        Self {
+            handler,
+            fusion_fact: Some(fusion_fact),
+        }
     }
 
     pub(crate) fn infer(self, request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
         (self.handler)(request, entry)
+    }
+
+    pub(crate) fn fusion_fact(self, request: &CallRequest) -> Option<ValueFact> {
+        self.fusion_fact.and_then(|handler| handler(request))
+    }
+
+    pub(crate) fn has_fusion_fact(self) -> bool {
+        self.fusion_fact.is_some()
     }
 }
 
@@ -39,6 +63,11 @@ impl std::fmt::Debug for IdentityInferenceRule {
 impl PartialEq for IdentityInferenceRule {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::fn_addr_eq(self.handler, other.handler)
+            && match (self.fusion_fact, other.fusion_fact) {
+                (Some(left), Some(right)) => std::ptr::fn_addr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 

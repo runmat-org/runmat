@@ -20,7 +20,7 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
     };
     assert_eq!(
         transition_ns(from, CandidateExecutionLocation::Host, &edge),
-        23
+        Some(23)
     );
     assert_eq!(
         transition_ns(
@@ -28,7 +28,7 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
             CandidateExecutionLocation::Provider { device_id: 7 },
             &edge
         ),
-        17
+        Some(17)
     );
     assert_eq!(
         transition_ns(
@@ -36,7 +36,7 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
             CandidateExecutionLocation::Provider { device_id: 8 },
             &edge
         ),
-        31
+        Some(31)
     );
     // A host upload may be more expensive than a cross-provider transfer.
     edge.host_to_provider_ns = 41;
@@ -46,7 +46,7 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
             CandidateExecutionLocation::Provider { device_id: 8 },
             &edge
         ),
-        41
+        Some(41)
     );
     // Resolving the output to the execution provider removes the uncertainty.
     assert_eq!(
@@ -55,6 +55,14 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
             CandidateExecutionLocation::Provider { device_id: 7 },
             &edge,
         ),
-        0
+        Some(0)
+    );
+    assert_eq!(
+        transition_ns(
+            from,
+            CandidateExecutionLocation::VmRegion { device_id: 7 },
+            &edge
+        ),
+        None
     );
 }

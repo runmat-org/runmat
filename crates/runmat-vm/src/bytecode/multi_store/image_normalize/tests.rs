@@ -38,6 +38,98 @@ pub(super) fn compiled_clamped_image() -> Bytecode {
 }
 
 #[test]
+fn random_vecdim_image_source_seals_its_selected_region() {
+    // The execution fixture begins with a random host Single source rather
+    // than the constant `ones` source used by the other publication tests.
+    // Detection alone does not establish a selected VM region.
+    let source = r#"
+        rng(0); B=2; H=4; W=5;
+        gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+        imgs = rand(B, H, W, 'single');
+        mu = single(mean(imgs, [2 3], 'native'));
+        sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+        out = single(((imgs - mu) ./ sigma) * gain + bias);
+        out = max(out, single(0));
+        out = single(out .^ gamma);
+        err = out - imgs;
+        mse = mean(err .* err, 'all');
+        fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+    "#;
+    let ast = runmat_parser::parse(source).expect("parse random image source");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("lower HIR");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower MIR");
+    let bytecode = crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+        .expect("compile random image source");
+    let selected = bytecode
+        .sealed_selected_image_regions()
+        .expect("random image source has a sealed selected descriptor");
+    assert_eq!(selected.regions.len(), 1);
+    let region = &selected.regions[0];
+    let input = region
+        .plan
+        .inputs
+        .iter()
+        .position(|id| {
+            matches!(
+                selected.graph.value(*id).map(|value| &value.origin),
+                Some(ValueOrigin::NodeOutput { .. })
+            ) && selected.graph.var_binding(*id).is_some()
+        })
+        .expect("random image is a stored, live node output");
+    let id = region.plan.inputs[input];
+    assert!(matches!(
+        &region.entry_inputs[input],
+        ImageEntryInput::Binding(binding)
+            if binding.kind == runmat_accelerate::graph::VarKind::Global
+    ));
+    assert!(region
+        .plan
+        .inputs
+        .iter()
+        .zip(&region.entry_inputs)
+        .any(|(id, source)| {
+            selected.graph.var_binding(*id).is_none()
+                && matches!(source, ImageEntryInput::Binding(_))
+        }), "a compiler-private input is sealed by its ordered store even when its graph binding is projected away");
+
+    let graph = SelectedMultiStoreGraph::for_image(&bytecode).expect("same selected store walk");
+    let mut wrong_binding = graph.stores.clone();
+    let source_store = wrong_binding
+        .iter()
+        .rposition(|store| store.pc < region.publication.pcs().start && store.value_id == id)
+        .expect("random source was stored before its selected region");
+    wrong_binding[source_store].binding.index = usize::MAX;
+    assert!(capture::sealed_entry_inputs(
+        &selected.graph,
+        &wrong_binding,
+        &region.plan,
+        &region.publication,
+        &region.source,
+    )
+    .is_none());
+
+    let mut overwritten = graph.stores;
+    let prior_pc = overwritten[source_store].pc;
+    let prior_binding = overwritten[source_store].binding.clone();
+    let overwrite_pc = region.publication.pcs().start - 1;
+    assert!(prior_pc < overwrite_pc);
+    overwritten.push(crate::accel::graph::AccelStore {
+        pc: overwrite_pc,
+        value_id: region.plan.inputs[(input + 1) % region.plan.inputs.len()],
+        binding: prior_binding,
+    });
+    overwritten.sort_by_key(|store| store.pc);
+    assert!(capture::sealed_entry_inputs(
+        &selected.graph,
+        &overwritten,
+        &region.plan,
+        &region.publication,
+        &region.source,
+    )
+    .is_none());
+}
+
+#[test]
 fn function_only_full_image_source_uses_its_selected_function_layout() {
     // Function-local fusion metadata is carried by the selected definition;
     // no synthetic script entrypoint is available or authorized here.
@@ -500,18 +592,97 @@ fn compiled_gain_bias_clamp_keeps_every_out_publication_in_source_order() {
         .inputs
         .iter()
         .map(|id| {
-            selected_plan
-                .const_values
-                .get(id)
-                .cloned()
-                .or_else(|| graph.value(*id).and_then(|value| value.constant.clone()))
-                .unwrap_or_else(|| {
-                    runmat_value::Value::Tensor(
-                        runmat_value::Tensor::from_f32(vec![1.0; 40], vec![2, 4, 5]).unwrap(),
-                    )
-                })
+            use runmat_accelerate::fusion::ImageScalar;
+            let single = |value| {
+                runmat_value::Value::Tensor(
+                    runmat_value::Tensor::from_f32(vec![value], vec![1, 1]).unwrap(),
+                )
+            };
+            if *id == pattern.input {
+                return runmat_value::Value::Tensor(
+                    runmat_value::Tensor::from_f32(vec![1.0; 40], vec![2, 4, 5]).unwrap(),
+                );
+            }
+            if source.leaves.iter().any(
+                |leaf| matches!(leaf, ImageSourceLeaf::Constant { id: constant, .. } if constant == id),
+            ) {
+                return selected_plan
+                    .const_values
+                    .get(id)
+                    .cloned()
+                    .or_else(|| graph.value(*id).and_then(|value| value.constant.clone()))
+                    .unwrap_or_else(|| panic!("selected source constant {id} has no carrier"));
+            }
+            let routes = pattern.reduction_routes.as_ref().unwrap();
+            for form in [&routes.mu.form, &routes.variance.form] {
+                let ImageMeanForm::VecDims { call, .. } = form else {
+                    panic!("compiled clamped fixture uses vecdim means");
+                };
+                if call.axes_value == *id {
+                    return runmat_value::Value::Tensor(
+                        runmat_value::Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap(),
+                    );
+                }
+                let mean = source
+                    .steps
+                    .iter()
+                    .find(|step| step.node == call.node)
+                    .expect("selected mean call remains in the source transcript");
+                if mean.inputs.get(2) == Some(id) {
+                    return runmat_value::Value::String("native".to_owned());
+                }
+            }
+            for (control, value) in [
+                (Some(&pattern.epsilon), 1e-6_f32),
+                (pattern.gain.as_ref(), 1.0123_f32),
+                (pattern.bias.as_ref(), -0.02_f32),
+                (pattern.gamma.as_ref(), 1.8_f32),
+            ] {
+                if matches!(control, Some(ImageScalar::Value(value_id)) if value_id == id) {
+                    return single(value);
+                }
+            }
+            if pattern.clamp_zero_value == Some(*id) {
+                return single(0.0);
+            }
+            panic!("unresolved live selected source input {id}")
         })
         .collect::<Vec<_>>();
+    for (control, expected) in [
+        (Some(&pattern.epsilon), 1e-6_f32),
+        (pattern.gain.as_ref(), 1.0123_f32),
+        (pattern.bias.as_ref(), -0.02_f32),
+        (pattern.gamma.as_ref(), 1.8_f32),
+    ] {
+        let Some(runmat_accelerate::fusion::ImageScalar::Value(id)) = control else {
+            continue;
+        };
+        let Some(position) = selected_plan
+            .inputs
+            .iter()
+            .position(|candidate| candidate == id)
+        else {
+            assert!(
+                selected_plan.const_values.contains_key(id)
+                    || graph
+                        .value(*id)
+                        .and_then(|value| value.constant.as_ref())
+                        .is_some(),
+                "selected scalar control is either a live input or a compiled constant"
+            );
+            continue;
+        };
+        let runmat_value::Value::Tensor(tensor) = &invocation_inputs[position] else {
+            panic!("live selected scalar control has a Single tensor carrier");
+        };
+        assert_eq!(tensor.len(), 1);
+        assert_eq!(tensor.shape(), &[1, 1]);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+        let Some(runmat_value::NumericScalar::F32(actual)) = tensor.numeric_value_at(0) else {
+            panic!("live selected scalar control has an F32 value");
+        };
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
     let admitted = futures::executor::block_on(ImageSourceInvocation::bind(
         &graph,
         &selected_plan,

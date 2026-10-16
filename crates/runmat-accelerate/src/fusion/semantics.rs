@@ -10,8 +10,8 @@ use runmat_builtins::infer_catalog_call;
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{
-    CanonicalFusionDeclaration, FusionAdmissionContext, FusionArithmeticEvidence,
-    FusionPowerArithmeticReceipt,
+    CanonicalFusionDeclaration, FusionAdmissionContext, FusionAdmissionWork,
+    FusionArithmeticEvidence, FusionPowerArithmeticReceipt,
 };
 use runmat_runtime::value_fact::value_fact;
 use runmat_types::{
@@ -216,9 +216,7 @@ pub(crate) struct ResolvedProgram {
 #[derive(Debug)]
 pub(crate) enum FusionResolveFailure {
     Structural(anyhow::Error),
-    /// A completed, read-only real-domain eligibility check did not admit
-    /// the optimization. No selected arithmetic has executed; ordinary
-    /// evaluation remains available, including complex-valued results.
+    /// A completed read-only real-domain proof declined selected arithmetic.
     DomainIneligible(BuiltinBindingIdentity),
     Admission(anyhow::Error),
     Runtime(Box<runmat_runtime::RuntimeError>),
@@ -292,7 +290,45 @@ impl FusionResolveFailure {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FactResolutionScope {
+    Full,
+    FiniteOnly,
+}
+
+/// One resolution's fact policy and observed provider-effect boundary. A
+/// failed proof retains its observed status even before its per-operation
+/// admission work can be published into the resolved program.
+struct ResolutionObservation {
+    facts: FactResolutionScope,
+    provider_probe_observed: bool,
+}
+
 impl ResolvedProgram {
+    pub(crate) async fn resolve_finite_image(
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        provider_precision: ProviderPrecision,
+        correlation: Option<crate::placement::PlacementCorrelationId>,
+    ) -> std::result::Result<Self, FusionResolveFailure> {
+        let mut borrowed = Vec::new();
+        borrowed
+            .try_reserve_exact(inputs.len())
+            .map_err(|error| FusionResolveFailure::Admission(error.into()))?;
+        borrowed.extend(inputs.iter());
+        let bindings = semantic_bindings::capture(plan)?;
+        Self::resolve_observed(
+            plan,
+            &borrowed,
+            provider_precision,
+            PrecisionPolicy::current(),
+            correlation,
+            &bindings,
+            FactResolutionScope::FiniteOnly,
+        )
+        .await
+    }
+
     pub async fn resolve(
         plan: &FusionGroupPlan,
         inputs: &[Value],
@@ -328,6 +364,7 @@ impl ResolvedProgram {
             PrecisionPolicy::current(),
             correlation,
             bindings,
+            FactResolutionScope::Full,
         )
         .await
     }
@@ -348,6 +385,7 @@ impl ResolvedProgram {
             precision_policy,
             None,
             &bindings,
+            FactResolutionScope::Full,
         )
         .await
     }
@@ -359,8 +397,12 @@ impl ResolvedProgram {
         precision_policy: PrecisionPolicy,
         correlation: Option<crate::placement::PlacementCorrelationId>,
         snapshots: &[Option<SemanticBinding>],
+        facts: FactResolutionScope,
     ) -> std::result::Result<Self, FusionResolveFailure> {
-        let mut provider_probe_observed = false;
+        let mut observation = ResolutionObservation {
+            facts,
+            provider_probe_observed: false,
+        };
         let result = Self::resolve_observed_inner(
             plan,
             inputs,
@@ -368,11 +410,11 @@ impl ResolvedProgram {
             precision_policy,
             correlation,
             snapshots,
-            &mut provider_probe_observed,
+            &mut observation,
         )
         .await;
         result.map_err(|error| {
-            if provider_probe_observed {
+            if observation.provider_probe_observed {
                 error.after_observed_probe()
             } else {
                 error
@@ -387,7 +429,7 @@ impl ResolvedProgram {
         precision_policy: PrecisionPolicy,
         correlation: Option<crate::placement::PlacementCorrelationId>,
         snapshots: &[Option<SemanticBinding>],
-        provider_probe_observed: &mut bool,
+        observation: &mut ResolutionObservation,
     ) -> std::result::Result<Self, FusionResolveFailure> {
         let (mut program, invocation_leaves) = source_assembly(
             plan,
@@ -402,7 +444,13 @@ impl ResolvedProgram {
         let mut computed_scalars = ComputedScalars::from_plan(plan);
         let mut scalar_observation = ScalarEvidenceObservation::new(correlation);
         for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
-            let inferred = inferred_operation(&program, operation, *snapshot, &invocation_leaves)?;
+            let inferred = inferred_operation(
+                &program,
+                operation,
+                *snapshot,
+                &invocation_leaves,
+                observation.facts == FactResolutionScope::FiniteOnly,
+            )?;
             let values = selected_values(&invocation_leaves, &computed_scalars, inferred.input_ids);
             let computed = scalar_observation.evaluate(operation, *snapshot, &values, &inferred);
             let admitted = if let (Some(output), Some(snapshot)) = (inferred.output, snapshot) {
@@ -412,7 +460,6 @@ impl ResolvedProgram {
                     .and_then(|semantics| semantics.admit)
                 {
                     let mut observed = super::admission::AdmissionObservation::new(correlation);
-                    let mut real_domain_completed = false;
                     let mut operand_evidence = inferred
                         .input_ids
                         .iter()
@@ -430,6 +477,7 @@ impl ResolvedProgram {
                             } else { None }
                         })
                         .collect::<Vec<_>>();
+                    let mut real_domain_completed = false;
                     if let Some((predicate, internal_error)) = snapshot
                         .declaration
                         .semantics
@@ -439,7 +487,7 @@ impl ResolvedProgram {
                             real_ranges = Some(super::real_domain::RealRangeResolver::new(
                                 plan,
                                 &invocation_leaves,
-                            ));
+                            )?);
                         }
                         let resolver = real_ranges.as_mut().expect("just initialized");
                         if !real_range_index_reported {
@@ -447,7 +495,7 @@ impl ResolvedProgram {
                                 &mut observed.work,
                                 snapshot.declaration.binding,
                                 provider_precision,
-                            );
+                            )?;
                             real_range_index_reported = true;
                         }
                         if !resolver.is_valid() {
@@ -475,7 +523,7 @@ impl ResolvedProgram {
                             *operand_id,
                             predicate,
                             &mut observed.work,
-                            provider_probe_observed,
+                            &mut observation.provider_probe_observed,
                         )
                         .await?
                         .map(|mut evidence| {
@@ -494,10 +542,13 @@ impl ResolvedProgram {
                     .ok_or_else(|| anyhow!("fusion operand evidence identity mismatch"))?
                     .with_output_fact(&inferred.fact);
                     let result = admit(context).await;
-                    *provider_probe_observed |= observed.work.provider_effect_observed();
+                    observation.provider_probe_observed |= observed.work.provider_effect_observed();
                     let result = result.map_err(FusionResolveFailure::Admission)?;
                     let work = observed.completed();
-                    if result.is_none() && real_domain_completed && *provider_probe_observed {
+                    if result.is_none()
+                        && real_domain_completed
+                        && observation.provider_probe_observed
+                    {
                         return Err(FusionResolveFailure::DomainIneligible(
                             snapshot.declaration.binding,
                         ));
@@ -583,6 +634,12 @@ impl ResolvedProgram {
         self.facts
             .get(&id)
             .ok_or_else(|| anyhow!("missing fusion value fact {id}"))
+    }
+
+    pub(crate) fn observed_provider_probe(&self) -> bool {
+        self.admission_work
+            .values()
+            .any(FusionAdmissionWork::provider_effect_observed)
     }
 
     pub(crate) fn is_invocation_input(&self, id: ValueId) -> bool {

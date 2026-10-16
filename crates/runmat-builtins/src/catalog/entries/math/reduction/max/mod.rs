@@ -24,8 +24,9 @@ pub const MAX_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &MAX_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
-        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::with_fusion_fact(
             inference::infer,
+            inference::infer_fusion_fact,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

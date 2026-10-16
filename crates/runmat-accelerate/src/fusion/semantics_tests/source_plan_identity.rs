@@ -154,6 +154,8 @@ fn source_plan_identity_bit_encodes_every_pattern_float_boundary() {
             bias: Some(ImageScalar::Value(1)),
             gamma: None,
             clamp_zero: true,
+            clamp_zero_value: None,
+            bound_mean_axes: Vec::new(),
             requires_single_input: false,
             reduction_routes: None,
         })

@@ -112,6 +112,14 @@ impl PowerPairCompound {
         &self,
         cancellation: Option<&CancellationToken>,
     ) -> ProviderExecutionResult<PowerPairExecuted> {
+        self.execute_admitted(cancellation, None).await
+    }
+
+    pub async fn execute_admitted(
+        &self,
+        cancellation: Option<&CancellationToken>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<PowerPairExecuted> {
         check_cancelled(cancellation, false)?;
         let evidence = self.probe.execute().await?;
         check_cancelled(cancellation, true)?;
@@ -119,7 +127,10 @@ impl PowerPairCompound {
             PowerResultDomain::Real => &self.real,
             PowerResultDomain::Complex => &self.complex,
         };
-        let executed = with_prior_effect(evaluation.execute(&evidence).await, true)?;
+        let executed = with_prior_effect(
+            evaluation.execute_admitted(&evidence, admission).await,
+            true,
+        )?;
         let final_identity = with_prior_effect(self.identity().map_err(Into::into), true);
         let completed = check_cancelled(cancellation, true).and(final_identity);
         let recipe = match completed {

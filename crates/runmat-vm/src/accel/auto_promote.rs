@@ -4,6 +4,7 @@ use runmat_value::Value;
 #[derive(Clone, Copy)]
 pub enum AutoBinaryOp {
     Elementwise,
+    MatrixPower,
     MatMul,
 }
 
@@ -19,14 +20,20 @@ pub async fn accel_promote_binary(
     a: &Value,
     b: &Value,
 ) -> Result<(Value, Value), RuntimeError> {
-    use runmat_accelerate::{promote_binary_in_context, BinaryOp};
+    use runmat_accelerate::{
+        promote_binary_in_context, promote_builtin_binary_in_context, BinaryOp,
+    };
     let mapped = match op {
-        AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
+        AutoBinaryOp::Elementwise | AutoBinaryOp::MatrixPower => BinaryOp::Elementwise,
         AutoBinaryOp::MatMul => BinaryOp::MatMul,
     };
-    promote_binary_in_context(runtime, mapped, a, b)
-        .await
-        .map_err(promotion_error)
+    let promotion = match op {
+        AutoBinaryOp::Elementwise => promote_builtin_binary_in_context(runtime, mapped, a, b).await,
+        AutoBinaryOp::MatrixPower | AutoBinaryOp::MatMul => {
+            promote_binary_in_context(runtime, mapped, a, b).await
+        }
+    };
+    promotion.map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]

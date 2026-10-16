@@ -274,14 +274,29 @@ fn installed_right_is_exact_to_context_program_region_and_cancellation_generatio
     assert!(installed.registration != other_installation.registration);
     let right = installed.right(&selected).unwrap();
     let second = other_installation.right(&selected).unwrap();
+    let decline = installed.decline_right(&selected).unwrap();
+    assert_eq!(
+        decline.semantic_identity(&selected),
+        Some(semantic(b"same"))
+    );
+    let registrations_before_join = service.registrations.get();
+    assert!(decline.same_installed_region(&right, &selected));
+    assert!(!decline.same_installed_region(&second, &selected));
+    assert_eq!(service.registrations.get(), registrations_before_join);
     assert_eq!(right.placement_revision(), second.placement_revision());
     assert_eq!(right.registration(), installed.registration);
+    let registrations_before_sizing = service.registrations.get();
+    assert_eq!(right.held_domain_contributions_for_sizing(), Some(&[][..]));
+    assert_eq!(service.registrations.get(), registrations_before_sizing);
     assert!(right.planning_revision(&selected).is_some());
+    assert!(service.registrations.get() > registrations_before_sizing);
     assert!(right.completion_lease(&selected).is_some());
     assert!(second.completion_lease(&selected).is_some());
 
     let foreign = context(Some(service.clone()), Some(program(b"one")));
     assert_ne!(selected.local_identity(), foreign.local_identity());
+    assert!(decline.semantic_identity(&foreign).is_none());
+    assert!(!decline.same_installed_region(&installed.right(&selected).unwrap(), &foreign));
     assert!(installed.right(&foreign).is_none());
     assert!(installed
         .right(&selected)
@@ -362,7 +377,10 @@ fn missing_stale_or_wrong_session_revision_never_yields_completion_lease() {
     service.wrong_authority.set(false);
     let valid = installed.right(&selected).unwrap();
     assert!(valid.placement_revision().is_some());
+    let decline = installed.decline_right(&selected).unwrap();
+    assert!(decline.same_installed_region(&valid, &selected));
     service.reset_epoch();
+    assert!(!decline.same_installed_region(&valid, &selected));
     assert!(valid.completion_lease(&selected).is_none());
     assert!(installed
         .right(&selected)

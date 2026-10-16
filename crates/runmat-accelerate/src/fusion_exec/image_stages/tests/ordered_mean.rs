@@ -176,6 +176,8 @@ fn nested_dim_cast_has_bound_future_extent_and_no_post_effect_replay() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         };
         let mean = futures::executor::block_on(session.mean()).unwrap();
@@ -213,6 +215,8 @@ fn nested_dim_cast_has_bound_future_extent_and_no_post_effect_replay() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         };
         *provider.reject_cast_query.lock().unwrap() = true;
@@ -249,6 +253,8 @@ fn nested_dim_cast_has_bound_future_extent_and_no_post_effect_replay() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         };
         *provider.reject_cast_query_after_cast.lock().unwrap() = true;
@@ -293,6 +299,8 @@ fn nested_dim_cast_has_bound_future_extent_and_no_post_effect_replay() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         };
         *provider.alias_same_class_cast.lock().unwrap() = false;
@@ -795,6 +803,8 @@ fn pending_selected_mean_publication_restores_raw_residency_and_prevents_replay(
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         };
         let mut future = Box::pin(session.mean());

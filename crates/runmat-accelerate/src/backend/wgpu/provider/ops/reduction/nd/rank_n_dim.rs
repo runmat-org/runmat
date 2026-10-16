@@ -47,7 +47,7 @@ impl WgpuProvider {
             selected.output_shape() == geometry.out_shape.as_slice(),
             "rank-N mean cold route changed its output shape"
         );
-        let executed = self.execute_cold_mean_nd_exec(selected)?;
+        let executed = self.execute_cold_mean_nd_exec(selected, None)?;
         self.validate_nd_moment_pair(input, &axes, &executed.mean, &executed.ex2)?;
         Ok(Some(executed.mean))
     }

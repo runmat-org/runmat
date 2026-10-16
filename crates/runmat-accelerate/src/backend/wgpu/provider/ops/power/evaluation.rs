@@ -100,6 +100,14 @@ impl WgpuProvider {
         &self,
         recipe: &PowerEvaluationRecipe,
     ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
+        self.execute_power_evaluation_recipe_admitted_exec(recipe, None)
+    }
+
+    pub(crate) fn execute_power_evaluation_recipe_admitted_exec(
+        &self,
+        recipe: &PowerEvaluationRecipe,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
         if !recipe.probe().is_owned_by(self) {
             return Err(anyhow!("POWER evaluation provider changed").into());
         }
@@ -111,7 +119,7 @@ impl WgpuProvider {
             return Err(anyhow!("POWER evaluation physical recipe changed").into());
         }
         let (output, observed, _) = self
-            .fused_elementwise_prepared_probe_with_telemetry_exec(
+            .fused_elementwise_prepared_probe_with_telemetry_admitted_exec(
                 &prepared.shader,
                 &[base.clone(), exponent.clone()],
                 FusedElementwiseWork {
@@ -121,6 +129,7 @@ impl WgpuProvider {
                     uniform_abi: Some(FusionUniformAbi::Broadcast),
                 },
                 &prepared.fusion,
+                admission,
             )
             .map_err(|cause| ProviderExecutionError::from(cause).with_unproven_effects())?;
         Ok(ProviderExecutedRealElementwise { output, observed })

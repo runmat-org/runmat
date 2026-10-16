@@ -4,7 +4,8 @@
 use super::{ImageMeanAxis, ImageMeanForm, ImageMeanOutput, ImageMeanRoute, ImageReductionRoutes};
 use crate::graph::{AccelGraph, AccelNodeLabel, NodeId, PrimitiveOp, ValueId};
 use runmat_accelerate_api::{
-    ImageNormalizeDescriptor, ProviderImageMeanCall, ProviderImageMeanClass, ProviderImageMeanHook,
+    scalar_program::ScalarLiteral, ImageNormalizeDescriptor, PowerScalarControl,
+    ProviderImageMeanCall, ProviderImageMeanClass, ProviderImageMeanHook,
     ProviderImagePowerProgram, ProviderImageStageWorkload,
 };
 
@@ -52,22 +53,27 @@ impl ImageMeanAndPowerSource {
         &self,
         desc: &ImageNormalizeDescriptor,
     ) -> Option<ProviderImageStageWorkload> {
-        self.staged_workload_with_power(desc, None)
+        self.staged_workload_with_power(desc, None, None)
     }
 
     pub fn staged_workload_selected(
         &self,
         desc: &ImageNormalizeDescriptor,
         powers: ProviderImagePowerProgram,
+        epsilon: ScalarLiteral,
     ) -> Option<ProviderImageStageWorkload> {
-        self.staged_workload_with_power(desc, Some(powers))
+        self.staged_workload_with_power(desc, Some(powers), Some(epsilon))
     }
 
     fn staged_workload_with_power(
         &self,
         desc: &ImageNormalizeDescriptor,
         selected_powers: Option<ProviderImagePowerProgram>,
+        selected_epsilon: Option<ScalarLiteral>,
     ) -> Option<ProviderImageStageWorkload> {
+        if selected_powers.is_some() != selected_epsilon.is_some() {
+            return None;
+        }
         fn shape(shape: [usize; 3]) -> Option<[u64; 3]> {
             Some([
                 u64::try_from(shape[0]).ok()?,
@@ -104,6 +110,15 @@ impl ImageMeanAndPowerSource {
             (value.is_finite() && f64::from(value as f32) == value)
                 .then_some((value as f32).to_bits())
         };
+        if let Some(control) = selected_epsilon {
+            let exact = match control {
+                ScalarLiteral::F32Bits(bits) => f64::from(f32::from_bits(bits)),
+                ScalarLiteral::F64Bits(bits) => f64::from_bits(bits),
+            };
+            if exact.to_bits() != desc.epsilon.to_bits() {
+                return None;
+            }
+        }
         let program = ProviderImageStageWorkload {
             input_shape: shape([desc.batch, desc.height, desc.width])?,
             mu: mean(&self.mu.calls)?,
@@ -121,7 +136,10 @@ impl ImageMeanAndPowerSource {
                 exact_f32(self.final_power.represented_exponent)?
             },
             selected_powers,
-            epsilon_f32_bits: exact_f32(desc.epsilon)?,
+            epsilon: match selected_epsilon {
+                Some(control) => control,
+                None => ScalarLiteral::F32Bits(exact_f32(desc.epsilon)?),
+            },
             output_program: None,
             moment_program: None,
         };
@@ -139,6 +157,19 @@ impl ImageMeanAndPowerSource {
         routes: &ImageReductionRoutes,
         input_shape: [usize; 3],
     ) -> Option<Self> {
+        Self::from_selected_graph(graph, routes, input_shape, None)
+    }
+
+    /// A live final-power control can be represented by the selected source
+    /// only after its exact request value has been bound. The value ID must
+    /// still be the final producer's operand; this is not permission to use a
+    /// compiler constant fact in place of a published binding.
+    pub(crate) fn from_selected_graph(
+        graph: &AccelGraph,
+        routes: &ImageReductionRoutes,
+        input_shape: [usize; 3],
+        bound_final_exponent: Option<(ValueId, PowerScalarControl)>,
+    ) -> Option<Self> {
         if !routes.matches_source_graph(graph) {
             return None;
         }
@@ -146,13 +177,17 @@ impl ImageMeanAndPowerSource {
         Some(Self {
             mu: routes.mu.direct_provider_plan(input_shape)?,
             variance: routes.variance.direct_provider_plan(input_shape)?,
-            square: source_power(graph, routes.variance.input())?,
-            final_power: source_power(graph, producers.output)?,
+            square: source_power(graph, routes.variance.input(), None)?,
+            final_power: source_power(graph, producers.output, bound_final_exponent)?,
         })
     }
 }
 
-fn source_power(graph: &AccelGraph, output: ValueId) -> Option<ImageSourcePower> {
+fn source_power(
+    graph: &AccelGraph,
+    output: ValueId,
+    bound_exponent: Option<(ValueId, PowerScalarControl)>,
+) -> Option<ImageSourcePower> {
     let (node, producer) = super::node_from_value(graph, output)?;
     if !matches!(
         producer.label,
@@ -162,12 +197,16 @@ fn source_power(graph: &AccelGraph, output: ValueId) -> Option<ImageSourcePower>
     {
         return None;
     }
+    let exponent_value = producer.inputs[1];
+    let represented_exponent = match bound_exponent {
+        Some((id, actual)) => (id == exponent_value).then_some(actual.value())?,
+        None => super::super::collect_scalar_constant(graph, exponent_value)?.value,
+    };
     Some(ImageSourcePower {
         node,
         base: producer.inputs[0],
-        exponent_value: producer.inputs[1],
-        represented_exponent: super::super::collect_scalar_constant(graph, producer.inputs[1])?
-            .value,
+        exponent_value,
+        represented_exponent,
     })
 }
 

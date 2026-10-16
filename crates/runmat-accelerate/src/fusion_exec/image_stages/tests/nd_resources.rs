@@ -112,6 +112,7 @@ fn selected_cold_completion_checks_pair_uniform_and_observed_bytes() {
         vec![2, 1, 1],
         mean.handle.physical().requested_bytes(),
         64,
+        0,
     );
     let resources = super::super::nd_resources::cold_mean(
         provider,
@@ -222,6 +223,7 @@ fn selected_cold_completion_rejects_actual_wrong_owner_class_and_shape_without_r
             vec![2, 1, 1],
             output_bytes,
             64,
+            0,
         );
         let resources = super::super::nd_resources::cold_mean(
             provider,

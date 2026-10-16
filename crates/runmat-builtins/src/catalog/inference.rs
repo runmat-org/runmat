@@ -21,6 +21,7 @@ mod support;
 mod unary_logical_scalar;
 
 pub use distributed::infer_partition_local_call;
+pub use routing::finite_fusion_fact_route;
 pub use routing::infer as infer_catalog_call;
 pub use routing::infer_fusion_numeric_fact;
 pub(crate) use support::facts::materialize;

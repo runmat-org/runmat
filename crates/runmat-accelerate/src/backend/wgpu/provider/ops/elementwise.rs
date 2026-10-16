@@ -68,6 +68,14 @@ use real_binary_recipe::{RealBinaryObserved, RealBinarySubmission};
 use real_recipe::RealObserved;
 use std::cell::{Cell, RefCell};
 
+/// The selected standard binary path carries its pipeline and publication
+/// effect marker together. Ordinary/recipe executions carry neither.
+#[derive(Clone, Copy)]
+struct SelectedBinaryExecution<'a> {
+    pipeline: &'a super::validated_fusion::ValidatedFusionPipeline,
+    effect: &'a Cell<bool>,
+}
+
 /// Internal shader ABI: input words can differ from the native output words.
 /// The owning shader must declare both precisions explicitly.
 #[derive(Clone, Copy)]
@@ -1232,7 +1240,7 @@ impl WgpuProvider {
         op: crate::backend::wgpu::types::UnaryOpCode,
         a: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        self.unary_op_exec_recorded(op, a, None)
+        self.unary_op_exec_recorded(op, a, None, None)
     }
 
     pub(super) fn unary_std_selected_exec(
@@ -1287,6 +1295,7 @@ impl WgpuProvider {
                 frame: &frame,
                 pipeline: validated,
             },
+            None,
         )
     }
 
@@ -1295,6 +1304,7 @@ impl WgpuProvider {
         op: crate::backend::wgpu::types::UnaryOpCode,
         a: &GpuTensorHandle,
         observed: Option<&RefCell<RealObserved>>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
             return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
@@ -1332,6 +1342,7 @@ impl WgpuProvider {
                 observed,
                 prepared: None,
             },
+            admission,
         );
         if result.is_ok() {
             self.telemetry
@@ -1412,7 +1423,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         scalar: f64,
     ) -> Result<GpuTensorHandle> {
-        self.scalar_op_exec_recorded(op, a, scalar, None)
+        self.scalar_op_exec_recorded(op, a, scalar, None, None)
     }
 
     fn scalar_op_exec_recorded(
@@ -1421,6 +1432,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         scalar: f64,
         observed: Option<&RefCell<RealObserved>>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         let entry_a = if runmat_accelerate_api::handle_storage(a)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -1603,8 +1615,13 @@ impl WgpuProvider {
             }
             Ok((out_buffer, Some(start)))
         })??;
-        let handle =
-            self.register_real_floating_output(out_buffer, entry_a.shape, len, selected_precision)?;
+        let handle = self.register_real_floating_output_admitted(
+            out_buffer,
+            entry_a.shape,
+            len,
+            selected_precision,
+            admission,
+        )?;
         if let Some(start) = start {
             self.telemetry
                 .record_fused_elementwise_duration(start.elapsed());
@@ -1691,7 +1708,17 @@ impl WgpuProvider {
                 && right.integer_type().is_none(),
             "std selected binary operands are not same-shape native real floating tensors"
         );
-        self.binary_op_exec_recorded(op, a, b, None, Some(validated), Some(effect))
+        self.binary_op_exec_recorded(
+            op,
+            a,
+            b,
+            None,
+            Some(SelectedBinaryExecution {
+                pipeline: validated,
+                effect,
+            }),
+            None,
+        )
     }
 
     pub(super) fn preflight_std_binary_input(&self, input: &GpuTensorHandle) -> Result<()> {
@@ -1717,9 +1744,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
         observed: Option<&RefCell<RealBinaryObserved>>,
-        validated: Option<&super::validated_fusion::ValidatedFusionPipeline>,
-        effect: Option<&std::cell::Cell<bool>>,
+        selected: Option<SelectedBinaryExecution<'_>>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
+        let validated = selected.map(|frame| frame.pipeline);
+        let effect = selected.map(|frame| frame.effect);
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
             return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
         }
@@ -1756,7 +1785,7 @@ impl WgpuProvider {
         let selected_precision = entry_a.precision;
         if entry_a.shape != entry_b.shape {
             // Attempt general N-D broadcasted binary op
-            return self.binary_op_broadcast_exec_recorded(op, a, b, observed);
+            return self.binary_op_broadcast_exec_recorded(op, a, b, observed, admission);
         }
         let len = entry_a.len;
         let selected_max = if op == crate::backend::wgpu::types::BinaryOpCode::Max {
@@ -1782,11 +1811,12 @@ impl WgpuProvider {
             if let Some(observed) = observed {
                 observed.borrow_mut().output(&out_buffer);
             }
-            return self.register_real_floating_output(
+            return self.register_real_floating_output_admitted(
                 out_buffer,
                 entry_a.shape,
                 entry_a.len,
                 selected_precision,
+                admission,
             );
         }
         if len > (u32::MAX as usize) {
@@ -1937,8 +1967,13 @@ impl WgpuProvider {
             }
             Ok(out_buffer)
         })??;
-        let handle =
-            self.register_real_floating_output(out_buffer, entry_a.shape, len, selected_precision)?;
+        let handle = self.register_real_floating_output_admitted(
+            out_buffer,
+            entry_a.shape,
+            len,
+            selected_precision,
+            admission,
+        )?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         self.inherit_elementwise_layout(handle, a)
@@ -2112,6 +2147,7 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
         observed: Option<&RefCell<RealBinaryObserved>>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         use crate::backend::wgpu::params::{AlignedU32, BinaryBroadcastParams, BCAST_MAX_RANK};
         let entry_a = self.real_floating_entry(a)?;
@@ -2152,11 +2188,12 @@ impl WgpuProvider {
             if let Some(observed) = observed {
                 observed.borrow_mut().output(&out_buffer);
             }
-            return self.register_real_floating_output(
+            return self.register_real_floating_output_admitted(
                 out_buffer,
                 out_shape.clone(),
                 0,
                 selected_precision,
+                admission,
             );
         }
         // Compute strides (column-major)
@@ -2270,11 +2307,12 @@ impl WgpuProvider {
             }
             Ok((out_buffer, start))
         })??;
-        let handle = self.register_real_floating_output(
+        let handle = self.register_real_floating_output_admitted(
             out_buffer,
             out_shape.clone(),
             len,
             selected_precision,
+            admission,
         )?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
@@ -2344,6 +2382,7 @@ impl WgpuProvider {
                 observed: None,
                 prepared: None,
             },
+            None,
         )
     }
 
@@ -2358,23 +2397,24 @@ impl WgpuProvider {
         GpuTensorHandle,
         runmat_accelerate_api::ProviderRealElementwiseObserved,
     )> {
-        let (output, resources, _) =
-            self.fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, false)?;
+        let (output, resources, _) = self
+            .fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, false, None)?;
         Ok((output, resources))
     }
 
-    pub(super) fn fused_elementwise_prepared_probe_exec(
+    pub(super) fn fused_elementwise_prepared_probe_admitted_exec(
         &self,
         shader: &str,
         inputs: &[GpuTensorHandle],
         work: FusedElementwiseWork<'_>,
         prepared: &FrozenFusionRecipe,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<(
         GpuTensorHandle,
         runmat_accelerate_api::ProviderRealElementwiseObserved,
         Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
     )> {
-        self.fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, true)
+        self.fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, true, admission)
     }
 
     fn fused_elementwise_prepared_inner_exec(
@@ -2384,6 +2424,7 @@ impl WgpuProvider {
         work: FusedElementwiseWork<'_>,
         prepared: &FrozenFusionRecipe,
         capture_probe_tickets: bool,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<(
         GpuTensorHandle,
         runmat_accelerate_api::ProviderRealElementwiseObserved,
@@ -2402,6 +2443,7 @@ impl WgpuProvider {
                 observed: Some(&observed),
                 prepared: Some(prepared),
             },
+            admission,
         )?;
         prepared.require(&observed.borrow().resources)?;
         let observed = observed.into_inner();
@@ -2436,6 +2478,7 @@ impl WgpuProvider {
                 frame,
                 pipeline: validated,
             },
+            None,
         )
     }
 
@@ -2446,6 +2489,7 @@ impl WgpuProvider {
         work: FusedElementwiseWork<'_>,
         mut after_allocation: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
         evidence: SingleFusionEvidence<'_>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         let (observed, prepared, validated) = match evidence {
             SingleFusionEvidence::Legacy { observed, prepared } => (observed, prepared, None),
@@ -2879,7 +2923,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
             };
             let allocated_bytes = output_buffer.size();
-            self.register_numeric_buffer(
+            self.register_numeric_buffer_produced_admitted(
                 output_buffer,
                 super::backend_types::NumericBufferRegistration {
                     shape: output_shape.to_vec(),
@@ -2889,6 +2933,8 @@ impl WgpuProvider {
                     allocated_bytes,
                     usage: BufferUsageClass::FusionOut,
                 },
+                false,
+                admission,
             )?
         };
         if let Some(observed) = observed {

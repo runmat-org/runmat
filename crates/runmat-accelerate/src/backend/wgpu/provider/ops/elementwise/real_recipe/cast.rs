@@ -104,8 +104,9 @@ impl WgpuProvider {
         input: &GpuTensorHandle,
         target: ProviderPrecision,
         observed: &RefCell<RealObserved>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
-        self.floating_cast_exec_recorded(input, precision(target), |event| {
+        self.floating_cast_exec_recorded(input, precision(target), admission, |event| {
             use super::super::super::floating_cast::CastResourceEvent;
             match event {
                 CastResourceEvent::Output(bytes) => {

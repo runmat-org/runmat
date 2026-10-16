@@ -31,7 +31,7 @@ pub(super) struct SelectedRealReceipt {
     pub observed: ProviderRealElementwiseObserved,
 }
 
-struct PlannedCall {
+pub(super) struct PlannedCall {
     source: ImageSelectedRealCall,
     recipe: ProviderRealElementwiseRecipe,
     #[cfg(test)]
@@ -48,6 +48,25 @@ pub(super) struct SelectedRealPlans {
 }
 
 impl SelectedRealPlans {
+    pub(super) fn registered_output_count(&self) -> usize {
+        self.calls
+            .iter()
+            .filter(|call| {
+                call.recipe.physical().output_route
+                    == ProviderRealElementwiseOutputRoute::FreshAllocation
+            })
+            .count()
+    }
+
+    pub(super) fn alias_view_count(&self) -> usize {
+        self.calls
+            .iter()
+            .filter(|call| {
+                call.recipe.physical().output_route
+                    == ProviderRealElementwiseOutputRoute::SameClassFloatingCastAlias
+            })
+            .count()
+    }
     pub(super) fn physical_upper_bound(
         &self,
     ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
@@ -57,6 +76,7 @@ impl SelectedRealPlans {
             bound.add(
                 physical.requested_incremental_peak_bytes()?,
                 physical.dispatches,
+                Some(physical.queue_submissions),
             )?;
         }
         Some(bound)
@@ -122,7 +142,7 @@ pub(super) fn plan(
                 runmat_types::NumericClass::Double => ProviderPrecision::F64,
                 _ => return Ok(None),
             };
-            let Some(physical) = powers.final_power.exact_physical_proposal() else {
+            let Some(output_bytes) = powers.final_power.output_requested_bytes() else {
                 return Ok(None);
             };
             if power_seen
@@ -142,11 +162,11 @@ pub(super) fn plan(
             };
             if representation
                 .checked_byte_len()
-                .is_none_or(|minimum| minimum > physical.output_buffer_bytes)
+                .is_none_or(|minimum| minimum > output_bytes)
             {
                 return Ok(None);
             }
-            bytes = physical.output_buffer_bytes;
+            bytes = output_bytes;
             current_source = wire.source_output;
             power_seen = true;
             continue;
@@ -238,6 +258,7 @@ impl SelectedRealPlans {
         wire: &ProviderImageOutputCall,
         source: &GpuTensorHandle,
         protected: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<SelectedRealOutput> {
         let index = self.next.get();
         if !self.matches_output(index, wire) {
@@ -252,7 +273,7 @@ impl SelectedRealPlans {
         self.next.set(index + 1);
         let executed = planned
             .recipe
-            .execute_protected(source, protected)
+            .execute_protected_admitted(source, protected, admission)
             .await
             .map_err(ProviderExecutionError::after_effect)?;
         #[cfg(test)]

@@ -38,6 +38,15 @@ impl FusionOutputAdmission {
         provider: &'static dyn AccelProvider,
         host: &HostNumericTensorView<'_>,
     ) -> Result<GpuTensorHandle> {
+        self.upload_typed_admitted(provider, host, None)
+    }
+
+    pub(in crate::fusion_exec) fn upload_typed_admitted(
+        &mut self,
+        provider: &'static dyn AccelProvider,
+        host: &HostNumericTensorView<'_>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
         let precision = match (host.storage, host.data) {
             (GpuTensorStorage::Real, HostNumericDataView::F32(_)) => ProviderPrecision::F32,
             (GpuTensorStorage::Real, HostNumericDataView::F64(_)) => ProviderPrecision::F64,
@@ -65,9 +74,10 @@ impl FusionOutputAdmission {
             }
         }
         let protected: Vec<_> = self.borrowed.iter().chain(live.iter()).collect();
-        let handle =
-            runmat_accelerate_api::upload_numeric_protecting(provider, host, &protected)
-                .map_err(|error| self.classify_upload_phase_error(error.into_execution_error()))?;
+        let handle = runmat_accelerate_api::upload_numeric_protecting_admitted(
+            provider, host, &protected, admission,
+        )
+        .map_err(|error| self.classify_upload_phase_error(error.into_execution_error()))?;
         self.admit(handle, provider, host.shape, precision)
     }
 

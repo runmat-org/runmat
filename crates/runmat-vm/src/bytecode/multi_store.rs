@@ -19,11 +19,13 @@ mod semantic;
 pub use semantic::ProspectiveSemanticMultiStoreRegion;
 
 mod image_normalize;
+pub(crate) use image_normalize::{
+    CapturedImageInputs, SelectedImageRegion, SelectedImageRegionSet,
+};
 pub use image_normalize::{
     ImageCheckpoint, ImageLiveOut, ImageLiveOutSource, ImageNormalizePublicationJoin,
     ImageRegionStore, ImageStoreDestination, ImageStoreOrdinal,
 };
-pub(crate) use image_normalize::{SelectedImageRegion, SelectedImageRegionSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProspectiveStore {

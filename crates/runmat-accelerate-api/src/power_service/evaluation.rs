@@ -112,9 +112,17 @@ impl PowerEvaluationRecipe {
         &self,
         evidence: &PowerProbeDomain,
     ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
+        self.execute_admitted(evidence, None).await
+    }
+
+    pub async fn execute_admitted(
+        &self,
+        evidence: &PowerProbeDomain,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
         // Every failure belongs to an already-consumed probe, including a
         // child Unsupported. There is no permission to replay this compound.
-        self.execute_inner(evidence)
+        self.execute_inner(evidence, admission)
             .await
             .map_err(ProviderExecutionError::after_effect)
     }
@@ -122,6 +130,7 @@ impl PowerEvaluationRecipe {
     async fn execute_inner(
         &self,
         evidence: &PowerProbeDomain,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
         if !self.probe.authenticates(evidence) || evidence.domain() != self.domain {
             return Err(changed());
@@ -139,7 +148,9 @@ impl PowerEvaluationRecipe {
             crate::ResidencyRestoreGuard::new(base),
             crate::ResidencyRestoreGuard::new(exponent),
         ];
-        let result = owner.execute_power_evaluation_recipe(self).await;
+        let result = owner
+            .execute_power_evaluation_recipe_admitted(self, admission)
+            .await;
         for guard in &guards {
             guard.restore();
         }

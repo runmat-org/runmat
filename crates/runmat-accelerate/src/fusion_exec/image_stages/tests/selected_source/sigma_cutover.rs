@@ -348,7 +348,8 @@ async fn sealed_source_mutation_and_plan_rejection_have_no_legacy_fallback() {
     *provider.real_fault.lock().unwrap() = None;
     let mean = session.mean().await.unwrap().0;
     let before = provider.trace();
-    session.program.epsilon_f32_bits ^= 1;
+    session.program.epsilon =
+        runmat_accelerate_api::scalar_program::ScalarLiteral::F32Bits(0.5_f32.to_bits());
     let error = session.sigma().await.err().unwrap();
     assert!(error.is_after_effect());
     assert_eq!(
@@ -367,53 +368,60 @@ async fn sealed_source_mutation_and_plan_rejection_have_no_legacy_fallback() {
 async fn actual_compiled_mixed_double_control_is_not_erased_or_sent_to_legacy_hooks() {
     let provider = provider_with_precision(None, None, ProviderPrecision::F64);
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let graph = compiled_image_graph_with_epsilon([2, 3, 4], "0.125");
-    let groups = detect_fusion_groups(&graph);
-    let plans = FusionPlan::from_graph(&graph, &groups);
-    let plan = plans
-        .groups
-        .iter()
-        .find(|plan| plan.group.kind == FusionKind::ImageNormalize)
-        .unwrap();
-    let FusionPattern::ImageNormalize(pattern) = plan.group.pattern.as_ref().unwrap() else {
-        panic!("selected mixed image");
-    };
-    let input = provider
-        .allocations
-        .allocate_zeroed(
-            vec![2, 3, 4],
-            NumericElementType::F32,
-            GpuTensorStorage::Real,
-        )
-        .unwrap();
-    let values = plan
-        .inputs
-        .iter()
-        .map(|id| {
-            if *id == pattern.input {
-                Value::GpuTensor(input.handle.clone())
-            } else {
-                exact_source_input(&graph, *id, plan.group.span.start)
-            }
-        })
-        .collect::<Vec<_>>();
-    let invocation =
-        ImageSourceInvocation::bind(&graph, plan, &values, ProviderPrecision::F64, None)
-            .await
+    for (source, exact) in [("0.125", 0.125_f64), ("0.1", 0.1_f64)] {
+        let graph = compiled_image_graph_with_epsilon([2, 3, 4], source);
+        let groups = detect_fusion_groups(&graph);
+        let plans = FusionPlan::from_graph(&graph, &groups);
+        let plan = plans
+            .groups
+            .iter()
+            .find(|plan| plan.group.kind == FusionKind::ImageNormalize)
             .unwrap();
-    assert!(
-        invocation.selected_sigma_operations().is_none(),
-        "authentic mixed-double Add has no native equivalence authority"
-    );
-    assert!(ImageNormalizeStageSession::begin_selected(
-        provider,
-        &input.handle,
-        &invocation,
-        ImageArithmeticProof::fixture()
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
-    assert!(provider.real_controls.lock().unwrap().is_empty());
-    assert_eq!(input.probe.retirements(), 0);
+        let FusionPattern::ImageNormalize(pattern) = plan.group.pattern.as_ref().unwrap() else {
+            panic!("selected mixed image");
+        };
+        let input = provider
+            .allocations
+            .allocate_zeroed(
+                vec![2, 3, 4],
+                NumericElementType::F32,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let values = plan
+            .inputs
+            .iter()
+            .map(|id| {
+                if *id == pattern.input {
+                    Value::GpuTensor(input.handle.clone())
+                } else {
+                    exact_source_input(&graph, *id, plan.group.span.start)
+                }
+            })
+            .collect::<Vec<_>>();
+        let invocation =
+            ImageSourceInvocation::bind(&graph, plan, &values, ProviderPrecision::F64, None)
+                .await
+                .unwrap();
+        assert_eq!(
+            invocation.requested_staged_workload().unwrap().epsilon,
+            runmat_accelerate_api::scalar_program::ScalarLiteral::F64Bits(exact.to_bits()),
+            "the selected request retains the original Double control before provider admission"
+        );
+        assert!(
+            invocation.selected_sigma_operations().is_none(),
+            "authentic mixed-double Add has no native equivalence authority"
+        );
+        assert!(ImageNormalizeStageSession::begin_selected(
+            provider,
+            &input.handle,
+            &invocation,
+            ImageArithmeticProof::fixture()
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert!(provider.real_controls.lock().unwrap().is_empty());
+        assert_eq!(input.probe.retirements(), 0);
+    }
 }

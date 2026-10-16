@@ -25,6 +25,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     result
 }
 
+pub(super) fn infer_fusion_fact(request: &CallRequest) -> Option<ValueFact> {
+    let input = request.arguments.first()?;
+    // The public rule renders this rejected carrier as a diagnostic. A
+    // finite facts-only request must reject it before that String/Vec exists.
+    if matches!(input.kind, ValueKindFact::Numeric(numeric)
+        if numeric.domain == NumericDomain::Complex
+            && numeric.class.integer_class().is_some())
+    {
+        return None;
+    }
+    let mut diagnostics = Vec::new();
+    let fact = infer_output(input, request, &mut diagnostics);
+    diagnostics.is_empty().then_some(fact)
+}
+
 fn infer_output(
     input: &ValueFact,
     request: &CallRequest,

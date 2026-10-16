@@ -70,9 +70,46 @@ pub(super) struct InstructionLoopContext<'a> {
 pub(super) type BoxedInstructionLoop<'a> =
     Pin<Box<dyn Future<Output = InstructionLoopResult> + 'a>>;
 
+#[cfg(feature = "wgpu")]
+pin_project_lite::pin_project! {
+    struct AuditedInstructionLoop<F> {
+        #[pin]
+        inner: F,
+        slot: Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot>,
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl<F: Future> Future for AuditedInstructionLoop<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.project();
+        runmat_accelerate_api::observation::with_vm_region_poll(this.slot.as_ref(), || {
+            this.inner.poll(cx)
+        })
+    }
+}
+
 #[inline(never)]
 pub(super) fn boxed(context: InstructionLoopContext<'_>) -> BoxedInstructionLoop<'_> {
-    Box::pin(run(context))
+    #[cfg(feature = "wgpu")]
+    {
+        let slot = context
+            .fusion_observations
+            .route_audit_slot(context.image_installation.is_some());
+        Box::pin(AuditedInstructionLoop {
+            inner: run(context),
+            slot,
+        })
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        Box::pin(run(context))
+    }
 }
 
 // Fusion planning owns a different execution future from ordinary instruction
@@ -219,6 +256,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         Vec::new()
     };
     while *pc < bytecode.instructions.len() {
+        #[cfg(feature = "wgpu")]
+        if let Some(route) = fusion_observations.take_completed_original() {
+            route.complete().await;
+        }
         crate::runtime::workspace::reconcile_workspace_vars(&mut *vars);
         if let (Some(scope), Some(exception)) = (catch_entries.get(&*pc), last_exception.as_ref()) {
             catch_exceptions.insert(*scope, std::rc::Rc::new(exception.clone()));
@@ -258,6 +299,15 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             .await;
             match image_result {
                 Ok(image_stages::ImageStageOutcome::Declined) => {}
+                #[cfg(feature = "wgpu")]
+                Ok(image_stages::ImageStageOutcome::Original {
+                    span,
+                    publication,
+                    route,
+                }) => {
+                    fusion_observations.begin_original(span, publication, route);
+                    interp_engine::check_cancelled(&context.runtime)?;
+                }
                 Ok(image_stages::ImageStageOutcome::Executed { next_pc }) => {
                     *pc = next_pc;
                     continue;
@@ -953,6 +1003,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         *pc += 1;
         #[cfg(feature = "native-accel")]
         fusion_observations.instruction_exit(executed_pc, *pc);
+    }
+    #[cfg(feature = "wgpu")]
+    if let Some(route) = fusion_observations.take_completed_original() {
+        route.complete().await;
     }
     Ok::<(), RuntimeError>(())
 }

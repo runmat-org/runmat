@@ -1,4 +1,7 @@
 //! Provider-owned preparation facts, distinct from numerical feasibility.
+use crate::{
+    ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderUploadPhysicalEvidence,
+};
 use runmat_execution::{CandidatePreparationState, Digest};
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +47,72 @@ pub enum ProviderPreparationProgram<'a> {
 pub enum ProviderPreparationRoute {
     FloatingCast { target: crate::ProviderPrecision },
     TypedReductionInputs { identity: Digest },
+    ClassPreservingUpload { identity: Digest },
+}
+
+/// Pure exact class-preserving input upload. This is a placement fact, not a
+/// future handle or execution permit. The consuming owner must recheck the
+/// same provider evidence and source before invoking the raw upload hook.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderClassPreservingUpload {
+    source: ProviderRepresentation,
+    prepared: ProviderRepresentation,
+    physical: ProviderUploadPhysicalEvidence,
+    identity: Digest,
+}
+
+impl ProviderClassPreservingUpload {
+    pub fn new_checked(
+        device_id: u32,
+        source: ProviderRepresentation,
+        prepared: ProviderRepresentation,
+        physical: ProviderUploadPhysicalEvidence,
+    ) -> Option<Self> {
+        if source.residency != ProviderResidency::Host
+            || prepared.residency != ProviderResidency::Device
+            || source.element_type != prepared.element_type
+            || source.storage != prepared.storage
+            || source.layout != ProviderLayout::ColumnMajorContiguous
+            || prepared.layout != ProviderLayout::ColumnMajorContiguous
+            || source.shape != prepared.shape
+            || prepared.checked_byte_len()?.max(4) > physical.output_requested_bytes
+            || physical.completion_queue_slots == 0
+        {
+            return None;
+        }
+        let identity = Digest::sha256_serialized(&(
+            "class-preserving-input-upload.v1",
+            device_id,
+            &source,
+            &prepared,
+            physical,
+        ))
+        .ok()?;
+        Some(Self {
+            source,
+            prepared,
+            physical,
+            identity,
+        })
+    }
+
+    pub fn source(&self) -> &ProviderRepresentation {
+        &self.source
+    }
+
+    pub fn prepared(&self) -> &ProviderRepresentation {
+        &self.prepared
+    }
+
+    pub fn physical(&self) -> ProviderUploadPhysicalEvidence {
+        self.physical
+    }
+
+    pub fn route(&self) -> ProviderPreparationRoute {
+        ProviderPreparationRoute::ClassPreservingUpload {
+            identity: self.identity,
+        }
+    }
 }
 
 impl ProviderPreparationProgram<'_> {

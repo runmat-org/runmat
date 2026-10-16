@@ -14,7 +14,50 @@ use runmat_accelerate_api::{
     ProviderStorage,
 };
 use runmat_builtins::{BuiltinCatalogIdentity, BuiltinErrorDescriptor};
-use runmat_value::NumericScalar;
+use runmat_value::{ExactHostTensor2dAllocation, NumericDType, NumericScalar};
+
+/// Upper bound for request-local host payloads of one scalar real-range probe.
+/// The caller separately charges the rank-sized `ProviderRepresentation.shape`
+/// payloads emitted by `hook`; provider-owned device/readback allocations are
+/// governed by the selected provider's physical resource admission.
+pub fn scalar_probe_host_upper_bytes(max_rank: usize) -> Option<u64> {
+    fn slots<T>(count: usize) -> Option<usize> {
+        count.checked_mul(std::mem::size_of::<T>())
+    }
+
+    // The extrema path reserves both output slots before its first hook.
+    // Adoption protects the input and both outputs simultaneously.
+    let mut bytes = slots::<GpuTensorHandle>(2)?;
+    bytes = bytes.checked_add(slots::<&GpuTensorHandle>(3)?)?;
+    bytes = bytes.checked_add(slots::<usize>(2)?)?; // reduction contract shape
+    bytes = bytes.checked_add(slots::<f64>(2)?)?; // represented extrema
+    bytes = bytes.checked_add(slots::<NumericScalar>(1)?)?; // decoded scalar
+                                                            // An accepted one-element provider download is moved into one host tensor;
+                                                            // the exact numeric owner's quote covers its payload, initial shape, and
+                                                            // shared storage metadata. Native-value decoding clones the two-axis
+                                                            // shape while that tensor remains live. The logical route may also own a
+                                                            // one-byte conversion vector before the native-value vector is produced.
+    bytes = bytes
+        .checked_add(ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 1).ok()?)?;
+    bytes = bytes.checked_add(slots::<usize>(2)?)?;
+    bytes = bytes.checked_add(slots::<u8>(1)?)?;
+    // The observer retains all four provider stages in its proof record, so
+    // all operation identities coexist rather than only the longest one.
+    for operation in ["logical_isnan", "reduce_any", "reduce_min", "reduce_max"] {
+        bytes = bytes.checked_add(operation.len())?;
+    }
+    // The NaN proof retains one mask view at input rank and one scalar view;
+    // the subsequent extrema proof instead retains two scalar views. Only
+    // one proof runs at a time, but their operation identities remain in the
+    // caller's observed stage vector. These are view-owner host records, not
+    // device allocation payloads and not the separate observation shapes.
+    let scalar_view = GpuTensorHandle::view_host_upper_bytes(2)?;
+    let mask_view = GpuTensorHandle::view_host_upper_bytes(max_rank)?;
+    let views = mask_view
+        .checked_add(scalar_view)?
+        .max(scalar_view.checked_mul(2)?);
+    u64::try_from(bytes).ok()?.checked_add(views)
+}
 
 /// Selected catalog owner of probe diagnostics. The descriptor, not the
 /// presentation name, supplies the externally visible error identifier.
@@ -139,7 +182,9 @@ impl Reductions<'_> {
         output: GpuTensorHandle,
         builtin: RealProbeDiagnostic,
     ) -> BuiltinResult<()> {
-        let protected: Vec<_> = std::iter::once(self.input).chain(&self.owned).collect();
+        let mut protected = Vec::with_capacity(self.owned.len() + 1);
+        protected.push(self.input);
+        protected.extend(&self.owned);
         let contract = BinaryGpuOutputContract {
             shape: vec![1, 1],
             storage: GpuTensorStorage::Real,
@@ -195,7 +240,7 @@ pub async fn probe_real_extrema_observed(
     let precision = input_precision(provider, input, builtin)?;
     let mut reductions = Reductions {
         input,
-        owned: Vec::new(),
+        owned: Vec::with_capacity(if need_maximum { 2 } else { 1 }),
     };
     hook(observe, "reduce_min", input, builtin)?;
     match provider.reduce_min(input).await {

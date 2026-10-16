@@ -4,7 +4,13 @@ mod principal;
 mod real;
 
 use crate::{BuiltinCatalogEntry, RootKind};
-use runmat_types::{CallInference, CallRequest};
+use runmat_types::{CallInference, CallRequest, ValueFact};
+
+pub(in crate::catalog::inference) fn infer_principal_fusion_fact(
+    request: &CallRequest,
+) -> Option<ValueFact> {
+    principal::infer_fusion_fact(request)
+}
 
 pub(in crate::catalog::inference) fn infer(
     kind: RootKind,

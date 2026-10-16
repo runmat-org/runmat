@@ -73,6 +73,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 mod ownership;
 use ownership::{BufferPayload, BufferRecord, BufferStore};
 
+#[path = "fusion_gpu/staged_image.rs"]
+mod staged_image;
+
 fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
     test_helpers::compile_source(source).expect("compile source")
 }
@@ -176,8 +179,44 @@ impl TestProvider {
         guard
             .get(&handle.buffer_id())
             .filter(|record| record.owns(handle))
-            .map(|record| (record.data.to_f64(), handle.shape().to_vec()))
+            .and_then(|record| {
+                record
+                    .data
+                    .to_f64()
+                    .map(|data| (data, handle.shape().to_vec()))
+            })
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id()))
+    }
+
+    fn push_complex(
+        &self,
+        data: BufferPayload,
+        shape: Vec<usize>,
+        element: runmat_accelerate_api::NumericElementType,
+    ) -> GpuTensorHandle {
+        use runmat_accelerate_api::allocation::{AllocationIdentity, AllocationLease};
+        assert!(matches!(
+            data,
+            BufferPayload::ComplexF32(_) | BufferPayload::ComplexF64(_)
+        ));
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let physical = ownership::complex_physical_for(data.len(), element);
+        self.buffers
+            .lock()
+            .unwrap()
+            .insert(id, BufferRecord::new(data, shape.clone(), physical, false));
+        let registered = registered_provider().expect("registered fixture provider");
+        assert!(std::ptr::eq(self, registered.as_ref()));
+        let owner: runmat_accelerate_api::allocation::AllocationOwnerHandle = registered.clone();
+        let lease = AllocationLease::register(AllocationIdentity::new(0, id, 1), owner)
+            .expect("fixture complex allocation registration");
+        let handle = GpuTensorHandle::from_allocation(
+            lease,
+            runmat_accelerate_api::GpuTensorView::contiguous(shape),
+        )
+        .expect("fixture complex tensor view admission");
+        runmat_accelerate_api::mark_residency(&handle);
+        handle
     }
 
     fn push(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
@@ -235,12 +274,184 @@ impl TestProvider {
 }
 
 impl AccelProvider for TestProvider {
+    fn propose_power_pair_geometry(
+        &self,
+        inputs: &[runmat_accelerate_api::ProviderRepresentation; 2],
+        descriptions: &[runmat_accelerate_api::PowerInputDescription; 2],
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerPairPhysicalProjection>,
+    > {
+        self.staged_power_pair_geometry(inputs, descriptions, frozen)
+    }
+
+    fn propose_power_probe(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    > {
+        self.staged_power_probe(base, exponent, frozen)
+    }
+
+    fn execute_power_probe_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerProbeRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::power_service::PowerProbeObserved,
+    > {
+        Box::pin(async move { self.staged_power_probe_execute(recipe) })
+    }
+
+    fn propose_power_evaluation(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerEvaluationPhysicalProposal>,
+    > {
+        self.staged_power_evaluation(base, exponent, domain)
+    }
+
+    fn execute_power_evaluation_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerEvaluationRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move { self.staged_power_evaluation_execute(recipe) })
+    }
+
+    fn propose_real_binary(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealBinaryRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealBinaryPhysicalProposal>,
+    > {
+        self.staged_binary_proposal(request)
+    }
+
+    fn execute_real_binary_recipe<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealBinaryRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealBinary,
+    > {
+        Box::pin(async move {
+            staged_image::require_unmanaged_metadata(admission)?;
+            self.staged_binary_execute(lhs, rhs, recipe)
+        })
+    }
+
+    fn propose_real_elementwise(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealElementwiseRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealElementwisePhysicalProposal>,
+    > {
+        self.staged_real_proposal(request)
+    }
+
+    fn execute_real_elementwise_recipe<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealElementwiseRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move {
+            staged_image::require_unmanaged_metadata(admission)?;
+            self.staged_real_execute(input, recipe)
+        })
+    }
+
+    fn plan_dense_real_output_buffer_bytes(
+        &self,
+        output: &runmat_accelerate_api::ProviderRepresentation,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        if output.storage != ProviderStorage::DenseReal
+            || output.layout != runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+            || output.residency != runmat_accelerate_api::ProviderResidency::Device
+            || !matches!(
+                output.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            return Ok(None);
+        }
+        Ok(output.checked_byte_len())
+    }
+
+    fn plan_power_output_buffer_bytes(
+        &self,
+        planned: &runmat_accelerate_api::power_service::PowerSymbolicPlan,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        Ok(planned
+            .physical_work(domain)
+            .and_then(|work| work.output.checked_byte_len()))
+    }
+
+    fn plan_ordered_real_mean(
+        &self,
+        source: &runmat_accelerate_api::ProviderRepresentation,
+        source_buffer_bytes: u64,
+        axes_zero_based: &[usize],
+        output_precision: ProviderPrecision,
+        nan_mode: runmat_accelerate_api::ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMeanRecipe>> {
+        self.staged_mean_plan(
+            source,
+            source_buffer_bytes,
+            axes_zero_based,
+            output_precision,
+            nan_mode,
+        )
+    }
+
+    fn prepare_ordered_real_mean_against_recipe(
+        &self,
+        source: &GpuTensorHandle,
+        recipe: &runmat_accelerate_api::ProviderOrderedRealMeanRecipe,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        self.staged_mean_prepare(source, recipe)
+    }
+
+    fn execute_ordered_real_mean(
+        &self,
+        selected: runmat_accelerate_api::ProviderOrderedRealMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::ProviderExecutedOrderedRealMean,
+    > {
+        staged_image::require_unmanaged_metadata(admission)?;
+        self.staged_mean_execute(selected)
+    }
+
     fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
         const OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
             ("transfer.upload", ProviderOperationFamily::Upload),
             ("transfer.download", ProviderOperationFamily::Download),
             ("sin", ProviderOperationFamily::Elementwise),
+            ("minus", ProviderOperationFamily::Elementwise),
+            ("rdivide", ProviderOperationFamily::Elementwise),
             ("single", ProviderOperationFamily::Elementwise),
+            ("double", ProviderOperationFamily::Elementwise),
+            (
+                runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
+                ProviderOperationFamily::Elementwise,
+            ),
             ("sum", ProviderOperationFamily::Reduction),
             ("fusion.elementwise", ProviderOperationFamily::Fusion),
             ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
@@ -263,7 +474,12 @@ impl AccelProvider for TestProvider {
                     family: *family,
                 })
                 .collect(),
-            element_types: vec![ProviderElementType::F32, ProviderElementType::F64],
+            element_types: vec![
+                ProviderElementType::F32,
+                ProviderElementType::F64,
+                ProviderElementType::ComplexF32,
+                ProviderElementType::ComplexF64,
+            ],
             max_rank: None,
             max_allocation_bytes: None,
             concurrency: ProviderConcurrencyCapabilities {
@@ -285,6 +501,191 @@ impl AccelProvider for TestProvider {
             );
         }
         let capability = self.capability_snapshot();
+        if query.operation.0 == runmat_builtins::POWER_CATALOG_ENTRY.identity.name
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.outputs.is_empty()
+            && query.inputs.len() == 2
+            && query.inputs[0].element_type == ProviderElementType::F32
+            && query.inputs[0].storage == ProviderStorage::DenseReal
+            && query.inputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && query.inputs[1].element_type == ProviderElementType::F64
+            && query.inputs[1].residency == runmat_accelerate_api::ProviderResidency::Host
+            && query.workload.numerical_domain
+                == runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                    runmat_accelerate_api::PowerResultDomain::Real,
+                )
+        {
+            if let Some(work) = &query.workload.real_power_scalar {
+                if runmat_accelerate_api::ExactSingleBasePower::for_control(work.control).is_some()
+                {
+                    if let Some(bytes) = work.input.as_ref().map(|input| input.requested_bytes()) {
+                        if let Some(request) =
+                            runmat_accelerate_api::power_service::exact_single_base_request(
+                                &query.inputs[0],
+                                work.control,
+                                runmat_accelerate_api::RealPowerOperand::Base,
+                                bytes,
+                            )
+                        {
+                            if let Ok(Some(physical)) = self.staged_real_proposal(&request) {
+                                return ProviderFeasibility::supported(ProviderResourceEstimate {
+                                    transient_bytes: Some(physical.uniform_buffer_bytes),
+                                    output_bytes: Some(physical.output_buffer_bytes),
+                                    dispatches: Some(physical.dispatches),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if query.operation.0 == runmat_builtins::POWER_CATALOG_ENTRY.identity.name
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.outputs.is_empty()
+            && query.inputs.len() == 2
+            && query.workload.real_power_mode.is_some()
+            && matches!(
+                query.workload.numerical_domain,
+                runmat_accelerate_api::NumericalDomainEvidence::RealPower(_)
+            )
+            && query.inputs.iter().all(|input| {
+                input.storage == ProviderStorage::DenseReal
+                    && input.layout == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                    && matches!(
+                        input.element_type,
+                        ProviderElementType::F32 | ProviderElementType::F64
+                    )
+                    && input.checked_byte_len().is_some()
+            })
+            && query
+                .inputs
+                .iter()
+                .filter(|input| input.residency == runmat_accelerate_api::ProviderResidency::Device)
+                .count()
+                == 1
+            && query
+                .inputs
+                .iter()
+                .filter(|input| {
+                    input.residency == runmat_accelerate_api::ProviderResidency::Host
+                        && input.checked_element_count() == Some(1)
+                })
+                .count()
+                == 1
+        {
+            let base = &query.inputs[0];
+            let exponent = &query.inputs[1];
+            let output_shape = base
+                .shape
+                .iter()
+                .copied()
+                .map(usize::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+                .zip(
+                    exponent
+                        .shape
+                        .iter()
+                        .copied()
+                        .map(usize::try_from)
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok(),
+                )
+                .and_then(|(base, exponent)| {
+                    runmat_types::geometry::broadcast_concrete_shape(&base, &exponent).ok()
+                });
+            if let Some(shape) = output_shape {
+                let elements = shape.iter().try_fold(1_u64, |n, &extent| {
+                    n.checked_mul(u64::try_from(extent).ok()?)
+                });
+                // Symbolic feasibility has one device operand and one host
+                // scalar. The paired physical hook sees two device operands
+                // only after the exact scalar upload (and any widening).
+                let element_width = match query.workload.real_power_mode {
+                    Some(runmat_accelerate_api::RealPowerArithmeticMode::NativeSingle) => 4,
+                    Some(_) => 8,
+                    None => {
+                        return ProviderFeasibility::rejected(
+                            runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                            "test_provider.power_mode.unavailable",
+                        )
+                    }
+                };
+                let complex_width = if query.workload.numerical_domain
+                    == runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                        runmat_accelerate_api::PowerResultDomain::Complex,
+                    ) {
+                    2
+                } else {
+                    1
+                };
+                if let Some(output_bytes) = elements
+                    .and_then(|n| n.checked_mul(element_width))
+                    .and_then(|n| n.checked_mul(complex_width))
+                {
+                    return ProviderFeasibility::supported(ProviderResourceEstimate {
+                        transient_bytes: Some(0),
+                        output_bytes: Some(output_bytes),
+                        dispatches: Some(1),
+                    });
+                }
+            }
+        }
+        if query.operation.0 == "transfer.upload"
+            && query.family == ProviderOperationFamily::Upload
+            && query.outputs.len() == 1
+            && runmat_accelerate_api::class_preserving_upload_query(query.outputs.clone()).as_ref()
+                == Some(query)
+            && matches!(
+                query.outputs[0].element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            return ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: Some(0),
+                output_bytes: query.outputs[0].checked_byte_len(),
+                dispatches: Some(1),
+            });
+        }
+        if matches!(query.operation.0.as_str(), "single" | "double")
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.inputs.len() == 1
+            && query.outputs.len() == 1
+            && query.inputs[0].shape == query.outputs[0].shape
+            && query.inputs[0].storage == ProviderStorage::DenseReal
+            && query.outputs[0].storage == ProviderStorage::DenseReal
+            && query.inputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && query.outputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && matches!(
+                query.inputs[0].element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            let target = if query.operation.0 == "single" {
+                ProviderPrecision::F32
+            } else {
+                ProviderPrecision::F64
+            };
+            if query.outputs[0].element_type == ProviderElementType::from(target)
+                && query.workload
+                    == (runmat_accelerate_api::ProviderWorkload {
+                        preparation_route: Some(
+                            runmat_accelerate_api::ProviderPreparationRoute::FloatingCast {
+                                target,
+                            },
+                        ),
+                        ..runmat_accelerate_api::ProviderWorkload::default()
+                    })
+            {
+                let changing = query.inputs[0].element_type != query.outputs[0].element_type;
+                let output_bytes = query.outputs[0].checked_byte_len();
+                return ProviderFeasibility::supported(ProviderResourceEstimate {
+                    transient_bytes: output_bytes,
+                    output_bytes,
+                    dispatches: Some(u32::from(changing)),
+                });
+            }
+        }
         let native_single_image = query.operation
             == ProviderOperationIdentity::new(
                 runmat_accelerate::placement::fusion_operation_token(&FusionKind::ImageNormalize),
@@ -298,12 +699,68 @@ impl AccelProvider for TestProvider {
             query.family,
             query.inputs.as_slice(),
         ) {
+            ("minus" | "rdivide", ProviderOperationFamily::Elementwise, [lhs, rhs])
+                if query.outputs.is_empty()
+                    && lhs.element_type == rhs.element_type
+                    && matches!(
+                        lhs.element_type,
+                        ProviderElementType::F32 | ProviderElementType::F64
+                    )
+                    && [lhs, rhs].iter().all(|input| {
+                        input.storage == ProviderStorage::DenseReal
+                            && input.layout
+                                == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                            && input.residency == runmat_accelerate_api::ProviderResidency::Device
+                    }) =>
+            {
+                let shapes = lhs
+                    .shape
+                    .iter()
+                    .copied()
+                    .map(usize::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    .zip(
+                        rhs.shape
+                            .iter()
+                            .copied()
+                            .map(usize::try_from)
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok(),
+                    );
+                shapes.and_then(|(lhs_shape, rhs_shape)| {
+                    runmat_types::geometry::broadcast_concrete_shape(&lhs_shape, &rhs_shape)
+                        .ok()
+                        .and_then(|shape| {
+                            let expansions =
+                                u64::from(lhs_shape != shape) + u64::from(rhs_shape != shape);
+                            shape
+                                .iter()
+                                .copied()
+                                .try_fold(1_u64, |n, dim| n.checked_mul(u64::try_from(dim).ok()?))
+                                .and_then(|count| {
+                                    count.checked_mul(
+                                        if lhs.element_type == ProviderElementType::F32 {
+                                            4
+                                        } else {
+                                            8
+                                        },
+                                    )
+                                })
+                                .and_then(|output| {
+                                    output
+                                        .checked_mul(expansions)
+                                        .map(|scratch| (output, scratch))
+                                })
+                        })
+                })
+            }
             ("sin", ProviderOperationFamily::Elementwise, [input])
                 if input.element_type == ProviderElementType::F64
                     && input.storage == ProviderStorage::DenseReal
                     && query.outputs.is_empty() =>
             {
-                input.checked_byte_len()
+                input.checked_byte_len().map(|bytes| (bytes, bytes))
             }
             ("single", ProviderOperationFamily::Elementwise, [input])
                 if matches!(
@@ -315,6 +772,7 @@ impl AccelProvider for TestProvider {
                 input
                     .checked_element_count()
                     .and_then(|count| count.checked_mul(4))
+                    .map(|bytes| (bytes, bytes))
             }
             ("sum", ProviderOperationFamily::Reduction, [input])
                 if input.element_type == ProviderElementType::F64
@@ -333,13 +791,14 @@ impl AccelProvider for TestProvider {
                     shape
                         .into_iter()
                         .try_fold(8_u64, |bytes, extent| bytes.checked_mul(extent))
+                        .map(|bytes| (bytes, bytes))
                 })
             }
             _ => None,
         };
-        if let Some(bytes) = ordinary {
+        if let Some((bytes, scratch)) = ordinary {
             return ProviderFeasibility::supported(ProviderResourceEstimate {
-                transient_bytes: Some(bytes),
+                transient_bytes: Some(scratch),
                 output_bytes: Some(bytes),
                 dispatches: Some(1),
             });
@@ -396,6 +855,93 @@ impl AccelProvider for TestProvider {
         })
     }
 
+    fn upload_physical_evidence(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        if query.operation.0 != "transfer.upload" || query.family != ProviderOperationFamily::Upload
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        // The F32 software upload first widens the borrowed source into a
+        // temporary f64 Vec before constructing the retained F32 buffer.
+        // Count that transient and the copied shape separately from output.
+        let output = &query.outputs[0];
+        let host_workspace_bytes = match output.element_type {
+            ProviderElementType::F32 => output.checked_element_count()?.checked_mul(8)?,
+            ProviderElementType::F64 => 0,
+            _ => return None,
+        }
+        .checked_add(
+            u64::try_from(output.shape.len())
+                .ok()?
+                .checked_mul(u64::try_from(std::mem::size_of::<usize>()).ok()?)?,
+        )?;
+        Some(runmat_accelerate_api::ProviderUploadPhysicalEvidence {
+            output_requested_bytes: estimate.output_bytes?,
+            host_workspace_bytes: runmat_execution::ResourceByteBound::Known(host_workspace_bytes),
+            provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(0),
+            completion_queue_slots: 1,
+        })
+    }
+
+    fn numeric_upload_physical_evidence(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
+        let upload = self.upload_physical_evidence(query)?;
+        Some(
+            runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence {
+                output_requested_bytes: upload.output_requested_bytes,
+                provider_scratch_bytes: upload.provider_scratch_bytes,
+                completion_queue_slots: upload.completion_queue_slots,
+            },
+        )
+    }
+
+    fn floating_cast_physical_evidence(
+        &self,
+        input: &runmat_accelerate_api::ProviderRepresentation,
+        target: ProviderPrecision,
+    ) -> Option<runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence> {
+        let (source_precision, component_lanes) = match (input.element_type, input.storage) {
+            (ProviderElementType::F32, ProviderStorage::DenseReal)
+            | (ProviderElementType::F64, ProviderStorage::DenseReal) => (input.element_type, 1),
+            (ProviderElementType::ComplexF32, ProviderStorage::DenseComplexInterleaved) => {
+                (ProviderElementType::F32, 2)
+            }
+            (ProviderElementType::ComplexF64, ProviderStorage::DenseComplexInterleaved) => {
+                (ProviderElementType::F64, 2)
+            }
+            _ => return None,
+        };
+        if source_precision == ProviderElementType::from(target)
+            || input.layout != runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+            || input.residency != runmat_accelerate_api::ProviderResidency::Device
+        {
+            return None;
+        }
+        let width = if target == ProviderPrecision::F32 {
+            4
+        } else {
+            8
+        };
+        Some(
+            runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence {
+                output_requested_bytes: input
+                    .checked_element_count()?
+                    .checked_mul(width)?
+                    .checked_mul(component_lanes)?,
+                uniform_buffer_bytes: 0,
+                dispatches: 1,
+                queue_slots: 1,
+            },
+        )
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,
@@ -450,7 +996,10 @@ impl AccelProvider for TestProvider {
                     target.buffer_id()
                 ));
             }
-            target_buf.data.write(lin, vals[pos]);
+            target_buf
+                .data
+                .write(lin, vals[pos])
+                .map_err(|error| anyhow!(error))?;
         }
         Ok(())
     }
@@ -525,22 +1074,33 @@ impl AccelProvider for TestProvider {
         Box::pin(async move {
             suspension::pending_download_if_armed(handle).await;
             self.numeric_downloads.fetch_add(1, Ordering::Relaxed);
-            let (data, shape) = self.pull(handle)?;
-            let data = match handle.descriptor().element_type {
-                Some(runmat_accelerate_api::NumericElementType::F32) => {
-                    HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect())
+            let data = {
+                let guard = self.buffers.lock().unwrap();
+                let record = guard
+                    .get(&handle.buffer_id())
+                    .filter(|record| record.owns(handle))
+                    .ok_or_else(|| anyhow!("numeric download source is not live"))?;
+                match &record.data {
+                    BufferPayload::F32(values) => HostNumericDataOwned::F32(values.clone()),
+                    BufferPayload::F64(values) => HostNumericDataOwned::F64(values.clone()),
+                    BufferPayload::U8(values) => HostNumericDataOwned::U8(values.clone()),
+                    BufferPayload::ComplexF32(values) => HostNumericDataOwned::F32(
+                        values
+                            .iter()
+                            .flat_map(|(real, imag)| [*real, *imag])
+                            .collect(),
+                    ),
+                    BufferPayload::ComplexF64(values) => HostNumericDataOwned::F64(
+                        values
+                            .iter()
+                            .flat_map(|(real, imag)| [*real, *imag])
+                            .collect(),
+                    ),
                 }
-                Some(runmat_accelerate_api::NumericElementType::F64) => {
-                    HostNumericDataOwned::F64(data)
-                }
-                Some(runmat_accelerate_api::NumericElementType::U8) => {
-                    HostNumericDataOwned::U8(data.into_iter().map(|value| value as u8).collect())
-                }
-                other => bail!("test provider cannot download numeric element type {other:?}"),
             };
             Ok(HostNumericTensorOwned {
                 data,
-                shape,
+                shape: handle.shape().to_vec(),
                 storage: handle
                     .descriptor()
                     .storage
@@ -592,9 +1152,7 @@ impl AccelProvider for TestProvider {
         &self,
         source: &GpuTensorHandle,
     ) -> runmat_execution::ResourceByteBound {
-        let bytes = source.shape().iter().try_fold(8_u64, |n, &extent| {
-            n.checked_mul(u64::try_from(extent).ok()?)
-        });
+        let bytes = Some(source.physical().payload_bytes());
         match bytes.and_then(|bytes| {
             bytes.checked_add(
                 u64::try_from(source.shape().len())
@@ -1177,6 +1735,57 @@ impl AccelProvider for TestProvider {
         Box::pin(async move {
             suspension::pending_single_if_armed().await;
             self.single_inputs.lock().unwrap().push(input.buffer_id());
+            if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F32 {
+                let live_same_class = self
+                    .buffers
+                    .lock()
+                    .unwrap()
+                    .get(&input.buffer_id())
+                    .is_some_and(|record| {
+                        record.owns(input)
+                            && record.shape == input.shape()
+                            && matches!(
+                                &record.data,
+                                BufferPayload::F32(_) | BufferPayload::ComplexF32(_)
+                            )
+                    });
+                if !live_same_class {
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                        anyhow!("same-class Single source is not live"),
+                    ));
+                }
+                // The declared zero-dispatch cast is an exact owned view of
+                // the input, not a new physical allocation.
+                return Ok(input.clone());
+            }
+            if input.physical().storage()
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                let data = {
+                    let guard = self.buffers.lock().unwrap();
+                    let record = guard
+                        .get(&input.buffer_id())
+                        .filter(|record| record.owns(input))
+                        .ok_or_else(|| anyhow!("complex Single source is not live"))?;
+                    match &record.data {
+                        BufferPayload::ComplexF32(values) => values.clone(),
+                        BufferPayload::ComplexF64(values) => values
+                            .iter()
+                            .map(|(real, imag)| (*real as f32, *imag as f32))
+                            .collect(),
+                        _ => {
+                            return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                                anyhow!("complex Single source payload is not complex"),
+                            ))
+                        }
+                    }
+                };
+                return Ok(self.push_complex(
+                    BufferPayload::ComplexF32(data),
+                    input.shape().to_vec(),
+                    runmat_accelerate_api::NumericElementType::F32,
+                ));
+            }
             let (data, shape) = self.pull(input)?;
             let single = data
                 .into_iter()
@@ -1193,6 +1802,42 @@ impl AccelProvider for TestProvider {
             )
             .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
         })
+    }
+
+    fn elem_sub<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_binary(
+                lhs,
+                rhs,
+                runmat_accelerate_api::ProviderRealBinaryOperation::Sub,
+            )
+        })
+    }
+
+    fn elem_div<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_binary(
+                lhs,
+                rhs,
+                runmat_accelerate_api::ProviderRealBinaryOperation::Div,
+            )
+        })
+    }
+
+    fn repmat(
+        &self,
+        input: &GpuTensorHandle,
+        repetitions: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.ordinary_real_repmat(input, repetitions)
     }
 
     fn fused_elementwise<'a>(
@@ -4636,6 +5281,7 @@ fn image_normalize_feasibility_admits_native_single_without_widening_other_fusio
 #[test]
 fn image_normalize_matches_cpu() {
     gc_test_context(|| {
+        let _accel_guard = accel_test_lock();
         fusion_diagnostics::enable();
         use runmat_accelerate::FusionKind;
         let source = r#"
@@ -4662,6 +5308,12 @@ fn image_normalize_matches_cpu() {
                 .iter()
                 .any(|group| matches!(group.kind, FusionKind::ImageNormalize)),
             "nested image-normalization group not detected: {graph:#?}"
+        );
+        assert!(
+            !bytecode
+                .prospective_image_normalize_publications()
+                .is_empty(),
+            "nested image source must seal an executable VM publication region"
         );
 
         let out_index = bytecode
@@ -4778,6 +5430,7 @@ fn image_normalize_vecdim_double_reduction_does_not_claim_native_fusion() {
 #[test]
 fn image_normalize_vecdim_matches_cpu() {
     gc_test_context(|| {
+        let _accel_guard = accel_test_lock();
         use runmat_accelerate::{FusionKind, FusionPattern};
         let source = r#"
         rng(0); B=2; H=4; W=5;

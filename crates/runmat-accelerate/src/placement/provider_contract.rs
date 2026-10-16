@@ -131,12 +131,11 @@ pub(crate) fn tensor_representation(
     value: &Value,
     provider_precision: ProviderPrecision,
 ) -> Option<ProviderRepresentation> {
-    let scalar_shape = [1, 1];
     let (element_type, storage, shape, residency) = match value {
         Value::Tensor(tensor) => (
             provider_element_type(tensor.numeric_dtype()),
             ProviderStorage::DenseReal,
-            tensor.shape(),
+            tensor.shape().to_vec(),
             ProviderResidency::Host,
         ),
         Value::GpuTensor(handle) => {
@@ -166,20 +165,20 @@ pub(crate) fn tensor_representation(
             (
                 element_type,
                 storage,
-                handle.shape(),
+                handle.shape().to_vec(),
                 ProviderResidency::Device,
             )
         }
         Value::Num(_) => (
             ProviderElementType::F64,
             ProviderStorage::DenseReal,
-            scalar_shape.as_slice(),
+            vec![1, 1],
             ProviderResidency::Host,
         ),
         Value::Int(integer) => (
             provider_element_type(integer.numeric_dtype()),
             ProviderStorage::DenseReal,
-            scalar_shape.as_slice(),
+            vec![1, 1],
             ProviderResidency::Host,
         ),
         _ => return None,
@@ -194,8 +193,8 @@ pub(crate) fn tensor_representation(
             ProviderLayout::ColumnMajorContiguous
         },
         shape: shape
-            .iter()
-            .map(|&extent| u64::try_from(extent).unwrap_or(u64::MAX))
+            .into_iter()
+            .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))
             .collect(),
         residency,
     })
@@ -485,12 +484,24 @@ pub(crate) fn wgpu_feasibility(
     {
         return result;
     }
-    let snapshot =
-        exact_float_upload_snapshot(wgpu_capability_snapshot(provider, max_buffer_bytes), query);
+    // The provider owns one immutable inventory. Ordinary query paths borrow
+    // it; only the exact upload exception needs a detached modified value.
+    let fallback_inventory = provider
+        .capability_snapshot_ref()
+        .is_none()
+        .then(|| wgpu_capability_snapshot(provider, max_buffer_bytes));
+    let inventory = provider
+        .capability_snapshot_ref()
+        .or(fallback_inventory.as_ref())
+        .expect("one capability inventory route is selected");
+    let upload = (query.operation.0 == "transfer.upload"
+        && query.family == ProviderOperationFamily::Upload)
+        .then(|| exact_float_upload_snapshot(inventory.clone(), query));
+    let snapshot = upload.as_ref().unwrap_or(inventory);
     if let Some(result) = logarithm_roots::feasibility(
         real_unary::HookProfile::Wgpu,
         provider.precision(),
-        &snapshot,
+        snapshot,
         query,
     ) {
         return result;
@@ -499,7 +510,7 @@ pub(crate) fn wgpu_feasibility(
         power::HookProfile::Wgpu,
         provider.precision(),
         provider,
-        &snapshot,
+        snapshot,
         query,
     ) {
         return result;
@@ -507,19 +518,19 @@ pub(crate) fn wgpu_feasibility(
     arithmetic::feasibility(
         arithmetic::HookProfile::Wgpu,
         provider.precision(),
-        &snapshot,
+        snapshot,
         query,
     )
     .or_else(|| {
         complex_components::feasibility(
             complex_components::HookProfile::Wgpu,
             provider.precision(),
-            &snapshot,
+            snapshot,
             query,
         )
     })
     .unwrap_or_else(|| {
-        bounded_transfer::wgpu_dense_feasibility(&snapshot, query, provider.precision())
+        bounded_transfer::wgpu_dense_feasibility(snapshot, query, provider.precision())
     })
 }
 
@@ -638,6 +649,17 @@ fn dense_feasibility_with_bytes(
     query: &ProviderFeasibilityQuery,
     allocation_bytes: impl Fn(&ProviderRepresentation) -> Option<u64>,
 ) -> ProviderFeasibility {
+    dense_feasibility_with_extra_elements(snapshot, query, allocation_bytes, &[])
+}
+
+/// A query-local arithmetic mode may admit exact additional floating classes
+/// without cloning or widening the provider's immutable capability inventory.
+fn dense_feasibility_with_extra_elements(
+    snapshot: &ProviderCapabilitySnapshot,
+    query: &ProviderFeasibilityQuery,
+    allocation_bytes: impl Fn(&ProviderRepresentation) -> Option<u64>,
+    additional_elements: &[ProviderElementType],
+) -> ProviderFeasibility {
     if !snapshot.supports_operation(&query.operation, query.family) {
         return ProviderFeasibility::rejected(
             ProviderRejectionCode::UnsupportedOperation,
@@ -658,6 +680,7 @@ fn dense_feasibility_with_bytes(
         if !snapshot
             .element_types
             .contains(&representation.element_type)
+            && !additional_elements.contains(&representation.element_type)
         {
             return ProviderFeasibility::rejected(
                 ProviderRejectionCode::UnsupportedElementType,

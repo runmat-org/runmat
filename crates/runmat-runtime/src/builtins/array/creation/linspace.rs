@@ -1,20 +1,19 @@
 //! MATLAB-compatible `linspace` builtin with GPU-aware semantics for RunMat.
+use runmat_builtins::{
+    LINSPACE_ERROR_ARG_COUNT, LINSPACE_ERROR_COUNT_NOT_FINITE, LINSPACE_ERROR_COUNT_NOT_SCALAR,
+    LINSPACE_ERROR_COUNT_TOO_LARGE,
+};
 
 use log::trace;
 use runmat_accelerate_api::ProviderPrecision;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::Type;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
+#[cfg(test)]
 use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
@@ -22,6 +21,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::linspace")]
@@ -88,174 +88,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
 
+#[cfg(test)]
 fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     row_vector_type(ctx)
 }
 
-const LINSPACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Row vector of linearly spaced values.",
-}];
-
-const LINSPACE_SIG_2_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Starting value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ending value.",
-    },
-];
-
-const LINSPACE_SIG_3_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Starting value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ending value.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("100"),
-        description: "Number of points.",
-    },
-];
-
-const LINSPACE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "x = linspace(start, stop)",
-        inputs: &LINSPACE_SIG_2_INPUTS,
-        outputs: &LINSPACE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = linspace(start, stop, n)",
-        inputs: &LINSPACE_SIG_3_INPUTS,
-        outputs: &LINSPACE_OUTPUT,
-    },
-];
-
-const LINSPACE_INTEGER_ENDPOINT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "start",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer endpoints are rejected; linspace endpoints must be single or double.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "stop",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer endpoints are rejected; linspace endpoints must be single or double.",
-    },
-];
-
-const LINSPACE_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are accepted as exact structural counts.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "x = linspace(integer_start, integer_stop[, n])",
-        inputs: &LINSPACE_INTEGER_ENDPOINT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes:
-            "Host and resident integer endpoints are rejected before numeric sequence generation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "x = linspace(start, stop, integer_n)",
-        inputs: &LINSPACE_INTEGER_COUNT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The count is read exactly; output class follows the floating-point endpoints.",
-    },
-];
-
-const LINSPACE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINSPACE.ARG_COUNT",
-    identifier: None,
-    when: "More than three input arguments are provided.",
-    message: "linspace: expected at most three input arguments",
-};
-
-const LINSPACE_ERROR_COUNT_NOT_SCALAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINSPACE.COUNT_NOT_SCALAR",
-    identifier: None,
-    when: "The count argument is not a numeric scalar value.",
-    message: "linspace: number of points must be a scalar",
-};
-
-const LINSPACE_ERROR_COUNT_NOT_FINITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINSPACE.COUNT_NOT_FINITE",
-    identifier: None,
-    when: "The count argument is infinite.",
-    message: "linspace: number of points must not be infinite",
-};
-
-const LINSPACE_ERROR_COUNT_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINSPACE.COUNT_TOO_LARGE",
-    identifier: None,
-    when: "The count argument exceeds platform limits.",
-    message: "linspace: number of points is too large for this platform",
-};
-
-const LINSPACE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    LINSPACE_ERROR_ARG_COUNT,
-    LINSPACE_ERROR_COUNT_NOT_SCALAR,
-    LINSPACE_ERROR_COUNT_NOT_FINITE,
-    LINSPACE_ERROR_COUNT_TOO_LARGE,
-];
-
-pub const LINSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LINSPACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LINSPACE_ERRORS,
-};
-
 #[runtime_builtin(
     name = "linspace",
-    category = "array/creation",
-    summary = "Generate linearly spaced row vectors.",
-    keywords = "linspace,range,vector,gpu",
-    examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
-    accel = "array_construct",
-    type_resolver(linspace_type),
-    descriptor(crate::builtins::array::creation::linspace::LINSPACE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::creation::linspace::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(

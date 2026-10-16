@@ -58,11 +58,11 @@ fn fixture() -> (ImageSourceInvocation, ImageMeanAndPowerSource) {
             },
         };
     let invocation = ImageSourceInvocation {
-        source: ImageSourceTranscript {
+        source: std::sync::Arc::new(ImageSourceTranscript {
             leaves: vec![],
             steps: vec![step(1, vec![20, 21], 22), step(2, vec![37, 38], 39)],
             checkpoints: vec![],
-        },
+        }),
         facts: vec![
             (20, single.clone()),
             (21, double),
@@ -96,6 +96,7 @@ fn fixture() -> (ImageSourceInvocation, ImageMeanAndPowerSource) {
                 RealPowerArithmeticMode::NativeSingle,
             ),
         ],
+        probe_observed: false,
         publications_bound: false,
     };
     (invocation, source)

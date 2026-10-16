@@ -391,6 +391,7 @@ impl AccelProvider for TypedCallerProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         recipe: &'a ProviderRealElementwiseRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
         self.cast_executions.fetch_add(1, Ordering::SeqCst);
         let element = match recipe.output().element_type {

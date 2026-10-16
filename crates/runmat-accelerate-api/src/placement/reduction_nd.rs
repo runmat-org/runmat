@@ -84,6 +84,10 @@ pub struct ProviderColdNdMean {
     output_shape: Vec<usize>,
     requested_output_bytes: u64,
     requested_uniform_bytes: u64,
+    requested_cache_metadata_payload_bytes: u64,
+    cache_view_grants: Option<[Box<dyn runmat_execution::resource::RetainedHostViewGrant>; 2]>,
+    cache_metadata_claim:
+        Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
 }
 
 /// Provider-produced completion facts for the selected cold moments kernel.
@@ -109,6 +113,7 @@ impl ProviderColdNdMean {
         output_shape: Vec<usize>,
         requested_output_bytes: u64,
         requested_uniform_bytes: u64,
+        requested_cache_metadata_payload_bytes: u64,
     ) -> Self {
         Self {
             source,
@@ -116,7 +121,45 @@ impl ProviderColdNdMean {
             output_shape,
             requested_output_bytes,
             requested_uniform_bytes,
+            requested_cache_metadata_payload_bytes,
+            cache_view_grants: None,
+            cache_metadata_claim: None,
         }
+    }
+
+    /// Bind two single-use host-view claims before the cold selected kernel
+    /// runs. The provider retains these exact views with its cache pair; a
+    /// failed or declined execution drops the unconsumed grants.
+    pub fn with_cache_view_grants(
+        mut self,
+        grants: [Box<dyn runmat_execution::resource::RetainedHostViewGrant>; 2],
+    ) -> Self {
+        self.cache_view_grants = Some(grants);
+        self
+    }
+
+    pub fn take_cache_view_grants(
+        &mut self,
+    ) -> Option<[Box<dyn runmat_execution::resource::RetainedHostViewGrant>; 2]> {
+        self.cache_view_grants.take()
+    }
+
+    pub fn with_cache_metadata_claim(
+        mut self,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> Self {
+        self.cache_metadata_claim = Some(claim);
+        self
+    }
+
+    pub fn take_cache_metadata_claim(
+        &mut self,
+    ) -> Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>> {
+        self.cache_metadata_claim.take()
+    }
+
+    pub fn requested_cache_metadata_payload_bytes(&self) -> u64 {
+        self.requested_cache_metadata_payload_bytes
     }
 
     pub fn source(&self) -> &GpuTensorHandle {

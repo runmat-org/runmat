@@ -139,6 +139,15 @@ fn typed_future_allocator_extent_survives_live_binding() {
         prepared.symbolic_plan().resident_input_description(),
         Some(crate::PowerInputDescription::Live { .. })
     ));
+    assert!(plan.matches_live_typed_binding(prepared.symbolic_plan(), &source.handle));
+    let changed_view = provider
+        .owner
+        .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(!plan.matches_live_typed_binding(prepared.symbolic_plan(), &changed_view.handle));
+    let mut altered_control = prepared.symbolic_plan().clone();
+    altered_control.control = PowerScalarControl::SingleBits(2.0_f32.to_bits());
+    assert!(!plan.matches_live_typed_binding(&altered_control, &source.handle));
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.probes.load(Ordering::SeqCst), 0);
     assert_eq!(source.probe.retirements(), 0);
@@ -316,7 +325,7 @@ fn symbolic_mixed_recipe_matches_live_preparation_and_preserves_source_controls(
         operation.clone(),
     )
     .unwrap();
-    assert_eq!(actual.symbolic_plan(), &plan);
+    assert!(plan.matches_live_typed_binding(actual.symbolic_plan(), &source.handle));
     assert_eq!(actual.physical_recipe(), plan.physical_recipe());
     assert_eq!(
         actual.feasibility_query(PowerResultDomain::Real),
@@ -437,7 +446,7 @@ fn symbolic_native_single_uses_exact_upload_without_widening() {
         operation,
     )
     .unwrap();
-    assert_eq!(prepared.symbolic_plan(), &plan);
+    assert!(plan.matches_live_typed_binding(prepared.symbolic_plan(), &source.handle));
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.probes.load(Ordering::SeqCst), 0);
 }

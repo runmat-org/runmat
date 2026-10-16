@@ -4,12 +4,20 @@
 use super::*;
 use crate::bytecode::{ImageCheckpoint, ImageLiveOutSource, ImageStoreDestination};
 use runmat_accelerate::fusion::FusionStoreMaterialization;
-use runmat_accelerate::fusion_exec::{ImageVmPreparation, ImageVmStages};
+use runmat_accelerate::fusion_exec::{ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages};
 use runmat_accelerate::graph::ValueOrigin;
 
 pub(super) enum ImageStageOutcome {
     Declined,
-    Executed { next_pc: usize },
+    Executed {
+        next_pc: usize,
+    },
+    #[cfg(feature = "wgpu")]
+    Original {
+        span: runmat_accelerate::InstrSpan,
+        publication: std::rc::Rc<crate::bytecode::ImageNormalizePublicationJoin>,
+        route: Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>,
+    },
 }
 
 pub(super) struct ImageStageFrame<'a> {
@@ -69,6 +77,7 @@ pub(super) async fn execute(
     let Some(selected) = installation.region_starting_at(pc, &frame.context.runtime) else {
         return Ok(ImageStageOutcome::Declined);
     };
+    let outer_started = runmat_time::Instant::now();
     let join = &selected.region.publication;
     // Only a selected source checkpoint can satisfy a region live-out. An
     // intermediate MIR slot cannot be omitted merely because it is unnamed.
@@ -86,27 +95,48 @@ pub(super) async fn execute(
     }) {
         return Ok(ImageStageOutcome::Declined);
     }
-    let Some(inputs) = installation.capture_inputs(selected.region, frame.vars, frame.context)
+    let Some(captured) = installation
+        .capture_inputs(
+            selected.region,
+            frame.vars,
+            frame.context,
+            &frame.context.runtime,
+        )
+        .map_err(|error| {
+            accel_fusion::fusion_execution_error(
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?
     else {
-        return Ok(ImageStageOutcome::Declined);
-    };
-    let Some(publications) = join.source_publications() else {
         return Ok(ImageStageOutcome::Declined);
     };
     let prepared = ImageVmStages::prepare(ImageVmPreparation {
         graph: selected.graph,
         plan: &selected.region.plan,
         source: std::sync::Arc::clone(&selected.region.source),
-        inputs: &inputs,
-        publications: &publications,
+        inputs: &captured.values,
+        publications: &selected.region.source_publications,
         runtime: &frame.context.runtime,
         placement: None,
         decline: Some(&selected.decline),
+        completion: selected.completion,
+        started: outer_started,
     })
     .await;
+    // The selected continuation retains its own authenticated preparation;
+    // release VM input clones and their reservation before stage execution.
+    drop(captured);
     let mut stage = match prepared {
-        Ok(Some(stage)) => stage,
-        Ok(None) => return Ok(ImageStageOutcome::Declined),
+        Ok(ImageVmSelectedRoute::Provider(stage)) => stage,
+        #[cfg(feature = "wgpu")]
+        Ok(ImageVmSelectedRoute::Original(route)) => {
+            return Ok(ImageStageOutcome::Original {
+                span: selected.region.plan.group.span.clone(),
+                publication: std::rc::Rc::clone(&selected.region.publication),
+                route,
+            });
+        }
+        Ok(ImageVmSelectedRoute::Declined) => return Ok(ImageStageOutcome::Declined),
         Err(error) if error.is_unsupported() => return Ok(ImageStageOutcome::Declined),
         Err(error) => return Err(accel_fusion::fusion_execution_error(error)),
     };
@@ -172,6 +202,9 @@ pub(super) async fn execute(
         stage
             .acknowledge_output_checkpoint(output.source_output)
             .map_err(accel_fusion::fusion_execution_error)?;
+    }
+    if let Some(completion) = stage.into_vm_completion_after_tail().await {
+        completion.complete(outer_started);
     }
     Ok(ImageStageOutcome::Executed {
         next_pc: join.pcs().end,

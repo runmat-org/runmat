@@ -14,14 +14,15 @@ fn insert(
     source: u64,
     bytes: u64,
 ) -> (bool, Vec<TestMomentPair>) {
-    cache.insert(
-        (view, dims.to_vec()),
-        [source, view + 100, view + 200],
-        None,
-        Arc::new(view + 100),
-        Arc::new(view + 200),
+    cache.insert(bounded::MomentEntry {
+        key: (view, dims.to_vec()),
+        allocations: [source, view + 100, view + 200],
+        source_view: None,
+        mean: Arc::new(view + 100),
+        ex2: Arc::new(view + 200),
         bytes,
-    )
+        metadata_claim: None,
+    })
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

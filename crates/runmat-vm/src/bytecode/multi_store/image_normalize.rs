@@ -8,8 +8,9 @@ use runmat_accelerate::fusion::{
     },
     FusionGroup, FusionGroupPlan, FusionKind, FusionPattern, FusionPlan,
 };
-use runmat_accelerate::graph::{AccelGraph, ValueId, ValueOrigin};
+use runmat_accelerate::graph::{AccelGraph, ValueId, ValueOrigin, VarBinding};
 use runmat_types::{ProgramPointId, RegionValueId};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use super::{ProspectiveStore, SelectedMultiStoreGraph};
@@ -21,6 +22,7 @@ mod statement_region;
 use statement_region::{selected_image_region, ImageStatementRegion};
 #[path = "image_normalize/capture.rs"]
 mod capture;
+pub(crate) use capture::CapturedImageInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageNormalizePublicationJoin {
@@ -35,8 +37,17 @@ pub struct ImageNormalizePublicationJoin {
 #[derive(Debug)]
 pub(crate) struct SelectedImageRegion {
     pub(crate) plan: FusionGroupPlan,
-    pub(crate) publication: ImageNormalizePublicationJoin,
+    pub(crate) publication: Rc<ImageNormalizePublicationJoin>,
+    pub(crate) source_publications: Vec<ImageSourcePublication>,
     pub(crate) source: Arc<ImageSourceTranscript>,
+    entry_inputs: Vec<ImageEntryInput>,
+}
+
+#[derive(Debug)]
+enum ImageEntryInput {
+    Constant,
+    FoldedConstant,
+    Binding(VarBinding),
 }
 
 #[derive(Debug)]
@@ -160,7 +171,7 @@ impl Bytecode {
                 selected
                     .regions
                     .into_iter()
-                    .map(|region| region.publication)
+                    .map(|region| region.publication.as_ref().clone())
                     .collect()
             })
             .unwrap_or_default()
@@ -192,11 +203,9 @@ impl Bytecode {
                     return None;
                 }
                 let publication = reconcile_image_publications(&region, &selected.graph, group)?;
-                let extended = selected_group_with_publications(
-                    &selected.graph,
-                    group,
-                    &publication.source_publications()?,
-                )?;
+                let source_publications = publication.source_publications()?;
+                let extended =
+                    selected_group_with_publications(&selected.graph, group, &source_publications)?;
                 let plan = FusionPlan::from_graph(&selected.graph, std::slice::from_ref(&extended))
                     .groups
                     .into_iter()
@@ -205,10 +214,19 @@ impl Bytecode {
                     &selected.graph,
                     &plan.group,
                 )?);
+                let entry_inputs = capture::sealed_entry_inputs(
+                    &selected.graph,
+                    &selected.stores,
+                    &plan,
+                    &publication,
+                    &source,
+                )?;
                 Some(SelectedImageRegion {
                     plan,
-                    publication,
+                    publication: Rc::new(publication),
+                    source_publications,
                     source,
+                    entry_inputs,
                 })
             })
             .collect::<Vec<_>>();

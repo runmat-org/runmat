@@ -3,8 +3,6 @@
 //! This records source operations and every external source leaf. It is
 //! not a represented-arithmetic proof or an executable provider program.
 
-use std::collections::{HashMap, HashSet};
-
 use crate::fusion::{FusionGroup, FusionKind, FusionPattern};
 use crate::graph::{
     AccelGraph, AccelNodeLabel, FusionCallOrigin, InstrSpan, NodeId, ValueId, ValueOrigin,
@@ -66,25 +64,30 @@ impl ImageSourceTranscript {
         checkpoints.extend(producers.clamp_output);
         checkpoints.push(producers.output);
 
-        let mut steps = Vec::with_capacity(group.nodes.len());
-        let mut producer_by_value = HashMap::new();
-        let mut seen_nodes = HashSet::new();
+        let mut steps = Vec::new();
+        steps.try_reserve_exact(group.nodes.len()).ok()?;
+        let mut producer_by_value = Vec::new();
+        producer_by_value
+            .try_reserve_exact(group.nodes.len())
+            .ok()?;
+        let mut seen_nodes = Vec::new();
+        seen_nodes.try_reserve_exact(group.nodes.len()).ok()?;
         for &id in &group.nodes {
             let node = graph.node(id)?;
             let [output] = node.outputs.as_slice() else {
                 return None;
             };
             if node.id != id
-                || !seen_nodes.insert(id)
                 || node.span.start > node.span.end
                 || node.span.start < group.span.start
                 || node.span.end > group.span.end
                 || !matches!(&graph.value(*output)?.origin,
                     ValueOrigin::NodeOutput { node: owner, output: 0 } if *owner == id)
-                || producer_by_value.insert(*output, id).is_some()
             {
                 return None;
             }
+            seen_nodes.push(id);
+            producer_by_value.push((*output, id));
             let selected_binding = match &node.label {
                 AccelNodeLabel::Primitive(_) => None,
                 AccelNodeLabel::Builtin {
@@ -119,6 +122,15 @@ impl ImageSourceTranscript {
         if steps.is_empty() {
             return None;
         }
+        seen_nodes.sort_unstable();
+        producer_by_value.sort_unstable_by_key(|(output, _)| *output);
+        if seen_nodes.windows(2).any(|pair| pair[0] == pair[1])
+            || producer_by_value
+                .windows(2)
+                .any(|pair| pair[0].0 == pair[1].0)
+        {
+            return None;
+        }
         steps.sort_by_key(|step| (step.pc.start, step.pc.end, step.node));
         if steps
             .windows(2)
@@ -126,16 +138,18 @@ impl ImageSourceTranscript {
         {
             return None;
         }
-        let source_order: HashMap<_, _> = steps
+        let mut source_order: Vec<_> = steps
             .iter()
             .enumerate()
             .map(|(position, step)| (step.output, position))
             .collect();
-        let mut external = HashSet::new();
-        let mut folded_digests = HashMap::new();
+        source_order.sort_unstable_by_key(|(output, _)| *output);
+        let mut external = Vec::new();
+        let mut folded_digests = Vec::new();
         for (position, step) in steps.iter().enumerate() {
             for &input in &step.inputs {
-                if let Some(&producer) = source_order.get(&input) {
+                if let Ok(index) = source_order.binary_search_by_key(&input, |(id, _)| *id) {
+                    let producer = source_order[index].1;
                     if producer >= position {
                         return None;
                     }
@@ -150,30 +164,41 @@ impl ImageSourceTranscript {
                             }) => {}
                         ValueOrigin::NodeOutput { .. } => {
                             folded_digests
-                                .insert(input, folded_leaf::digest(graph, input, step.pc.start)?);
+                                .push((input, folded_leaf::digest(graph, input, step.pc.start)?));
                         }
                         _ => return None,
                     }
-                    external.insert(input);
+                    external.push(input);
                 }
             }
         }
-        if checkpoints.iter().any(|id| !source_order.contains_key(id))
-            || checkpoints
-                .windows(2)
-                .any(|pair| source_order[&pair[0]] >= source_order[&pair[1]])
-        {
+        if checkpoints.iter().any(|id| {
+            source_order
+                .binary_search_by_key(id, |(key, _)| *key)
+                .is_err()
+        }) || checkpoints.windows(2).any(|pair| {
+            let first = source_order[source_order
+                .binary_search_by_key(&pair[0], |(key, _)| *key)
+                .expect("checked")]
+            .1;
+            let second = source_order[source_order
+                .binary_search_by_key(&pair[1], |(key, _)| *key)
+                .expect("checked")]
+            .1;
+            first >= second
+        }) {
             return None;
         }
-        let mut external = external.into_iter().collect::<Vec<_>>();
         external.sort_unstable();
+        external.dedup();
+        folded_digests.sort_unstable_by_key(|(id, _)| *id);
         let mut leaves = Vec::new();
         for id in external {
             let info = graph.value(id)?;
-            if let Some(digest) = folded_digests.get(&id) {
+            if let Ok(index) = folded_digests.binary_search_by_key(&id, |(key, _)| *key) {
                 leaves.push(ImageSourceLeaf::Constant {
                     id,
-                    digest: *digest,
+                    digest: folded_digests[index].1,
                 });
                 continue;
             }

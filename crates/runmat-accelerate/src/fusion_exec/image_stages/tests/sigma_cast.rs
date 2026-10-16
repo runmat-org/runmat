@@ -258,6 +258,8 @@ fn sigma_cast_pending_drop_retains_borrowed_raw() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::InFlight,
         };
         let mut scratch = Vec::new();
@@ -334,6 +336,8 @@ fn sigma_cast_rejects_published_alias_without_retiring_it() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::InFlight,
         };
         assert!(admission
@@ -361,6 +365,8 @@ fn sigma_cast_rejects_published_alias_without_retiring_it() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::InFlight,
         };
         let selected = &session
@@ -422,6 +428,8 @@ fn sigma_same_class_cast_publishes_the_authenticated_input_alias() {
             selected_real_plans: None,
             reserved_mu: None,
             cold_mu: None,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::InFlight,
         };
         let selected = &session

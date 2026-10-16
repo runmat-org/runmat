@@ -1,6 +1,8 @@
 //! Rebind physical checkpoint yields to exact selected source stores. A final
 //! `single` after POWER is executed before its store, not published early.
 
+use serde::ser::SerializeSeq;
+use serde::{Serialize, Serializer};
 use std::ops::Range;
 
 use super::*;
@@ -10,6 +12,23 @@ pub struct ImageSourcePublication {
     pub producer: ValueId,
     pub published: ValueId,
     pub statement: Range<usize>,
+}
+
+struct PublicationIdentity<'a>(&'a [ImageSourcePublication]);
+
+impl Serialize for PublicationIdentity<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for publication in self.0 {
+            sequence.serialize_element(&(
+                publication.producer,
+                publication.published,
+                publication.statement.start,
+                publication.statement.end,
+            ))?;
+        }
+        sequence.end()
+    }
 }
 
 impl ImageSourceInvocation {
@@ -64,17 +83,7 @@ impl ImageSourceInvocation {
         self.semantic_identity = Digest::sha256_serialized(&(
             "selected-image-publications-v1",
             self.semantic_identity,
-            publications
-                .iter()
-                .map(|publication| {
-                    (
-                        publication.producer,
-                        publication.published,
-                        publication.statement.start,
-                        publication.statement.end,
-                    )
-                })
-                .collect::<Vec<_>>(),
+            PublicationIdentity(publications),
         ))
         .ok()?;
         self.publications_bound = true;

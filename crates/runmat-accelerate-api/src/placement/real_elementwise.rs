@@ -217,6 +217,15 @@ impl ProviderRealElementwiseRecipe {
         input: &GpuTensorHandle,
         borrowed: &[&GpuTensorHandle],
     ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
+        self.execute_protected_admitted(input, borrowed, None).await
+    }
+
+    pub async fn execute_protected_admitted(
+        &self,
+        input: &GpuTensorHandle,
+        borrowed: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
         for handle in borrowed {
             handle
                 .view()
@@ -246,7 +255,7 @@ impl ProviderRealElementwiseRecipe {
             .collect::<Vec<_>>();
         let result = self
             .owner
-            .execute_real_elementwise_recipe(input, self)
+            .execute_real_elementwise_recipe(input, self, admission)
             .await;
         for guard in &metadata_guards {
             guard.restore();

@@ -13,7 +13,8 @@ mod validate;
 pub use compound::{PowerPairCompound, PowerPairExecuted, PowerPairExecutionEvidence};
 pub use evaluation::{PowerEvaluationPhysicalProposal, PowerEvaluationRecipe};
 pub use execute::{
-    execute_resident_scalar_power, execute_resident_scalar_power_projected,
+    execute_resident_scalar_power, execute_resident_scalar_power_admitted,
+    execute_resident_scalar_power_projected, execute_resident_scalar_power_projected_admitted,
     ExecutedResidentScalarPower,
 };
 pub use prepare::{

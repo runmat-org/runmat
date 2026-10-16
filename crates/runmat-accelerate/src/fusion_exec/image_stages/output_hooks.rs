@@ -23,15 +23,28 @@ impl ImageNormalizeStageSession {
                     .after_effect(),
             );
         };
-        let calls = program.calls.clone();
+        let calls = &program.calls;
+        // Allocate the bounded checkpoint index before moving the live mean
+        // and sigma out of their state. A capacity failure cannot silently
+        // retire those provider handles or turn this continuation replayable.
+        let initial_layout = if matches!(&self.state, State::SigmaPublished { .. }) {
+            match OutputProgress::layout(calls) {
+                Ok(layout) => Some(layout),
+                Err(error) => {
+                    self.state = State::Failed;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let prior = std::mem::replace(&mut self.state, State::InFlight);
         let mut progress = match prior {
-            State::SigmaPublished { mean, sigma } => OutputProgress {
+            State::SigmaPublished { mean, sigma } => OutputProgress::new(
                 mean,
                 sigma,
-                values: HashMap::new(),
-                next_call: 0,
-            },
+                initial_layout.expect("layout prepared for sigma publication"),
+            ),
             State::OutputReady(progress) => progress,
             other => {
                 self.state = other;
@@ -54,8 +67,7 @@ impl ImageNormalizeStageSession {
                 .output_shape
                 .map(|dimension| usize::try_from(dimension).expect("validated output shape"));
             let protected = progress
-                .values
-                .values()
+                .retained_values()
                 .chain([&progress.mean, &progress.sigma])
                 .collect::<Vec<_>>();
             let output = match output {
@@ -115,7 +127,7 @@ impl ImageNormalizeStageSession {
             } else {
                 output
             };
-            progress.values.insert(call.source_output, output.clone());
+            progress.values[progress.next_call] = Some(output.clone());
             progress.next_call += 1;
             if call.checkpoint {
                 self.state = State::OutputAwaitAck {
@@ -175,7 +187,6 @@ impl ImageNormalizeStageSession {
             return Ok(());
         }
         let cleanup = progress
-            .values
             .into_values()
             .filter_map(|handle| handle.release().err())
             .collect::<Vec<_>>();
@@ -197,7 +208,6 @@ impl ImageNormalizeStageSession {
         progress: OutputProgress,
     ) -> ProviderExecutionError {
         let cleanup = progress
-            .values
             .into_values()
             .filter_map(|handle| handle.release().err())
             .collect::<Vec<_>>();
@@ -235,8 +245,7 @@ impl ImageNormalizeStageSession {
                     ProviderImageOutputOperand::Mean => Ok(progress.mean.clone()),
                     ProviderImageOutputOperand::Sigma => Ok(progress.sigma.clone()),
                     ProviderImageOutputOperand::Produced(id) => progress
-                        .values
-                        .get(&id)
+                        .get(id)
                         .cloned()
                         .ok_or_else(|| anyhow!("selected image hook input is absent").into()),
                     _ => Err(anyhow!("selected image hook requires a tensor operand").into()),
@@ -280,9 +289,17 @@ impl ImageNormalizeStageSession {
                         .after_effect());
                     }
                     let mut protected = vec![&self.input, &progress.mean, &progress.sigma];
-                    protected.extend(progress.values.values());
+                    protected.extend(progress.retained_values());
                     return selected
-                        .execute(stage, &left, &rhs, &protected)
+                        .execute(
+                            stage,
+                            &left,
+                            &rhs,
+                            &protected,
+                            self.provider_metadata_permit.as_ref().map(|permit| {
+                                permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                            }),
+                        )
                         .await
                         .map(HookResult::Ordinary);
                 }
@@ -314,7 +331,7 @@ impl ImageNormalizeStageSession {
                     _ => return Err(anyhow!("image POWER control lacks typed authority").into()),
                 };
                 let mut protected = vec![&self.input, &progress.mean, &progress.sigma];
-                protected.extend(progress.values.values());
+                protected.extend(progress.retained_values());
                 return self
                     .execute_stage_power(&left, selected, legacy_bits, &protected)
                     .await
@@ -331,9 +348,9 @@ impl ImageNormalizeStageSession {
                         .after_effect()
                     })?;
                     let mut protected = vec![&self.input, &progress.mean, &progress.sigma];
-                    protected.extend(progress.values.values());
+                    protected.extend(progress.retained_values());
                     return selected
-                        .execute(call, &left, &protected)
+                        .execute(call, &left, &protected, self.provider_metadata_permit.as_ref().map(|permit| permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission))
                         .await
                         .map(HookResult::SharedReal);
                 }
@@ -362,9 +379,16 @@ impl ImageNormalizeStageSession {
                         .after_effect()
                 })?;
                 let mut protected = vec![&self.input, &progress.mean, &progress.sigma];
-                protected.extend(progress.values.values());
+                protected.extend(progress.retained_values());
                 return selected
-                    .execute(call, &left, &protected)
+                    .execute(
+                        call,
+                        &left,
+                        &protected,
+                        self.provider_metadata_permit.as_ref().map(|permit| {
+                            permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                        }),
+                    )
                     .await
                     .map(HookResult::SharedReal);
             }

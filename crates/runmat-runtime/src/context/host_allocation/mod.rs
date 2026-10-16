@@ -9,7 +9,7 @@ mod receipt;
 mod temporary;
 
 pub use plan::HostAllocationPlan;
-pub use receipt::{HostAllocationError, HostAllocationReceipt};
+pub use receipt::{HostAllocationError, HostAllocationReceipt, HostRetainedViewPermit};
 pub use temporary::HostNumericWorkspace;
 
 #[cfg(test)]

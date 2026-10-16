@@ -200,10 +200,29 @@ impl WgpuProvider {
         runmat_accelerate_api::ProviderRealElementwiseObserved,
         Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
     )> {
+        self.fused_elementwise_prepared_probe_with_telemetry_admitted_exec(
+            shader, inputs, work, prepared, None,
+        )
+    }
+
+    pub(super) fn fused_elementwise_prepared_probe_with_telemetry_admitted_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: super::elementwise::FusedElementwiseWork<'_>,
+        prepared: &super::elementwise::FrozenFusionRecipe,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+        Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    )> {
         let start = Instant::now();
         let len = work.len;
         let rank = work.output_shape.len();
-        let result = self.fused_elementwise_prepared_probe_exec(shader, inputs, work, prepared);
+        let result = self.fused_elementwise_prepared_probe_admitted_exec(
+            shader, inputs, work, prepared, admission,
+        );
         if result.is_ok() {
             self.telemetry
                 .record_fused_elementwise_duration(start.elapsed());

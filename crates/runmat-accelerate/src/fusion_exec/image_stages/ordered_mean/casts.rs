@@ -4,9 +4,10 @@
 use super::*;
 use crate::fusion::image_reduction::ImageSelectedMomentConversion;
 use runmat_accelerate_api::{
-    ProviderFeasibility, ProviderFeasibilityQuery, ProviderImageMomentConversion,
-    ProviderOperationFamily, ProviderOperationIdentity, ProviderPreparationRoute,
-    ProviderResourceEstimate, ProviderWorkload,
+    ProviderFeasibility, ProviderFeasibilityQuery, ProviderFloatingCastPhysicalEvidence,
+    ProviderImageMomentConversion, ProviderOperationFamily, ProviderOperationIdentity,
+    ProviderPreparationRoute, ProviderRealElementwiseOperation, ProviderRealElementwiseRecipe,
+    ProviderRealElementwiseRequest, ProviderResourceEstimate, ProviderWorkload,
 };
 use runmat_builtins::{DOUBLE_CATALOG_ENTRY, SINGLE_CATALOG_ENTRY};
 use runmat_execution::Digest;
@@ -22,6 +23,14 @@ pub(crate) struct SelectedMomentCastPlan {
     pub(crate) output: ProviderRepresentation,
     pub(crate) output_bytes: u64,
     pub(crate) resources: ProviderResourceEstimate,
+    /// Owner-issued physical work for a genuine class-changing cast. A
+    /// same-class alias has no submission or fresh allocation. Generic
+    /// feasibility alone is not evidence for staged observation or costing.
+    pub(crate) physical: Option<ProviderFloatingCastPhysicalEvidence>,
+    /// The same native cast, sealed as an executable recipe for finite
+    /// request-local host metadata admission. Ordinary unbounded providers
+    /// may continue to use their established unary conversion hook.
+    pub(crate) real_recipe: Option<ProviderRealElementwiseRecipe>,
 }
 
 fn query(
@@ -113,6 +122,42 @@ pub(super) fn plan(
         owner_output_bytes
     };
     resources.transient_bytes?;
+    let physical = if output.element_type == source.element_type {
+        None
+    } else {
+        provider.floating_cast_physical_evidence(source, target)
+    };
+    if physical.is_some_and(|stage| {
+        let Some(physical_peak) = stage
+            .output_requested_bytes
+            .checked_add(stage.uniform_buffer_bytes)
+        else {
+            return true;
+        };
+        stage.output_requested_bytes != output_bytes
+            || stage.dispatches != resources.dispatches.unwrap_or(0)
+            || stage.queue_slots == 0
+            || resources
+                .transient_bytes
+                .is_none_or(|bytes| bytes < physical_peak)
+    }) {
+        return None;
+    }
+    let real_recipe = ProviderRealElementwiseRecipe::plan(
+        provider,
+        ProviderRealElementwiseRequest {
+            operation: ProviderRealElementwiseOperation::FloatingCast { target },
+            source: source.clone(),
+            source_buffer_bytes: source_bytes,
+        },
+    )
+    .ok()
+    .flatten()
+    .filter(|recipe| {
+        recipe.output() == &output
+            && recipe.physical().output_buffer_bytes == output_bytes
+            && recipe.physical().dispatches == resources.dispatches.unwrap_or(0)
+    });
     Some(SelectedMomentCastPlan {
         source_input: call.source_input,
         source_output: call.source_output,
@@ -123,6 +168,8 @@ pub(super) fn plan(
         output,
         output_bytes,
         resources,
+        physical,
+        real_recipe,
     })
 }
 
@@ -163,4 +210,5 @@ pub(crate) fn revalidate(
         && replanned.output == selected.output
         && replanned.output_bytes == selected.output_bytes
         && replanned.resources == selected.resources
+        && replanned.physical == selected.physical
 }

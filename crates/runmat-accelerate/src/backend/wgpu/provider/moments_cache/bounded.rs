@@ -1,15 +1,32 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
 use super::CacheBudget;
 use runmat_accelerate_api::allocation::WeakGpuTensorHandle;
+use runmat_execution::resource::RetainedHostAllocationClaim;
+use std::sync::Arc;
 
 struct Pair<H, A> {
     mean: H,
     ex2: H,
     source_view: Option<WeakGpuTensorHandle>,
-    allocations: Vec<A>,
+    allocations: [A; 3],
     bytes: u64,
+    // Fund variable request-key payload until remove() has cleared every
+    // reverse index and LRU key. This is separate from GPU allocation bytes.
+    _metadata_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+}
+
+/// One already-proven physical moment pair and its exact cache ownership.
+/// Grouping the fields makes insertion consume a single coherent entry.
+pub(super) struct MomentEntry<K, H, A> {
+    pub key: K,
+    pub allocations: [A; 3],
+    pub source_view: Option<WeakGpuTensorHandle>,
+    pub mean: H,
+    pub ex2: H,
+    pub bytes: u64,
+    pub metadata_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 
 /// `K` identifies one exact source view and reduction-dimension sequence;
@@ -18,7 +35,6 @@ pub(super) struct BoundedMoments<K, H, A> {
     budget: CacheBudget,
     entries: HashMap<K, Pair<H, A>>,
     oldest_first: VecDeque<K>,
-    by_allocation: HashMap<A, HashSet<K>>,
     bytes: u64,
 }
 
@@ -28,14 +44,32 @@ where
     H: Clone,
     A: Clone + Eq + Hash,
 {
-    pub(super) fn new(budget: CacheBudget) -> Self {
-        Self {
+    pub(super) fn entry_inline_bytes() -> usize {
+        std::mem::size_of::<K>() + std::mem::size_of::<Pair<H, A>>()
+    }
+    pub(super) fn try_new(budget: CacheBudget) -> Result<Self, std::collections::TryReserveError> {
+        let mut entries = HashMap::new();
+        let entries_bound = if budget.max_bytes == 0 {
+            0
+        } else {
+            budget.max_entries
+        };
+        entries.try_reserve(entries_bound)?;
+        let mut oldest_first = VecDeque::new();
+        oldest_first.try_reserve(entries_bound)?;
+        Ok(Self {
             budget,
-            entries: HashMap::new(),
-            oldest_first: VecDeque::new(),
-            by_allocation: HashMap::new(),
+            // The provider-wide index backing is allocated at provider
+            // construction, before any selected request can insert a key.
+            entries,
+            oldest_first,
             bytes: 0,
-        }
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn new(budget: CacheBudget) -> Self {
+        Self::try_new(budget).expect("test cache capacity")
     }
 
     pub(super) fn get(&mut self, key: &K) -> Option<(H, H)> {
@@ -48,15 +82,16 @@ where
 
     /// Returns all strong handles detached by replacement/eviction/bypass.
     /// The owner must drop them after releasing its mutex.
-    pub(super) fn insert(
-        &mut self,
-        key: K,
-        allocations: impl IntoIterator<Item = A>,
-        source_view: Option<WeakGpuTensorHandle>,
-        mean: H,
-        ex2: H,
-        bytes: u64,
-    ) -> (bool, Vec<(H, H)>) {
+    pub(super) fn insert(&mut self, entry: MomentEntry<K, H, A>) -> (bool, Vec<(H, H)>) {
+        let MomentEntry {
+            key,
+            allocations,
+            source_view,
+            mean,
+            ex2,
+            bytes,
+            metadata_claim,
+        } = entry;
         let mut detached = Vec::new();
         if !self.budget.admits(1, bytes) {
             detached.push((mean, ex2));
@@ -78,17 +113,8 @@ where
                 detached.push((pair.mean, pair.ex2));
             }
         }
-        let allocations: Vec<A> = allocations
-            .into_iter()
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        for allocation in &allocations {
-            self.by_allocation
-                .entry(allocation.clone())
-                .or_default()
-                .insert(key.clone());
-        }
+        // Three physical identities are inline in Pair. Retirement scans the
+        // bounded provider index instead of lazily growing reverse hash sets.
         self.entries.insert(
             key.clone(),
             Pair {
@@ -97,6 +123,7 @@ where
                 source_view,
                 allocations,
                 bytes,
+                _metadata_claim: metadata_claim,
             },
         );
         self.bytes += bytes;
@@ -106,19 +133,17 @@ where
 
     /// Detaches all aliases and dimension variants for this physical record.
     pub(super) fn retire(&mut self, allocation: &A) -> Vec<(H, H)> {
-        let keys = self
-            .by_allocation
-            .get(allocation)
-            .cloned()
-            .unwrap_or_default();
-        let mut detached = Vec::with_capacity(keys.len());
-        let ordered: Vec<K> = self
+        let mut detached = Vec::new();
+        while let Some(key) = self
             .oldest_first
             .iter()
-            .filter(|key| keys.contains(*key))
+            .find(|key| {
+                self.entries
+                    .get(*key)
+                    .is_some_and(|pair| pair.allocations.contains(allocation))
+            })
             .cloned()
-            .collect();
-        for key in ordered {
+        {
             if let Some(pair) = self.remove(&key) {
                 detached.push((pair.mean, pair.ex2));
             }
@@ -147,7 +172,6 @@ where
 
     pub(super) fn detach_all(&mut self) -> Vec<(H, H)> {
         self.oldest_first.clear();
-        self.by_allocation.clear();
         self.bytes = 0;
         std::mem::take(&mut self.entries)
             .into_values()
@@ -159,17 +183,6 @@ where
         let pair = self.entries.remove(key)?;
         self.bytes -= pair.bytes;
         self.oldest_first.retain(|candidate| candidate != key);
-        for allocation in &pair.allocations {
-            let empty = if let Some(keys) = self.by_allocation.get_mut(allocation) {
-                keys.remove(key);
-                keys.is_empty()
-            } else {
-                false
-            };
-            if empty {
-                self.by_allocation.remove(allocation);
-            }
-        }
         Some(pair)
     }
 

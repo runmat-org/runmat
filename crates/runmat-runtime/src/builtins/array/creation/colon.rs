@@ -1,18 +1,21 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, Type,
+    COLON_ERROR_ARG_COUNT, COLON_ERROR_CHAR_CODEPOINT_RANGE,
+    COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT, COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
+    COLON_ERROR_INTERNAL, COLON_ERROR_NON_FINITE_INPUT, COLON_ERROR_NON_SCALAR_INPUT,
+    COLON_ERROR_SEQUENCE_LIMIT, COLON_ERROR_SEQUENCE_RANGE, COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+    COLON_GPU_64_BIT_INTEGER_EXTENSION, COLON_LOGICAL_INPUT_EXTENSION,
+    COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
 };
+
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::{LiteralValue, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
+#[cfg(test)]
 use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
@@ -21,7 +24,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use runmat_builtins::shape_rules::infer_range_shape;
+#[cfg(test)]
 use runmat_builtins::ResolveContext;
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
@@ -70,6 +75,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
+#[cfg(test)]
 fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     let (start, step, end) = match ctx.literal_args.as_slice() {
         [LiteralValue::Number(start), LiteralValue::Number(end)] => {
@@ -86,202 +92,6 @@ fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
 }
 
 const BUILTIN_NAME: &str = "colon";
-
-pub const COLON_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "colon-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "colon with logical operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ColonLogicalInputExtension"),
-};
-
-pub const COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "colon-zero-imaginary-complex",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "colon with zero-imaginary complex operands is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ColonZeroImaginaryComplexExtension"),
-    };
-
-pub const COLON_GPU_64_BIT_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "colon-gpu-64-bit-integer",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "colon with resident int64 or uint64 operands is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ColonGpu64BitIntegerExtension"),
-    };
-
-pub const COLON_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COLON_LOGICAL_INPUT_EXTENSION,
-    COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
-    COLON_GPU_64_BIT_INTEGER_EXTENSION,
-];
-
-const COLON_INTEGER_INPUTS_TWO: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
-    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
-];
-const COLON_INTEGER_INPUTS_THREE: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
-    BuiltinIntegerInputCapability { name: "step", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The explicit step is decoded exactly and may be negative even for an unsigned output class." },
-    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
-];
-
-pub const COLON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_stop)", inputs: &COLON_INTEGER_INPUTS_TWO, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage with an implicit +1 step." },
-    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_step, integer_stop)", inputs: &COLON_INTEGER_INPUTS_THREE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage. MATLAB-compatible GPU execution excludes int64 and uint64; RunMat mode accepts them through an exact owning-provider gather/upload fallback." },
-];
-
-const COLON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Arithmetic progression row vector (numeric or character).",
-}];
-
-const COLON_SIG_TWO_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start scalar value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stop scalar value (implicit step = 1).",
-    },
-];
-
-const COLON_SIG_THREE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start scalar value.",
-    },
-    BuiltinParamDescriptor {
-        name: "step",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Increment; zero returns an empty row vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stop scalar value.",
-    },
-];
-
-const COLON_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "x = colon(start, stop)",
-        inputs: &COLON_SIG_TWO_INPUTS,
-        outputs: &COLON_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = colon(start, step, stop)",
-        inputs: &COLON_SIG_THREE_INPUTS,
-        outputs: &COLON_OUTPUT,
-    },
-];
-
-const COLON_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.ARG_COUNT",
-    identifier: None,
-    when: "More than three input arguments are provided.",
-    message: "colon: expected two or three input arguments",
-};
-
-const COLON_ERROR_NON_SCALAR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.NON_SCALAR_INPUT",
-    identifier: None,
-    when: "At least one input is not scalar.",
-    message: "colon: expected scalar input",
-};
-
-const COLON_ERROR_NON_FINITE_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.NON_FINITE_INPUT",
-    identifier: None,
-    when: "At least one input scalar is non-finite.",
-    message: "colon: inputs must be finite numeric scalars",
-};
-
-const COLON_ERROR_COMPLEX_IMAGINARY_NONZERO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.COMPLEX_IMAGINARY_NONZERO",
-    identifier: None,
-    when: "Complex inputs have non-zero imaginary parts.",
-    message: "colon: complex inputs must have zero imaginary part",
-};
-
-const COLON_ERROR_UNSUPPORTED_STRING_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.UNSUPPORTED_STRING_INPUT",
-    identifier: None,
-    when: "String-like values are used as scalar bounds/step.",
-    message: "colon: inputs must be real scalar values; received a string-like argument",
-};
-
-const COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.CHAR_NON_INTEGER_CODEPOINT",
-    identifier: None,
-    when: "Character sequence values are non-integer.",
-    message: "colon: character sequence requires integer code points",
-};
-
-const COLON_ERROR_CHAR_CODEPOINT_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.CHAR_CODEPOINT_RANGE",
-    identifier: None,
-    when: "Character sequence values are outside valid Unicode range.",
-    message: "colon: character code point out of range",
-};
-
-const COLON_ERROR_SEQUENCE_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.SEQUENCE_RANGE",
-    identifier: None,
-    when: "Computed progression span/ratio is non-finite.",
-    message: "colon: sequence length exceeds representable range",
-};
-
-const COLON_ERROR_SEQUENCE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.SEQUENCE_LIMIT",
-    identifier: None,
-    when: "Computed progression length exceeds platform limits.",
-    message: "colon: sequence length exceeds platform limits",
-};
-
-const COLON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.INTERNAL",
-    identifier: None,
-    when: "Internal tensor/character output construction failed.",
-    message: "colon: internal error",
-};
-
-const COLON_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    COLON_ERROR_ARG_COUNT,
-    COLON_ERROR_NON_SCALAR_INPUT,
-    COLON_ERROR_NON_FINITE_INPUT,
-    COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
-    COLON_ERROR_UNSUPPORTED_STRING_INPUT,
-    COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT,
-    COLON_ERROR_CHAR_CODEPOINT_RANGE,
-    COLON_ERROR_SEQUENCE_RANGE,
-    COLON_ERROR_SEQUENCE_LIMIT,
-    COLON_ERROR_INTERNAL,
-];
-
-pub const COLON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COLON_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COLON_ERRORS,
-};
 
 fn colon_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     colon_error_with_message(error.message, error)
@@ -312,14 +122,7 @@ fn sequence_provider_error(
 
 #[runtime_builtin(
     name = "colon",
-    category = "array/creation",
-    summary = "Generate arithmetic progressions with MATLAB colon semantics.",
-    keywords = "colon,sequence,range,step,gpu",
-    accel = "array_construct",
-    type_resolver(colon_type),
-    extensions(COLON_EXTENSIONS),
-    integer_capabilities(COLON_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::array::creation::colon::COLON_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(
@@ -1872,13 +1675,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn double_colon_declines_f32_preferred_owner_without_widening_a_handle() {
+    fn double_colon_uses_f64_capability_of_f32_preferred_owner() {
         test_support::with_f32_test_provider(|_| {
             let output = finalize_numeric_sequence(vec![0.0, 0.5, 1.0], true, None, &[])
-                .expect("class-preserving host fallback");
-            let Value::Tensor(tensor) = output else {
-                panic!("expected host double")
+                .expect("class-preserving sequence");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident double")
             };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            let tensor = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
             assert_eq!(tensor.materialize_f64(), vec![0.0, 0.5, 1.0]);
         });

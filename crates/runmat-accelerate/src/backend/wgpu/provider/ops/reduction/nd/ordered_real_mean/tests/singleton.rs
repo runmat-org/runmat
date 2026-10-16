@@ -31,7 +31,10 @@ fn actual_one_element_nan_and_signed_zero_use_the_ordered_numeric_route() {
             .prepare_ordered_real_mean(&input, &[2], ProviderPrecision::F32, mode)
             .unwrap()
             .expect("one in-bounds nonempty axis is admissible");
-        let output = provider.execute_ordered_real_mean(selected).unwrap().output;
+        let output = provider
+            .execute_ordered_real_mean(selected, None)
+            .unwrap()
+            .output;
         assert_eq!(output.shape(), &[1, 1, 1]);
         let observed = block_on(provider.download_numeric_exec(&output)).unwrap();
         let HostNumericDataOwned::F32(data) = observed.data else {

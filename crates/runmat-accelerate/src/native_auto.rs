@@ -50,7 +50,7 @@ mod host_route;
 mod state;
 mod original_work;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
-pub use host_route::promote_binary_in_context;
+pub use host_route::{promote_binary_in_context, promote_builtin_binary_in_context};
 pub use state::AutoOffloadHandle;
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -2071,6 +2071,50 @@ mod tests {
         drop((left, right));
         assert_eq!(left_probe.retirements(), 1);
         assert_eq!(right_probe.retirements(), 1);
+    }
+
+    #[test]
+    fn selected_elementwise_builtin_retains_resident_inputs_for_its_async_owner() {
+        use runmat_accelerate_api::GpuHandleProvenance;
+
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        for provenance in [
+            GpuHandleProvenance::Automatic,
+            GpuHandleProvenance::Explicit,
+        ] {
+            let allocation = COSTED_PROVIDER
+                .owner()
+                .allocate_zeroed(
+                    vec![1, 2],
+                    NumericElementType::F32,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            let input = allocation.handle.with_provenance(provenance).unwrap();
+            let original = Value::GpuTensor(input.clone());
+            let (result, decisions) = capture_promotion(|| {
+                futures::executor::block_on(promote_builtin_binary_in_context(
+                    &runtime,
+                    BinaryOp::Elementwise,
+                    &original,
+                    &Value::Num(2.0),
+                ))
+                .expect("selected builtin owns the exact resident route")
+            });
+            let (returned, scalar) = result;
+            let Value::GpuTensor(returned) = returned else {
+                panic!("automatic promotion must not materialize the builtin input");
+            };
+            assert!(returned.shares_allocation_with(&input));
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(&returned),
+                Some(provenance)
+            );
+            assert!(matches!(scalar, Value::Num(2.0)));
+            assert!(decisions.is_empty(), "no generic route may be selected");
+        }
     }
 
     #[test]

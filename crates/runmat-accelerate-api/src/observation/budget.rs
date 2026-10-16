@@ -89,6 +89,19 @@ impl ProviderObservationBudget {
         }
         Some(permit)
     }
+
+    /// A browser queue-tail map consumes one in-flight observation slot and
+    /// one exact fence allocation. Both permits drop together on completion,
+    /// cancellation, or abandoned mapping.
+    #[cfg(feature = "wgpu")]
+    pub fn try_reserve_wgpu_tail(self: &Arc<Self>, requested_bytes: u64) -> Option<WgpuTailPermit> {
+        let slot = self.acquire()?;
+        let bytes = self.try_reserve_wgpu_query(requested_bytes)?;
+        Some(WgpuTailPermit {
+            _slot: slot,
+            _bytes: bytes,
+        })
+    }
 }
 pub(super) struct Permit(Arc<ProviderObservationBudget>);
 
@@ -98,6 +111,22 @@ pub(super) struct Permit(Arc<ProviderObservationBudget>);
 pub struct WgpuQueryPermit {
     budget: Arc<ProviderObservationBudget>,
     requested_bytes: u64,
+}
+
+/// Joint callback-capacity and requested-byte owner for a browser tail.
+#[cfg(feature = "wgpu")]
+pub struct WgpuTailPermit {
+    _slot: Permit,
+    _bytes: WgpuQueryPermit,
+}
+
+#[cfg(feature = "wgpu")]
+impl WgpuTailPermit {
+    /// A failed map cannot certify physical retirement. Do not recycle
+    /// optional tail capacity onto the same uncertain device route.
+    pub fn poison_budget(&self) {
+        self._bytes.poison_budget();
+    }
 }
 
 #[cfg(feature = "wgpu")]

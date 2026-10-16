@@ -15,10 +15,16 @@ pub(super) struct BoundSigmaAddControl {
     value_digest: Digest,
 }
 
+impl BoundSigmaAddControl {
+    pub(super) fn literal(&self) -> ScalarLiteral {
+        self.literal
+    }
+}
+
 pub(super) fn freeze_control(
     plan: &FusionGroupPlan,
     inputs: &[Value],
-    positions: &HashMap<ValueId, usize>,
+    positions: &ImageValuePositions,
 ) -> Option<BoundSigmaAddControl> {
     let FusionPattern::ImageNormalize(pattern) = plan.group.pattern.as_ref()? else {
         return None;
@@ -215,13 +221,13 @@ impl ImageSelectedSigmaOperations {
         })
     }
     pub(crate) fn identity(&self) -> anyhow::Result<Digest> {
-        Ok(Digest::sha256(serde_json::to_vec(&(
+        Ok(Digest::sha256_serialized(&(
             "selected-sigma-real-operations-v1",
             self.semantic_identity,
             self.source_ids(),
             self.control.value_digest,
             self.control.literal,
             self.mode.result_class(),
-        ))?))
+        ))?)
     }
 }

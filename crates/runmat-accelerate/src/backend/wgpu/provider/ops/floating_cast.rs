@@ -64,6 +64,7 @@ impl WgpuProvider {
         self.floating_cast_exec_recorded_with_checkpoint(
             input,
             target,
+            None,
             &mut after_allocation,
             |_| Ok(()),
         )
@@ -74,16 +75,24 @@ impl WgpuProvider {
         &self,
         input: &GpuTensorHandle,
         target: NumericPrecision,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
         record: impl FnMut(CastResourceEvent) -> Result<()>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
-        self.floating_cast_exec_recorded_with_checkpoint(input, target, |_| Ok(()), record)
-            .await
+        self.floating_cast_exec_recorded_with_checkpoint(
+            input,
+            target,
+            admission,
+            |_| Ok(()),
+            record,
+        )
+        .await
     }
 
     async fn floating_cast_exec_recorded_with_checkpoint(
         &self,
         input: &GpuTensorHandle,
         target: NumericPrecision,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
         mut after_allocation: impl FnMut(&WgpuBufferOwner) -> Result<()>,
         mut record: impl FnMut(CastResourceEvent) -> Result<()>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
@@ -95,9 +104,19 @@ impl WgpuProvider {
             NumericPrecision::F64 => NumericElementType::F64,
         };
         if frozen.entry.precision == target && !frozen.logical_producer {
-            let output = input
-                .with_view(input.view().clone().with_logical(false))
-                .map_err(ProviderExecutionError::from)?;
+            let output = if let Some(admission) = admission {
+                let bytes = GpuTensorHandle::view_host_upper_bytes(input.view().shape_capacity())
+                    .ok_or_else(|| {
+                    ProviderExecutionError::from(anyhow!("floating cast alias view byte overflow"))
+                })?;
+                let grant = admission
+                    .claim_view(bytes)
+                    .map_err(ProviderExecutionError::from_source)?;
+                input.with_view_retained_grant(input.view().clone().with_logical(false), grant)
+            } else {
+                input.with_view(input.view().clone().with_logical(false))
+            }
+            .map_err(ProviderExecutionError::from)?;
             record(CastResourceEvent::Alias(
                 output.physical().requested_bytes(),
             ))
@@ -236,7 +255,7 @@ impl WgpuProvider {
         // Publication is outside device emission: registration/view failure
         // cleanup may invoke residency owners and must not reenter the gate.
         let output = self
-            .register_numeric_buffer(
+            .register_numeric_buffer_produced_admitted(
                 output,
                 NumericBufferRegistration {
                     shape: frozen.entry.shape,
@@ -246,6 +265,8 @@ impl WgpuProvider {
                     allocated_bytes: frozen.allocated_bytes,
                     usage: BufferUsageClass::Generic,
                 },
+                false,
+                admission,
             )
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
         self.finish_floating_cast_view(output, frozen.transpose)

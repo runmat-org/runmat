@@ -225,7 +225,7 @@ pub async fn dispatch_arithmetic(
                         return crate::call::call_builtin_async(runtime, "power", &args).await;
                     }
                     let (a_acc, b_acc) =
-                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::MatrixPower, &a, &b).await?;
                     RootedValue::new(
                         runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)?,
                     )

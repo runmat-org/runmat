@@ -53,6 +53,10 @@ struct Admitted<'a> {
     observation: CandidateObservationEvidence,
 }
 
+pub(in crate::placement) const fn unobserved_admitted_record_bytes() -> usize {
+    std::mem::size_of::<Admitted<'static>>()
+}
+
 enum SelectionDraft {
     Direct {
         selected: CompactSelectedExecutionCandidate,
@@ -98,12 +102,6 @@ impl PlacementSession {
         &self,
         request: WholeWorkPlacementRequestRef<'_>,
     ) -> Result<RuntimeManagedWholeWorkSelection, PlacementPlanError> {
-        if request.candidates.len() != 1 {
-            return Err(PlacementPlanError {
-                code: "RunMat:Placement:InsufficientResourceEvidence",
-                message: "managed single-route placement cannot retain a compared graph".into(),
-            });
-        }
         if self.managed_observations.is_none() {
             return Err(PlacementPlanError {
                 code: "RunMat:Placement:InsufficientResourceEvidence",
@@ -117,7 +115,7 @@ impl PlacementSession {
             probe: None,
         } = self.select_whole_work_untracked(request, true)?
         else {
-            unreachable!("a managed one-route policy has no graph or dynamic probe")
+            unreachable!("managed admission requires exactly one physical route")
         };
         let identity =
             request
@@ -257,7 +255,7 @@ impl PlacementSession {
         } else {
             self.drain_observations();
         }
-        let mut admitted: SmallVec<[Admitted<'_>; 1]> = SmallVec::new();
+        let mut admitted: SmallVec<[Admitted<'_>; 2]> = SmallVec::new();
         let mut insufficient_resource_evidence = false;
         for candidate in request.candidates {
             let demand = candidate.resources;
@@ -318,6 +316,12 @@ impl PlacementSession {
         }
 
         if managed {
+            if admitted.len() != 1 {
+                return Err(PlacementPlanError {
+                    code: "RunMat:Placement:InsufficientResourceEvidence",
+                    message: "managed placement cannot retain a compared physical graph".into(),
+                });
+            }
             // A single admitted route has no comparison graph. Keep the same
             // validated candidate and observation cost; an occupied managed
             // slot suppresses a second exploratory probe without replay.

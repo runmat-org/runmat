@@ -38,10 +38,8 @@ pub(super) fn with_total_candidate_observation_contract(
 }
 
 pub(super) fn with_output_resources(facts: Digest, output_bytes: Option<u64>) -> Digest {
-    Digest::sha256(
-        serde_json::to_vec(&("physical-output-resources-v1", facts, output_bytes))
-            .expect("provider output resources must serialize"),
-    )
+    Digest::sha256_serialized(&("physical-output-resources-v1", facts, output_bytes))
+        .expect("provider output resources must serialize")
 }
 
 pub(super) fn rejected_runtime_facts(
@@ -52,19 +50,17 @@ pub(super) fn rejected_runtime_facts(
     resources: &PlacementResourceSnapshot,
     host_epoch: u64,
 ) -> Digest {
-    Digest::sha256(
-        serde_json::to_vec(&(
-            query,
-            rejection,
-            cpu_preparation,
-            residency.host_bytes,
-            &residency.provider_bytes,
-            residency.unknown_values,
-            resources,
-            host_epoch,
-        ))
-        .expect("rejected placement facts must serialize"),
-    )
+    Digest::sha256_serialized(&(
+        query,
+        rejection,
+        cpu_preparation,
+        residency.host_bytes,
+        &residency.provider_bytes,
+        residency.unknown_values,
+        resources,
+        host_epoch,
+    ))
+    .expect("rejected placement facts must serialize")
 }
 
 pub(super) fn with_semantic_identity(facts: Digest, semantic: Option<Digest>) -> Digest {
@@ -87,18 +83,16 @@ pub(super) fn runtime_facts(
 ) -> Digest {
     // Reuse the cost-query contract so preparation and transfer requirements
     // cannot diverge between cost estimation and its feedback/cache identity.
-    Digest::sha256(
-        serde_json::to_vec(&(
-            cost,
-            cpu_preparation,
-            residency.host_bytes,
-            &residency.provider_bytes,
-            residency.unknown_values,
-            resources,
-            host_epoch,
-        ))
-        .expect("placement cost facts must serialize"),
-    )
+    Digest::sha256_serialized(&(
+        cost,
+        cpu_preparation,
+        residency.host_bytes,
+        &residency.provider_bytes,
+        residency.unknown_values,
+        resources,
+        host_epoch,
+    ))
+    .expect("placement cost facts must serialize")
 }
 
 /// The entire executable/rejected physical set shares one feedback signature.
@@ -123,26 +117,38 @@ pub(super) fn candidate_set_facts(
     resources: &PlacementResourceSnapshot,
     host_epoch: u64,
 ) -> Digest {
-    Digest::sha256(
-        serde_json::to_vec(&(
-            "local-physical-candidate-set-v1",
-            admitted,
-            rejected,
-            source_digest,
-            cpu_preparation,
-            residency.host_bytes,
-            &residency.provider_bytes,
-            residency.unknown_values,
-            resources,
-            host_epoch,
-        ))
-        .expect("physical candidate set facts must serialize"),
-    )
+    Digest::sha256_serialized(&(
+        "local-physical-candidate-set-v1",
+        admitted,
+        rejected,
+        source_digest,
+        cpu_preparation,
+        residency.host_bytes,
+        &residency.provider_bytes,
+        residency.unknown_values,
+        resources,
+        host_epoch,
+    ))
+    .expect("physical candidate set facts must serialize")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_output_resource_identity_matches_owned_json_bytes() {
+        let facts = Digest::sha256(b"selected image source");
+        for output_bytes in [None, Some(0), Some(u64::MAX)] {
+            assert_eq!(
+                with_output_resources(facts, output_bytes),
+                Digest::sha256(
+                    serde_json::to_vec(&("physical-output-resources-v1", facts, output_bytes))
+                        .unwrap(),
+                ),
+            );
+        }
+    }
     use runmat_accelerate_api::{
         ProviderFeasibilityQuery, ProviderOperationFamily, ProviderOperationIdentity,
         ProviderWorkload,

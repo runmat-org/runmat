@@ -472,9 +472,9 @@ impl WgpuProvider {
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
         let bind_group_cache = Arc::new(BindGroupCache::default());
-        let reduction_reuse = OwnerShared::new(Mutex::new(ReductionReuseCache::new(
+        let reduction_reuse = OwnerShared::new(Mutex::new(ReductionReuseCache::try_new(
             Self::reduction_reuse_budget(),
-        )));
+        )?));
         let kernel_resources = OwnerShared::new(KernelResourceRegistry::default());
         let allocations = OwnerShared::new(super::allocation_state::AllocationState::new(
             runtime_device_id,

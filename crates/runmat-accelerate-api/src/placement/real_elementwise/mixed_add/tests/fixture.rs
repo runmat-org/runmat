@@ -84,6 +84,7 @@ impl AccelProvider for Fixture {
         &'a self,
         input: &'a GpuTensorHandle,
         recipe: &'a ProviderRealElementwiseRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> crate::ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
         Box::pin(async move {
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;

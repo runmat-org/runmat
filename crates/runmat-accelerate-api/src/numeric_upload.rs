@@ -149,12 +149,23 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     host: &HostNumericTensorView<'_>,
     protected: &[&GpuTensorHandle],
 ) -> NumericUploadResult<GpuTensorHandle> {
+    upload_numeric_protecting_admitted(provider, host, protected, None)
+}
+
+/// The same single validation/retirement owner for an upload whose provider
+/// registration must consume request-local host metadata headroom.
+pub fn upload_numeric_protecting_admitted<P: AccelProvider + ?Sized>(
+    provider: &P,
+    host: &HostNumericTensorView<'_>,
+    protected: &[&GpuTensorHandle],
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+) -> NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
     let _borrowed_metadata: Vec<_> = protected
         .iter()
         .map(|handle| crate::ResidencyRestoreGuard::new(handle))
         .collect();
-    let handle = provider.upload_numeric_raw(host)?;
+    let handle = provider.upload_numeric_raw_admitted(host, admission)?;
     let aliases = protected
         .iter()
         .any(|input| input.shares_allocation_with(&handle));

@@ -40,15 +40,57 @@ pub(super) struct RealRangeResolver<'a> {
     visit_marks: Vec<(u32, u8)>,
     visit_generation: u32,
     visit_order: Vec<ValueId>,
+    visit_stack: Vec<(ValueId, bool)>,
     valid: bool,
     indexed_operations: usize,
     indexed_leaves: usize,
 }
 
+/// Exact vector element layouts for a resolver over a sealed source. The
+/// caller supplies checked upper cardinalities before constructing any of
+/// these vectors; the DFS stack can hold one pending visit per source edge.
+pub(crate) fn resolver_vector_upper_bytes(
+    leaves: usize,
+    operations: usize,
+    source_edges: usize,
+) -> Option<u64> {
+    let ids = leaves.checked_add(operations)?;
+    let stack = ids.checked_add(source_edges)?;
+    let parts = [
+        operations.checked_mul(std::mem::size_of::<(ValueId, usize)>())?,
+        leaves.checked_mul(std::mem::size_of::<(ValueId, &Value)>())?,
+        ids.checked_mul(std::mem::size_of::<(ValueId, Option<Option<RealRange>>)>())?,
+        ids.checked_mul(std::mem::size_of::<ValueId>())?,
+        ids.checked_mul(std::mem::size_of::<(u32, u8)>())?,
+        ids.checked_mul(std::mem::size_of::<ValueId>())?,
+        stack.checked_mul(std::mem::size_of::<(ValueId, bool)>())?,
+    ];
+    parts.into_iter().try_fold(0_u64, |total, bytes| {
+        total.checked_add(u64::try_from(bytes).ok()?)
+    })
+}
+
+/// Aggregate retained stage slots across all proofs sharing one range cache.
+/// Each graph node is resolved once; every proof adds one walk marker, and
+/// only the first adds the source-index marker.
+pub(crate) fn proof_stage_upper(leaves: usize, operations: usize, proofs: usize) -> Option<usize> {
+    leaves
+        .checked_mul(7)?
+        .checked_add(operations)?
+        .checked_add(proofs)?
+        .checked_add(1)
+}
+
 impl<'a> RealRangeResolver<'a> {
-    pub(super) fn new(plan: &'a FusionGroupPlan, invocation: &FusionInvocationLeaves<'a>) -> Self {
-        let mut operations = Vec::with_capacity(plan.operations.len());
-        let leaves = invocation.values().to_vec();
+    pub(super) fn new(
+        plan: &'a FusionGroupPlan,
+        invocation: &FusionInvocationLeaves<'a>,
+    ) -> anyhow::Result<Self> {
+        let mut operations = Vec::new();
+        operations.try_reserve_exact(plan.operations.len())?;
+        let mut leaves = Vec::new();
+        leaves.try_reserve_exact(invocation.values().len())?;
+        leaves.extend_from_slice(invocation.values());
         let indexed_leaves = invocation.unique_leaf_count();
         let mut valid = true;
         for (index, operation) in plan.operations.iter().enumerate() {
@@ -62,15 +104,40 @@ impl<'a> RealRangeResolver<'a> {
         }
         operations.sort_unstable_by_key(|(id, _)| *id);
         valid &= !operations.windows(2).any(|pair| pair[0].0 == pair[1].0);
-        let mut ids = Vec::with_capacity(leaves.len() + operations.len());
+        let id_capacity = leaves
+            .len()
+            .checked_add(operations.len())
+            .ok_or_else(|| anyhow!("fusion range source ID count overflows"))?;
+        let source_edges = plan
+            .operations
+            .iter()
+            .try_fold(0_usize, |count, operation| {
+                let inputs = match operation {
+                    FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
+                };
+                count.checked_add(inputs.len())
+            })
+            .ok_or_else(|| anyhow!("fusion range source edge count overflows"))?;
+        let stack_capacity = id_capacity
+            .checked_add(source_edges)
+            .ok_or_else(|| anyhow!("fusion range visit capacity overflows"))?;
+        let mut ids = Vec::new();
+        ids.try_reserve_exact(id_capacity)?;
         ids.extend(leaves.iter().map(|(id, _)| *id));
         ids.extend(operations.iter().map(|(id, _)| *id));
         ids.sort_unstable();
         ids.dedup();
-        let ranges = ids.iter().map(|&id| (id, None)).collect();
-        let visit_marks = vec![(0, 0); ids.len()];
-        let visit_order = Vec::with_capacity(ids.len());
-        Self {
+        let mut ranges = Vec::new();
+        ranges.try_reserve_exact(ids.len())?;
+        ranges.extend(ids.iter().map(|&id| (id, None)));
+        let mut visit_marks = Vec::new();
+        visit_marks.try_reserve_exact(ids.len())?;
+        visit_marks.resize(ids.len(), (0, 0));
+        let mut visit_order = Vec::new();
+        visit_order.try_reserve_exact(ids.len())?;
+        let mut visit_stack = Vec::new();
+        visit_stack.try_reserve_exact(stack_capacity)?;
+        Ok(Self {
             operations,
             leaves,
             ranges,
@@ -78,10 +145,11 @@ impl<'a> RealRangeResolver<'a> {
             visit_marks,
             visit_generation: 0,
             visit_order,
+            visit_stack,
             valid,
             indexed_operations: plan.operations.len(),
             indexed_leaves,
-        }
+        })
     }
 
     pub(super) fn is_valid(&self) -> bool {
@@ -93,7 +161,8 @@ impl<'a> RealRangeResolver<'a> {
         work: &mut FusionAdmissionWork,
         binding: BuiltinBindingIdentity,
         provider_precision: ProviderPrecision,
-    ) {
+    ) -> anyhow::Result<()> {
+        self.reserve_proof_stages(work, binding, provider_precision, 1)?;
         append_stage(
             work,
             binding,
@@ -103,6 +172,27 @@ impl<'a> RealRangeResolver<'a> {
                 leaves: self.indexed_leaves as u64,
             },
         );
+        Ok(())
+    }
+
+    fn reserve_proof_stages(
+        &self,
+        work: &mut FusionAdmissionWork,
+        binding: BuiltinBindingIdentity,
+        provider_precision: ProviderPrecision,
+        additional: usize,
+    ) -> anyhow::Result<()> {
+        if matches!(work, FusionAdmissionWork::None) {
+            *work = FusionAdmissionWork::DomainProof {
+                binding,
+                provider_precision,
+                stages: Vec::new(),
+            };
+        }
+        if let FusionAdmissionWork::DomainProof { stages, .. } = work {
+            stages.try_reserve_exact(additional)?;
+        }
+        Ok(())
     }
 }
 
@@ -223,6 +313,7 @@ impl RealRangeResolver<'_> {
             visit_marks: marks,
             visit_generation: generation,
             visit_order: order,
+            visit_stack: stack,
             ..
         } = self;
         order.clear();
@@ -239,7 +330,8 @@ impl RealRangeResolver<'_> {
                 0
             }
         };
-        let mut stack = vec![(id, false)];
+        stack.clear();
+        stack.push((id, false));
         let mut examined = 0u64;
         while let Some((current, expanded)) = stack.pop() {
             examined = examined.saturating_add(1);
@@ -518,6 +610,21 @@ pub(super) async fn prove_observed(
         provider_precision,
     } = context;
     let (order, examined) = resolver.visit(operand_id, plan);
+    let additional = resolver
+        .visit_order
+        .iter()
+        .try_fold(1usize, |count, id| {
+            let stages = if lookup(&resolver.leaves, *id)
+                .is_some_and(|value| matches!(&**value, Value::GpuTensor(_)))
+            {
+                7
+            } else {
+                1
+            };
+            count.checked_add(stages)
+        })
+        .ok_or_else(|| anyhow!("fusion range proof stage count overflows"))?;
+    resolver.reserve_proof_stages(work, binding, provider_precision, additional)?;
     append_stage(
         work,
         binding,
@@ -603,16 +710,7 @@ pub(super) async fn prove(
     predicate: RealUnaryPredicate,
     work: &mut FusionAdmissionWork,
 ) -> std::result::Result<Option<FusionOperandDomainEvidence>, FusionResolveFailure> {
-    let mut provider_probe_observed = false;
-    prove_observed(
-        context,
-        resolver,
-        operand_id,
-        predicate,
-        work,
-        &mut provider_probe_observed,
-    )
-    .await
+    prove_observed(context, resolver, operand_id, predicate, work, &mut false).await
 }
 
 #[cfg(test)]

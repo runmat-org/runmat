@@ -47,6 +47,39 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     finish_fixed(entry, request, output, diagnostics)
 }
 
+pub(super) fn infer_fusion_fact(request: &CallRequest) -> Option<ValueFact> {
+    let [input] = request.arguments.as_slice() else {
+        return None;
+    };
+    // The same rejected classes below would render a public diagnostic.
+    // Keep that rendering out of the finite facts-only projection.
+    match input.kind {
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) if !matches!(class, NumericClass::Double | NumericClass::Single) => return None,
+        ValueKindFact::Numeric(_)
+        | ValueKindFact::Logical
+        | ValueKindFact::Character
+        | ValueKindFact::Symbolic
+        | ValueKindFact::Unknown => {}
+        _ => return None,
+    }
+    let prepared = super::input::prepare(request, "sqrt").ok()?;
+    if !prepared.diagnostics.is_empty() || matches!(prepared.fact.storage, StorageFact::Sparse) {
+        return None;
+    }
+    let mut output = prepared.fact.clone();
+    let mut diagnostics = Vec::new();
+    infer_output(
+        prepared.fact,
+        prepared.literal,
+        &mut output,
+        &mut diagnostics,
+    );
+    diagnostics.is_empty().then_some(output)
+}
+
 fn infer_output(
     input: &ValueFact,
     literal: Option<super::literal::RootLiteralDomain>,

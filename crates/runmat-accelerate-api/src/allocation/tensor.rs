@@ -22,6 +22,8 @@ struct OwnedTensorView {
     allocation: AllocationLease,
     identity: TensorViewIdentity,
     view: GpuTensorView,
+    // Declared last: refund follows the owned view and its shape storage.
+    metadata_grant: Option<Box<dyn runmat_execution::resource::RetainedHostViewGrant>>,
 }
 
 /// Clone retains one shared view without copying shape or tensor payloads.
@@ -47,6 +49,9 @@ pub struct GpuTensorHandle {
 #[derive(Clone)]
 pub struct WeakGpuTensorHandle {
     inner: WeakShared<OwnedTensorView>,
+    // The view grant's reservation follows the backing through the last Weak.
+    _backing_claim:
+        Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
 }
 impl WeakGpuTensorHandle {
     pub fn acquire(&self) -> Result<GpuTensorHandle, AllocationAcquisitionError> {
@@ -60,9 +65,29 @@ impl WeakGpuTensorHandle {
 }
 
 impl GpuTensorHandle {
+    /// Conservative host metadata request for one newly owned tensor view.
+    /// This excludes the provider's physical allocation lease and payload,
+    /// but includes the ref-counted view record and its rank-sized shape.
+    /// Cloning an existing handle does not request another view record.
+    pub fn view_host_upper_bytes(shape_capacity: usize) -> Option<u64> {
+        use std::mem::{align_of, size_of};
+
+        let counters = size_of::<usize>().checked_mul(2)?;
+        let record = counters
+            .checked_add(size_of::<OwnedTensorView>())?
+            .checked_add(align_of::<OwnedTensorView>())?;
+        let shape = shape_capacity.checked_mul(size_of::<usize>())?;
+        u64::try_from(record.checked_add(shape)?).ok()
+    }
+
     pub fn downgrade(&self) -> WeakGpuTensorHandle {
         WeakGpuTensorHandle {
             inner: Shared::downgrade(&self.inner),
+            _backing_claim: self
+                .inner
+                .metadata_grant
+                .as_ref()
+                .map(|grant| grant.backing_claim()),
         }
     }
     /// Only an owner-admitted lease can construct an operational handle. There
@@ -71,10 +96,63 @@ impl GpuTensorHandle {
         allocation: AllocationLease,
         view: GpuTensorView,
     ) -> Result<Self, AllocationAcquisitionError> {
+        Self::from_allocation_with_grant(allocation, view, None)
+    }
+
+    /// The physical provider may attach one consumed host-view grant while
+    /// publishing a newly registered allocation. The lease remains the only
+    /// authority to construct an operational handle.
+    pub fn from_allocation_with_retained_grant(
+        allocation: AllocationLease,
+        view: GpuTensorView,
+        grant: Box<dyn runmat_execution::resource::RetainedHostViewGrant>,
+    ) -> Result<Self, AllocationAcquisitionError> {
+        Self::from_allocation_with_grant(allocation, view, Some(grant))
+    }
+
+    fn from_allocation_with_grant(
+        allocation: AllocationLease,
+        view: GpuTensorView,
+        metadata_grant: Option<Box<dyn runmat_execution::resource::RetainedHostViewGrant>>,
+    ) -> Result<Self, AllocationAcquisitionError> {
         allocation.validate_live()?;
         view.validate(allocation.physical())
             .map_err(AllocationAcquisitionError::InvalidView)?;
         allocation.validate_view(&view)?;
+        let metadata_grant = match (allocation.view_issuer(), metadata_grant) {
+            (Some(issuer), Some(grant)) => {
+                if !std::sync::Arc::ptr_eq(issuer, &grant.issuer()) {
+                    return Err(AllocationAcquisitionError::WrongOwner);
+                }
+                Some(grant)
+            }
+            (Some(issuer), None) => {
+                let bytes = Self::view_host_upper_bytes(view.shape_capacity()).ok_or(
+                    AllocationAcquisitionError::RetainedHostView(
+                        runmat_execution::resource::RetainedHostViewError::Overflow,
+                    ),
+                )?;
+                Some(
+                    issuer
+                        .clone()
+                        .reserve_view(bytes)
+                        .map_err(AllocationAcquisitionError::RetainedHostView)?,
+                )
+            }
+            (None, grant) => grant,
+        };
+        if let Some(grant) = &metadata_grant {
+            let required = Self::view_host_upper_bytes(view.shape_capacity()).ok_or(
+                AllocationAcquisitionError::RetainedHostView(
+                    runmat_execution::resource::RetainedHostViewError::Overflow,
+                ),
+            )?;
+            if grant.view_bytes() < required {
+                return Err(AllocationAcquisitionError::RetainedHostView(
+                    runmat_execution::resource::RetainedHostViewError::ExceedsCapacity,
+                ));
+            }
+        }
         let identity = TensorViewIdentity {
             allocation: allocation.identity(),
             view: allocation
@@ -87,6 +165,7 @@ impl GpuTensorHandle {
                 allocation,
                 identity,
                 view,
+                metadata_grant,
             }),
         })
     }
@@ -120,7 +199,38 @@ impl GpuTensorHandle {
         }
     }
     pub fn with_view(&self, view: GpuTensorView) -> Result<Self, AllocationAcquisitionError> {
-        Self::from_allocation(self.inner.allocation.clone(), view)
+        // A derived view has its own exact claim; the parent's remains with
+        // the old record. An unbounded handle retains its ordinary behavior.
+        self.inner.allocation.validate_live()?;
+        view.validate(self.physical())
+            .map_err(AllocationAcquisitionError::InvalidView)?;
+        self.inner.allocation.validate_view(&view)?;
+        let grant = self
+            .inner
+            .metadata_grant
+            .as_ref()
+            .map(|parent| {
+                let bytes = Self::view_host_upper_bytes(view.shape_capacity()).ok_or(
+                    AllocationAcquisitionError::RetainedHostView(
+                        runmat_execution::resource::RetainedHostViewError::Overflow,
+                    ),
+                )?;
+                parent
+                    .issuer()
+                    .reserve_view(bytes)
+                    .map_err(AllocationAcquisitionError::RetainedHostView)
+            })
+            .transpose()?;
+        Self::from_allocation_with_grant(self.inner.allocation.clone(), view, grant)
+    }
+    /// Construct a new validated view whose metadata reservation remains live
+    /// for exactly as long as the resulting shared view does.
+    pub fn with_view_retained_grant(
+        &self,
+        view: GpuTensorView,
+        grant: Box<dyn runmat_execution::resource::RetainedHostViewGrant>,
+    ) -> Result<Self, AllocationAcquisitionError> {
+        Self::from_allocation_with_grant(self.inner.allocation.clone(), view, Some(grant))
     }
     pub fn with_provenance(
         &self,
@@ -130,7 +240,28 @@ impl GpuTensorHandle {
             self.allocation_lease().validate_live()?;
             return Ok(self.clone());
         }
-        self.with_view(self.view().clone().with_provenance(provenance))
+        // This API constructs the derived shape itself. Reserve its metadata
+        // before cloning that shape; with_view cannot do so because callers
+        // have already constructed their proposed view.
+        self.inner.allocation.validate_live()?;
+        let grant = self
+            .inner
+            .metadata_grant
+            .as_ref()
+            .map(|parent| {
+                let bytes = Self::view_host_upper_bytes(self.view().shape_capacity()).ok_or(
+                    AllocationAcquisitionError::RetainedHostView(
+                        runmat_execution::resource::RetainedHostViewError::Overflow,
+                    ),
+                )?;
+                parent
+                    .issuer()
+                    .reserve_view(bytes)
+                    .map_err(AllocationAcquisitionError::RetainedHostView)
+            })
+            .transpose()?;
+        let view = self.view().clone().with_provenance(provenance);
+        Self::from_allocation_with_grant(self.inner.allocation.clone(), view, grant)
     }
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
         self.inner

@@ -1,12 +1,10 @@
 //! Publication projection from selected bindings, exact peeled paths and
 //! canonical request facts. This does not certify provider arithmetic.
-use std::collections::{HashMap, HashSet};
-
 use runmat_accelerate_api::{
     moment_precision, ProviderImageMomentConversion, ProviderImageMomentProgram,
     ProviderImageMomentPublication, ProviderPrecision,
 };
-use runmat_builtins::{infer_catalog_call, DOUBLE_CATALOG_ENTRY, SINGLE_CATALOG_ENTRY};
+use runmat_builtins::{infer_fusion_numeric_fact, DOUBLE_CATALOG_ENTRY, SINGLE_CATALOG_ENTRY};
 use runmat_runtime::builtins::common::spec::{
     canonical_fusion_declaration, FusionAdmissionWork, FusionProofStage, FusionReductionContext,
 };
@@ -49,12 +47,25 @@ pub(super) fn conversion_entry(
 
 struct Projection<'a> {
     source: &'a ImageSourceInvocation,
-    facts: HashMap<ValueId, ValueFact>,
-    nodes: HashMap<NodeId, &'a ImageSourceStep>,
-    leaves: HashMap<ValueId, &'a Value>,
+    facts: Vec<(ValueId, ValueFact)>,
+    nodes: Vec<(NodeId, &'a ImageSourceStep)>,
+    leaves: Vec<(ValueId, &'a Value)>,
     precision: ProviderPrecision,
     placement: Option<PlacementCorrelationId>,
     work: Vec<(ValueId, FusionAdmissionWork)>,
+}
+
+fn lookup<'a, T>(entries: &'a [(ValueId, T)], id: &ValueId) -> Option<&'a T> {
+    entries
+        .binary_search_by_key(id, |(key, _)| *key)
+        .ok()
+        .map(|index| &entries[index].1)
+}
+
+fn replace_fact(entries: &mut [(ValueId, ValueFact)], id: ValueId, fact: ValueFact) -> Option<()> {
+    let index = entries.binary_search_by_key(&id, |(key, _)| *key).ok()?;
+    entries[index].1 = fact;
+    Some(())
 }
 
 impl Projection<'_> {
@@ -76,7 +87,7 @@ impl Projection<'_> {
         let Some(&input) = step.inputs.first() else {
             return Ok(None);
         };
-        let Some(mut raw_fact) = self.facts.get(&raw).cloned() else {
+        let Some(mut raw_fact) = lookup(&self.facts, &raw).cloned() else {
             return Ok(None);
         };
         if reduction && raw_fact.storage == StorageFact::Unknown {
@@ -89,12 +100,12 @@ impl Projection<'_> {
             let Some(owner) = declaration.reduction else {
                 return Ok(None);
             };
-            let Some(input_fact) = self.facts.get(&input) else {
+            let Some(input_fact) = lookup(&self.facts, &input) else {
                 return Ok(None);
             };
             let Some(controls) = step.inputs[1..]
                 .iter()
-                .map(|id| self.leaves.get(id).copied())
+                .map(|id| lookup(&self.leaves, id).copied())
                 .collect::<Option<Vec<_>>>()
             else {
                 return Ok(None);
@@ -158,12 +169,14 @@ impl Projection<'_> {
         if moment_precision(&raw_fact).is_none() {
             return Ok(None);
         }
-        self.facts.insert(raw, raw_fact.clone());
+        if replace_fact(&mut self.facts, raw, raw_fact.clone()).is_none() {
+            return Ok(None);
+        }
         let mut current = raw;
         let mut current_fact = raw_fact.clone();
         let mut conversions = Vec::new();
         for node in nodes {
-            let Some(step) = self.nodes.get(node).copied() else {
+            let Some(step) = lookup(&self.nodes, node).copied() else {
                 return Ok(None);
             };
             if step.inputs.as_slice() != [current] {
@@ -172,19 +185,15 @@ impl Projection<'_> {
             let Some(entry) = conversion_entry(step) else {
                 return Ok(None);
             };
-            let inference = infer_catalog_call(
-                entry,
-                &CallRequest {
-                    arguments: vec![current_fact],
-                    outputs: OutputSelection::default(),
-                    literals: Default::default(),
-                },
-            );
-            if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
+            let request = CallRequest {
+                arguments: vec![current_fact],
+                outputs: OutputSelection::default(),
+                literals: Default::default(),
+            };
+            let Some(Ok(output)) = infer_fusion_numeric_fact(entry, &request) else {
                 return Ok(None);
-            }
-            let output = inference.outputs.into_iter().next().expect("one output");
-            let Some(canonical) = self.facts.get(&step.output) else {
+            };
+            let Some(canonical) = lookup(&self.facts, &step.output) else {
                 return Ok(None);
             };
             if output.numeric() != canonical.numeric()
@@ -199,7 +208,9 @@ impl Projection<'_> {
                 source_output: step.output.into(),
                 output_fact: output.clone(),
             });
-            self.facts.insert(step.output, output.clone());
+            if replace_fact(&mut self.facts, step.output, output.clone()).is_none() {
+                return Ok(None);
+            }
             current_fact = output;
             current = step.output;
         }
@@ -224,32 +235,34 @@ impl Projection<'_> {
         for call in calls {
             // Peeled paths are outer-to-inner. Deduplicate exact selected
             // edges, never equal classes. Shared path prefixes remain once.
-            let mut selected = HashSet::new();
+            let mut selected = Vec::new();
             for path in &route.cast_paths {
                 if path.peeled_value != call.output {
                     continue;
                 }
                 let mut current = call.output;
                 for node in path.nodes.iter().rev() {
-                    let Some(step) = self.nodes.get(node) else {
+                    let Some(step) = lookup(&self.nodes, node) else {
                         return Ok(None);
                     };
                     if step.inputs.as_slice() != [current] || conversion_entry(step).is_none() {
                         return Ok(None);
                     }
-                    selected.insert(*node);
+                    selected.push(*node);
                     current = step.output;
                 }
                 if current != path.consumer_value {
                     return Ok(None);
                 }
             }
+            selected.sort_unstable();
+            selected.dedup();
             let nodes = self
                 .source
                 .source
                 .steps
                 .iter()
-                .filter(|step| selected.contains(&step.node))
+                .filter(|step| selected.binary_search(&step.node).is_ok())
                 .map(|step| step.node)
                 .collect::<Vec<_>>();
             let Some(publication) = self.publication(call.output, &nodes, true).await? else {
@@ -278,21 +291,46 @@ impl ImageSourceInvocation {
         let Some(producers) = routes.stage_producers() else {
             return Ok(None);
         };
-        let mut leaves = plan
-            .const_values
+        let mut ordered = Vec::new();
+        ordered
+            .try_reserve_exact(
+                plan.const_values
+                    .len()
+                    .checked_add(plan.inputs.len())
+                    .ok_or(ImageSourceAdmissionFailure::Inputs)?,
+            )
+            .map_err(|error| ImageSourceAdmissionFailure::CanonicalUnproven(error.into()))?;
+        // Explicit priority retains the live value on an ID collision. The
+        // unstable in-place sort needs no hidden scratch allocation.
+        ordered.extend(
+            plan.inputs
+                .iter()
+                .copied()
+                .zip(inputs)
+                .map(|(id, value)| (id, value, true)),
+        );
+        ordered.extend(
+            plan.const_values
+                .iter()
+                .map(|(id, value)| (*id, value, false)),
+        );
+        ordered.sort_unstable_by_key(|(id, _, live)| (*id, !*live));
+        ordered.dedup_by(|left, right| left.0 == right.0);
+        let leaves: Vec<_> = ordered
+            .into_iter()
+            .map(|(id, value, _)| (id, value))
+            .collect();
+        let mut nodes: Vec<_> = self
+            .source
+            .steps
             .iter()
-            .map(|(id, value)| (*id, value))
-            .collect::<HashMap<_, _>>();
-        leaves.extend(plan.inputs.iter().copied().zip(inputs));
+            .map(|step| (step.node, step))
+            .collect();
+        nodes.sort_unstable_by_key(|(id, _)| *id);
         let mut projection = Projection {
             source: self,
-            facts: self.facts.iter().cloned().collect(),
-            nodes: self
-                .source
-                .steps
-                .iter()
-                .map(|step| (step.node, step))
-                .collect(),
+            facts: self.facts.to_vec(),
+            nodes,
             leaves,
             precision,
             placement,

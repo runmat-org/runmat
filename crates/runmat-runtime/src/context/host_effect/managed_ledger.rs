@@ -48,6 +48,46 @@ pub struct ManagedHostEffectLedger {
 }
 
 impl ManagedHostEffectLedger {
+    /// Exact metadata created by a previously published view after its
+    /// invocation headroom has retired. This competes with every other live
+    /// stage/output reservation on the same ledger; it never reuses the old
+    /// view's claim or mints capacity from a completed invocation.
+    pub(crate) fn reserve_retained_view(
+        &self,
+        bytes: u64,
+        epoch: u64,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, HostEffectAllocationError> {
+        let mut ledger = self.state.lock().expect("host ledger lock");
+        if !ledger.snapshot.current || ledger.snapshot.epoch != epoch {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let next = ledger
+            .snapshot
+            .live_reserved_bytes
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        if next > ledger.snapshot.capacity_bytes {
+            return Err(HostEffectAllocationError::ExceedsCapacity);
+        }
+        let claimed = ledger
+            .snapshot
+            .live_claimed_bytes
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        ledger.snapshot.live_reserved_bytes = next;
+        ledger.snapshot.peak_reserved_bytes = ledger.snapshot.peak_reserved_bytes.max(next);
+        ledger.snapshot.live_claimed_bytes = claimed;
+        ledger.snapshot.peak_claimed_bytes = ledger
+            .snapshot
+            .peak_claimed_bytes
+            .max(ledger.snapshot.live_claimed_bytes);
+        drop(ledger);
+        Ok(Arc::new(OutputClaim {
+            ledger: self.state.clone(),
+            headroom: std::sync::Weak::new(),
+            bytes,
+        }))
+    }
     pub fn new(capacity_bytes: u64) -> Self {
         Self::new_with_epoch(capacity_bytes, 0)
     }
@@ -361,6 +401,16 @@ struct OutputClaim {
     ledger: Arc<Mutex<LedgerState>>,
     headroom: std::sync::Weak<HeadroomInner>,
     bytes: u64,
+}
+
+pub(crate) fn retained_claim_host_upper_bytes() -> u64 {
+    // Arc's strong/weak counters and alignment accompany the claim object.
+    u64::try_from(
+        std::mem::size_of::<OutputClaim>()
+            + 2 * std::mem::size_of::<usize>()
+            + std::mem::align_of::<OutputClaim>(),
+    )
+    .expect("claim metadata fits u64")
 }
 
 struct ManagedOutputHeadroom {

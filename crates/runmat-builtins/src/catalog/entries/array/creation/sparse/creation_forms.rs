@@ -1,9 +1,6 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-
-use super::{SPARSE_ERRORS, SPARSE_INPUT_A, SPARSE_INPUT_DIMS};
+//! Sparse creation form signatures and parameter descriptors.
+use super::{SPARSE_ERRORS, SPARSE_INPUT_DIMS};
+use crate::*;
 
 pub(super) const SPARSE_MATRIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -35,6 +32,22 @@ const MATRIX_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Full or sparse matrix.",
+}];
+
+const PATTERN_MATRIX_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Full or sparse matrix supplying the nonzero pattern.",
+}];
+
+const SPARSE_RESULT_R_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse result matrix.",
 }];
 
 const DIMS_DENSITY_INPUTS: [BuiltinParamDescriptor; 3] = [
@@ -88,7 +101,7 @@ const DIMS_DENSITY_RC_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Reciprocal condition number target or singular-value vector.",
+        description: "Reciprocal condition number target or singular-value vector of length at most min(m,n).",
     },
 ];
 
@@ -98,7 +111,7 @@ const MATRIX_TYPENAME_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Full or sparse matrix.",
+        description: "Full or sparse matrix supplying the nonzero pattern.",
     },
     BuiltinParamDescriptor {
         name: "typename",
@@ -167,7 +180,7 @@ const DIMS_DENSITY_RC_TYPENAME_INPUTS: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Reciprocal condition number target or singular-value vector.",
+        description: "Reciprocal condition number target or singular-value vector of length at most min(m,n).",
     },
     BuiltinParamDescriptor {
         name: "typename",
@@ -224,7 +237,7 @@ const SPDIAGS_INPUT_A_D: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Diagonal numbers to extract.",
+        description: "Integer-valued diagonal offsets to extract.",
     },
 ];
 
@@ -241,7 +254,7 @@ const SPDIAGS_INPUT_CONSTRUCT: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Diagonal numbers.",
+        description: "Integer-valued diagonal offsets.",
     },
     BuiltinParamDescriptor {
         name: "m",
@@ -272,7 +285,7 @@ const SPDIAGS_INPUT_REPLACE: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Diagonal numbers to replace.",
+        description: "Integer-valued diagonal offsets to replace.",
     },
     BuiltinParamDescriptor {
         name: "A",
@@ -289,10 +302,19 @@ const SPEYE_INPUT_A_TYPENAME: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Square size or two-element size vector.",
+        description: "Integer-valued square size or two-element size vector; negative dimensions become zero.",
     },
     SPARSE_TYPENAME,
 ];
+
+const SPEYE_INPUT_SIZE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Integer-valued square size or two-element size vector; negative dimensions become zero.",
+}];
 
 const SPEYE_INPUT_DIMS_TYPENAME: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
@@ -320,7 +342,7 @@ const SPEYE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
     BuiltinSignatureDescriptor {
         label: "S = speye(n)",
-        inputs: &SPARSE_INPUT_A,
+        inputs: &SPEYE_INPUT_SIZE,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -340,7 +362,7 @@ const SPEYE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
     BuiltinSignatureDescriptor {
         label: "S = speye(sz)",
-        inputs: &SPARSE_INPUT_A,
+        inputs: &SPEYE_INPUT_SIZE,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -358,40 +380,40 @@ const NONZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
 
 const SPONES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "R = spones(S)",
-    inputs: &MATRIX_INPUT,
-    outputs: &SPARSE_MATRIX_OUTPUT,
+    inputs: &PATTERN_MATRIX_INPUT,
+    outputs: &SPARSE_RESULT_R_OUTPUT,
 }];
 
 const SPRAND_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "R = sprand(S)",
-        inputs: &MATRIX_INPUT,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        inputs: &PATTERN_MATRIX_INPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
     BuiltinSignatureDescriptor {
         label: "R = sprand(S, typename)",
         inputs: &MATRIX_TYPENAME_INPUTS,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
     BuiltinSignatureDescriptor {
         label: "R = sprand(m, n, density)",
         inputs: &DIMS_DENSITY_INPUTS,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
     BuiltinSignatureDescriptor {
         label: "R = sprand(m, n, density, typename)",
         inputs: &DIMS_DENSITY_TYPENAME_INPUTS,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
     BuiltinSignatureDescriptor {
         label: "R = sprand(m, n, density, rc)",
         inputs: &DIMS_DENSITY_RC_INPUTS,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
     BuiltinSignatureDescriptor {
         label: "R = sprand(m, n, density, rc, typename)",
         inputs: &DIMS_DENSITY_RC_TYPENAME_INPUTS,
-        outputs: &SPARSE_MATRIX_OUTPUT,
+        outputs: &SPARSE_RESULT_R_OUTPUT,
     },
 ];
 
@@ -429,7 +451,6 @@ pub const SPEYE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SPARSE_ERRORS,
 };
-
 pub const NONZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &NONZEROS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

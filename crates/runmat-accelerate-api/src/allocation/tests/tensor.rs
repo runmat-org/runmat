@@ -1,4 +1,174 @@
 use super::*;
+use runmat_execution::resource::{
+    RetainedHostAllocationClaim, RetainedHostViewError, RetainedHostViewGrant,
+    RetainedHostViewIssuer,
+};
+use std::sync::{atomic::AtomicU64, Arc};
+
+#[derive(Debug)]
+struct TestViewIssuer {
+    live: Arc<AtomicU64>,
+    capacity: u64,
+}
+
+#[derive(Debug)]
+struct TestViewGrant {
+    bytes: u64,
+    claim: Arc<TestViewClaim>,
+    issuer: Arc<dyn RetainedHostViewIssuer>,
+}
+
+#[derive(Debug)]
+struct TestViewClaim {
+    bytes: u64,
+    live: Arc<AtomicU64>,
+}
+
+impl Drop for TestViewClaim {
+    fn drop(&mut self) {
+        self.live.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+impl RetainedHostViewGrant for TestViewGrant {
+    fn view_bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    fn issuer(&self) -> Arc<dyn RetainedHostViewIssuer> {
+        self.issuer.clone()
+    }
+
+    fn backing_claim(&self) -> Arc<dyn RetainedHostAllocationClaim> {
+        self.claim.clone()
+    }
+}
+
+impl RetainedHostViewIssuer for TestViewIssuer {
+    fn reserve_view(
+        self: Arc<Self>,
+        bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, RetainedHostViewError> {
+        self.live
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(bytes)
+                    .filter(|total| *total <= self.capacity)
+            })
+            .map_err(|_| RetainedHostViewError::ExceedsCapacity)?;
+        Ok(Box::new(TestViewGrant {
+            bytes,
+            claim: Arc::new(TestViewClaim {
+                bytes,
+                live: self.live.clone(),
+            }),
+            issuer: self,
+        }))
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn retained_view_grant_funds_one_record_while_clones_share_and_aliases_reserve_again() {
+    let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
+    let raw = tensor(&owner);
+    let bytes = GpuTensorHandle::view_host_upper_bytes(2).unwrap();
+    let live = Arc::new(AtomicU64::new(0));
+    let issuer = Arc::new(TestViewIssuer {
+        live: live.clone(),
+        capacity: bytes * 2,
+    });
+    let grant = issuer.clone().reserve_view(bytes).unwrap();
+    let published = raw
+        .with_view_retained_grant(raw.view().clone(), grant)
+        .unwrap();
+    let same = published.clone();
+    let weak = published.downgrade();
+    assert_eq!(live.load(Ordering::Acquire), bytes);
+    let alias =
+        published
+            .with_view(GpuTensorView::contiguous(vec![2, 1]).with_layout(
+                GpuTensorLayout::Transpose(crate::TransposeInfo {
+                    base_rows: 1,
+                    base_cols: 2,
+                }),
+            ))
+            .unwrap();
+    assert_eq!(live.load(Ordering::Acquire), bytes * 2);
+    assert!(matches!(
+        published.with_provenance(crate::GpuHandleProvenance::Explicit),
+        Err(AllocationAcquisitionError::RetainedHostView(
+            RetainedHostViewError::ExceedsCapacity
+        ))
+    ));
+    drop(raw);
+    drop(published);
+    assert_eq!(live.load(Ordering::Acquire), bytes * 2);
+    drop(same);
+    assert!(weak.acquire().is_err(), "dead view cannot be resurrected");
+    assert_eq!(live.load(Ordering::Acquire), bytes * 2);
+    drop(alias);
+    assert_eq!(live.load(Ordering::Acquire), bytes);
+    drop(weak);
+    assert_eq!(live.load(Ordering::Acquire), 0);
+
+    // A finite owner can reacquire a wire only by funding a fresh view from
+    // the authenticated finite lease. Publication's supplied grant is used
+    // once; acquisition and the direct constructor cannot evade the issuer.
+    let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
+    let live = Arc::new(AtomicU64::new(0));
+    let issuer = Arc::new(TestViewIssuer {
+        live: live.clone(),
+        capacity: bytes * 2,
+    });
+    let lease = AllocationLease::register_with_retained_metadata(
+        ID,
+        owner.clone(),
+        Some(RetainedLeaseHostMetadata::new(Arc::new(()), issuer.clone())),
+    )
+    .unwrap();
+    let initial = GpuTensorHandle::from_allocation_with_retained_grant(
+        lease,
+        GpuTensorView::contiguous(vec![1, 2]),
+        issuer.clone().reserve_view(bytes).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(live.load(Ordering::Acquire), bytes);
+    let foreign_live = Arc::new(AtomicU64::new(0));
+    let foreign_issuer = Arc::new(TestViewIssuer {
+        live: foreign_live.clone(),
+        capacity: bytes,
+    });
+    assert_eq!(
+        GpuTensorHandle::from_allocation_with_retained_grant(
+            initial.allocation_lease().clone(),
+            initial.view().clone(),
+            foreign_issuer.reserve_view(bytes).unwrap(),
+        )
+        .unwrap_err(),
+        AllocationAcquisitionError::WrongOwner
+    );
+    assert_eq!(foreign_live.load(Ordering::Acquire), 0);
+    let wire = initial.wire_descriptor();
+    let weak_lease = owner.weak_lease(ID);
+    let reacquired = weak_lease.acquire_tensor(&wire).unwrap();
+    assert_eq!(live.load(Ordering::Acquire), bytes * 2);
+    assert!(matches!(
+        weak_lease.acquire_tensor(&wire),
+        Err(AllocationAcquisitionError::RetainedHostView(
+            RetainedHostViewError::ExceedsCapacity
+        ))
+    ));
+    drop(reacquired);
+    let direct = GpuTensorHandle::from_allocation(
+        initial.allocation_lease().clone(),
+        initial.view().clone(),
+    )
+    .unwrap();
+    assert_eq!(live.load(Ordering::Acquire), bytes * 2);
+    drop(direct);
+    drop(initial);
+    assert_eq!(live.load(Ordering::Acquire), 0);
+}
 
 fn tensor(owner: &Shared<TestOwner>) -> GpuTensorHandle {
     GpuTensorHandle::from_allocation(

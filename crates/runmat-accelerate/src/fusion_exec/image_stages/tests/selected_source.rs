@@ -193,6 +193,10 @@ async fn selected_constructor_for_shape(shape: [usize; 3]) {
         })
         .expect("compiled mean axes have a mid-span literal producer");
     let folded_id = folded.outputs[0];
+    assert!(pattern
+        .bound_mean_axes
+        .iter()
+        .any(|(id, _)| *id == folded_id));
     let folded_node = folded.id as usize;
     let transcript = |graph: &AccelGraph| {
         crate::fusion::image_reduction::ImageSourceTranscript::from_graph(graph, &plan.group)
@@ -232,6 +236,24 @@ async fn selected_constructor_for_shape(shape: [usize; 3]) {
                 && !plan.group.nodes.contains(&node.id)
         })
         .expect("clamp has a source-folded zero control");
+    assert_eq!(
+        pattern.clamp_zero_value,
+        Some(folded_zero.outputs[0]),
+        "a published folded clamp remains a live selected input"
+    );
+    let zero_position = plan
+        .inputs
+        .iter()
+        .position(|id| *id == folded_zero.outputs[0])
+        .expect("published clamp has an actual request binding");
+    let mut changed_zero = values.clone();
+    changed_zero[zero_position] = Value::Tensor(Tensor::from_f32(vec![-0.0], vec![1, 1]).unwrap());
+    assert!(matches!(
+        ImageSourceInvocation::bind(&graph, plan, &changed_zero, ProviderPrecision::F64, None)
+            .await,
+        Err(crate::fusion::image_reduction::ImageSourceAdmissionFailure::ConstantChanged(id))
+            if id == folded_zero.outputs[0]
+    ));
     let mut forged_zero = graph.clone();
     forged_zero.values[folded_zero.outputs[0] as usize].constant = Some(Value::Tensor(
         Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap(),
@@ -258,6 +280,46 @@ async fn selected_constructor_for_shape(shape: [usize; 3]) {
         ImageSourceInvocation::bind(&graph, plan, &values, ProviderPrecision::F64, None)
             .await
             .expect("same compiled source and exact live bindings");
+    let Some(crate::fusion::ImageScalar::Value(gamma_id)) = pattern.gamma.as_ref() else {
+        panic!("compiled gamma is a live selected control");
+    };
+    let gamma_position = plan
+        .inputs
+        .iter()
+        .position(|id| id == gamma_id)
+        .expect("compiled gamma has an actual request binding");
+    let mut changed_gamma = values.clone();
+    changed_gamma[gamma_position] = Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap());
+    let rebound_gamma =
+        ImageSourceInvocation::bind(&graph, plan, &changed_gamma, ProviderPrecision::F64, None)
+            .await
+            .expect("a changed live gamma is rebound through selected power arithmetic");
+    let (_, rebound_source) = rebound_gamma
+        .selected_staged_mean_power(&input.handle)
+        .expect("changed live gamma retains an exact selected source");
+    assert_eq!(rebound_source.final_power.exponent_value, *gamma_id);
+    assert_eq!(
+        rebound_source.final_power.represented_exponent.to_bits(),
+        2.0f64.to_bits()
+    );
+    let rebound_output = graph
+        .node(rebound_source.final_power.node)
+        .expect("selected final POWER producer")
+        .outputs[0];
+    assert_eq!(
+        rebound_gamma
+            .selected_power(rebound_output)
+            .expect("rebound POWER arithmetic")
+            .arithmetic
+            .exponent_scalar,
+        Some(runmat_accelerate_api::PowerScalarControl::SingleBits(
+            2.0f32.to_bits()
+        ))
+    );
+    assert_ne!(
+        rebound_gamma.semantic_identity(),
+        invocation.semantic_identity()
+    );
     let source = transcript(&graph).expect("selected compiled transcript");
     let div = source
         .steps

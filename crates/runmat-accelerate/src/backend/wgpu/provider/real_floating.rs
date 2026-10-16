@@ -200,6 +200,17 @@ impl WgpuProvider {
         len: usize,
         precision: NumericPrecision,
     ) -> Result<GpuTensorHandle> {
+        self.register_real_floating_output_admitted(buffer, shape, len, precision, None)
+    }
+
+    pub(super) fn register_real_floating_output_admitted(
+        &self,
+        buffer: WgpuBufferOwner,
+        shape: Vec<usize>,
+        len: usize,
+        precision: NumericPrecision,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
         let physical_element_type = match precision {
             NumericPrecision::F32 => NumericElementType::F32,
             NumericPrecision::F64 => NumericElementType::F64,
@@ -212,7 +223,7 @@ impl WgpuProvider {
             allocated_bytes >= requested_bytes,
             "real floating output allocation is smaller than its physical type"
         );
-        self.register_numeric_buffer(
+        self.register_numeric_buffer_produced_admitted(
             buffer,
             NumericBufferRegistration {
                 shape,
@@ -222,6 +233,8 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
+            false,
+            admission,
         )
     }
 

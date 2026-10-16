@@ -392,6 +392,7 @@ impl WgpuProvider {
         &self,
         input: &GpuTensorHandle,
         recipe: &ProviderRealElementwiseRecipe,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedRealElementwise> {
         if !recipe.is_owned_by(self) {
             return Err(ProviderExecutionError::from(anyhow!(
@@ -450,7 +451,7 @@ impl WgpuProvider {
                         unreachable!("matched scalar operation")
                     }
                 };
-                self.scalar_op_exec_recorded(op, input, scalar, Some(&observed))
+                self.scalar_op_exec_recorded(op, input, scalar, Some(&observed), admission)
                     .map_err(|cause| {
                         let error = ProviderExecutionError::from(cause);
                         if observed.borrow().effect {
@@ -477,7 +478,7 @@ impl WgpuProvider {
                     })??;
                     observed.borrow_mut().output(&buffer);
                     let allocated_bytes = buffer.size();
-                    self.register_numeric_buffer(
+                    self.register_numeric_buffer_produced_admitted(
                         buffer,
                         super::super::backend_types::NumericBufferRegistration {
                             shape: input.shape().to_vec(),
@@ -487,6 +488,8 @@ impl WgpuProvider {
                             allocated_bytes,
                             usage: BufferUsageClass::FusionOut,
                         },
+                        false,
+                        admission,
                     )
                     .map_err(|error| ProviderExecutionError::from(error).after_effect())
                 } else {
@@ -518,6 +521,7 @@ impl WgpuProvider {
                             observed: Some(&observed),
                             prepared: None,
                         },
+                        admission,
                     )
                     .map_err(|cause| {
                         let error = ProviderExecutionError::from(cause);
@@ -535,6 +539,7 @@ impl WgpuProvider {
                         .expect("matched ordinary unary operation"),
                     input,
                     Some(&observed),
+                    admission,
                 )
                 .map_err(|cause| {
                     let error = ProviderExecutionError::from(cause);
@@ -545,7 +550,7 @@ impl WgpuProvider {
                     }
                 }),
             Operation::FloatingCast { target } => {
-                self.execute_real_floating_cast(input, target, &observed)
+                self.execute_real_floating_cast(input, target, &observed, admission)
                     .await
             }
         };

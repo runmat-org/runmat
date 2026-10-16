@@ -15,6 +15,40 @@ pub(crate) struct LocalCpuCandidate {
 }
 
 impl LocalCpuCandidate {
+    /// Source-ordered original VM instructions, not a host-only fallback.
+    /// The installed-region owner supplies `source_region`; placement never
+    /// derives it from a display label or an input tensor alone.
+    pub(crate) fn original_vm_region(
+        source_region: Digest,
+        device_id: u32,
+        tail: runmat_accelerate_api::ProviderVmRegionTailResources,
+        cost: CandidateCostEvidence,
+    ) -> Self {
+        let identity = "vm.original.region".to_owned();
+        Self {
+            identity,
+            region: None,
+            guards: Vec::new(),
+            route: WholeWorkCandidate {
+                kind: ExecutionCandidateKind::OriginalVmRegion,
+                execution_location: CandidateExecutionLocation::VmRegion { device_id },
+                preparation: CandidatePreparationState::Ready,
+                output_residency: CandidateOutputResidency::Unknown,
+                presentation: CandidateOutputPresentation::Direct,
+                route_facts: source_region,
+                cost,
+                resources: CandidateResourceDemand {
+                    // One provider-owned tail submission orders every nested
+                    // ordinary WGPU submission before cost feedback. Browser
+                    // also carries its exact admitted map-fence bytes.
+                    queue_slots: tail.queue_slots,
+                    scratch_bytes: ResourceByteBound::Known(tail.provider_scratch_bytes),
+                    ..CandidateResourceDemand::default()
+                },
+                transactional_results: false,
+            },
+        }
+    }
     pub(crate) fn with_presentation(mut self, presentation: CandidateOutputPresentation) -> Self {
         self.route.presentation = presentation;
         self

@@ -5,7 +5,8 @@ use super::{
 };
 use crate::placement::{
     plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
-    LocalPlacementOutcome, PlacementPolicy, TotalCandidateObservationContract,
+    LocalPlacementOutcome, LocalPublicationSemantics, PlacementPolicy,
+    TotalCandidateObservationContract,
 };
 use runmat_accelerate_api::reduction::ReductionSelection;
 use runmat_accelerate_api::{
@@ -177,6 +178,7 @@ pub(super) fn choose(
             family: ProviderOperationFamily::Fusion,
             cpu: cpu.into(),
             cpu_admission,
+            publication: LocalPublicationSemantics::Atomic,
             physical,
             compare_profitability: request.placement.is_some(),
             runtime: request.runtime.as_ref(),

@@ -86,7 +86,7 @@ async fn compiled_suffix_chains_owned_mul_add_max_and_exact_alias_casts() {
         };
         assert!(first
             .handle
-            .shares_allocation_with(progress.values.get(&ids[1]).unwrap()));
+            .shares_allocation_with(progress.get(ids[1]).unwrap()));
         assert!(first.handle.allocation_lease().validate_live().is_ok());
         session.acknowledge_output_checkpoint(ids[2]).unwrap();
         let second = session.next_output_checkpoint().await.unwrap();
@@ -119,10 +119,9 @@ async fn compiled_suffix_chains_owned_mul_add_max_and_exact_alias_casts() {
             panic!("selected final checkpoint must await its VM store");
         };
         assert!(progress
-            .values
-            .get(&ids[4])
+            .get(ids[4])
             .unwrap()
-            .shares_allocation_with(progress.values.get(&ids[3]).unwrap()));
+            .shares_allocation_with(progress.get(ids[3]).unwrap()));
         session.acknowledge_output_checkpoint(final_id).unwrap();
         for checkpoint in [&first.handle, &second.handle, &final_checkpoint.handle] {
             checkpoint.allocation_lease().validate_live().unwrap();

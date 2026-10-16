@@ -148,7 +148,7 @@ async fn qualify(provider: &'static WgpuProvider, single: bool) {
         for _ in 0..2 {
             let observed = RefCell::new(RealObserved::default());
             let output = provider
-                .scalar_op_exec_recorded(ScalarOpCode::Max, &input, scalar, Some(&observed))
+                .scalar_op_exec_recorded(ScalarOpCode::Max, &input, scalar, Some(&observed), None)
                 .unwrap();
             let observed = observed.into_inner();
             assert!(observed.effect);

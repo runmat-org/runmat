@@ -61,7 +61,11 @@ mod elementwise;
 mod explained_input;
 mod explained_output;
 pub(crate) mod image_stages;
-pub use image_stages::{ImageVmCheckpoint, ImageVmPreparation, ImageVmStages};
+#[cfg(feature = "wgpu")]
+pub use image_stages::ImageVmOriginalRoute;
+pub use image_stages::{
+    ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages,
+};
 #[cfg(test)]
 mod ownership_tests;
 pub use elementwise::{
@@ -1357,6 +1361,20 @@ pub async fn execute_image_normalize_vm(
                 .ok_or_else(|| anyhow!("image normalize: value {vid:?} not materialized"))
         }
     };
+    // Bound folded controls are never substituted from plan.const_values.
+    // An absent or changed live request operand declines before provider work.
+    if !crate::fusion::image_reduction::bound_image_controls_match(pattern, |id| {
+        request
+            .plan
+            .inputs
+            .iter()
+            .position(|candidate| *candidate == id)
+            .and_then(|position| request.inputs.get(position))
+    }) {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    }
     let input_value = find_value(pattern.input)?;
     let input_precision = match input_value {
         Value::Tensor(tensor) => match tensor.numeric_dtype() {

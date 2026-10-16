@@ -32,6 +32,22 @@ fn selected_route_witness_still_waits_for_actual_completion() {
 }
 
 #[test]
+fn selected_image_upload_is_device_bound_but_not_a_stage_witness() {
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_selected_execution();
+    receipt.require_selected_image_upload(7);
+    let recorder = receipt.recorder();
+    assert!(recorder.observes_selected_image_upload(7));
+    assert!(!recorder.observes_selected_image_upload(8));
+    recorder.submission().unwrap().complete();
+    // The upload fence cannot turn the selected stage into an observed run.
+    assert_eq!(
+        receipt.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}
+
+#[test]
 fn fallback_cannot_be_repaired_by_later_provider_restore_or_late_route_witness() {
     for after_publication in [false, true] {
         let mut receipt = ProviderOperationReceipt::new();

@@ -211,8 +211,14 @@ pub(crate) fn project_private_bindings(
         if bridges.iter().any(|bridge| {
             bridge.slot == literal.slot
                 && bridge.store_pc == literal.store_pc
+                && bridge.load_pc == literal.load_pc
                 && bridge.producer_pc == literal.producer_pc
-                && bridge.consumer_pc == literal.consumer_pc
+                // The bridge ends at the unique graph operation while the
+                // literal certificate ends at its containing statement.
+                // The same store and load establish the same private value;
+                // only that contained, source-ordered use may share proof.
+                && literal.load_pc < bridge.consumer_pc
+                && bridge.consumer_pc <= literal.consumer_pc
                 && index.region_covers(bridge.producer_pc, bridge.consumer_pc)
         }) || controls.iter().any(|control| {
             control.slot == literal.slot

@@ -22,6 +22,7 @@ mod prepared_request;
 mod whole_work;
 pub(super) use prepared_request::PreparedPlacementRequest;
 pub(crate) use whole_work::select_unobserved;
+pub(in crate::placement) use whole_work::unobserved_admitted_record_bytes;
 pub(super) use whole_work::{candidate_resources_admitted, no_resource_candidate};
 #[cfg(test)]
 #[path = "session/authority_tests.rs"]
@@ -739,6 +740,10 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         runmat_runtime::RuntimeError,
     > {
         PlacementSession::select_whole_work_borrowed_managed(self, request).map_err(runtime_error)
+    }
+
+    fn managed_whole_work_available(&self) -> bool {
+        self.managed_observations.is_some() && self.managed_feedback.is_some()
     }
 
     fn observed_candidate_duration(

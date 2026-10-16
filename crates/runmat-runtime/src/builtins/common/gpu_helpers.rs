@@ -18,7 +18,8 @@ pub(crate) use residency_cleanup::clear_input_residency;
 mod real_range;
 pub use real_range::{
     probe_real_extrema, probe_real_extrema_observed, probe_real_nan_absence,
-    probe_real_nan_absence_observed, RealExtrema, RealProbeDiagnostic, RealProbeStage,
+    probe_real_nan_absence_observed, scalar_probe_host_upper_bytes, RealExtrema,
+    RealProbeDiagnostic, RealProbeStage,
 };
 
 pub fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage {
@@ -504,27 +505,32 @@ pub async fn download_native_values_async(
     let value = download_value_preserving_residency_async(provider, handle).await?;
     match value {
         Value::Tensor(tensor) => {
-            let data = (0..tensor.len())
-                .map(|index| {
-                    tensor.numeric_value_at(index).ok_or_else(|| {
-                        build_runtime_error(
-                            "native download: numeric payload storage is inconsistent",
-                        )
+            // The fallible `Result<Vec<_>>` collector erases the exact lower
+            // size hint and can grow from a minimum-capacity allocation even
+            // for one scalar. Reserve the validated tensor length explicitly
+            // so scalar probe admission can quote the actual requested slots.
+            let mut data = Vec::with_capacity(tensor.len());
+            for index in 0..tensor.len() {
+                data.push(tensor.numeric_value_at(index).ok_or_else(|| {
+                    build_runtime_error("native download: numeric payload storage is inconsistent")
                         .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build()
-                    })
-                })
-                .collect::<crate::BuiltinResult<Vec<_>>>()?;
+                })?);
+            }
             Ok(HostNativeTensorOwned {
                 data,
                 shape: tensor.shape().to_vec(),
             })
         }
-        Value::LogicalArray(logical) => Ok(HostNativeTensorOwned {
-            data: logical.data.into_iter().map(NumericScalar::U8).collect(),
-            shape: logical.shape,
-        }),
+        Value::LogicalArray(logical) => {
+            let mut data = Vec::with_capacity(logical.data.len());
+            data.extend(logical.data.into_iter().map(NumericScalar::U8));
+            Ok(HostNativeTensorOwned {
+                data,
+                shape: logical.shape,
+            })
+        }
         Value::Num(value) => Ok(HostNativeTensorOwned {
             data: vec![NumericScalar::F64(value)],
             shape: vec![1, 1],

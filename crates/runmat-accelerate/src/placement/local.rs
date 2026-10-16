@@ -13,8 +13,9 @@ mod multi;
 mod cpu;
 pub(crate) use cpu::LocalCpuCandidate;
 pub(crate) use multi::{
-    plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
-    LocalProviderAdmission, PreparedPhysicalAuthority,
+    plan_local_multi, plan_local_multi_bounded, LocalCpuAdmission, LocalMultiPlacementRequest,
+    LocalPhysicalCandidate, LocalProviderAdmission, LocalPublicationSemantics,
+    PreparedPhysicalAuthority,
 };
 mod rejected;
 mod session_facts;
@@ -185,6 +186,13 @@ pub(crate) enum LocalPlacementFeedbackAuthority {
             std::sync::Mutex<Option<runmat_runtime::context::RuntimeWholeWorkSelection>>,
         >,
     ),
+    /// One finite managed decision and its retained in-flight observation
+    /// lease. Deferred completion consumes the same selection exactly once.
+    Managed(
+        std::sync::Arc<
+            std::sync::Mutex<Option<runmat_runtime::context::RuntimeManagedWholeWorkSelection>>,
+        >,
+    ),
 }
 
 impl LocalPlacementFeedbackAuthority {
@@ -212,6 +220,28 @@ impl LocalPlacementFeedbackAuthority {
                     && selection.decision.signature == *signature
                     && selection.decision.selected.candidate == candidate
                     && selection.decision.selected.kind == kind;
+                let restored = match slot.lock() {
+                    Ok(mut slot) => {
+                        *slot = Some(selection);
+                        true
+                    }
+                    Err(_) => false,
+                };
+                current && restored
+            }
+            Self::Managed(slot) => {
+                let selection = match slot.lock() {
+                    Ok(mut slot) => slot.take(),
+                    Err(_) => None,
+                };
+                let Some(selection) = selection else {
+                    return false;
+                };
+                let current = selection.observation_is_current()
+                    && signature.permit_identity().ok() == Some(selection.identity)
+                    && runmat_execution::Digest::parse_canonical(candidate)
+                        == Some(selection.selected.candidate)
+                    && selection.selected.kind == kind;
                 let restored = match slot.lock() {
                     Ok(mut slot) => {
                         *slot = Some(selection);
@@ -249,6 +279,7 @@ impl LocalPlacementFeedbackAuthority {
                     },
                 })
             }
+            Self::Managed(_) => None,
         }
     }
 }
@@ -291,6 +322,18 @@ impl LocalPlacementFeedback {
             LocalPlacementFeedbackAuthority::WholeWork(_) => {
                 if let Some(delivery) = self.authority.delivery(feedback) {
                     let _ = service.observe_deferred_feedback(delivery);
+                }
+            }
+            LocalPlacementFeedbackAuthority::Managed(slot) => {
+                let selected = slot.lock().ok().and_then(|mut slot| slot.take());
+                if let Some(selected) = selected {
+                    let outcome = if succeeded {
+                        runmat_execution::WholeWorkObservationOutcome::Success
+                    } else {
+                        runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+                    };
+                    let _ =
+                        service.observe_managed_whole_work(&selected, total_elapsed_ns, outcome);
                 }
             }
         }
@@ -358,6 +401,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             family,
             cpu,
             cpu_admission,
+            publication: multi::LocalPublicationSemantics::Atomic,
             physical: vec![multi::LocalPhysicalCandidate {
                 authority: compound.map(multi::PreparedPhysicalAuthority::Compound),
                 physical_identity: compound.map(|plan| plan.identity()),

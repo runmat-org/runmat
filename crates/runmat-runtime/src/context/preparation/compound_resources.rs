@@ -3,10 +3,7 @@
 use super::RuntimeContext;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{AccelProvider, ProviderCapabilitySnapshot};
-use runmat_execution::{
-    CandidateOutputResidency, CandidateResourceDemand, ProviderInputStageDemand,
-    ProviderInputStageDemands, ResourceAccount,
-};
+use runmat_execution::{CandidateOutputResidency, CandidateResourceDemand};
 
 pub(super) fn preflight(
     runtime: Option<&RuntimeContext>,
@@ -53,43 +50,11 @@ pub(super) fn with_observation(
         return Ok(resources);
     };
     let bytes = observation
-        .requested_peak_buffer_bytes
-        .checked_add(
-            observation
-                .wgpu_compute_query
-                .map_or(0, |query| query.requested_peak_buffer_bytes),
-        )
+        .requested_total_peak_bytes()
         .ok_or_else(overflow)?;
-    let add = |bound| {
-        ResourceAccount::default()
-            .checked_add(bound)
-            .and_then(|account| account.checked_add(bytes.into()))
-            .map(ResourceAccount::bound)
-            .ok_or_else(overflow)
-    };
-    let mut resources = resources;
-    resources.scratch_bytes = add(resources.scratch_bytes)?;
-    if let Some(peak) = &mut resources.peak_live {
-        peak.peak_bytes = peak.peak_bytes.checked_add(bytes).ok_or_else(overflow)?;
-    }
-    resources.provider_input_stages = resources
-        .provider_input_stages
-        .map(|stages| {
-            stages
-                .iter()
-                .map(|stage| {
-                    Ok(ProviderInputStageDemand {
-                        incremental_peak_bytes: add(stage.incremental_peak_bytes)?,
-                        ..stage
-                    })
-                })
-                .collect::<BuiltinResult<Vec<_>>>()
-                .and_then(|stages| {
-                    ProviderInputStageDemands::sequential(stages).ok_or_else(overflow)
-                })
-        })
-        .transpose()?;
-    Ok(resources)
+    resources
+        .with_provider_observation_peak(bytes)
+        .ok_or_else(overflow)
 }
 
 fn overflow() -> crate::RuntimeError {

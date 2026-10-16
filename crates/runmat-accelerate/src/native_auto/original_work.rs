@@ -60,7 +60,10 @@ pub(super) fn matrix(
 mod tests {
     use super::*;
     use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumInvocation, SumOutputClass};
-    struct NoDevice;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct NoDevice {
+        queries: AtomicUsize,
+    }
     impl AccelProvider for NoDevice {
         fn device_info(&self) -> String {
             "no-device-work-prior".into()
@@ -74,8 +77,20 @@ mod tests {
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
             panic!("source prior cannot download")
         }
+        fn query_feasibility(
+            &self,
+            _query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        ) -> runmat_accelerate_api::ProviderFeasibility {
+            self.queries.fetch_add(1, Ordering::SeqCst);
+            runmat_accelerate_api::ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "source prior fixture has no device operations",
+            )
+        }
     }
-    static OWNER: NoDevice = NoDevice;
+    static OWNER: NoDevice = NoDevice {
+        queries: AtomicUsize::new(0),
+    };
     fn route() -> runmat_accelerate_api::ProviderSumWorkload {
         runmat_accelerate_api::ProviderSumWorkload {
             invocation: SumInvocation::Sum,
@@ -151,6 +166,7 @@ mod tests {
             ..ThresholdConfig::default()
         };
         let auto = NativeAutoOffload::new(&OWNER, config);
+        let queries_before = OWNER.queries.load(Ordering::SeqCst);
         let evaluation = auto.evaluate_reduction(8);
         let (evaluation, rejection, plan) = auto
             .plan_operation(
@@ -169,7 +185,11 @@ mod tests {
         assert_eq!(rejection, Some(ProviderRejectionCode::UnsupportedOperation));
         // Absence of a host price no longer bypasses actual provider query/
         // resource admission. This context-free call gains no learning right.
-        assert!(plan.provider_query.is_some());
+        assert_eq!(OWNER.queries.load(Ordering::SeqCst), queries_before + 1);
+        // A rejected provider has no execution observation to start. Its
+        // feasibility query above is distinct from that execution authority.
+        assert!(plan.provider_query.is_none());
+        assert!(!plan.provider_observation);
     }
     #[test]
     fn cache_identity_and_rates_are_checked() {

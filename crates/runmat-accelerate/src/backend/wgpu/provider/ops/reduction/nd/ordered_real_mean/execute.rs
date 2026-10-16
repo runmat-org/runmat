@@ -54,18 +54,31 @@ impl WgpuProvider {
         source: &GpuTensorHandle,
         plan: &OrderedMeanPlan,
         nan_mode: ProviderRealMeanNaNMode,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<(GpuTensorHandle, u64)> {
-        self.execute_ordered_mean_plan_with(source, plan, nan_mode, |_| Ok(()))
+        self.execute_ordered_mean_plan_with_admission(source, plan, nan_mode, admission, |_| Ok(()))
     }
 
     /// The request-local checkpoint is a no-op in production. Tests inject a
     /// failure at the real allocation/submission boundary without a global
     /// provider fault switch or a second execution algorithm.
+    #[cfg(test)]
     pub(super) fn execute_ordered_mean_plan_with(
         &self,
         source: &GpuTensorHandle,
         plan: &OrderedMeanPlan,
         nan_mode: ProviderRealMeanNaNMode,
+        checkpoint: impl FnMut(OrderedMeanCheckpoint) -> Result<()>,
+    ) -> ProviderExecutionResult<(GpuTensorHandle, u64)> {
+        self.execute_ordered_mean_plan_with_admission(source, plan, nan_mode, None, checkpoint)
+    }
+
+    fn execute_ordered_mean_plan_with_admission(
+        &self,
+        source: &GpuTensorHandle,
+        plan: &OrderedMeanPlan,
+        nan_mode: ProviderRealMeanNaNMode,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
         mut checkpoint: impl FnMut(OrderedMeanCheckpoint) -> Result<()>,
     ) -> ProviderExecutionResult<(GpuTensorHandle, u64)> {
         self.require_ieee_words(crate::backend::wgpu::types::NumericPrecision::F64)
@@ -217,11 +230,12 @@ impl WgpuProvider {
                     .after_effect()
             })?;
         let result = self
-            .register_real_floating_output(
+            .register_real_floating_output_admitted(
                 output,
                 final_step.output_shape().to_vec(),
                 len,
                 physical_precision(final_step.output_precision()),
+                admission,
             )
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
         Ok((result, observed_incremental_peak_bytes))

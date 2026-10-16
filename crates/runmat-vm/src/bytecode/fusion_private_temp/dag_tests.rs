@@ -60,9 +60,36 @@ fn authentic_elementwise_private_dag_closes_without_materializing_private_stores
 
 fn assert_elementwise_private_closure(bytecode: &Bytecode) {
     let edges = bridges(bytecode);
+    let output_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(slot, name)| (name == "y").then_some(*slot))
+        .expect("source expression output binding");
+    let (_, stores) = crate::accel::graph::build_accel_graph_with_stores(
+        &bytecode.instructions,
+        &bytecode.var_types,
+    );
+    let output_store = stores
+        .iter()
+        .find(|store| store.binding.index == output_slot)
+        .expect("source expression output store");
+    let prior_publication = stores
+        .iter()
+        .filter(|store| {
+            store.pc < output_store.pc && bytecode.var_names.contains_key(&store.binding.index)
+        })
+        .map(|store| store.pc)
+        .max();
+    let expression_edges = edges
+        .iter()
+        .filter(|edge| {
+            prior_publication.is_none_or(|pc| pc < edge.producer_pc)
+                && edge.consumer_pc < output_store.pc
+        })
+        .collect::<Vec<_>>();
     assert!(
-        edges.len() >= 2,
-        "authentic private expression edges: {edges:?}"
+        expression_edges.len() >= 2,
+        "source-expression private branches are sealed: {edges:?}"
     );
     let (plan, graph) = bytecode.prepare_vm_fusion_plan();
     let plan = plan.expect("checked elementwise plan");
@@ -72,7 +99,7 @@ fn assert_elementwise_private_closure(bytecode: &Bytecode) {
         .iter()
         .find(|selected| {
             selected.group.kind == FusionKind::ElementwiseChain
-                && edges.iter().all(|edge| {
+                && expression_edges.iter().all(|edge| {
                     selected.group.span.start <= edge.producer_pc
                         && edge.consumer_pc <= selected.group.span.end
                 })
@@ -86,7 +113,7 @@ fn assert_elementwise_private_closure(bytecode: &Bytecode) {
         selected.group.stack_layout.is_some(),
         "exact bytecode-derived stack contract"
     );
-    for edge in &edges {
+    for edge in expression_edges {
         let producer = graph
             .nodes
             .iter()
@@ -135,11 +162,37 @@ fn function_elementwise_private_dag_survives_portable_roundtrip() {
 #[test]
 fn nonscalar_matrix_product_is_not_a_private_elementwise_bridge() {
     let bytecode = compiled("x = gpuArray(single(ones(4, 4))); y = sin(x*x); z = gather(y);");
-    let (plan, _) = bytecode.prepare_vm_fusion_plan();
+    let (plan, graph) = bytecode.prepare_vm_fusion_plan();
+    let matmul_pc = graph
+        .as_ref()
+        .and_then(|graph| {
+            graph.nodes.iter().find(|node| {
+                node.category == runmat_accelerate::graph::AccelOpCategory::MatMul
+                    && matches!(
+                        node.label,
+                        runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                            origin: runmat_accelerate::graph::FusionCallOrigin::Operator(
+                                runmat_types::OperatorKind::MatrixMultiply
+                            ),
+                            ..
+                        }
+                    )
+            })
+        })
+        .expect("the non-scalar product retains its matrix operator")
+        .span
+        .start;
     if let Some(plan) = plan {
-        assert!(!plan.groups.iter().any(|selected| selected.group.kind
-            == FusionKind::ElementwiseChain
-            && selected.operations.len() > 1));
+        assert!(plan.groups.iter().any(|selected| {
+            selected.group.kind == FusionKind::MatmulEpilogue
+                && selected.group.span.start <= matmul_pc
+                && matmul_pc <= selected.group.span.end
+        }));
+        assert!(!plan.groups.iter().any(|selected| {
+            selected.group.kind == FusionKind::ElementwiseChain
+                && selected.group.span.start <= matmul_pc
+                && matmul_pc <= selected.group.span.end
+        }));
     }
 }
 
@@ -296,7 +349,6 @@ fn authentic_function_private_dag_survives_dispatch_and_program_v2_roundtrip() {
 fn authentic_compiler_private_dag_closes_into_one_checked_reduction() {
     let bytecode = pure_dag();
     let edges = bridges(&bytecode);
-    assert_eq!(edges.len(), 3, "three sealed private edges: {edges:?}");
     assert!(edges.iter().all(|edge| {
         matches!(bytecode.instructions[edge.store_pc], Instr::StoreVar(slot) if slot == edge.slot)
             && matches!(bytecode.instructions[edge.load_pc], Instr::LoadVar(slot) if slot == edge.slot)
@@ -308,6 +360,17 @@ fn authentic_compiler_private_dag_closes_into_one_checked_reduction() {
         .iter()
         .find(|group| group.kind == FusionKind::Reduction)
         .expect("one folded reduction window");
+    let reduction_edges = edges
+        .iter()
+        .filter(|edge| {
+            reduction.span.start <= edge.producer_pc && edge.consumer_pc <= reduction.span.end
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reduction_edges.len(),
+        3,
+        "three reduction-owned private edges: {edges:?}"
+    );
     assert_eq!(
         groups
             .iter()
@@ -315,9 +378,6 @@ fn authentic_compiler_private_dag_closes_into_one_checked_reduction() {
             .count(),
         1,
     );
-    assert!(edges.iter().all(|edge| {
-        reduction.span.start <= edge.producer_pc && edge.consumer_pc <= reduction.span.end
-    }));
     let (plan, graph) = bytecode.prepare_vm_fusion_plan();
     let plan = plan.expect("checked multi-producer plan");
     let graph = graph.expect("same authentic instruction graph");
@@ -346,7 +406,7 @@ fn authentic_compiler_private_dag_closes_into_one_checked_reduction() {
             .count(),
         3,
     );
-    for edge in &edges {
+    for edge in reduction_edges {
         let producer = graph
             .nodes
             .iter()
@@ -494,7 +554,11 @@ fn private_dag_rejects_graph_fanout_and_preserves_user_store() {
     let edge = edges
         .iter()
         .find(|edge| {
-            !matches!(
+            groups.iter().any(|group| {
+                group.kind == FusionKind::Reduction
+                    && group.span.start <= edge.producer_pc
+                    && edge.consumer_pc <= group.span.end
+            }) && !matches!(
                 crate::bytecode::compile::instr_fusion_signal_kind(
                     &bytecode.instructions[edge.consumer_pc]
                 ),
@@ -563,8 +627,16 @@ fn private_dag_rejects_graph_fanout_and_preserves_user_store() {
 fn intermediate_effect_or_extra_use_cannot_hide_inside_dag_region() {
     let original = pure_dag();
     let edges = bridges(&original);
+    let reduction = original
+        .runtime_fusion_groups()
+        .into_iter()
+        .find(|group| group.kind == FusionKind::Reduction)
+        .expect("selected reduction");
     let first = edges
         .iter()
+        .filter(|edge| {
+            reduction.span.start <= edge.producer_pc && edge.consumer_pc <= reduction.span.end
+        })
         .min_by_key(|edge| edge.producer_pc)
         .expect("first private producer");
     let intervening = edges

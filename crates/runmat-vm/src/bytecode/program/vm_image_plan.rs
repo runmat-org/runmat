@@ -3,7 +3,9 @@
 
 use runmat_accelerate::graph::AccelGraph;
 use runmat_execution::Digest;
-use runmat_runtime::context::{RuntimeContext, VmFusionDeclineRight, VmFusionInstalledRegion};
+use runmat_runtime::context::{
+    RuntimeContext, VmFusionCompletionRight, VmFusionDeclineRight, VmFusionInstalledRegion,
+};
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
 use std::cell::RefCell;
@@ -11,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::super::multi_store::{SelectedImageRegion, SelectedImageRegionSet};
+use super::super::multi_store::{CapturedImageInputs, SelectedImageRegion, SelectedImageRegionSet};
 use super::vm_fusion_plan::{vm_fusion_executable_identity, vm_fusion_semantic_identity};
 use super::{Bytecode, FunctionBytecode, FunctionRegistry};
 
@@ -232,6 +234,7 @@ pub(crate) struct VmImageSelected<'a> {
     pub(crate) graph: &'a AccelGraph,
     pub(crate) region: &'a SelectedImageRegion,
     pub(crate) decline: VmFusionDeclineRight,
+    pub(crate) completion: Option<VmFusionCompletionRight>,
 }
 
 impl Bytecode {
@@ -423,6 +426,7 @@ impl VmImagePlanInstallation {
             graph: &self.selected.graph,
             region,
             decline: installed.decline_right(runtime)?,
+            completion: installed.right(runtime),
         })
     }
 
@@ -431,7 +435,11 @@ impl VmImagePlanInstallation {
         region: &SelectedImageRegion,
         vars: &[runmat_value::Value],
         context: &super::ExecutionContext,
-    ) -> Option<Vec<runmat_value::Value>> {
-        self.selected.capture_inputs(region, vars, context)
+        runtime: &RuntimeContext,
+    ) -> Result<
+        Option<CapturedImageInputs>,
+        runmat_runtime::context::host_allocation::HostAllocationError,
+    > {
+        self.selected.capture_inputs(region, vars, context, runtime)
     }
 }

@@ -106,6 +106,8 @@ fn image_wrong_rank_resumes_runtime_before_placement_or_upload() {
             bias: None,
             gamma: None,
             clamp_zero: false,
+            clamp_zero_value: None,
+            bound_mean_axes: Vec::new(),
             requires_single_input: true,
             reduction_routes: None,
         });
@@ -135,6 +137,52 @@ fn image_wrong_rank_resumes_runtime_before_placement_or_upload() {
                 FusionExecutionOutcome::SharedRuntime(_)
             ));
         }
+    });
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn image_bound_fold_missing_request_value_cannot_use_captured_constant() {
+    runmat_gc::gc_test_context(|| {
+        static PROVIDER: NoTouchImageProvider = NoTouchImageProvider;
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+        let pattern = FusionPattern::ImageNormalize(ImageNormalizePattern {
+            input: 0,
+            epsilon: ImageScalar::Constant(0.0),
+            gain: None,
+            bias: None,
+            gamma: None,
+            clamp_zero: true,
+            clamp_zero_value: Some(1),
+            bound_mean_axes: Vec::new(),
+            requires_single_input: true,
+            reduction_routes: None,
+        });
+        let mut plan = make_plan(Vec::new());
+        plan.group.kind = FusionKind::ImageNormalize;
+        plan.group.pattern = Some(pattern.clone());
+        plan.group.shape = ShapeInfo::Tensor(vec![Some(1), Some(2), Some(2)]);
+        plan.inputs = vec![0];
+        plan.stack_pattern = vec![0];
+        plan.kernel.kind = FusionKind::ImageNormalize;
+        plan.pattern = Some(pattern);
+        plan.const_values.insert(
+            1,
+            Value::Tensor(runmat_value::Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+        );
+        let request = FusionExecutionRequest {
+            plan: &plan,
+            inputs: vec![Value::Tensor(
+                runmat_value::Tensor::from_f32(vec![1.0; 4], vec![1, 2, 2]).unwrap(),
+            )],
+            placement: None,
+            runtime: Some(context(Vec::new())),
+        };
+        assert!(AdmittedBindings::new(&request).is_some());
+        assert!(matches!(
+            futures::executor::block_on(execute_image_normalize_vm(request, None)).unwrap(),
+            FusionExecutionOutcome::SharedRuntime(_)
+        ));
     });
 }
 

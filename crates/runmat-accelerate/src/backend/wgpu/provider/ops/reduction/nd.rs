@@ -89,6 +89,7 @@ impl WgpuProvider {
                         dims_zero_based,
                         &moments.mean,
                         &moments.ex2,
+                        None,
                     )?;
                     return Ok(Some(moments.ex2));
                 }
@@ -98,7 +99,7 @@ impl WgpuProvider {
                 return Ok(Some(mean));
             }
             let moments = self.reduce_moments_nd_exec(a, dims_zero_based)?;
-            self.remember_moments(a, dims_zero_based, &moments.mean, &moments.ex2)?;
+            self.remember_moments(a, dims_zero_based, &moments.mean, &moments.ex2, None)?;
             return Ok(Some(moments.mean));
         }
         let entry = self.real_floating_entry(a)?;
@@ -337,6 +338,15 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
     ) -> Result<runmat_accelerate_api::ProviderMoments2> {
+        self.reduce_moments_nd_exec_admitted(a, dims_zero_based, None)
+    }
+
+    pub(crate) fn reduce_moments_nd_exec_admitted(
+        &self,
+        a: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<runmat_accelerate_api::ProviderMoments2> {
         let entry = self.real_floating_entry(a)?;
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
@@ -547,10 +557,20 @@ impl WgpuProvider {
 
                 Ok((mean_out, ex2_out, out_shape))
             })??;
-        let mean_handle =
-            self.register_real_floating_output(mean_out, out_shape.clone(), cols, entry.precision)?;
-        let ex2_handle =
-            self.register_real_floating_output(ex2_out, out_shape, cols, entry.precision)?;
+        let mean_handle = self.register_real_floating_output_admitted(
+            mean_out,
+            out_shape.clone(),
+            cols,
+            entry.precision,
+            admission,
+        )?;
+        let ex2_handle = self.register_real_floating_output_admitted(
+            ex2_out,
+            out_shape,
+            cols,
+            entry.precision,
+            admission,
+        )?;
         self.validate_nd_moment_pair(a, dims_zero_based, &mean_handle, &ex2_handle)?;
         Ok(runmat_accelerate_api::ProviderMoments2 {
             mean: mean_handle,

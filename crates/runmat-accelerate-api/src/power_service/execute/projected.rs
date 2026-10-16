@@ -8,25 +8,52 @@ pub async fn execute_resident_scalar_power_projected(
     projection: &PowerTypedScalarProjection,
     cancellation: Option<&runmat_execution::cancellation::CancellationToken>,
 ) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
+    execute_resident_scalar_power_projected_admitted(prepared, projection, cancellation, None).await
+}
+
+pub async fn execute_resident_scalar_power_projected_admitted(
+    prepared: PreparedResidentScalarPower,
+    projection: &PowerTypedScalarProjection,
+    cancellation: Option<&runmat_execution::cancellation::CancellationToken>,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
     crate::placement::compound_execution::check_cancelled(cancellation, false)
         .map_err(PowerServiceError)?;
     prepared.validate_live()?;
     if prepared.route != PowerPhysicalRoute::TypedDomain
-        || !projection.matches(prepared.provider, &prepared.symbolic)
+        || !projection.matches_bound(prepared.provider, &prepared.symbolic, &prepared.resident)
     {
         return Err(PowerServiceError::pre(
             "typed POWER scalar projection changed before execution",
         ));
     }
-    let current = PowerTypedScalarProjection::plan(prepared.provider, &prepared.symbolic)
-        .map_err(PowerServiceError)?
-        .ok_or_else(|| PowerServiceError::pre("typed POWER scalar physical route unavailable"))?;
-    let projection_identity = projection.identity().map_err(PowerServiceError::from)?;
-    if current.identity().map_err(PowerServiceError::from)? != projection_identity {
+    if admission.is_some() && !prepared.exact_scalar_upload() {
+        return Err(PowerServiceError::pre(
+            "finite typed POWER requires an admitted scalar upload",
+        ));
+    }
+    if admission.is_some() {
+        let expected = prepared
+            .output_shape
+            .iter()
+            .copied()
+            .map(u64::try_from)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|_| PowerServiceError::pre("finite typed POWER output shape overflows"))?;
+        if projection.pair.physical().real.output.shape.as_slice() != expected.as_slice()
+            || projection.pair.physical().complex.output.shape.as_slice() != expected.as_slice()
+        {
+            return Err(PowerServiceError::pre(
+                "finite typed POWER requires shape-preserving selected outputs",
+            ));
+        }
+    }
+    if !projection.is_current_for(prepared.provider) {
         return Err(PowerServiceError::pre(
             "typed POWER scalar projection changed before execution",
         ));
     }
+    let projection_identity = projection.identity().map_err(PowerServiceError::from)?;
     let _protected_metadata = prepared
         .protected_with(&[])
         .into_iter()
@@ -37,7 +64,7 @@ pub async fn execute_resident_scalar_power_projected(
     let widened = if let Some(stage) = projection.widened {
         let _guard = ResidencyRestoreGuard::new(resident);
         let output = provider
-            .unary_double(resident)
+            .unary_double_admitted(resident, admission)
             .await
             .map_err(PowerServiceError::after)?;
         if !valid_output(
@@ -73,7 +100,7 @@ pub async fn execute_resident_scalar_power_projected(
         });
     }
     let native = widened.as_ref().unwrap_or(resident);
-    let scalar = prepare_scalar(&prepared, native, widened.is_some())?;
+    let scalar = prepare_scalar(&prepared, native, widened.is_some(), admission)?;
     if scalar.physical().requested_bytes() != projection.scalar_upload.output_requested_bytes {
         return Err(reject(
             scalar,
@@ -97,7 +124,7 @@ pub async fn execute_resident_scalar_power_projected(
         .bind(base, exponent)
         .map_err(PowerServiceError::after)?;
     let (native_output, evidence) = pair
-        .execute(cancellation)
+        .execute_admitted(cancellation, admission)
         .await
         .map_err(PowerServiceError::after)?
         .into_parts();
@@ -122,7 +149,9 @@ pub async fn execute_resident_scalar_power_projected(
     } {
         let result = {
             let _guard = ResidencyRestoreGuard::new(&native_output);
-            provider.unary_single(&native_output).await
+            provider
+                .unary_single_admitted(&native_output, admission)
+                .await
         };
         let output = match result {
             Ok(output) => output,

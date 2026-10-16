@@ -68,21 +68,24 @@ pub(super) fn feasibility(
     // F32 on a Double-preferred WGPU owner is admitted only by an explicit
     // arithmetic mode and the profile-specific POWER recipe below. The mixed
     // mode retains its distinct Double-compute/Single-publication contract.
-    let mut admitted_snapshot = snapshot.clone();
-    if query.workload.real_power_mode.is_some_and(|mode| {
-        matches!(
-            mode,
-            RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
-                | RealPowerArithmeticMode::NativeSingle
-        )
-    }) {
-        for class in [ProviderElementType::F32, ProviderElementType::ComplexF32] {
-            if !admitted_snapshot.element_types.contains(&class) {
-                admitted_snapshot.element_types.push(class);
-            }
-        }
-    }
-    let result = match dense_feasibility(&admitted_snapshot, &accounted) {
+    let additional_elements: &[ProviderElementType] =
+        if query.workload.real_power_mode.is_some_and(|mode| {
+            matches!(
+                mode,
+                RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
+                    | RealPowerArithmeticMode::NativeSingle
+            )
+        }) {
+            &[ProviderElementType::F32, ProviderElementType::ComplexF32]
+        } else {
+            &[]
+        };
+    let result = match dense_feasibility_with_extra_elements(
+        snapshot,
+        &accounted,
+        ProviderRepresentation::checked_byte_len,
+        additional_elements,
+    ) {
         ProviderFeasibility::Supported { mut estimate } => {
             if let Some(bytes) = work.physical_output_bytes {
                 estimate.output_bytes = Some(bytes);

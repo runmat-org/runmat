@@ -15,6 +15,7 @@ pub struct PowerTypedScalarResourceBounds {
     pub scratch_bytes: ResourceByteBound,
     pub peak_bytes: ResourceByteBound,
     pub host_workspace_bytes: u64,
+    pub dispatches: u32,
     pub queue_slots: u32,
 }
 
@@ -200,6 +201,19 @@ impl PowerTypedScalarProjection {
     pub fn matches(&self, owner: &dyn AccelProvider, symbolic: &PowerSymbolicPlan) -> bool {
         crate::same_provider_instance(self.owner, owner) && &self.symbolic == symbolic
     }
+    /// Compare the selected, future-backed projection with a prepared live
+    /// descriptor without changing the selected recipe. The private prepared
+    /// POWER owner, not these descriptions, authenticates the retained lease.
+    pub fn matches_bound(
+        &self,
+        owner: &dyn AccelProvider,
+        symbolic: &PowerSymbolicPlan,
+        source: &crate::GpuTensorHandle,
+    ) -> bool {
+        crate::same_provider_instance(self.owner, owner)
+            && self.source_matches(source)
+            && self.symbolic.matches_live_typed_binding(symbolic, source)
+    }
     pub fn is_current_for(&self, owner: &dyn AccelProvider) -> bool {
         crate::same_provider_instance(self.owner, owner)
             && Self::plan(self.owner, &self.symbolic)
@@ -221,6 +235,23 @@ impl PowerTypedScalarProjection {
                 .resident_input
                 .as_ref()
                 .is_some_and(|description| description.matches(source))
+    }
+
+    pub fn real_output_requested_bytes(&self) -> u64 {
+        self.narrow_real.map_or(
+            self.pair.physical().real.work.output_buffer_bytes,
+            |stage| stage.output_requested_bytes,
+        )
+    }
+
+    /// Newly registered handles on one selected domain path. Probe-internal
+    /// scratch is charged by its physical proposal, not as a Tensor handle.
+    pub fn registered_output_count(&self) -> Option<usize> {
+        2_usize
+            .checked_add(usize::from(self.widened.is_some()))?
+            .checked_add(usize::from(
+                self.narrow_real.is_some() || self.narrow_complex.is_some(),
+            ))
     }
 
     pub fn identity(&self) -> anyhow::Result<runmat_execution::Digest> {
@@ -316,11 +347,29 @@ impl PowerTypedScalarProjection {
                     .map_or(0, |stage| stage.queue_slots)
                     .max(self.narrow_complex.map_or(0, |stage| stage.queue_slots)),
             )?;
+        let dispatches = self
+            .widened
+            .map_or(0, |stage| stage.dispatches)
+            .checked_add(self.pair.physical().probe.dispatches)?
+            .checked_add(
+                self.pair
+                    .physical()
+                    .real
+                    .work
+                    .dispatches
+                    .max(self.pair.physical().complex.work.dispatches),
+            )?
+            .checked_add(
+                self.narrow_real
+                    .map_or(0, |stage| stage.dispatches)
+                    .max(self.narrow_complex.map_or(0, |stage| stage.dispatches)),
+            )?;
         Some(PowerTypedScalarResourceBounds {
             retained_bytes,
             scratch_bytes,
             peak_bytes: peak.bound(),
             host_workspace_bytes: self.pair.physical().probe.host_workspace_bytes,
+            dispatches,
             queue_slots,
         })
     }

@@ -34,12 +34,12 @@ pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
     apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
-    promote_binary, promote_binary_in_context, promote_reduction_args, promote_unary,
-    refresh_auto_offload_calibration, reset_auto_offload_log, AutoOffloadCalibrationOutcome,
-    AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry, AutoOffloadDisposition,
-    AutoOffloadReport, BinaryOp, CachedProviderInfo, CalibrationSource, CalibrationUnitPolicy,
-    DecisionReason, ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry,
-    ThresholdSnapshot, UnaryOp,
+    promote_binary, promote_binary_in_context, promote_builtin_binary_in_context,
+    promote_reduction_args, promote_unary, refresh_auto_offload_calibration,
+    reset_auto_offload_log, AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary,
+    AutoOffloadDecisionEntry, AutoOffloadDisposition, AutoOffloadReport, BinaryOp,
+    CachedProviderInfo, CalibrationSource, CalibrationUnitPolicy, DecisionReason, ReductionOp,
+    ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};

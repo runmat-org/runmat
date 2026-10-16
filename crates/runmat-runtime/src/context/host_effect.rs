@@ -22,6 +22,7 @@ mod exact_bytes;
 mod exact_diagnostic;
 mod final_facts;
 mod managed_ledger;
+pub(crate) use managed_ledger::retained_claim_host_upper_bytes;
 mod output_permit;
 mod stage;
 mod workload;

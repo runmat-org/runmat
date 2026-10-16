@@ -1,17 +1,14 @@
 //! MATLAB-compatible `range` builtin with GPU-aware semantics for RunMat.
+use runmat_builtins::{
+    EXPLICIT_NANFLAG_EXTENSION, GPU_MULTI_AXIS_EXTENSION, INTEGER_DATA_EXTENSION,
+    TYPED_INTEGER_CONTROL_EXTENSION,
+};
 
 use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+#[cfg(test)]
+use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
@@ -87,6 +84,7 @@ fn invalid_reduction_shape(stage: &'static str) -> crate::RuntimeError {
     error
 }
 
+#[cfg(test)]
 fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -97,263 +95,6 @@ fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
         _ => Type::tensor(),
     }
 }
-
-const RANGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Range result (max-min).",
-}];
-
-const RANGE_SIG_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input data.",
-}];
-
-const RANGE_SIG_DIM_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Reduction dimension.",
-    },
-];
-
-const RANGE_SIG_VECDIM_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data.",
-    },
-    BuiltinParamDescriptor {
-        name: "vecdim",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Vector of reduction dimensions.",
-    },
-];
-
-const RANGE_SIG_ALL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data.",
-    },
-    BuiltinParamDescriptor {
-        name: "all_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"all\""),
-        description: "Reduce over all elements.",
-    },
-];
-
-const RANGE_SIG_NANFLAG_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data.",
-    },
-    BuiltinParamDescriptor {
-        name: "nanflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling flag ('omitnan'|'includenan').",
-    },
-];
-
-const RANGE_SIG_DIM_NANFLAG_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim_or_vecdim",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Dimension selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "nanflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling flag ('omitnan'|'includenan').",
-    },
-];
-
-const RANGE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "y = range(X)",
-        inputs: &RANGE_SIG_INPUT,
-        outputs: &RANGE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = range(X, dim)",
-        inputs: &RANGE_SIG_DIM_INPUTS,
-        outputs: &RANGE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = range(X, vecdim)",
-        inputs: &RANGE_SIG_VECDIM_INPUTS,
-        outputs: &RANGE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = range(X, \"all\")",
-        inputs: &RANGE_SIG_ALL_INPUTS,
-        outputs: &RANGE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = range(X, nanflag)",
-        inputs: &RANGE_SIG_NANFLAG_INPUTS,
-        outputs: &RANGE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = range(X, dim_or_vecdim, nanflag)",
-        inputs: &RANGE_SIG_DIM_NANFLAG_INPUTS,
-        outputs: &RANGE_OUTPUT,
-    },
-];
-
-const RANGE_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    BuiltinErrorDescriptor {
-        code: "RM.RANGE.ALL_WITH_DIM",
-        identifier: None,
-        when: "'all' is combined with an explicit dimension.",
-        message: "range: 'all' cannot be combined with an explicit dimension",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANGE.TOO_MANY_DIMS",
-        identifier: None,
-        when: "More than one explicit dimension selector is provided.",
-        message: "range: too many dimension arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANGE.INVALID_DIM",
-        identifier: None,
-        when: "Dimension arguments are non-integer, non-finite, or < 1.",
-        message: "range: dimension must be >= 1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANGE.DIM_ON_GPU",
-        identifier: None,
-        when: "Dimension selector is GPU-resident.",
-        message: "range: dimension arguments must reside on the host (numeric or string)",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANGE.INVALID_DIM_TYPE",
-        identifier: None,
-        when: "Dimension selector has unsupported value type or shape.",
-        message: "range: unsupported dimension argument type",
-    },
-];
-
-pub const RANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RANGE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RANGE_ERRORS,
-};
-
-const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "range-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "range with typed-integer input data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RangeIntegerDataExtension"),
-};
-
-const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "range-typed-integer-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "range with a typed-integer dimension control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RangeTypedIntegerControlExtension"),
-};
-
-const EXPLICIT_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "range-explicit-nanflag",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "range with an explicit NaN handling flag is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RangeExplicitNanflagExtension"),
-};
-
-const GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "range-gpu-all-or-vecdim",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "range with all or vecdim on a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RangeGpuMultiAxisExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    INTEGER_DATA_EXTENSION,
-    TYPED_INTEGER_CONTROL_EXTENSION,
-    EXPLICIT_NANFLAG_EXTENSION,
-    GPU_MULTI_AXIS_EXTENSION,
-];
-
-const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single, double, logical, datetime, or duration; RunMat mode additionally accepts all eight real integer classes.",
-    }];
-
-const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim_or_vecdim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented dimension domain is single or double; exact typed-integer dimensions are a mode-gated RunMat extension.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = range(X, dim_or_vecdim_or_all) with integer X",
-        inputs: &INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat's integer-data extension selects exact same-class extrema and subtracts them in a widened signed or unsigned domain before producing double output; resident integer input gathers rather than using floating provider hooks.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = range(X, integer_dim_or_vecdim) with noninteger X",
-        inputs: &INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed-integer dimensions are decoded exactly and independently gated; range otherwise omits NaN by definition without an explicit flag.",
-    },
-];
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -368,14 +109,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "range",
-    category = "array/creation",
-    summary = "Compute data span as maximum minus minimum.",
-    keywords = "range,max,min,spread,gpu",
-    accel = "reduction",
-    type_resolver(range_type),
-    descriptor(crate::builtins::array::creation::range::RANGE_DESCRIPTOR),
-    extensions(crate::builtins::array::creation::range::EXTENSIONS),
-    integer_capabilities(crate::builtins::array::creation::range::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::range"
 )]
 async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -845,15 +579,14 @@ fn compute_range_tensor(
 
     if dims.dims_in_bounds.is_empty() {
         let output_shape = shape.clone();
-        let mut output = Vec::with_capacity(values.len());
-        for &value in values.iter() {
-            if value.is_nan() {
-                output.push(f64::NAN);
-            } else {
-                output.push(0.0);
-            }
-        }
-        return Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")));
+        return real_range_output(
+            values
+                .iter()
+                .copied()
+                .map(|value| if value.is_nan() { f64::NAN } else { 0.0 }),
+            output_shape,
+            tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        );
     }
 
     let mut output_shape = shape.clone();
@@ -865,7 +598,11 @@ fn compute_range_tensor(
 
     let out_len = tensor::element_count(&output_shape);
     if out_len == 0 {
-        return Tensor::new(vec![], output_shape).map_err(|e| builtin_error(format!("range: {e}")));
+        return real_range_output(
+            std::iter::empty(),
+            output_shape,
+            tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        );
     }
 
     let mut mins = vec![f64::INFINITY; out_len];
@@ -908,19 +645,39 @@ fn compute_range_tensor(
         }
     }
 
-    let mut output = vec![0.0; out_len];
-    for idx in 0..out_len {
+    let output = (0..out_len).map(|idx| {
         if saw_nan[idx] {
-            output[idx] = f64::NAN;
+            f64::NAN
         } else if saw_value[idx] {
             let diff = maxs[idx] - mins[idx];
-            output[idx] = if diff == 0.0 { 0.0 } else { diff };
+            if diff == 0.0 {
+                0.0
+            } else {
+                diff
+            }
         } else {
-            output[idx] = f64::NAN;
+            f64::NAN
         }
-    }
+    });
 
-    Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")))
+    real_range_output(
+        output,
+        output_shape,
+        tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+    )
+}
+
+fn real_range_output(
+    values: impl Iterator<Item = f64>,
+    shape: Vec<usize>,
+    single: bool,
+) -> crate::BuiltinResult<Tensor> {
+    if single {
+        Tensor::from_f32(values.map(|value| value as f32).collect(), shape)
+            .map_err(|e| builtin_error(format!("range: {e}")))
+    } else {
+        Tensor::new(values.collect(), shape).map_err(|e| builtin_error(format!("range: {e}")))
+    }
 }
 
 fn compute_integer_range_tensor(
@@ -1223,6 +980,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected row vector, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn range_single_matrix_preserves_single_storage_and_shape() {
+        let tensor =
+            Tensor::from_f32(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).expect("single input");
+        let result = range_builtin(Value::Tensor(tensor), Vec::new()).expect("range single");
+        let Value::Tensor(output) = result else {
+            panic!("single row result must retain tensor storage");
+        };
+        assert_eq!(output.shape(), &[1, 3]);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.materialize_f64(), vec![2.0, 3.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

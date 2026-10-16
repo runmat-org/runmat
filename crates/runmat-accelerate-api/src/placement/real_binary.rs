@@ -151,6 +151,17 @@ impl ProviderRealBinaryRecipe {
         rhs: &GpuTensorHandle,
         borrowed: &[&GpuTensorHandle],
     ) -> ProviderExecutionResult<ProviderExecutedRealBinary> {
+        self.execute_protected_admitted(lhs, rhs, borrowed, None)
+            .await
+    }
+
+    pub async fn execute_protected_admitted(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        borrowed: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<ProviderExecutedRealBinary> {
         let protected = std::iter::once(lhs)
             .chain(std::iter::once(rhs))
             .chain(borrowed.iter().copied())
@@ -178,7 +189,10 @@ impl ProviderRealBinaryRecipe {
             .copied()
             .map(crate::ResidencyRestoreGuard::new)
             .collect::<Vec<_>>();
-        let result = self.owner.execute_real_binary_recipe(lhs, rhs, self).await;
+        let result = self
+            .owner
+            .execute_real_binary_recipe(lhs, rhs, self, admission)
+            .await;
         for guard in &guards {
             guard.restore();
         }

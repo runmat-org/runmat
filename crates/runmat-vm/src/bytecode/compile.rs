@@ -36,6 +36,10 @@ mod statement_outputs_tests;
 #[path = "compile/statement_pc_tests.rs"]
 mod statement_pc_tests;
 
+#[cfg(test)]
+#[path = "compile/indexed_assignment_tests.rs"]
+mod indexed_assignment_tests;
+
 #[cfg(all(test, not(feature = "native-accel")))]
 #[path = "compile/no_acceleration_tests.rs"]
 mod no_acceleration_tests;

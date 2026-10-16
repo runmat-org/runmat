@@ -27,6 +27,8 @@ pub(super) type BufferStore = HashMap<u64, BufferRecord>;
 pub(super) enum BufferPayload {
     F32(Vec<f32>),
     F64(Vec<f64>),
+    ComplexF32(Vec<(f32, f32)>),
+    ComplexF64(Vec<(f64, f64)>),
     U8(Vec<u8>),
 }
 
@@ -47,22 +49,29 @@ impl BufferPayload {
         match self {
             Self::F32(data) => data.len(),
             Self::F64(data) => data.len(),
+            Self::ComplexF32(data) => data.len(),
+            Self::ComplexF64(data) => data.len(),
             Self::U8(data) => data.len(),
         }
     }
-    pub fn to_f64(&self) -> Vec<f64> {
+    pub fn to_f64(&self) -> Option<Vec<f64>> {
         match self {
-            Self::F32(data) => data.iter().copied().map(f64::from).collect(),
-            Self::F64(data) => data.clone(),
-            Self::U8(data) => data.iter().copied().map(f64::from).collect(),
+            Self::F32(data) => Some(data.iter().copied().map(f64::from).collect()),
+            Self::F64(data) => Some(data.clone()),
+            Self::ComplexF32(_) | Self::ComplexF64(_) => None,
+            Self::U8(data) => Some(data.iter().copied().map(f64::from).collect()),
         }
     }
-    pub fn write(&mut self, index: usize, value: f64) {
+    pub fn write(&mut self, index: usize, value: f64) -> Result<(), &'static str> {
         match self {
             Self::F32(data) => data[index] = value as f32,
             Self::F64(data) => data[index] = value,
+            Self::ComplexF32(_) | Self::ComplexF64(_) => {
+                return Err("real scalar write cannot change complex fixture storage");
+            }
             Self::U8(data) => data[index] = value as u8,
         }
+        Ok(())
     }
     pub fn exact_eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -71,6 +80,18 @@ impl BufferPayload {
             }
             (Self::F64(a), Self::F64(b)) => {
                 a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == b.len()
+            }
+            (Self::ComplexF32(a), Self::ComplexF32(b)) => {
+                a.iter()
+                    .zip(b)
+                    .all(|(x, y)| x.0.to_bits() == y.0.to_bits() && x.1.to_bits() == y.1.to_bits())
+                    && a.len() == b.len()
+            }
+            (Self::ComplexF64(a), Self::ComplexF64(b)) => {
+                a.iter()
+                    .zip(b)
+                    .all(|(x, y)| x.0.to_bits() == y.0.to_bits() && x.1.to_bits() == y.1.to_bits())
+                    && a.len() == b.len()
             }
             (Self::U8(a), Self::U8(b)) => a == b,
             _ => false,
@@ -151,6 +172,24 @@ pub(super) fn physical_for(len: usize, element: NumericElementType) -> GpuPhysic
         bytes as u64,
     )
     .expect("fixture physical descriptor")
+}
+
+pub(super) fn complex_physical_for(
+    len: usize,
+    element: NumericElementType,
+) -> GpuPhysicalDescriptor {
+    let bytes = len
+        .checked_mul(element.element_size())
+        .and_then(|bytes| bytes.checked_mul(2))
+        .expect("fixture complex byte length");
+    GpuPhysicalDescriptor::new(
+        element,
+        GpuTensorStorage::ComplexInterleaved,
+        len as u64,
+        bytes as u64,
+        bytes as u64,
+    )
+    .expect("fixture complex physical descriptor")
 }
 
 impl AllocationOwner for TestProvider {

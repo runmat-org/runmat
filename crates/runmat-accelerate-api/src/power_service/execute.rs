@@ -1,5 +1,5 @@
 use crate::{
-    upload_numeric_protecting, GpuTensorHandle, GpuTensorStorage, HostNumericDataView,
+    upload_numeric_protecting_admitted, GpuTensorHandle, GpuTensorStorage, HostNumericDataView,
     HostNumericTensorView, PowerResultDomain, PowerScalarControl, ProviderExecutionCompletionError,
     ProviderExecutionError, ProviderPrecision, RealPowerArithmeticMode, RealPowerOperand,
     ResidencyRestoreGuard,
@@ -9,7 +9,9 @@ use super::prepare::{PowerPhysicalRoute, PreparedResidentScalarPower};
 use super::validate::{publish_provenance, reject, storage, valid_output, PowerServiceError};
 mod exact;
 mod projected;
-pub use projected::execute_resident_scalar_power_projected;
+pub use projected::{
+    execute_resident_scalar_power_projected, execute_resident_scalar_power_projected_admitted,
+};
 
 pub struct ExecutedResidentScalarPower {
     pub handle: GpuTensorHandle,
@@ -21,6 +23,13 @@ pub struct ExecutedResidentScalarPower {
 /// replay: fill/upload/widen/classification may already have submitted work.
 pub async fn execute_resident_scalar_power(
     prepared: PreparedResidentScalarPower,
+) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
+    execute_resident_scalar_power_admitted(prepared, None).await
+}
+
+pub async fn execute_resident_scalar_power_admitted(
+    prepared: PreparedResidentScalarPower,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
     prepared.validate_live()?;
     // Retain and restore every surrounding borrowed view, including on an
@@ -34,7 +43,12 @@ pub async fn execute_resident_scalar_power(
         return execute_legacy_real(&prepared).await;
     }
     if prepared.route == PowerPhysicalRoute::ExactSingleBase {
-        return exact::execute(&prepared).await;
+        return exact::execute(&prepared, admission).await;
+    }
+    if admission.is_some() {
+        return Err(PowerServiceError::pre(
+            "finite selected POWER requires its exact prepared recipe",
+        ));
     }
     let provider = prepared.provider;
     let resident = &prepared.resident;
@@ -66,7 +80,7 @@ pub async fn execute_resident_scalar_power(
     if widened {
         revalidate_after_effect(&prepared)?;
     }
-    let scalar = prepare_scalar(&prepared, &native, widened)?;
+    let scalar = prepare_scalar(&prepared, &native, widened, None)?;
     let (base, exponent) = match prepared.resident_operand {
         RealPowerOperand::Base => (&native, &scalar),
         RealPowerOperand::Exponent => (&scalar, &native),
@@ -241,6 +255,7 @@ fn prepare_scalar(
     prepared: &PreparedResidentScalarPower,
     native: &GpuTensorHandle,
     prior_effect: bool,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> Result<GpuTensorHandle, PowerServiceError> {
     let provider = prepared.provider;
     let control = prepared.control;
@@ -275,10 +290,11 @@ fn prepare_scalar(
             shape,
             storage: GpuTensorStorage::Real,
         };
-        let output = upload_numeric_protecting(
+        let output = upload_numeric_protecting_admitted(
             provider,
             &view,
             &prepared.protected_with(&[&prepared.resident, native]),
+            admission,
         )
         .map_err(|error| {
             let carrier = error.into_execution_error();

@@ -533,7 +533,7 @@ fn predecessor_transition_ns(
                 .get(*selections.get(edge.from as usize)?)?;
             let ordinal = edge.source_output.unwrap_or(SourceOutputOrdinal::new(0));
             let output = predecessor.source_output_residency(ordinal)?;
-            total.checked_add(transition_ns(output, execution_location, edge))
+            total.checked_add(transition_ns(output, execution_location, edge)?)
         })
 }
 
@@ -541,12 +541,16 @@ fn transition_ns(
     from: CandidateOutputResidency,
     to: CandidateExecutionLocation,
     edge: &runmat_execution::PlacementGraphEdge,
-) -> u64 {
-    use CandidateExecutionLocation::{Host as ExecuteHost, Provider as ExecuteProvider};
+) -> Option<u64> {
+    use CandidateExecutionLocation::{Host as ExecuteHost, Provider as ExecuteProvider, VmRegion};
     use CandidateOutputResidency::{
         ConditionalHostOrProvider, Host, Mirrored, Provider, ProviderAndHost, Unknown,
     };
-    match (from, to) {
+    let transition = match (from, to) {
+        // An original instruction region has no concrete graph-input
+        // residency. Its whole-work placement must not acquire a fabricated
+        // graph-edge transfer estimate, including a free same-device one.
+        (_, VmRegion { .. }) => return None,
         (Host, ExecuteHost) | (Mirrored { .. }, ExecuteHost) => 0,
         (Host, ExecuteProvider { .. }) => edge.host_to_provider_ns,
         (Provider { .. }, ExecuteHost) => edge.provider_to_host_ns,
@@ -584,7 +588,8 @@ fn transition_ns(
         (ConditionalHostOrProvider { .. }, ExecuteProvider { .. }) => {
             edge.host_to_provider_ns.max(edge.cross_provider_ns)
         }
-    }
+    };
+    Some(transition)
 }
 
 fn compare_states(

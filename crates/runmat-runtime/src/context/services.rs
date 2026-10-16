@@ -810,6 +810,13 @@ pub trait RuntimePlacementService {
         )
     }
 
+    /// A managed selector may retain one finite in-flight observation lease.
+    /// Without this authority callers can execute a resource-admitted route
+    /// but must not publish placement learning feedback.
+    fn managed_whole_work_available(&self) -> bool {
+        false
+    }
+
     fn observe_managed_whole_work(
         &self,
         _selected: &RuntimeManagedWholeWorkSelection,

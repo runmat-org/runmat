@@ -81,5 +81,20 @@ pub(crate) fn all() -> Vec<&'static dyn AccelProvider> {
     .unwrap_or_default()
 }
 
+/// Return the next registered owner in the same device-id order as `all`,
+/// copying only the retained reference out of the registry lock. The caller
+/// performs provider authorization after the lock has been released.
+pub(crate) fn next_after(prior_device: Option<u32>) -> Option<(u32, &'static dyn AccelProvider)> {
+    read(|registry| {
+        registry
+            .devices
+            .iter()
+            .filter(|(id, _)| prior_device.is_none_or(|prior| **id > prior))
+            .min_by_key(|(id, _)| **id)
+            .map(|(&id, &provider)| (id, provider))
+    })
+    .flatten()
+}
+
 #[cfg(test)]
 mod tests;

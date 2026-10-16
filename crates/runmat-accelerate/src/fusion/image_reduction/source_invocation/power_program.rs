@@ -3,9 +3,28 @@
 
 use super::*;
 use runmat_accelerate_api::{
-    ProviderImagePowerCall, ProviderImagePowerProgram, ProviderOperationIdentity, RealPowerOperand,
+    PowerScalarControl, ProviderImagePowerCall, ProviderImagePowerProgram,
+    ProviderOperationIdentity, RealPowerOperand,
 };
 use runmat_types::NumericDomain;
+
+/// Bind a published final exponent from this invocation's actual scalar
+/// carrier. The selected POWER receipt later verifies the same ID, class,
+/// bits, and source operation; a compiler fold never substitutes for it.
+pub(super) fn bound_final_exponent(
+    id: ValueId,
+    represented: f64,
+    inputs: &[Value],
+    positions: &ImageValuePositions,
+) -> Option<(ValueId, PowerScalarControl)> {
+    let actual = inputs.get(*positions.get(&id)?)?;
+    let control = match super::super::source_output_hooks::scalar(actual)? {
+        ProviderImageOutputOperand::ScalarF32Bits(bits) => PowerScalarControl::SingleBits(bits),
+        ProviderImageOutputOperand::ScalarF64Bits(bits) => PowerScalarControl::DoubleBits(bits),
+        _ => return None,
+    };
+    (represented.to_bits() == control.value().to_bits()).then_some((id, control))
+}
 
 impl ImageSourceInvocation {
     pub(super) fn project_power_program(

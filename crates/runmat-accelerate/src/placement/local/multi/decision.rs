@@ -33,13 +33,16 @@ pub(super) struct DecisionRequest<'a> {
     ),
     pub(super) compare_profitability: bool,
     pub(super) runtime: Option<&'a runmat_runtime::context::RuntimeContext>,
+    pub(super) publication: LocalPublicationSemantics,
     pub(super) policy: PlacementPolicy,
+    pub(super) bounded_host: bool,
 }
 
 pub(super) fn select_decision(
     request: DecisionRequest<'_>,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    if request.cpu.route.cost.estimate().is_none()
+    if request.publication == LocalPublicationSemantics::SourceOrderedVm
+        || request.cpu.route.cost.estimate().is_none()
         || request
             .admitted
             .iter()
@@ -66,7 +69,9 @@ pub(super) fn select_decision(
         physical_facts,
         compare_profitability,
         runtime,
+        publication: _,
         policy,
+        bounded_host: _,
     } = request;
     let cpu = cpu
         .into_priced()

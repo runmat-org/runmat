@@ -53,7 +53,9 @@ mod tests {
                     square_exponent_f32_bits: 2.0f32.to_bits(),
                     final_exponent_f32_bits: 1.0f32.to_bits(),
                     selected_powers: None,
-                    epsilon_f32_bits: 0.25f32.to_bits(),
+                    epsilon: runmat_accelerate_api::scalar_program::ScalarLiteral::F32Bits(
+                        0.25f32.to_bits(),
+                    ),
                     output_program: None,
                     moment_program: None,
                 }),

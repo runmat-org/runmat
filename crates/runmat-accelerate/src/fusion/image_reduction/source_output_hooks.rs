@@ -2,8 +2,6 @@
 //! transcript. This is not a proof that the provider hooks reproduce ordinary
 //! arithmetic; only the exact selected operation/control order is recorded.
 
-use std::collections::{HashMap, HashSet};
-
 use runmat_accelerate_api::{
     ProviderImageOutputCall, ProviderImageOutputHook, ProviderImageOutputOperand,
     ProviderImageOutputProgram,
@@ -15,6 +13,7 @@ use runmat_value::{NumericScalar, Value};
 use crate::fusion::{FusionGroupPlan, FusionPattern};
 use crate::graph::{AccelNodeLabel, PrimitiveOp, ValueId};
 
+use super::source_invocation::ImageValuePositions;
 use super::ImageSourceInvocation;
 
 pub(super) struct ProjectedOutputProgram {
@@ -26,7 +25,7 @@ pub(super) struct ProjectedOutputProgram {
 /// A nonserializable companion minted in the same source walk as the public
 /// hook request. The public Input/Mean/Sigma categories do not carry ValueIds.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SelectedBinaryStep {
+pub(crate) struct SelectedBinaryStep {
     pub output: ValueId,
     pub inputs: [ValueId; 2],
     pub hook: ProviderImageOutputHook,
@@ -38,7 +37,7 @@ pub(super) struct SelectedBinaryStep {
 /// control source, and catalog revision. Wire hook kinds alone have none of
 /// this authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SelectedRealStep {
+pub(crate) struct SelectedRealStep {
     pub output: ValueId,
     pub inputs: Vec<ValueId>,
     pub hook: ProviderImageOutputHook,
@@ -89,48 +88,35 @@ impl ImageSourceInvocation {
         {
             return None;
         }
-        let mut live = HashMap::with_capacity(plan.inputs.len());
-        for (&id, value) in plan.inputs.iter().zip(actual_inputs) {
-            if live.insert(id, value).is_some() {
-                return None;
-            }
-        }
+        let live = ImageValuePositions::new(&plan.inputs)?;
         let input = routes.mu.input();
         let sigma_position = self
             .source
             .steps
             .iter()
             .position(|step| step.output == public_sigma)?;
-        let checkpoints = self.source.checkpoints[2..]
-            .iter()
-            .copied()
-            .collect::<HashSet<_>>();
-        if checkpoints.is_empty() {
+        if self.source.checkpoints.len() <= 2 {
             return None;
         }
-        let mut produced = HashSet::new();
+        let mut produced = Vec::new();
+        produced.try_reserve_exact(self.source.steps.len()).ok()?;
         let mut calls = Vec::new();
         let mut binary_steps = Vec::new();
         let mut real_steps = Vec::new();
-        let facts = self
-            .facts
-            .iter()
-            .map(|(id, fact)| (*id, fact))
-            .collect::<HashMap<_, _>>();
         for step in &self.source.steps[sigma_position + 1..] {
-            let operand = |id: ValueId, produced: &HashSet<ValueId>| {
+            let operand = |id: ValueId, produced: &[ValueId]| {
                 if id == input {
                     Some(ProviderImageOutputOperand::Input)
                 } else if id == public_mean {
                     Some(ProviderImageOutputOperand::Mean)
                 } else if id == public_sigma {
                     Some(ProviderImageOutputOperand::Sigma)
-                } else if produced.contains(&id) {
+                } else if produced.binary_search(&id).is_ok() {
                     Some(ProviderImageOutputOperand::Produced(u64::from(id)))
                 } else {
                     scalar(
                         live.get(&id)
-                            .copied()
+                            .and_then(|position| actual_inputs.get(*position))
                             .or_else(|| plan.const_values.get(&id))?,
                     )
                 }
@@ -187,7 +173,7 @@ impl ImageSourceInvocation {
                 }
                 _ => return None,
             };
-            let fact = *facts.get(&step.output)?;
+            let fact = self.source_fact(step.output)?;
             let numeric = fact.numeric()?;
             if numeric.domain != NumericDomain::Real {
                 return None;
@@ -247,9 +233,10 @@ impl ImageSourceInvocation {
                 operands,
                 output_shape,
                 output_precision,
-                checkpoint: checkpoints.contains(&step.output),
+                checkpoint: self.source.checkpoints[2..].contains(&step.output),
             });
-            produced.insert(step.output);
+            let index = produced.binary_search(&step.output).err()?;
+            produced.insert(index, step.output);
         }
         // A typed output program needs a terminal checkpoint to validate,
         // but the graph alone cannot name the selected VM store. This final

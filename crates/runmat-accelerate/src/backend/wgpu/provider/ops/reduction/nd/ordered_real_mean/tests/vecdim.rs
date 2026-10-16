@@ -176,10 +176,10 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
             .unwrap()
             .is_none());
         assert!(provider
-            .execute_ordered_real_mean(ProviderOrderedRealMean::new(
-                input.clone(),
-                candidate.clone(),
-            ))
+            .execute_ordered_real_mean(
+                ProviderOrderedRealMean::new(input.clone(), candidate.clone(),),
+                None
+            )
             .is_err());
     }
     assert_eq!(
@@ -252,7 +252,7 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
     assert_eq!(selected.steps()[0].output_bytes(), 2 * 5 * 8);
     assert_eq!(selected.steps()[1].output_bytes(), 2 * 4);
     assert!(selected.requested_incremental_peak_bytes() >= 2 * 5 * 8 + 2 * 4);
-    let executed = provider.execute_ordered_real_mean(selected).unwrap();
+    let executed = provider.execute_ordered_real_mean(selected, None).unwrap();
     assert_eq!(executed.selected_submissions, 2);
     assert_eq!(
         executed.observed_incremental_peak_bytes,
@@ -287,7 +287,9 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
         first_call.steps()[0].output_precision(),
         ProviderPrecision::F32
     );
-    let first_call = provider.execute_ordered_real_mean(first_call).unwrap();
+    let first_call = provider
+        .execute_ordered_real_mean(first_call, None)
+        .unwrap();
     let second_call = provider
         .prepare_ordered_real_mean(
             &first_call.output,
@@ -305,7 +307,9 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
         second_call.steps()[0].output_precision(),
         ProviderPrecision::F32
     );
-    let second_call = provider.execute_ordered_real_mean(second_call).unwrap();
+    let second_call = provider
+        .execute_ordered_real_mean(second_call, None)
+        .unwrap();
     assert_eq!(second_call.output.shape(), &[2, 1, 1]);
     assert!(!second_call
         .output
@@ -401,7 +405,9 @@ fn future_mixed_power_output_supplies_provider_owned_variance_extent() {
         .unwrap()
         .expect("future variance recipe must match the produced square view");
     assert_eq!(actual_variance.recipe(), &variance);
-    let mean = provider.execute_ordered_real_mean(actual_variance).unwrap();
+    let mean = provider
+        .execute_ordered_real_mean(actual_variance, None)
+        .unwrap();
     assert_eq!(mean.output.shape(), &[2, 1, 1]);
     assert_eq!(
         mean.output.physical().element_type(),

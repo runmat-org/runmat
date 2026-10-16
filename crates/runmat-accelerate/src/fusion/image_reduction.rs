@@ -82,13 +82,19 @@ pub struct ImageMeanRoute {
 
 mod provider_plan;
 mod source_invocation;
+mod source_controls;
 mod source_extension;
 mod source_moment_publications;
 mod source_output_hooks;
+pub(crate) use source_output_hooks::{SelectedBinaryStep, SelectedRealStep};
 mod source_program;
 pub use provider_plan::{
     ImageMeanAndPowerSource, ImageMeanProviderCall, ImageMeanProviderHook, ImageMeanProviderPlan,
     ImageSourcePower,
+};
+pub(crate) use source_controls::bound_image_controls_match;
+pub(super) use source_controls::{
+    bound_folded_zero, collect_bound_mean_axes, is_canonical_max_node, resolve_selected_mean_axes,
 };
 pub use source_extension::selected_group_with_publications;
 pub(crate) use source_invocation::{
@@ -102,6 +108,16 @@ pub use source_invocation::{
 pub use source_program::{ImageSourceLeaf, ImageSourceStep, ImageSourceTranscript};
 
 impl ImageMeanRoute {
+    pub(super) fn for_each_axes_value(&self, mut visit: impl FnMut(ValueId)) {
+        match &self.form {
+            ImageMeanForm::VecDims { call, .. } => visit(call.axes_value),
+            ImageMeanForm::Nested { inner, outer, .. } => {
+                visit(inner.axes_value);
+                visit(outer.axes_value);
+            }
+        }
+    }
+
     pub(super) fn with_cast_path(
         mut self,
         graph: &AccelGraph,
@@ -313,7 +329,7 @@ fn canonical_call(
     {
         return None;
     }
-    let dims = super::resolve_numeric_vector_constant(graph, candidate.inputs[1])?;
+    let dims = resolve_selected_mean_axes(graph, candidate.inputs[1], candidate.span.start)?;
     if dims.is_empty() || dims.len() > 2 {
         return None;
     }

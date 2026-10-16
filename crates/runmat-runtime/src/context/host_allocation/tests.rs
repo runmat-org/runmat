@@ -155,6 +155,46 @@ fn output_allocation_restores_control_cause_and_drops_unpublished_claim() {
 }
 
 #[test]
+fn retained_view_claim_outlives_stage_receipt_without_holding_scratch() {
+    let view = 80;
+    let per_view = HostAllocationPlan::retained_view_bytes(view).unwrap();
+    let issuer_bytes = HostAllocationPlan::retained_view_issuer_bytes().unwrap();
+    let retained = per_view + issuer_bytes;
+    let ledger = ManagedHostEffectLedger::new_with_epoch(retained + per_view + 32, 11);
+    let runtime = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let receipt = HostAllocationReceipt::admit(
+        Some(&runtime),
+        HostAllocationPlan::new(32, retained).unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    let permit = receipt.retained_view_permit(&runtime).unwrap();
+    let claim = permit.claim_view(view).unwrap();
+    let issuer = claim.issuer();
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, retained);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+    drop(permit);
+    let derived = issuer.clone().reserve_view(view).unwrap();
+    assert_eq!(ledger.snapshot().live_claimed_bytes, retained + per_view);
+    assert!(matches!(
+        issuer.clone().reserve_view(view),
+        Err(runmat_execution::resource::RetainedHostViewError::ExceedsCapacity)
+    ));
+    drop(claim);
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        issuer_bytes + per_view
+    );
+    drop(derived);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, issuer_bytes);
+    drop(issuer);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_claims() {
     let plan = HostAllocationPlan::new(16, 16).unwrap();
     let unmanaged = runtime(RuntimeServicePorts::default().with_parallel(Rc::new(UnmanagedFinite)));

@@ -76,6 +76,55 @@ pub fn admit_candidate_resources(
         provider_retained_bytes,
         require_transactional_results,
     } = admission;
+    if let CandidateExecutionLocation::VmRegion { device_id } = location {
+        // The original VM route is admitted by each instruction's existing
+        // host/provider owners, not by a fabricated aggregate allocation.
+        // It can enter whole-work learning only where no finite whole-route
+        // resource policy could be bypassed by that deferred admission.
+        let provider = resources
+            .provider(device_id)
+            .ok_or(ResourceAdmissionError::UnavailableProvider)?;
+        if kind != ExecutionCandidateKind::OriginalVmRegion
+            || output_residency != CandidateOutputResidency::Unknown
+            || !matches!(presentation, CandidateOutputPresentation::Direct)
+            || transactional_results
+            || require_transactional_results
+            || demand.queue_slots != 1
+            || demand.cpu_millicores != 0
+            || demand.retained_bytes != CandidateResourceDemand::default().retained_bytes
+            || demand.provider_host_workspace.is_some()
+            || demand.provider_input_stages.is_some()
+            || demand.peak_live.is_some()
+            || !matches!(
+                demand.scratch_bytes,
+                crate::placement::ResourceByteBound::Known(_)
+            )
+        {
+            return Err(ResourceAdmissionError::Overflow);
+        }
+        if provider.lost {
+            return Err(ResourceAdmissionError::UnavailableProvider);
+        }
+        if resources.cpu_millicores_available == 0
+            || resources.memory_available_bytes.is_some()
+            || provider.capacity_bytes.is_some()
+            || provider.scratch_available_bytes.is_some()
+            || provider.queue_limit.is_some()
+            || provider.queue_depth.is_some()
+            || !host_retained_bytes.is_empty()
+            || provider_retained_bytes
+                .values()
+                .any(|value| !value.is_empty())
+        {
+            return Err(ResourceAdmissionError::InsufficientEvidence {
+                budget: ResourceBudgetKind::HostMemory,
+                reason: crate::placement::ResourceBoundUnavailable::NoPeakMemoryBound,
+            });
+        }
+        return Ok(AdmittedResourceDemand {
+            evictions: BTreeMap::new(),
+        });
+    }
     let mut evictions = BTreeMap::new();
     let mut host_peak = host_retained_bytes;
     let mut provider_demands = BTreeMap::<u32, ResourceAccount>::new();
@@ -90,6 +139,7 @@ pub fn admit_candidate_resources(
         }
     }
     match location {
+        CandidateExecutionLocation::VmRegion { .. } => unreachable!("handled above"),
         CandidateExecutionLocation::Host => {
             if demand.cpu_millicores > resources.cpu_millicores_available {
                 return Err(ResourceAdmissionError::OverBudget);

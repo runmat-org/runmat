@@ -485,15 +485,12 @@ mod tests {
 
     #[test]
     fn integer_extensions_are_declared_in_builtin_metadata() {
-        let sparse = runmat_builtins::builtin_function_by_name("sparse").expect("sparse builtin");
-        assert_eq!(sparse.extensions, &SPARSE_EXTENSIONS);
-        let randi = runmat_builtins::builtin_function_by_name("randi").expect("randi builtin");
+        let sparse = runmat_builtins::builtin_extensions_by_name("sparse").expect("sparse builtin");
+        assert_eq!(sparse, &SPARSE_EXTENSIONS);
+        let randi = runmat_builtins::builtin_extensions_by_name("randi").expect("randi builtin");
+        assert_eq!(randi, &runmat_builtins::RANDI_EXTENSIONS);
         assert_eq!(
-            randi.extensions,
-            &crate::builtins::array::creation::randi::RANDI_EXTENSIONS
-        );
-        assert_eq!(
-            randi.extensions[0].error_identifier,
+            randi[0].error_identifier,
             Some("RunMat:compatibility:RandiWideIntegerExtension")
         );
 
@@ -2216,6 +2213,52 @@ mod tests {
             ("zero", "tf-integer-coefficients"),
             ("zero", "tf-integer-sample-time"),
             ("zero", "tf-logical-coefficients"),
+            // Current canonical inverse-degree, axes-control, and statistical
+            // extensions retain this exact-set audit across both registries.
+            ("acosd", "acosd-character-input"),
+            ("acosd", "acosd-gpu-real-complex-promotion"),
+            ("acosd", "acosd-integer-input"),
+            ("acosd", "acosd-logical-input"),
+            ("acotd", "acotd-character-input"),
+            ("acotd", "acotd-gpu-real-complex-promotion"),
+            ("acotd", "acotd-integer-input"),
+            ("acotd", "acotd-logical-input"),
+            ("acscd", "acscd-character-input"),
+            ("acscd", "acscd-gpu-real-complex-promotion"),
+            ("acscd", "acscd-integer-input"),
+            ("acscd", "acscd-logical-input"),
+            ("asecd", "asecd-character-input"),
+            ("asecd", "asecd-gpu-real-complex-promotion"),
+            ("asecd", "asecd-integer-input"),
+            ("asecd", "asecd-logical-input"),
+            ("asind", "asind-character-input"),
+            ("asind", "asind-gpu-real-complex-promotion"),
+            ("asind", "asind-integer-input"),
+            ("asind", "asind-logical-input"),
+            ("atan2d", "atan2d-character-input"),
+            ("atan2d", "atan2d-integer-input"),
+            ("atan2d", "atan2d-logical-input"),
+            ("atand", "atand-character-input"),
+            ("atand", "atand-gpu-real-complex-promotion"),
+            ("atand", "atand-integer-input"),
+            ("atand", "atand-logical-input"),
+            ("caxis", "axes-control-setter-output"),
+            ("clim", "axes-control-setter-output"),
+            ("colororder", "axes-control-setter-output"),
+            ("nlparci", "nlparci-resident-input"),
+            ("xlim", "axes-control-setter-output"),
+            ("xscale", "axes-control-setter-output"),
+            ("xtickangle", "axes-control-setter-output"),
+            ("xtickformat", "axes-control-setter-output"),
+            ("xticklabels", "axes-control-setter-output"),
+            ("xticks", "axes-control-setter-output"),
+            ("ylim", "axes-control-setter-output"),
+            ("yscale", "axes-control-setter-output"),
+            ("ytickangle", "axes-control-setter-output"),
+            ("ytickformat", "axes-control-setter-output"),
+            ("yticklabels", "axes-control-setter-output"),
+            ("yticks", "axes-control-setter-output"),
+            ("zlim", "axes-control-setter-output"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2732,6 +2775,7 @@ mod tests {
                 "isspace",
                 "isstable",
                 "isstring",
+                "isstruct",
                 "issymmetric",
                 "istable",
                 "istimetable",

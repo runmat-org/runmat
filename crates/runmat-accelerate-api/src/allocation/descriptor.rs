@@ -107,6 +107,11 @@ impl GpuTensorView {
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
+    /// The retained allocation may exceed the logical rank for a caller-
+    /// supplied view. Resource admission must fund capacity, not just length.
+    pub fn shape_capacity(&self) -> usize {
+        self.shape.capacity()
+    }
     pub const fn layout(&self) -> GpuTensorLayout {
         self.layout
     }
@@ -182,6 +187,7 @@ pub enum AllocationAcquisitionError {
     PhysicalMismatch,
     InvalidView(GpuViewError),
     Unsupported,
+    RetainedHostView(runmat_execution::resource::RetainedHostViewError),
 }
 impl std::fmt::Display for AllocationAcquisitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -1,8 +1,9 @@
 use super::super::super::{argument_error, finish_fixed, literal_text};
+use super::residency::{apply_default_conversion_residency, apply_like_prototype_residency};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_numeric_conversion, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, ValueFact, ValueKindFact,
+    infer_numeric_conversion, CallInference, CallRequest, DynamicReason, NumericClass,
+    NumericDomain, ResidencyFact, ValueFact, ValueKindFact,
 };
 
 pub(in crate::catalog::inference) fn infer_numeric_conversion_call(
@@ -81,9 +82,7 @@ pub(in crate::catalog::inference) fn infer_numeric_conversion_with_like_call(
     diagnostics.append(&mut inference.diagnostics);
     match request.arguments.as_slice() {
         [_] => {
-            if matches!(inference.fact.residency, ResidencyFact::Device { .. }) {
-                inference.fact.residency = ResidencyFact::Unknown;
-            }
+            apply_default_conversion_residency(&mut inference.fact);
         }
         [_, keyword, prototype] => {
             let keyword_literal = request.literals.literal_args.get(1).and_then(literal_text);
@@ -139,75 +138,29 @@ pub(in crate::catalog::inference) fn infer_numeric_conversion_with_like_call(
     finish_fixed(entry, request, inference.fact, diagnostics)
 }
 
-fn apply_like_prototype_residency(
-    output: &mut ValueFact,
-    prototype: &ValueFact,
-    diagnostics: &mut Vec<InferenceDiagnostic>,
-) {
-    if prototype.storage == runmat_types::StorageFact::Sparse {
-        diagnostics.push(argument_error(
-            "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
-            "sparse numeric conversion prototypes are not supported",
-            2,
-        ));
-        output.residency = ResidencyFact::Unknown;
-        output.storage = runmat_types::StorageFact::Unknown;
-        return;
-    }
-    match prototype.kind {
-        ValueKindFact::Numeric(NumericFact {
-            domain: NumericDomain::Real,
-            ..
-        })
-        | ValueKindFact::Logical => {
-            output.residency = match &prototype.residency {
-                ResidencyFact::Host => ResidencyFact::Host,
-                ResidencyFact::Device { provider } => ResidencyFact::Device {
-                    provider: provider.clone(),
-                },
-                ResidencyFact::Unknown => ResidencyFact::Unknown,
-                ResidencyFact::Remote { .. } => {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
-                        "a remote value cannot be used as a numeric conversion prototype",
-                        2,
-                    ));
-                    ResidencyFact::Unknown
-                }
-            };
-        }
-        ValueKindFact::Numeric(NumericFact {
-            domain: NumericDomain::Complex,
-            ..
-        }) => {
-            output.residency = match &prototype.residency {
-                ResidencyFact::Device { provider } => ResidencyFact::Device {
-                    provider: provider.clone(),
-                },
-                ResidencyFact::Host | ResidencyFact::Remote { .. } => {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
-                        "complex host numeric conversion prototypes are not supported",
-                        2,
-                    ));
-                    ResidencyFact::Unknown
-                }
-                ResidencyFact::Unknown => ResidencyFact::Unknown,
-            };
-        }
-        ValueKindFact::Unknown => output.residency = ResidencyFact::Unknown,
-        _ => {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
-                "numeric conversion prototypes must be real numeric or logical values",
-                2,
-            ));
-            output.residency = ResidencyFact::Unknown;
-        }
-    }
-    output.storage = match &output.residency {
-        ResidencyFact::Device { .. } => runmat_types::StorageFact::Opaque,
-        ResidencyFact::Host => output.storage,
-        _ => runmat_types::StorageFact::Unknown,
+pub(in crate::catalog::inference) fn infer_single_fusion_fact(
+    request: &CallRequest,
+    target: NumericClass,
+) -> Option<ValueFact> {
+    let [input] = request.arguments.as_slice() else {
+        return None;
     };
+    let admitted = matches!(
+        input.kind,
+        ValueKindFact::Numeric(_)
+            | ValueKindFact::Logical
+            | ValueKindFact::Character
+            | ValueKindFact::Symbolic
+            | ValueKindFact::Unknown
+    ) || matches!(input.kind, ValueKindFact::String)
+        && target == NumericClass::Double;
+    if !admitted {
+        return None;
+    }
+    let mut inference = infer_numeric_conversion(input, target);
+    if !inference.diagnostics.is_empty() {
+        return None;
+    }
+    apply_default_conversion_residency(&mut inference.fact);
+    Some(inference.fact)
 }

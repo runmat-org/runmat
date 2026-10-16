@@ -60,6 +60,40 @@ impl FusionPlacementSelection {
         selection
     }
 
+    pub(super) fn new_vm_image(
+        observer: FusionPlacementObserver,
+        feedback: Option<LocalPlacementFeedback>,
+        provider: &dyn AccelProvider,
+        physical: Option<runmat_accelerate_api::ProviderImageStagePhysicalWork>,
+    ) -> Self {
+        let started = Instant::now();
+        let receipt = feedback
+            .as_ref()
+            .filter(|feedback| feedback.is_current())
+            .and(physical)
+            .and_then(
+                |physical| match provider.begin_image_stage_observation(physical) {
+                    ProviderObservationSupport::Observed(receipt) => Some(receipt),
+                    ProviderObservationSupport::Unsupported => None,
+                },
+            );
+        let command_contribution = receipt.as_ref().and_then(|_| {
+            feedback
+                .as_ref()?
+                .runtime
+                .command_profiling()?
+                .begin_provider_operation()
+        });
+        Self {
+            observer,
+            feedback,
+            receipt,
+            command_contribution,
+            started,
+            drop_reports_failure: false,
+        }
+    }
+
     pub(super) fn recorder(&self) -> Option<ProviderOperationRecorder> {
         self.receipt
             .as_ref()
@@ -73,6 +107,41 @@ impl FusionPlacementSelection {
     ) {
         if let Some(receipt) = self.receipt.as_mut() {
             receipt.require_provider_execution(device_id, operation);
+        }
+    }
+
+    pub(super) fn require_vm_selected_stage_execution(&mut self) {
+        if let Some(receipt) = self.receipt.as_mut() {
+            receipt.require_selected_execution();
+        }
+    }
+
+    pub(super) fn require_vm_selected_image_upload(&mut self, device_id: u32) {
+        if let Some(receipt) = self.receipt.as_mut() {
+            receipt.require_selected_image_upload(device_id);
+        }
+    }
+
+    pub(super) fn fail_vm_image(
+        &self,
+        reason: runmat_accelerate_api::observation::ProviderObservationFailure,
+    ) {
+        if let Some(recorder) = self.recorder() {
+            recorder.fail(reason);
+        }
+    }
+
+    pub(super) fn confirm_vm_image_submissions(&self, expected: u32) {
+        use runmat_accelerate_api::observation::{
+            ProviderExecutionDisposition, ProviderObservationFailure,
+        };
+        let Some(recorder) = self.recorder() else {
+            return;
+        };
+        if recorder.submission_checkpoint() == u64::from(expected) {
+            recorder.execution_disposition(ProviderExecutionDisposition::SelectedProvider);
+        } else {
+            recorder.fail(ProviderObservationFailure::ExecutionUnproven);
         }
     }
 

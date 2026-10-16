@@ -17,7 +17,6 @@ use runmat_runtime::builtins::common::gpu_helpers::{
     exact_provider_for_handle, gpu_class_metadata_matches,
 };
 use runmat_value::Value;
-use std::collections::HashMap;
 
 /// Request-local source arithmetic authority. The canonical resolver has
 /// bound every external leaf, the output programs retain the selected
@@ -52,8 +51,8 @@ impl ImageArithmeticProof {
 pub(crate) struct ImageMean(pub GpuTensorHandle);
 #[derive(Debug)]
 pub(crate) struct ImageSigma(pub GpuTensorHandle);
-#[cfg(test)]
 #[derive(Debug)]
+#[cfg(test)]
 pub(crate) struct ImageResult(pub GpuTensorHandle);
 
 #[derive(Debug)]
@@ -65,8 +64,71 @@ pub(crate) struct ImageOutputCheckpoint {
 struct OutputProgress {
     mean: GpuTensorHandle,
     sigma: GpuTensorHandle,
-    values: HashMap<u64, GpuTensorHandle>,
+    values: Vec<Option<GpuTensorHandle>>,
+    positions: Vec<(u64, usize)>,
     next_call: usize,
+}
+
+struct OutputProgressLayout {
+    values: Vec<Option<GpuTensorHandle>>,
+    positions: Vec<(u64, usize)>,
+}
+
+impl OutputProgress {
+    fn layout(
+        calls: &[runmat_accelerate_api::ProviderImageOutputCall],
+    ) -> ProviderExecutionResult<OutputProgressLayout> {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(calls.len())
+            .map_err(|error| ProviderExecutionError::from(anyhow!(error)).after_effect())?;
+        values.resize_with(calls.len(), || None);
+        let mut positions = Vec::new();
+        positions
+            .try_reserve_exact(calls.len())
+            .map_err(|error| ProviderExecutionError::from(anyhow!(error)).after_effect())?;
+        positions.extend(
+            calls
+                .iter()
+                .enumerate()
+                .map(|(index, call)| (call.source_output, index)),
+        );
+        positions.sort_unstable_by_key(|(id, _)| *id);
+        if positions.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(ProviderExecutionError::from(anyhow!(
+                "selected image output IDs are not unique"
+            ))
+            .after_effect());
+        }
+        Ok(OutputProgressLayout { values, positions })
+    }
+
+    fn new(mean: GpuTensorHandle, sigma: GpuTensorHandle, layout: OutputProgressLayout) -> Self {
+        let OutputProgressLayout { values, positions } = layout;
+        Self {
+            mean,
+            sigma,
+            values,
+            positions,
+            next_call: 0,
+        }
+    }
+
+    fn get(&self, id: u64) -> Option<&GpuTensorHandle> {
+        let index = self
+            .positions
+            .binary_search_by_key(&id, |(key, _)| *key)
+            .ok()?;
+        self.values.get(self.positions[index].1)?.as_ref()
+    }
+
+    fn retained_values(&self) -> impl Iterator<Item = &GpuTensorHandle> {
+        self.values.iter().filter_map(Option::as_ref)
+    }
+
+    fn into_values(self) -> impl Iterator<Item = GpuTensorHandle> {
+        self.values.into_iter().flatten()
+    }
 }
 
 enum State {
@@ -89,20 +151,30 @@ enum State {
 }
 
 mod moment_publications;
+mod host_memory;
+mod host_source;
 mod nd_resources;
+mod observed;
 mod ordered_mean;
+#[cfg(feature = "wgpu")]
+mod original_route;
 mod output_hooks;
 mod placement;
 mod power;
 mod prepared;
 mod resources;
 mod selected_binary;
+mod selected_metadata;
+mod selected_plan;
 mod selected_real_output;
 mod sigma_operations;
 mod stages;
 mod vm;
+pub(crate) use host_source::HostSingleImageSource;
+#[cfg(feature = "wgpu")]
+pub use original_route::ImageVmOriginalRoute;
 pub(crate) use prepared::PreparedImageStages;
-pub use vm::{ImageVmCheckpoint, ImageVmPreparation, ImageVmStages};
+pub use vm::{ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages};
 
 /// Owns only its own references. A VM-published moment is a separate retained
 /// handle and remains live if this session is abandoned at a later checkpoint.
@@ -117,6 +189,9 @@ pub(crate) struct ImageNormalizeStageSession {
     selected_real_plans: Option<selected_real_output::SelectedRealPlans>,
     reserved_mu: Option<ProviderPinnedNdMean>,
     cold_mu: Option<ProviderColdNdMean>,
+    retained_view_permit: Option<runmat_runtime::context::host_allocation::HostRetainedViewPermit>,
+    provider_metadata_permit:
+        Option<Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>>,
     state: State,
 }
 
@@ -132,6 +207,68 @@ struct ImageStageBeginRequest {
 }
 
 impl ImageNormalizeStageSession {
+    fn cold_cache_view_rank(&self) -> Option<usize> {
+        self.cold_mu.as_ref().map(|cold| cold.output_shape().len())
+    }
+
+    fn cold_cache_metadata_payload_bytes(&self) -> Option<u64> {
+        self.cold_mu
+            .as_ref()
+            .map(|cold| cold.requested_cache_metadata_payload_bytes())
+    }
+
+    fn fund_cold_cache_views(
+        &mut self,
+        permit: &runmat_runtime::context::host_allocation::HostRetainedViewPermit,
+    ) -> Result<(), runmat_runtime::context::host_allocation::HostAllocationError> {
+        let Some(cold) = self.cold_mu.take() else {
+            return Ok(());
+        };
+        let Some(bytes) = GpuTensorHandle::view_host_upper_bytes(cold.output_shape().len()) else {
+            self.cold_mu = Some(cold);
+            return Err(runmat_runtime::context::host_allocation::HostAllocationError::Overflow);
+        };
+        let first = match permit.claim_view(bytes) {
+            Ok(grant) => grant,
+            Err(error) => {
+                self.cold_mu = Some(cold);
+                return Err(error);
+            }
+        };
+        let second = match permit.claim_view(bytes) {
+            Ok(grant) => grant,
+            Err(error) => {
+                self.cold_mu = Some(cold);
+                return Err(error);
+            }
+        };
+        let payload = cold.requested_cache_metadata_payload_bytes();
+        let metadata = match permit.claim_metadata(payload) {
+            Ok(claim) => claim,
+            Err(error) => {
+                self.cold_mu = Some(cold);
+                return Err(error);
+            }
+        };
+        self.cold_mu = Some(
+            cold.with_cache_view_grants([first, second])
+                .with_cache_metadata_claim(metadata),
+        );
+        Ok(())
+    }
+    fn set_retained_view_permit(
+        &mut self,
+        permit: runmat_runtime::context::host_allocation::HostRetainedViewPermit,
+    ) {
+        self.retained_view_permit = Some(permit);
+    }
+
+    fn set_provider_metadata_permit(
+        &mut self,
+        permit: Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) {
+        self.provider_metadata_permit = Some(permit);
+    }
     /// Physical requests from every selected provider recipe. No estimate is
     /// returned for a legacy hook or a missing proposal. Existing input and
     /// provider cache allocations are not falsely charged as fresh outputs.
@@ -295,6 +432,9 @@ impl ImageNormalizeStageSession {
             return Err(anyhow!("image normalize stage input has no live selected owner").into());
         }
         let shape = input.shape();
+        let selected_powers = frozen
+            .as_ref()
+            .and_then(|workload| workload.selected_powers.clone());
         let supported = input.physical().element_type() == NumericElementType::F32
             && input.physical().storage() == GpuTensorStorage::Real
             && !runmat_accelerate_api::handle_is_logical(input)
@@ -309,14 +449,14 @@ impl ImageNormalizeStageSession {
                 .is_some()
             && desc.epsilon.is_finite()
             && desc.epsilon > 0.0
-            && (desc.epsilon as f32) as f64 == desc.epsilon
+            && (selected_powers.is_some() || (desc.epsilon as f32) as f64 == desc.epsilon)
             && (output_program.is_some()
                 || (desc.gain.is_none() && desc.bias.is_none() && !desc.clamp_zero));
-        let selected_powers = frozen
-            .as_ref()
-            .and_then(|workload| workload.selected_powers.clone());
         let Some(mut program) = (if let Some(powers) = selected_powers {
-            source.staged_workload_selected(&desc, powers)
+            let Some(selected_epsilon) = frozen.as_ref().map(|workload| workload.epsilon) else {
+                return Ok(None);
+            };
+            source.staged_workload_selected(&desc, powers, selected_epsilon)
         } else {
             source.staged_workload(&desc)
         }) else {
@@ -346,7 +486,7 @@ impl ImageNormalizeStageSession {
             return Ok(None);
         }
         if let Some(frozen) = frozen {
-            let mut expected = program.clone();
+            let mut expected = program;
             expected.moment_program = frozen.moment_program.clone();
             if expected != frozen || !frozen.validate() || frozen.moment_program.is_none() {
                 return Ok(None);
@@ -467,6 +607,8 @@ impl ImageNormalizeStageSession {
             selected_real_plans,
             reserved_mu,
             cold_mu,
+            retained_view_permit: None,
+            provider_metadata_permit: None,
             state: State::BeforeMean,
         }))
     }
@@ -538,7 +680,7 @@ impl ImageNormalizeStageSession {
                         ))
                         .after_effect()
                     })?;
-                ordered_mean::execute_call(
+                ordered_mean::execute_call_admitted(
                     self.provider,
                     ordered_mean::OrderedMeanExecutionContext {
                         current: &current,
@@ -550,6 +692,10 @@ impl ImageNormalizeStageSession {
                     call,
                     publication,
                     planned,
+                    self.provider_metadata_permit.as_ref().map(|permit| {
+                        permit.as_ref()
+                            as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                    }),
                 )?
             } else {
                 match call.hook {
@@ -651,19 +797,47 @@ impl ImageNormalizeStageSession {
     }
 
     fn provenance(&self, mut handle: GpuTensorHandle) -> ProviderExecutionResult<GpuTensorHandle> {
-        if let Err(source) =
-            super::mark_fusion_output(&mut handle, &[Value::GpuTensor(self.input.clone())])
-        {
-            let primary = ProviderExecutionError::from(source).after_effect();
-            return match handle.release() {
-                Ok(_) => Err(primary),
-                Err(cleanup) => Err(ProviderExecutionError::from_source(
-                    ProviderExecutionCompletionError::new(Some(primary), vec![cleanup]),
-                )
-                .after_effect()),
-            };
-        }
-        Ok(handle)
+        let stamped = (|| -> ProviderExecutionResult<GpuTensorHandle> {
+            if let Some(permit) = &self.retained_view_permit {
+                let bytes = GpuTensorHandle::view_host_upper_bytes(handle.shape().len())
+                    .ok_or_else(|| {
+                        ProviderExecutionError::from(anyhow!("image view extent overflows"))
+                            .after_effect()
+                    })?;
+                let claim = permit
+                    .claim_view(bytes)
+                    .map_err(|error| ProviderExecutionError::from_source(error).after_effect())?;
+                let provenance = if runmat_accelerate_api::handle_is_explicit(&self.input) {
+                    runmat_accelerate_api::GpuHandleProvenance::Explicit
+                } else {
+                    runmat_accelerate_api::GpuHandleProvenance::Automatic
+                };
+                handle
+                    .with_view_retained_grant(
+                        handle.view().clone().with_provenance(provenance),
+                        claim,
+                    )
+                    .map_err(|error| ProviderExecutionError::from_source(error).after_effect())
+            } else {
+                super::mark_fusion_output(&mut handle, &[Value::GpuTensor(self.input.clone())])
+                    .map(|()| handle.clone())
+                    .map_err(|error| ProviderExecutionError::from(error).after_effect())
+            }
+        })();
+        let published = match stamped {
+            Ok(published) => published,
+            Err(primary) => {
+                return match handle.release() {
+                    Ok(_) => Err(primary),
+                    Err(cleanup) => Err(ProviderExecutionError::from_source(
+                        ProviderExecutionCompletionError::new(Some(primary), vec![cleanup]),
+                    )
+                    .after_effect()),
+                }
+            }
+        };
+        crate::fusion_residency::mark(&published);
+        Ok(published)
     }
 }
 

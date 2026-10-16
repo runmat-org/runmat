@@ -4,7 +4,7 @@ use crate::graph::{InstrSpan, ShapeInfo};
 
 fn new_resolver<'a>(plan: &'a FusionGroupPlan, inputs: &[&'a Value]) -> RealRangeResolver<'a> {
     let leaves = FusionInvocationLeaves::new(plan, inputs).expect("valid invocation leaves");
-    RealRangeResolver::new(plan, &leaves)
+    RealRangeResolver::new(plan, &leaves).expect("bounded source geometry")
 }
 
 fn plan(operations: Vec<FusionOp>, output: ValueId) -> FusionGroupPlan {
@@ -57,19 +57,20 @@ fn indexed_walk_handles_deep_chains_shared_dags_and_cycles() {
     let inputs: Vec<_> = values.iter().collect();
     let mut resolver = new_resolver(&deep, &inputs);
     assert!(resolver.is_valid());
-    let (order, examined) = resolver.visit(4097, &deep);
-    order.unwrap();
-    let order = &resolver.visit_order;
-    assert_eq!(order.len(), 4098);
-    assert!(examined >= order.len() as u64);
-    assert_eq!(order.last(), Some(&4097));
+    let (completed, examined) = resolver.visit(4097, &deep);
+    assert!(completed.is_some());
+    assert_eq!(resolver.visit_order.len(), 4098);
+    assert!(examined >= resolver.visit_order.len() as u64);
+    assert_eq!(resolver.visit_order.last(), Some(&4097));
 
     let shared = plan(vec![add_op(0, 1, 2), add_op(2, 2, 3)], 3);
     let mut resolver = new_resolver(&shared, &inputs);
-    let (order, _) = resolver.visit(3, &shared);
-    order.unwrap();
-    let order = &resolver.visit_order;
-    assert_eq!(order.len(), 4, "shared producer is traversed only once");
+    assert!(resolver.visit(3, &shared).0.is_some());
+    assert_eq!(
+        resolver.visit_order.len(),
+        4,
+        "shared producer is traversed only once"
+    );
 
     let cyclic = plan(vec![add_op(3, 0, 2), add_op(2, 0, 3)], 3);
     let mut resolver = new_resolver(&cyclic, &inputs);
@@ -89,14 +90,16 @@ fn indexed_work_counts_unique_invocation_leaves_not_shadow_constants() {
     let inputs: Vec<_> = values.iter().collect();
     let resolver = new_resolver(&source, &inputs);
     let mut work = FusionAdmissionWork::None;
-    resolver.report_index(
-        &mut work,
-        BuiltinBindingIdentity {
-            builtin: runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
-            variant: "default",
-        },
-        ProviderPrecision::F64,
-    );
+    resolver
+        .report_index(
+            &mut work,
+            BuiltinBindingIdentity {
+                builtin: runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
+                variant: "default",
+            },
+            ProviderPrecision::F64,
+        )
+        .unwrap();
     assert!(resolver.is_valid());
     let FusionAdmissionWork::DomainProof { stages, .. } = work else {
         panic!("valid index must report preparation work");
@@ -208,10 +211,13 @@ fn many_requirements_reuse_one_leaf_index_and_cached_ranges() {
         variant: "default",
     };
     let snapshots = [None];
+    let mut retained_stages = 0usize;
     for requirement in 0..512 {
         let mut work = FusionAdmissionWork::None;
         if requirement == 0 {
-            resolver.report_index(&mut work, binding, ProviderPrecision::F64);
+            resolver
+                .report_index(&mut work, binding, ProviderPrecision::F64)
+                .unwrap();
         }
         let evidence = futures::executor::block_on(prove(
             RealDomainProofContext {
@@ -233,6 +239,7 @@ fn many_requirements_reuse_one_leaf_index_and_cached_ranges() {
         let FusionAdmissionWork::DomainProof { stages, .. } = work else {
             panic!("proof must report work");
         };
+        retained_stages += stages.len();
         if requirement == 0 {
             assert!(matches!(
                 stages[0],
@@ -247,6 +254,7 @@ fn many_requirements_reuse_one_leaf_index_and_cached_ranges() {
             assert!(matches!(stages[0], FusionProofStage::GraphWalk { .. }));
         }
     }
+    assert!(retained_stages <= proof_stage_upper(512, 1, 512).unwrap());
 }
 
 #[test]

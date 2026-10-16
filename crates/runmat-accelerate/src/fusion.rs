@@ -113,6 +113,14 @@ pub struct ImageNormalizePattern {
     pub gamma: Option<ImageScalar>,
     #[serde(default)]
     pub clamp_zero: bool,
+    /// A compiler-folded zero held in a live binding, rather than an
+    /// unbound source literal. Execution must check the actual bound value.
+    #[serde(default)]
+    pub clamp_zero_value: Option<ValueId>,
+    /// Digests of folded mean-axis constructors that were published into
+    /// live bindings. Their actual carriers remain request inputs.
+    #[serde(default)]
+    pub bound_mean_axes: Vec<(ValueId, runmat_execution::Digest)>,
     /// Tensor `single` conversions in the matched chain are redundant only
     /// when its runtime input retains native single storage throughout.
     #[serde(default)]
@@ -2591,6 +2599,8 @@ fn detect_image_normalize(
             bias: match_info.bias.clone(),
             gamma: match_info.gamma.clone(),
             clamp_zero: match_info.clamp_zero,
+            clamp_zero_value: match_info.clamp_zero_value,
+            bound_mean_axes: match_info.bound_mean_axes.clone(),
             requires_single_input: match_info.requires_single_input,
             reduction_routes: match_info.reduction_routes.clone().map(Box::new),
         };
@@ -3527,10 +3537,10 @@ fn split_max_with_zero_scalar(
     vid: ValueId,
     assigned: &HashSet<NodeId>,
     nodes: &mut Vec<NodeId>,
-) -> Option<(NodeId, ValueId)> {
+) -> Option<(NodeId, ValueId, Option<ValueId>)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
-        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max") => {
+        AccelNodeLabel::Builtin { .. } if image_reduction::is_canonical_max_node(node) => {
             if node.inputs.len() != 2 {
                 if log::log_enabled!(log::Level::Debug) {
                     log::debug!(
@@ -3545,25 +3555,33 @@ fn split_max_with_zero_scalar(
             if let Some(ImageScalar::Constant(value)) =
                 capture_image_scalar(graph, rhs, assigned, nodes)
             {
-                if approx_eq(value, 0.0) {
+                if value.to_bits() == 0.0f64.to_bits() {
                     if log::log_enabled!(log::Level::Debug) {
                         log::debug!(
                             "split_max_with_zero_scalar: rhs zero constant for node {node_id:?}"
                         );
                     }
-                    return Some((node_id, lhs));
+                    return Some((node_id, lhs, None));
                 }
             }
             if let Some(ImageScalar::Constant(value)) =
                 capture_image_scalar(graph, lhs, assigned, nodes)
             {
-                if approx_eq(value, 0.0) {
+                if value.to_bits() == 0.0f64.to_bits() {
                     if log::log_enabled!(log::Level::Debug) {
                         log::debug!(
                             "split_max_with_zero_scalar: lhs zero constant for node {node_id:?}"
                         );
                     }
-                    return Some((node_id, rhs));
+                    return Some((node_id, rhs, None));
+                }
+            }
+            // A published compiler fold is not a source literal. It may be
+            // recognized structurally, but remains an external live input
+            // whose exact bound value is checked before provider effects.
+            for (control, base) in [(rhs, lhs), (lhs, rhs)] {
+                if image_reduction::bound_folded_zero(graph, control, node.span.start) {
+                    return Some((node_id, base, Some(control)));
                 }
             }
             if log::log_enabled!(log::Level::Debug) {
@@ -3638,7 +3656,7 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
     }
     let data_vid = node.inputs[0];
     let dims_vid = node.inputs[1];
-    let dims = resolve_numeric_vector_constant(graph, dims_vid)?;
+    let dims = image_reduction::resolve_selected_mean_axes(graph, dims_vid, node.span.start)?;
     Some((node_id, data_vid, dims))
 }
 
@@ -3661,6 +3679,8 @@ struct ImageNormalizeMatch {
     bias: Option<ImageScalar>,
     gamma: Option<ImageScalar>,
     clamp_zero: bool,
+    clamp_zero_value: Option<ValueId>,
+    bound_mean_axes: Vec<(ValueId, runmat_execution::Digest)>,
     requires_single_input: bool,
     reduction_routes: Option<image_reduction::ImageReductionRoutes>,
 }
@@ -3711,19 +3731,20 @@ fn analyze_image_normalize(
 
     let mut clamp_nodes = Vec::new();
     let pow_base_vid = peel_numeric_casts(graph, pow_node.inputs[0], assigned, &mut clamp_nodes)?;
-    let (clamp_input_vid, clamp_zero) = if let Some((clamp_node_id, clamp_input_vid)) =
-        split_max_with_zero_scalar(graph, pow_base_vid, assigned, &mut clamp_nodes)
-    {
-        if assigned.contains(&clamp_node_id) {
-            img_norm_fail!("clamp node already assigned");
-        }
-        nodes.extend(clamp_nodes);
-        nodes.push(clamp_node_id);
-        (clamp_input_vid, true)
-    } else {
-        nodes.extend(clamp_nodes);
-        (pow_base_vid, false)
-    };
+    let (clamp_input_vid, clamp_zero, clamp_zero_value) =
+        if let Some((clamp_node_id, clamp_input_vid, zero_value)) =
+            split_max_with_zero_scalar(graph, pow_base_vid, assigned, &mut clamp_nodes)
+        {
+            if assigned.contains(&clamp_node_id) {
+                img_norm_fail!("clamp node already assigned");
+            }
+            nodes.extend(clamp_nodes);
+            nodes.push(clamp_node_id);
+            (clamp_input_vid, true, zero_value)
+        } else {
+            nodes.extend(clamp_nodes);
+            (pow_base_vid, false, None)
+        };
 
     let pre_bias_vid = peel_numeric_casts(graph, clamp_input_vid, assigned, &mut nodes)?;
     let (pre_gain_vid, bias_opt) = if let Some((add_node_id, base_vid, bias_scalar)) =
@@ -3894,17 +3915,10 @@ fn analyze_image_normalize(
     nodes.sort_unstable();
     nodes.dedup();
 
-    Some(ImageNormalizeMatch {
-        nodes,
-        input: imgs_vid,
-        epsilon,
-        gain: gain_opt,
-        bias: bias_opt,
-        gamma: gamma_opt,
-        clamp_zero,
-        requires_single_input,
-        reduction_routes: mu_route.zip(variance_route).map(|(mu, variance)| {
-            image_reduction::ImageReductionRoutes {
+    let reduction_routes =
+        mu_route
+            .zip(variance_route)
+            .map(|(mu, variance)| image_reduction::ImageReductionRoutes {
                 mu,
                 variance,
                 stage_producers: Some(image_reduction::ImageStageProducers {
@@ -3915,8 +3929,22 @@ fn analyze_image_normalize(
                     clamp_output: clamp_zero.then_some(pow_base_vid),
                     output: pow_node.outputs[0],
                 }),
-            }
-        }),
+            });
+    let bound_mean_axes =
+        image_reduction::collect_bound_mean_axes(graph, &nodes, reduction_routes.as_ref())?;
+
+    Some(ImageNormalizeMatch {
+        nodes,
+        input: imgs_vid,
+        epsilon,
+        gain: gain_opt,
+        bias: bias_opt,
+        gamma: gamma_opt,
+        clamp_zero,
+        clamp_zero_value,
+        bound_mean_axes,
+        requires_single_input,
+        reduction_routes,
     })
 }
 
@@ -4484,7 +4512,10 @@ mod tests {
                 AccelNode {
                     id: 1,
                     label: AccelNodeLabel::Builtin {
-                        origin: Default::default(),
+                        origin: FusionCallOrigin::Named {
+                            binding: runmat_builtins::MAX_CATALOG_ENTRY
+                                .binding_identity(&runmat_builtins::MAX_CATALOG_ENTRY.bindings[0]),
+                        },
                         name: "max".into(),
                     },
                     category: AccelOpCategory::Elementwise,
@@ -4511,7 +4542,7 @@ mod tests {
         assert_eq!(trace.nodes, vec![0]);
         assert_eq!(
             split_max_with_zero_scalar(&graph, 3, &HashSet::new(), &mut Vec::new()),
-            Some((1, 0))
+            Some((1, 0, None))
         );
 
         let assigned = HashSet::from([0]);

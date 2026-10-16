@@ -19,10 +19,19 @@ pub(super) fn physical_facts(
     provider: &dyn AccelProvider,
     runtime: Option<&RuntimeContext>,
 ) -> (PlacementResourceSnapshot, Digest, u64, bool) {
-    let capability = provider.capability_snapshot();
-    let provider_digest = Digest::sha256(
-        serde_json::to_vec(&capability).expect("provider capability snapshot must serialize"),
-    );
+    // A provider with an immutable shared inventory does not need to clone
+    // its nested capability vectors for each placement request. Legacy
+    // providers retain the detached snapshot contract. Stream the exact
+    // serialized bytes in either case instead of allocating a JSON mirror.
+    let shared_capability = provider.capability_snapshot_ref();
+    let owned_capability = shared_capability
+        .is_none()
+        .then(|| provider.capability_snapshot());
+    let capability = shared_capability
+        .or(owned_capability.as_ref())
+        .expect("one capability snapshot route is selected");
+    let provider_digest =
+        Digest::sha256_serialized(capability).expect("provider capability snapshot must serialize");
     let provider_resources = provider.placement_resources();
     let host_resources = runtime
         .and_then(|runtime| runtime.service_ports().parallel())

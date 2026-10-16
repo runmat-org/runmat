@@ -49,6 +49,9 @@ pub(super) struct SelectedBinaryPlans {
 }
 
 impl SelectedBinaryPlans {
+    pub(super) fn registered_output_count(&self) -> usize {
+        self.calls.len()
+    }
     pub(super) fn physical_upper_bound(
         &self,
     ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
@@ -58,6 +61,7 @@ impl SelectedBinaryPlans {
             bound.add(
                 physical.requested_incremental_peak_bytes()?,
                 physical.dispatches,
+                Some(physical.queue_submissions),
             )?;
         }
         Some(bound)
@@ -123,21 +127,16 @@ fn plan_call(
     }))
 }
 
-pub(super) fn plan(
+pub(super) fn plan_source(
     provider: &'static dyn AccelProvider,
-    image_input: &GpuTensorHandle,
+    input_rep: ProviderRepresentation,
+    input_bytes: u64,
     source: &ImageSelectedBinaryCalls,
     powers: &power::ImagePowerPlans,
     means: &ordered_mean::ImageOrderedMeanPlans,
     program: &ProviderImageStageWorkload,
 ) -> ProviderExecutionResult<Option<SelectedBinaryPlans>> {
-    let Some(input_precision) = handle_precision(image_input) else {
-        return Ok(None);
-    };
-    let Some(input_rep) = ordered_mean::representation(input_precision, image_input.shape()) else {
-        return Ok(None);
-    };
-    let image = operand(input_rep, image_input.physical().requested_bytes());
+    let image = operand(input_rep, input_bytes);
     let Some((mean_rep, mean_bytes)) = means.public_mean_carrier() else {
         return Ok(None);
     };
@@ -215,6 +214,31 @@ pub(super) fn plan(
     }))
 }
 
+pub(super) fn plan(
+    provider: &'static dyn AccelProvider,
+    image_input: &GpuTensorHandle,
+    source: &ImageSelectedBinaryCalls,
+    powers: &power::ImagePowerPlans,
+    means: &ordered_mean::ImageOrderedMeanPlans,
+    program: &ProviderImageStageWorkload,
+) -> ProviderExecutionResult<Option<SelectedBinaryPlans>> {
+    let Some(input_precision) = handle_precision(image_input) else {
+        return Ok(None);
+    };
+    let Some(input_rep) = ordered_mean::representation(input_precision, image_input.shape()) else {
+        return Ok(None);
+    };
+    plan_source(
+        provider,
+        input_rep,
+        image_input.physical().requested_bytes(),
+        source,
+        powers,
+        means,
+        program,
+    )
+}
+
 impl SelectedBinaryPlans {
     pub(super) fn semantic_identity(&self) -> Digest {
         self.semantic_identity
@@ -283,6 +307,7 @@ impl SelectedBinaryPlans {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         protected: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
         let index = Self::index(stage);
         if self.next.get() != index {
@@ -297,7 +322,7 @@ impl SelectedBinaryPlans {
         self.next.set(index + 1);
         let executed = planned
             .recipe
-            .execute_protected(lhs, rhs, protected)
+            .execute_protected_admitted(lhs, rhs, protected, admission)
             .await
             .map_err(ProviderExecutionError::after_effect)?;
         #[cfg(test)]

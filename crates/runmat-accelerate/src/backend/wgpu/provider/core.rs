@@ -220,6 +220,16 @@ impl WgpuProvider {
         registration: NumericBufferRegistration,
         logical: bool,
     ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced_admitted(buffer, registration, logical, None)
+    }
+
+    pub(super) fn register_numeric_buffer_produced_admitted(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        registration: NumericBufferRegistration,
+        logical: bool,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
         let NumericBufferRegistration {
             shape,
             len,
@@ -245,7 +255,8 @@ impl WgpuProvider {
             usage,
             last_submission_id: None,
         };
-        self.allocations.register_produced(entry, logical)
+        self.allocations
+            .register_produced_admitted(entry, logical, admission)
     }
 
     pub(super) fn register_integer_buffer(

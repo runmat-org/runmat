@@ -48,6 +48,10 @@ pub(super) struct Record {
     pub(super) resource_ticket: Option<runmat_accelerate_api::observation::ProviderResourceTicket>,
     /// Set only by a logical-producing upload/kernel at physical registration.
     pub(super) logical_producer: bool,
+    /// Request-derived record and shape metadata is charged until actual
+    /// physical retirement (or a proven released registration failure).
+    pub(super) host_metadata_claim:
+        Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

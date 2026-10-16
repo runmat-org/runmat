@@ -6,7 +6,18 @@ use runmat_runtime::context::{VmFusionHostInstruction, VmFusionHostRoute};
 use runmat_time::{duration_ns_saturating, Instant};
 
 #[derive(Default)]
-pub(super) struct FusionRegionObservations(Vec<RegionObservation>);
+pub(super) struct FusionRegionObservations(
+    Vec<RegionObservation>,
+    #[cfg(feature = "wgpu")] Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot>,
+    #[cfg(feature = "wgpu")] Option<Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>>,
+);
+
+#[cfg(feature = "wgpu")]
+struct OriginalSourceProof {
+    route: Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>,
+    publication: std::rc::Rc<crate::bytecode::ImageNormalizePublicationJoin>,
+    next_store: usize,
+}
 
 struct RegionObservation {
     span: InstrSpan,
@@ -17,6 +28,8 @@ struct RegionObservation {
     host_route: Option<VmFusionHostRoute>,
     publication_pc: Option<usize>,
     awaiting_publication: bool,
+    #[cfg(feature = "wgpu")]
+    original: Option<OriginalSourceProof>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -37,6 +50,65 @@ fn region_exit(span: &InstrSpan, executed_pc: usize, next_pc: usize) -> RegionEx
 }
 
 impl FusionRegionObservations {
+    #[cfg(feature = "wgpu")]
+    pub(super) fn route_audit_slot(
+        &mut self,
+        image_capable: bool,
+    ) -> Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot> {
+        if image_capable && self.1.is_none() {
+            self.1 = Some(std::sync::Arc::new(std::sync::Mutex::new(None)));
+        }
+        self.1.as_ref().map(std::sync::Arc::clone)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_route_audit(&self) {
+        if let Some(slot) = &self.1 {
+            if let Ok(mut active) = slot.lock() {
+                *active = None;
+            }
+        }
+        runmat_accelerate_api::observation::set_vm_region_for_current_poll(None);
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub(super) fn begin_original(
+        &mut self,
+        span: InstrSpan,
+        publication: std::rc::Rc<crate::bytecode::ImageNormalizePublicationJoin>,
+        route: Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>,
+    ) {
+        if let Some(slot) = &self.1 {
+            if let Ok(mut active) = slot.lock() {
+                let audit = route.audit();
+                *active = Some(audit.clone());
+                runmat_accelerate_api::observation::set_vm_region_for_current_poll(Some(audit));
+            }
+        }
+        self.0.push(RegionObservation {
+            span,
+            ticket: None,
+            provider_completion: None,
+            trace: None,
+            started: Instant::now(),
+            host_route: None,
+            publication_pc: None,
+            awaiting_publication: false,
+            original: Some(OriginalSourceProof {
+                route,
+                publication,
+                next_store: 0,
+            }),
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub(super) fn take_completed_original(
+        &mut self,
+    ) -> Option<Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>> {
+        self.2.take()
+    }
+
     /// Dispatch has already refreshed and checked the ordinary binding. Only
     /// now may an exact certified load replace its pushed stack value with the
     /// selected region's private host mirror.
@@ -144,6 +216,8 @@ impl FusionRegionObservations {
             host_route,
             publication_pc,
             awaiting_publication: false,
+            #[cfg(feature = "wgpu")]
+            original: None,
         });
     }
 
@@ -163,6 +237,8 @@ impl FusionRegionObservations {
             host_route: None,
             publication_pc,
             awaiting_publication: false,
+            #[cfg(feature = "wgpu")]
+            original: None,
         });
     }
 
@@ -184,6 +260,20 @@ impl FusionRegionObservations {
     pub(super) fn instruction_exit(&mut self, executed_pc: usize, next_pc: usize) {
         let mut index = 0;
         while index < self.0.len() {
+            #[cfg(feature = "wgpu")]
+            if let Some(proof) = self.0[index].original.as_mut() {
+                if let Some(expected) = proof.publication.ordered_stores().get(proof.next_store) {
+                    if expected.store.pc == executed_pc
+                        && executed_pc.checked_add(1) == Some(next_pc)
+                    {
+                        proof.next_store += 1;
+                    } else if expected.store.pc < next_pc || expected.store.pc <= executed_pc {
+                        self.0.remove(index);
+                        self.clear_route_audit();
+                        continue;
+                    }
+                }
+            }
             if self.0[index].awaiting_publication {
                 let published = self.0[index].publication_pc == Some(executed_pc)
                     && executed_pc.checked_add(1) == Some(next_pc);
@@ -213,6 +303,14 @@ impl FusionRegionObservations {
                 RegionExit::Running => index += 1,
                 RegionExit::Completed => {
                     let mut observation = self.0.remove(index);
+                    #[cfg(feature = "wgpu")]
+                    if let Some(proof) = observation.original.take() {
+                        self.clear_route_audit();
+                        if proof.next_store == proof.publication.ordered_stores().len() {
+                            self.2 = Some(proof.route);
+                        }
+                        continue;
+                    }
                     if observation.publication_pc == executed_pc.checked_add(1)
                         && (observation.host_route.is_some()
                             || observation.provider_completion.is_some())
@@ -235,6 +333,10 @@ impl FusionRegionObservations {
                     }
                 }
                 RegionExit::Aborted => {
+                    #[cfg(feature = "wgpu")]
+                    if self.0[index].original.is_some() {
+                        self.clear_route_audit();
+                    }
                     self.0.remove(index);
                 }
             }
@@ -243,6 +345,11 @@ impl FusionRegionObservations {
 
     pub(super) fn abort(&mut self) {
         self.0.clear();
+        #[cfg(feature = "wgpu")]
+        {
+            self.clear_route_audit();
+            self.2 = None;
+        }
     }
 }
 

@@ -6686,6 +6686,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger",
  "futures",
+ "hashbrown 0.16.1",
  "js-sys",
  "libloading 0.8.9",
  "libm",

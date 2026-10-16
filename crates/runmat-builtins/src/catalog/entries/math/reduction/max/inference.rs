@@ -4,9 +4,9 @@ use super::super::support::{
 };
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    broadcast_shape, infer_call, CallContract, CallInference, CallRequest, DynamicReason,
-    InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    broadcast_shape_checked, infer_call, BroadcastShapeError, CallContract, CallInference,
+    CallRequest, DynamicReason, InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     result
 }
 
+pub(super) fn infer_fusion_fact(request: &CallRequest) -> Option<ValueFact> {
+    if !matches!(call_family(request), MaxCallFamily::Pairwise) {
+        return None;
+    }
+    let left = request.arguments.first()?;
+    pairwise_output_checked(left, request).ok()
+}
+
 fn reduction_outputs(
     input: &ValueFact,
     request: &CallRequest,
@@ -155,26 +163,39 @@ fn pairwise_output(
     request: &CallRequest,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> ValueFact {
+    match pairwise_output_checked(left, request) {
+        Ok(fact) => fact,
+        Err(error) => {
+            diagnostics.push(error.into_diagnostic());
+            ValueFact::unknown(DynamicReason::RuntimeValue)
+        }
+    }
+}
+
+fn pairwise_output_checked(
+    left: &ValueFact,
+    request: &CallRequest,
+) -> Result<ValueFact, BroadcastShapeError> {
     let Some(right) = request.arguments.get(1) else {
-        return ValueFact::unknown(DynamicReason::RuntimeValue);
+        return Ok(ValueFact::unknown(DynamicReason::RuntimeValue));
     };
     if !admitted_max_pairwise_options(request.arguments.len(), &request.literals)
         || left.storage == StorageFact::Sparse
         || right.storage == StorageFact::Sparse
     {
-        return ValueFact::unknown(DynamicReason::RuntimeValue);
+        return Ok(ValueFact::unknown(DynamicReason::RuntimeValue));
     }
     let kind = match (&left.kind, &right.kind) {
         (ValueKindFact::Numeric(a), ValueKindFact::Numeric(b)) if a == b => {
             if a.domain == NumericDomain::Complex && a.class.integer_class().is_some() {
-                return ValueFact::unknown(DynamicReason::RuntimeValue);
+                return Ok(ValueFact::unknown(DynamicReason::RuntimeValue));
             }
             let known_array_operand = left.shape.element_count().is_some_and(|count| count > 1)
                 || right.shape.element_count().is_some_and(|count| count > 1);
             if a.domain == NumericDomain::Complex && !known_array_operand {
                 // Scalar complex comparison can return a real scalar when
                 // both imaginary components are zero. Runtime values decide.
-                return ValueFact::unknown(DynamicReason::RuntimeValue);
+                return Ok(ValueFact::unknown(DynamicReason::RuntimeValue));
             }
             ValueKindFact::Numeric(*a)
         }
@@ -182,15 +203,9 @@ fn pairwise_output(
             class: NumericClass::Double,
             domain: NumericDomain::Real,
         }),
-        _ => return ValueFact::unknown(DynamicReason::RuntimeValue),
+        _ => return Ok(ValueFact::unknown(DynamicReason::RuntimeValue)),
     };
-    let shape = match broadcast_shape(&left.shape, &right.shape) {
-        Ok(shape) => shape,
-        Err(error) => {
-            diagnostics.push(error);
-            return ValueFact::unknown(DynamicReason::RuntimeValue);
-        }
-    };
+    let shape = broadcast_shape_checked(&left.shape, &right.shape)?;
     let shape = if shape.element_count() == Some(1) {
         ShapeFact::Scalar
     } else {
@@ -200,5 +215,5 @@ fn pairwise_output(
     if left.residency != ResidencyFact::Host || right.residency != ResidencyFact::Host {
         result.residency = ResidencyFact::Unknown;
     }
-    result
+    Ok(result)
 }

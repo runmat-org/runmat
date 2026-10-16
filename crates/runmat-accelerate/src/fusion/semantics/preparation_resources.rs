@@ -123,7 +123,7 @@ fn selected_geometry(operation: &FusionOp) -> Result<(usize, bool), PreparationB
         }
         return Ok((arity, *op == PrimitiveOp::Add));
     }
-    let Some(binding) = SemanticBinding::capture(operation)
+    let Some(binding) = SemanticBinding::capture_typed(operation)
         .map_err(|_| PreparationBoundError::UnsupportedDeclarationOrCarrier)?
     else {
         return Err(PreparationBoundError::UnsupportedDeclarationOrCarrier);
@@ -372,3 +372,7 @@ impl PureSourceGeometry {
             .ok_or(PreparationBoundError::Overflow)
     }
 }
+
+#[path = "preparation_resources/image.rs"]
+mod image;
+pub(crate) use image::{ImageSourceGeometry, ImageStageCardinality};

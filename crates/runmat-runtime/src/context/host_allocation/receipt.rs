@@ -5,6 +5,10 @@ use std::sync::{
 };
 
 use runmat_execution::cancellation::CancellationToken;
+use runmat_execution::resource::{
+    ProviderHostMetadataAdmission, ProviderHostMetadataError, RetainedHostAllocationClaim,
+    RetainedHostViewError, RetainedHostViewGrant, RetainedHostViewIssuer,
+};
 use runmat_value::{
     ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
     NumericDType,
@@ -78,7 +82,190 @@ pub struct HostAllocationReceipt {
     fence: AllocationFence,
 }
 
+/// A precharged output-headroom capability. Claims survive the invocation
+/// only when moved into the published value that owns the metadata.
+#[derive(Clone)]
+pub struct HostRetainedViewPermit {
+    headroom: Arc<dyn HostEffectOutputHeadroom>,
+    fence: AllocationFence,
+    issuer: Arc<dyn RetainedHostViewIssuer>,
+}
+
+impl fmt::Debug for HostRetainedViewPermit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("HostRetainedViewPermit(..)")
+    }
+}
+
+struct ManagedViewIssuer {
+    ledger: ManagedHostEffectLedger,
+    epoch: u64,
+    _own_metadata_claim: Arc<dyn ExactHostAllocationReservation>,
+}
+
+#[derive(Debug)]
+struct ManagedViewGrant {
+    view_bytes: u64,
+    issuer: Arc<dyn RetainedHostViewIssuer>,
+    _claim: Arc<dyn RetainedHostAllocationClaim>,
+}
+
+impl RetainedHostViewGrant for ManagedViewGrant {
+    fn view_bytes(&self) -> u64 {
+        self.view_bytes
+    }
+
+    fn issuer(&self) -> Arc<dyn RetainedHostViewIssuer> {
+        self.issuer.clone()
+    }
+
+    fn backing_claim(&self) -> Arc<dyn RetainedHostAllocationClaim> {
+        self._claim.clone()
+    }
+}
+
+impl fmt::Debug for ManagedViewIssuer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ManagedViewIssuer")
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(super) fn retained_view_issuer_host_upper_bytes() -> Result<u64, HostAllocationError> {
+    let allocation = std::mem::size_of::<ManagedViewIssuer>()
+        .checked_add(2 * std::mem::size_of::<usize>())
+        .and_then(|bytes| bytes.checked_add(std::mem::align_of::<ManagedViewIssuer>()))
+        .ok_or(HostAllocationError::Overflow)?;
+    let allocation = u64::try_from(allocation).map_err(|_| HostAllocationError::Overflow)?;
+    allocation
+        .checked_add(crate::context::host_effect::retained_claim_host_upper_bytes())
+        .ok_or(HostAllocationError::Overflow)
+}
+
+pub(super) fn retained_view_grant_host_upper_bytes() -> u64 {
+    (std::mem::size_of::<ManagedViewGrant>()
+        + std::mem::size_of::<usize>() * 2
+        + std::mem::align_of::<ManagedViewGrant>()) as u64
+}
+
+impl RetainedHostViewIssuer for ManagedViewIssuer {
+    fn reserve_view(
+        self: Arc<Self>,
+        view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, RetainedHostViewError> {
+        let bytes = HostAllocationPlan::retained_view_bytes(view_bytes)
+            .map_err(|_| RetainedHostViewError::Overflow)?;
+        let claim = self
+            .ledger
+            .reserve_retained_view(bytes, self.epoch)
+            .map_err(|error| match error {
+                HostEffectAllocationError::Overflow => RetainedHostViewError::Overflow,
+                HostEffectAllocationError::ExceedsCapacity => {
+                    RetainedHostViewError::ExceedsCapacity
+                }
+                _ => RetainedHostViewError::Revoked,
+            })?;
+        Ok(Box::new(ManagedViewGrant {
+            view_bytes,
+            issuer: self,
+            _claim: claim,
+        }))
+    }
+}
+
+impl HostRetainedViewPermit {
+    pub fn issuer(&self) -> Arc<dyn RetainedHostViewIssuer> {
+        self.issuer.clone()
+    }
+    pub fn claim_view(
+        &self,
+        view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, HostAllocationError> {
+        self.fence.check()?;
+        let bytes = HostAllocationPlan::retained_view_bytes(view_bytes)?;
+        let bytes = usize::try_from(bytes).map_err(|_| HostAllocationError::Overflow)?;
+        let claim = self.headroom.reserve_exact(bytes)?;
+        self.fence.check()?;
+        Ok(Box::new(ManagedViewGrant {
+            view_bytes,
+            issuer: self.issuer.clone(),
+            _claim: claim,
+        }))
+    }
+
+    /// Fund a cache-owned variable metadata payload from the same invocation
+    /// headroom. The returned claim follows the cache entry, not this permit.
+    pub fn claim_metadata(
+        &self,
+        payload_bytes: u64,
+    ) -> Result<Arc<dyn RetainedHostAllocationClaim>, HostAllocationError> {
+        self.fence.check()?;
+        let bytes = HostAllocationPlan::retained_metadata_bytes(payload_bytes)?;
+        let bytes = usize::try_from(bytes).map_err(|_| HostAllocationError::Overflow)?;
+        let claim = self.headroom.reserve_exact(bytes)?;
+        self.fence.check()?;
+        Ok(claim)
+    }
+}
+
+impl ProviderHostMetadataAdmission for HostRetainedViewPermit {
+    fn claim_view(
+        &self,
+        view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, ProviderHostMetadataError> {
+        HostRetainedViewPermit::claim_view(self, view_bytes).map_err(provider_metadata_error)
+    }
+
+    fn claim_record(
+        &self,
+        record_bytes: u64,
+    ) -> Result<Arc<dyn RetainedHostAllocationClaim>, ProviderHostMetadataError> {
+        self.claim_metadata(record_bytes)
+            .map_err(provider_metadata_error)
+    }
+}
+
+fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataError {
+    match error {
+        HostAllocationError::Overflow => ProviderHostMetadataError::Overflow,
+        HostAllocationError::Cancelled => ProviderHostMetadataError::Cancelled,
+        HostAllocationError::StaleAuthority | HostAllocationError::MissingManagedOwner => {
+            ProviderHostMetadataError::StaleAuthority
+        }
+        HostAllocationError::Resource(HostEffectAllocationError::ExceedsCapacity) => {
+            ProviderHostMetadataError::ExceedsCapacity
+        }
+        HostAllocationError::Resource(_) | HostAllocationError::Numeric(_) => {
+            ProviderHostMetadataError::OwnerFailure
+        }
+    }
+}
+
 impl HostAllocationReceipt {
+    pub fn retained_view_permit(
+        &self,
+        runtime: &RuntimeContext,
+    ) -> Result<HostRetainedViewPermit, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let issuer_bytes = retained_view_issuer_host_upper_bytes()?;
+        let issuer_bytes =
+            usize::try_from(issuer_bytes).map_err(|_| HostAllocationError::Overflow)?;
+        let issuer_claim = self.output.reserve_exact(issuer_bytes)?;
+        self.checkpoint(runtime)?;
+        let issuer = Arc::new(ManagedViewIssuer {
+            ledger: self.ledger.clone(),
+            epoch: self.fence.epoch,
+            _own_metadata_claim: issuer_claim,
+        });
+        self.checkpoint(runtime)?;
+        Ok(HostRetainedViewPermit {
+            headroom: self.output.headroom.clone(),
+            fence: self.fence.clone(),
+            issuer,
+        })
+    }
     /// Keep the scratch claim alive until an owned CPU job physically settles.
     pub fn retain_scratch_for_cpu_work(&self) -> Arc<ManagedHostEffectStageReservation> {
         self.stage.clone()

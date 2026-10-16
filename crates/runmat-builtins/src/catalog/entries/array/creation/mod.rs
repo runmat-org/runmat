@@ -2,6 +2,10 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod constructor_facts;
+mod grid_facts;
+mod random_facts;
+mod shape_facts;
+mod sequence_facts;
 mod full;
 mod inf;
 mod nan;
@@ -10,16 +14,54 @@ mod r#true;
 mod zeros;
 mod empty;
 mod magic;
+mod ones;
 mod sparse;
+mod colon;
+mod createarray;
+mod eye;
+mod linspace;
+mod logspace;
+mod meshgrid;
+mod ndgrid;
+mod peaks;
+mod rand;
+mod randi;
+mod randn;
+mod randperm;
+mod range;
+mod nonzeros;
+mod spdiags;
+mod speye;
+mod spones;
+mod sprand;
 
+pub use colon::*;
+pub use createarray::*;
 pub use empty::*;
+pub use eye::*;
 pub use full::*;
 pub use inf::*;
+pub use linspace::*;
+pub use logspace::*;
 pub use magic::*;
+pub use meshgrid::*;
 pub use nan::*;
+pub use ndgrid::*;
+pub use nonzeros::*;
+pub use ones::*;
+pub use peaks::*;
 pub use r#false::*;
 pub use r#true::*;
+pub use rand::*;
+pub use randi::*;
+pub use randn::*;
+pub use randperm::*;
+pub use range::*;
 pub use sparse::*;
+pub use spdiags::*;
+pub use speye::*;
+pub use spones::*;
+pub use sprand::*;
 pub use zeros::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -31,7 +73,26 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(zeros::ENTRIES.iter().copied());
     values.extend(empty::ENTRIES.iter().copied());
     values.extend(magic::ENTRIES.iter().copied());
+    values.extend(ones::ENTRIES.iter().copied());
     values.extend(sparse::ENTRIES.iter().copied());
+    values.extend(colon::ENTRIES.iter().copied());
+    values.extend(createarray::ENTRIES.iter().copied());
+    values.extend(eye::ENTRIES.iter().copied());
+    values.extend(linspace::ENTRIES.iter().copied());
+    values.extend(logspace::ENTRIES.iter().copied());
+    values.extend(meshgrid::ENTRIES.iter().copied());
+    values.extend(ndgrid::ENTRIES.iter().copied());
+    values.extend(peaks::ENTRIES.iter().copied());
+    values.extend(rand::ENTRIES.iter().copied());
+    values.extend(randi::ENTRIES.iter().copied());
+    values.extend(randn::ENTRIES.iter().copied());
+    values.extend(randperm::ENTRIES.iter().copied());
+    values.extend(range::ENTRIES.iter().copied());
+    values.extend(nonzeros::ENTRIES.iter().copied());
+    values.extend(spdiags::ENTRIES.iter().copied());
+    values.extend(speye::ENTRIES.iter().copied());
+    values.extend(spones::ENTRIES.iter().copied());
+    values.extend(sprand::ENTRIES.iter().copied());
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {

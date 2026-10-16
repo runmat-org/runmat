@@ -31,7 +31,7 @@ pub use image_stages::{
     ProviderImageMomentConversion, ProviderImageMomentProgram, ProviderImageMomentPublication,
     ProviderImageOutputCall, ProviderImageOutputHook, ProviderImageOutputOperand,
     ProviderImageOutputProgram, ProviderImagePowerCall, ProviderImagePowerProgram,
-    ProviderImageStageWorkload,
+    ProviderImageStagePhysicalWork, ProviderImageStageWorkload,
 };
 pub use reduction_nd::{
     ProviderColdNdMean, ProviderExecutedColdNdMean, ProviderExecutedOrderedRealMean,
@@ -81,8 +81,8 @@ mod typed_reduction;
 pub use typed_reduction::ProviderTypedReductionWorkload;
 mod preparation;
 pub use preparation::{
-    ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationRoute,
-    ProviderPreparationSnapshot,
+    ProviderClassPreservingUpload, ProviderElementwiseGeometry, ProviderPreparationProgram,
+    ProviderPreparationRoute, ProviderPreparationSnapshot,
 };
 
 pub use capability::{

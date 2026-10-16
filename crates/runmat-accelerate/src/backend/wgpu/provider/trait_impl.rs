@@ -1,3 +1,4 @@
+use super::allocation_state::AllocationState;
 use super::*;
 #[path = "trait_impl/typed_elementwise.rs"]
 mod typed_elementwise;
@@ -29,6 +30,48 @@ fn numeric_upload_failure(
     }
 }
 
+fn upload_numeric_with_admission(
+    provider: &WgpuProvider,
+    host: &HostNumericTensorView,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+    let buffer_created = std::cell::Cell::new(false);
+    let output = provider
+        .upload_numeric_exec_observed_admitted(
+            host,
+            || {
+                buffer_created.set(true);
+                #[cfg(test)]
+                {
+                    use std::sync::atomic::Ordering;
+                    provider
+                        .numeric_upload_post_buffer_count
+                        .fetch_add(1, Ordering::SeqCst);
+                    if let Some(error) = provider
+                        .numeric_upload_post_buffer_fault
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("numeric upload test fault lock poisoned"))?
+                        .take()
+                    {
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            },
+            admission,
+        )
+        .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
+    if let Err(error) = complete_observed_upload(provider) {
+        let primary = numeric_upload_failure(error, true);
+        let cleanup = output.release().err().into_iter().collect();
+        return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+            runmat_accelerate_api::ProviderExecutionCompletionError::new(Some(primary), cleanup),
+        )
+        .after_effect());
+    }
+    Ok(output)
+}
+
 /// A host upload may use mapped-at-creation rather than a provider dispatch.
 /// Submit a provider-owned fence *after* publication so the whole-call receipt
 /// observes queue completion, not merely the return of `create_buffer_init`.
@@ -38,6 +81,7 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
         runmat_accelerate_api::observation::current_provider_observation().filter(|recorder| {
             recorder.expects_operation(&operation)
                 || recorder.observes_conditional_provider_upload(provider.device_id())
+                || recorder.observes_selected_image_upload(provider.device_id())
                 || recorder.observes_real_unary_upload(provider.device_id())
                 || recorder.observes_power_scalar_upload(provider.device_id())
         })
@@ -163,6 +207,38 @@ fn confirm_extrema_kernel_submission(
 }
 
 impl AccelProvider for WgpuProvider {
+    fn vm_region_queue_tail_resources(
+        &self,
+    ) -> Option<runmat_accelerate_api::ProviderVmRegionTailResources> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observation_progress
+                .as_ref()
+                .is_some_and(|progress| progress.is_available())
+                .then_some(runmat_accelerate_api::ProviderVmRegionTailResources {
+                    queue_slots: 1,
+                    provider_scratch_bytes: 0,
+                })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES;
+            (self.observation_budget.wgpu_query_requested_byte_limit() >= bytes).then_some(
+                runmat_accelerate_api::ProviderVmRegionTailResources {
+                    queue_slots: 1,
+                    provider_scratch_bytes: bytes,
+                },
+            )
+        }
+    }
+
+    fn observe_vm_region_queue_tail<'a>(
+        &'a self,
+        device_id: u32,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ()> {
+        Box::pin(self.observe_vm_region_queue_tail_exec(device_id))
+    }
+
     fn wgpu_device_access(&self) -> Option<&runmat_accelerate_api::WgpuDeviceAccess> {
         Some(&self.access)
     }
@@ -181,11 +257,39 @@ impl AccelProvider for WgpuProvider {
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
         recipe: &'a runmat_accelerate_api::ProviderRealBinaryRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<
         'a,
         runmat_accelerate_api::ProviderExecutedRealBinary,
     > {
-        Box::pin(async move { self.execute_real_binary_recipe_exec(lhs, rhs, recipe) })
+        Box::pin(async move { self.execute_real_binary_recipe_exec(lhs, rhs, recipe, admission) })
+    }
+
+    fn registered_output_host_metadata(
+        &self,
+        rank: usize,
+    ) -> Option<runmat_execution::resource::ProviderHostRegistrationMetadata> {
+        AllocationState::registration_host_metadata_for_rank(rank)
+    }
+
+    fn output_registration_table_upper_bytes(&self, registrations: usize) -> Option<u64> {
+        self.allocations.managed_table_upper_bytes(registrations)
+    }
+
+    fn output_registration_preparation_host_bytes(&self) -> Option<u64> {
+        AllocationState::managed_preparation_host_bytes()
+    }
+
+    fn prepare_output_host_metadata(
+        &self,
+        admission: Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        registrations: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    > {
+        self.allocations
+            .prepare_managed_metadata(admission, registrations)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
     }
 
     fn propose_real_elementwise(
@@ -201,12 +305,13 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         recipe: &'a runmat_accelerate_api::ProviderRealElementwiseRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<
         'a,
         runmat_accelerate_api::ProviderExecutedRealElementwise,
     > {
         Box::pin(async move {
-            self.execute_real_elementwise_recipe_exec(input, recipe)
+            self.execute_real_elementwise_recipe_exec(input, recipe, admission)
                 .await
         })
     }
@@ -324,6 +429,19 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.execute_power_evaluation_recipe_exec(recipe) })
     }
 
+    fn execute_power_evaluation_recipe_admitted<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerEvaluationRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(
+            async move { self.execute_power_evaluation_recipe_admitted_exec(recipe, admission) },
+        )
+    }
+
     fn propose_power_pair_geometry(
         &self,
         inputs: &[runmat_accelerate_api::ProviderRepresentation; 2],
@@ -422,10 +540,11 @@ impl AccelProvider for WgpuProvider {
     fn execute_ordered_real_mean(
         &self,
         selected: runmat_accelerate_api::ProviderOrderedRealMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<
         runmat_accelerate_api::ProviderExecutedOrderedRealMean,
     > {
-        self.execute_ordered_real_mean_exec(selected)
+        self.execute_ordered_real_mean_exec(selected, admission)
     }
     fn reserve_cached_mean_nd(
         &self,
@@ -444,8 +563,9 @@ impl AccelProvider for WgpuProvider {
     fn execute_cold_mean_nd(
         &self,
         selected: runmat_accelerate_api::ProviderColdNdMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<runmat_accelerate_api::ProviderExecutedColdNdMean> {
-        self.execute_cold_mean_nd_exec(selected)
+        self.execute_cold_mean_nd_exec(selected, admission)
     }
     fn resident_network_adjoint_supported(
         &self,
@@ -480,6 +600,54 @@ impl AccelProvider for WgpuProvider {
         program: runmat_accelerate_api::ProviderPreparationProgram<'_>,
     ) -> Option<runmat_accelerate_api::ProviderPreparationSnapshot> {
         self.fusion_preparation_snapshot(query, program)
+    }
+    fn image_stage_observation_capability(
+        &self,
+        work: runmat_accelerate_api::ProviderImageStagePhysicalWork,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationOverhead,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self
+            .observation_progress
+            .as_ref()
+            .is_some_and(|progress| progress.is_available())
+        {
+            return ProviderObservationCapability::Unsupported;
+        }
+        if !work.validate() {
+            return ProviderObservationCapability::Unsupported;
+        }
+        let Some(requested_peak_buffer_bytes) = u64::from(work.queue_submissions)
+            .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
+        else {
+            return ProviderObservationCapability::Unsupported;
+        };
+        crate::backend::wgpu::dispatch::observation::gate_prospective_encoder_query(
+            ProviderObservationCapability::Supported(ProviderObservationOverhead {
+                submissions: work.queue_submissions,
+                requested_peak_buffer_bytes,
+                clear_commands: work.queue_submissions,
+                map_callbacks: work.queue_submissions,
+                wgpu_compute_query: None,
+            }),
+            self.timestamp_capability,
+            &self.observation_budget,
+        )
+    }
+
+    fn begin_image_stage_observation(
+        &self,
+        work: runmat_accelerate_api::ProviderImageStagePhysicalWork,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationSupport,
+        };
+        match self.image_stage_observation_capability(work) {
+            ProviderObservationCapability::Supported(_) => self.owned_operation_observation(),
+            ProviderObservationCapability::Unsupported => ProviderObservationSupport::Unsupported,
+        }
     }
     fn operation_observation_capability(
         &self,
@@ -1182,8 +1350,24 @@ impl AccelProvider for WgpuProvider {
         self.set_rng_state_exec(state)
     }
 
-    fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
-        self.randperm_exec(n, k)
+    fn random_permutation(
+        &self,
+        n: usize,
+        k: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        // The installed F32 permutation pipeline cannot publish the Double
+        // output required by randperm. This is a kernel capability, not an
+        // inference from preferred precision about typed upload capability.
+        if self.precision() != ProviderPrecision::F64 {
+            return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "Double random permutation kernel is unavailable",
+                ),
+            ));
+        }
+        self.randperm_exec(n, k).map_err(|cause| {
+            runmat_accelerate_api::ProviderExecutionError::from(cause).with_unproven_effects()
+        })
     }
 
     fn random_permutation_like(
@@ -1191,8 +1375,8 @@ impl AccelProvider for WgpuProvider {
         _prototype: &GpuTensorHandle,
         n: usize,
         k: usize,
-    ) -> Result<GpuTensorHandle> {
-        self.randperm_exec(n, k)
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.random_permutation(n, k)
     }
 
     fn polyval(
@@ -2168,12 +2352,34 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn unary_double_admitted<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_cast_exec_recorded(a, NumericPrecision::F64, admission, |_| Ok(()))
+                .await
+        })
+    }
+
     fn unary_single<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.floating_cast_exec_typed(a, NumericPrecision::F32)
+                .await
+        })
+    }
+
+    fn unary_single_admitted<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_cast_exec_recorded(a, NumericPrecision::F32, admission, |_| Ok(()))
                 .await
         })
     }
@@ -3571,39 +3777,14 @@ impl AccelProvider for WgpuProvider {
         &self,
         host: &HostNumericTensorView,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
-        let buffer_created = std::cell::Cell::new(false);
-        let output = self
-            .upload_numeric_exec_observed(host, || {
-                buffer_created.set(true);
-                #[cfg(test)]
-                {
-                    use std::sync::atomic::Ordering;
-                    self.numeric_upload_post_buffer_count
-                        .fetch_add(1, Ordering::SeqCst);
-                    if let Some(error) = self
-                        .numeric_upload_post_buffer_fault
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("numeric upload test fault lock poisoned"))?
-                        .take()
-                    {
-                        return Err(error);
-                    }
-                }
-                Ok(())
-            })
-            .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
-        if let Err(error) = complete_observed_upload(self) {
-            let primary = numeric_upload_failure(error, true);
-            let cleanup = output.release().err().into_iter().collect();
-            return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
-                runmat_accelerate_api::ProviderExecutionCompletionError::new(
-                    Some(primary),
-                    cleanup,
-                ),
-            )
-            .after_effect());
-        }
-        Ok(output)
+        upload_numeric_with_admission(self, host, None)
+    }
+    fn upload_numeric_raw_admitted(
+        &self,
+        host: &HostNumericTensorView,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        upload_numeric_with_admission(self, host, admission)
     }
     fn upload_logical_raw(
         &self,

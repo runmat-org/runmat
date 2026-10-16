@@ -1,5 +1,6 @@
 //! Typed provider-hook program for three staged image-normalization outputs.
 //! Source bindings and numerical equivalence are proved by separate owners.
+use crate::scalar_program::ScalarLiteral;
 use serde::{Deserialize, Serialize};
 
 mod moment_publication;
@@ -14,6 +15,22 @@ pub use output_program::{
     ProviderImageOutputProgram,
 };
 pub use power::{ProviderImagePowerCall, ProviderImagePowerProgram};
+
+/// Checked work inventory from the same move-owned selected stage recipes.
+/// Descriptive only: it cannot authorize execution, allocation, or feedback
+/// without the prepared session and its live source/provider snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderImageStagePhysicalWork {
+    pub requested_bytes: u64,
+    pub dispatches: u32,
+    pub queue_submissions: u32,
+}
+
+impl ProviderImageStagePhysicalWork {
+    pub fn validate(self) -> bool {
+        self.requested_bytes > 0 && self.dispatches > 0 && self.queue_submissions > 0
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,7 +57,7 @@ pub struct ProviderImageMeanCall {
 /// A fixed requested-hook program: mu reduction; subtract, square POWER,
 /// variance reduction, add epsilon, sqrt; subtract, divide, final POWER.
 /// Legacy literal fixtures retain F32 control slots; selected invocations
-/// carry a separate original-class, versioned POWER program. Returned handles are separately
+/// carry separate original-class POWER and Sigma controls. Returned handles are separately
 /// published after their stage; they coexist with later scratch. This is not
 /// a free-form operation list or a backend dispatch/cost assertion.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -55,7 +72,10 @@ pub struct ProviderImageStageWorkload {
     /// for the held literal fixture and must never stand in for original bits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_powers: Option<ProviderImagePowerProgram>,
-    pub epsilon_f32_bits: u32,
+    /// Exact original-class Sigma Add scalar. Legacy unselected execution
+    /// admits only F32; selected execution is additionally checked against
+    /// its canonical source and the provider's typed arithmetic proposal.
+    pub epsilon: ScalarLiteral,
     /// Exact source-ordered output hooks, when a selected source owner has
     /// supplied them. The legacy three-stage workload leaves this absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,8 +101,15 @@ impl ProviderImageStageWorkload {
                 .selected_powers
                 .as_ref()
                 .is_none_or(|powers| powers.validate())
-            && f32::from_bits(self.epsilon_f32_bits).is_finite()
-            && f32::from_bits(self.epsilon_f32_bits) > 0.0
+            && match (self.selected_powers.is_some(), self.epsilon) {
+                (_, ScalarLiteral::F32Bits(bits)) => {
+                    f32::from_bits(bits).is_finite() && f32::from_bits(bits) > 0.0
+                }
+                (true, ScalarLiteral::F64Bits(bits)) => {
+                    f64::from_bits(bits).is_finite() && f64::from_bits(bits) > 0.0
+                }
+                (false, ScalarLiteral::F64Bits(_)) => false,
+            }
             && self.valid_mean(&self.mu)
             && self.valid_mean(&self.variance)
             && self.moment_program.as_ref().is_none_or(|program| {
@@ -206,7 +233,7 @@ mod tests {
             square_exponent_f32_bits: 2.0f32.to_bits(),
             final_exponent_f32_bits: 1.0f32.to_bits(),
             selected_powers: None,
-            epsilon_f32_bits: 0.25f32.to_bits(),
+            epsilon: ScalarLiteral::F32Bits(0.25f32.to_bits()),
             output_program: None,
             moment_program: None,
         }
@@ -229,7 +256,7 @@ mod tests {
         bad.variance.push(bad.variance[0]);
         assert!(!bad.validate());
         bad = good;
-        bad.epsilon_f32_bits = f32::NAN.to_bits();
+        bad.epsilon = ScalarLiteral::F32Bits(f32::NAN.to_bits());
         assert!(!bad.validate());
     }
 }

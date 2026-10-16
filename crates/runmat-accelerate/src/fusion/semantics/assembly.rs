@@ -120,6 +120,7 @@ pub(super) fn inferred_operation<'a>(
     operation: &'a FusionOp,
     snapshot: Option<SemanticBinding>,
     leaves: &FusionInvocationLeaves<'_>,
+    finite_facts_only: bool,
 ) -> Result<InferredOperation<'a>> {
     let (input_ids, output) = match operation {
         FusionOp::Primitive { inputs, output, .. } | FusionOp::Builtin { inputs, output, .. } => {
@@ -160,6 +161,10 @@ pub(super) fn inferred_operation<'a>(
             runmat_builtins::infer_fusion_numeric_fact(snapshot.entry, &request)
         {
             fact.map_err(|_| anyhow!("fusion call has no admitted output"))?
+        } else if finite_facts_only {
+            return Err(anyhow!(
+                "selected fusion declaration has no bounded canonical fact route"
+            ));
         } else {
             let inference = infer_catalog_call(snapshot.entry, &request);
             if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {

@@ -17,7 +17,7 @@ pub use descriptor::{
     AllocationAcquisitionError, GpuPhysicalDescriptor, GpuTensorLayout, GpuTensorView,
     GpuTensorWireDescriptor, GpuViewError,
 };
-pub use lease::{AllocationLease, WeakAllocationLease};
+pub use lease::{AllocationLease, RetainedLeaseHostMetadata, WeakAllocationLease};
 pub use owner::{
     AllocationOwner, AllocationOwnerHandle, AllocationRegistrationError,
     AllocationRetirementOutcome,

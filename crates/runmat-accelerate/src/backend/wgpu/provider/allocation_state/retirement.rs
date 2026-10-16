@@ -71,8 +71,14 @@ impl AllocationState {
             disposition.set(Disposition::Released);
             stage.set(Stage::Complete);
             failure.set(Failure::MapPoisoned);
-            let removed = self.lock_records()?.remove(&id);
+            let (removed, empty_table) = {
+                let mut records = self.lock_records()?;
+                let removed = records.remove(&id);
+                let empty_table = records.detach_empty_managed();
+                (removed, empty_table)
+            };
             drop(removed);
+            drop(empty_table);
             Ok(())
         });
         match result {
@@ -133,6 +139,7 @@ impl Drop for AllocationState {
         // reachable while the owner lives; they are not claimed durable after
         // this terminal disposition. WGPU has no driver-pointer free to retry.
         let records = std::mem::take(self.buffers.get_mut().unwrap_or_else(|e| e.into_inner()));
+        let (records, _table_claim) = records.into_records();
         for (id, record) in records {
             let Some(entry) = record.entry else {
                 if matches!(

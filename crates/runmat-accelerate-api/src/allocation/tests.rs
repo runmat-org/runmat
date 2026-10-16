@@ -6,19 +6,54 @@ mod native_export;
 use super::shared::Shared;
 use super::*;
 use owner::{Entry, TestOwner};
-use std::sync::atomic::Ordering;
+use runmat_execution::resource::{
+    RetainedHostViewError, RetainedHostViewGrant, RetainedHostViewIssuer,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[cfg(all(target_arch = "wasm32", not(feature = "wgpu")))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 const ID: AllocationIdentity = AllocationIdentity::new(17, 41, 2);
 
+#[derive(Debug)]
+struct TestLeaseClaim(Arc<AtomicUsize>);
+
+#[derive(Debug)]
+struct TestLeaseIssuer;
+
+impl RetainedHostViewIssuer for TestLeaseIssuer {
+    fn reserve_view(
+        self: Arc<Self>,
+        _view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, RetainedHostViewError> {
+        Err(RetainedHostViewError::Revoked)
+    }
+}
+
+impl Drop for TestLeaseClaim {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn clones_retain_captured_owner_and_retire_exactly_once() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let owner_weak = Shared::downgrade(&owner);
-    let lease = AllocationLease::register(ID, owner.clone()).unwrap();
+    let claimed = Arc::new(AtomicUsize::new(1));
+    let claim = Arc::new(TestLeaseClaim(claimed.clone()));
+    let lease = AllocationLease::register_with_retained_metadata(
+        ID,
+        owner.clone(),
+        Some(RetainedLeaseHostMetadata::new(
+            claim,
+            Arc::new(TestLeaseIssuer),
+        )),
+    )
+    .unwrap();
     let second = lease.clone();
     let weak = lease.downgrade();
     let third = weak.acquire().unwrap();
@@ -42,10 +77,13 @@ fn clones_retain_captured_owner_and_retire_exactly_once() {
     );
     drop(third);
     assert!(weak.acquire().is_none());
+    assert_eq!(claimed.load(Ordering::SeqCst), 1);
     assert!(
         owner_weak.upgrade().is_none(),
         "weak map association creates no state cycle"
     );
+    drop(weak);
+    assert_eq!(claimed.load(Ordering::SeqCst), 0);
 }
 
 #[test]

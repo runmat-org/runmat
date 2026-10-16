@@ -54,21 +54,45 @@ pub(crate) struct LocalPhysicalCandidate<'a> {
 #[derive(Clone, Copy)]
 pub(crate) enum PreparedPhysicalAuthority<'a> {
     Compound(&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound),
-    ImageStages(&'a crate::fusion_exec::image_stages::PreparedImageStages),
+    ImageStages {
+        plan: &'a crate::fusion_exec::image_stages::PreparedImageStages,
+        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+    },
+    ImageHostStages(&'a crate::fusion_exec::image_stages::HostSingleImageSource),
 }
 
 impl PreparedPhysicalAuthority<'_> {
-    fn resources(self) -> CandidateResourceDemand {
+    fn resources(self) -> Result<CandidateResourceDemand, Box<runmat_runtime::RuntimeError>> {
         match self {
-            Self::Compound(plan) => plan.resources(),
-            Self::ImageStages(plan) => plan.resource_demand(),
+            Self::Compound(plan) => Ok(plan.resources()),
+            Self::ImageStages { plan, tail } => {
+                plan.resource_demand_with_tail(tail).ok_or_else(|| {
+                    Box::new(
+                        runmat_runtime::build_runtime_error(
+                            "selected image tail resource bound overflows",
+                        )
+                        .with_identifier("RunMat:Placement:ResourceOverflow")
+                        .build(),
+                    )
+                })
+            }
+            Self::ImageHostStages(plan) => plan.physical_resources().ok_or_else(|| {
+                Box::new(
+                    runmat_runtime::build_runtime_error(
+                        "selected image host upload resource bound overflows",
+                    )
+                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                    .build(),
+                )
+            }),
         }
     }
 
     fn output_residency(self, device_id: u32) -> CandidateOutputResidency {
         match self {
             Self::Compound(plan) => plan.output_residency(),
-            Self::ImageStages(_) => CandidateOutputResidency::Provider { device_id },
+            Self::ImageStages { .. } => CandidateOutputResidency::Provider { device_id },
+            Self::ImageHostStages(..) => CandidateOutputResidency::Provider { device_id },
         }
     }
 
@@ -80,7 +104,44 @@ impl PreparedPhysicalAuthority<'_> {
             Self::Compound(plan) => plan
                 .resources_with_observation(observation)
                 .map_err(Box::new),
-            Self::ImageStages(plan) => Ok(plan.resource_demand()),
+            Self::ImageStages { plan, tail } => {
+                plan.resources_with_observation_and_tail(observation, tail)
+            }
+            Self::ImageHostStages(plan) => {
+                let resources = plan.physical_resources().ok_or_else(|| {
+                    Box::new(
+                        runmat_runtime::build_runtime_error(
+                            "selected image host upload resource bound overflows",
+                        )
+                        .with_identifier("RunMat:Placement:ResourceOverflow")
+                        .build(),
+                    )
+                })?;
+                match observation {
+                    None => Ok(resources),
+                    Some(overhead) => resources
+                        .with_provider_observation_peak(
+                            overhead.requested_total_peak_bytes().ok_or_else(|| {
+                                Box::new(
+                                    runmat_runtime::build_runtime_error(
+                                        "selected image host observation extent overflows",
+                                    )
+                                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                                    .build(),
+                                )
+                            })?,
+                        )
+                        .ok_or_else(|| {
+                            Box::new(
+                                runmat_runtime::build_runtime_error(
+                                    "selected image host observation extent overflows",
+                                )
+                                .with_identifier("RunMat:Placement:ResourceOverflow")
+                                .build(),
+                            )
+                        }),
+                }
+            }
         }
     }
 
@@ -90,9 +151,11 @@ impl PreparedPhysicalAuthority<'_> {
     ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
         match self {
             Self::Compound(plan) => plan.observation_capability(provider),
-            Self::ImageStages(_) => {
-                runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
-            }
+            Self::ImageStages { plan, .. } => plan.observation_capability(provider),
+            Self::ImageHostStages(plan) => plan.stage_physical_work().map_or(
+                runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported,
+                |work| provider.image_stage_observation_capability(work),
+            ),
         }
     }
 }
@@ -109,8 +172,18 @@ pub(crate) enum LocalCpuAdmission {
         download_bytes: u64,
         readback_count: u64,
     },
+    /// Original installed VM instructions retain per-operation admission.
+    /// Whole-route comparison is legal only with an unbounded aggregate
+    /// resource policy; this does not grant an ordinary host fallback.
+    VmRegionAtUse,
     /// No executable host route was admitted; do not fabricate a CPU candidate.
     Unavailable,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum LocalPublicationSemantics {
+    Atomic,
+    SourceOrderedVm,
 }
 
 /// Source implementation admission is separate from provider feasibility.
@@ -132,6 +205,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) family: ProviderOperationFamily,
     pub(crate) cpu: LocalCpuCandidate,
     pub(crate) cpu_admission: LocalCpuAdmission,
+    pub(crate) publication: LocalPublicationSemantics,
     pub(crate) physical: Vec<LocalPhysicalCandidate<'a>>,
     pub(crate) compare_profitability: bool,
     pub(crate) runtime: Option<&'a runmat_runtime::context::RuntimeContext>,
@@ -139,9 +213,51 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
 
 mod decision;
 mod graph;
+mod host_memory;
 mod inputs;
 mod unpriced;
 use graph::{candidate_name, candidate_resource, Admitted};
+
+pub(crate) fn plan_local_multi_bounded(
+    provider: &dyn AccelProvider,
+    request: LocalMultiPlacementRequest<'_>,
+    policy: PlacementPolicy,
+) -> runmat_accelerate_api::ProviderExecutionResult<(
+    LocalPlacementOutcome,
+    Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+)> {
+    let runtime = request.runtime.ok_or_else(|| {
+        runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+            "bounded local placement requires the owning runtime"
+        ))
+    })?;
+    let requested = host_memory::bounded_unpriced_requested_bytes(provider, &request)
+        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+    let plan = runmat_runtime::context::host_allocation::HostAllocationPlan::new(requested, 0)
+        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+    let receipt =
+        runmat_runtime::context::host_allocation::HostAllocationReceipt::admit(Some(runtime), plan)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+    if receipt.is_none() {
+        return Err(runmat_accelerate_api::ProviderExecutionError::from(
+            anyhow::anyhow!("finite placement authority changed before request allocation"),
+        ));
+    }
+    let outcome = plan_local_multi_with_provider_mode(
+        provider,
+        request,
+        policy,
+        LocalProviderAdmission::Available,
+        true,
+    )
+    .map_err(|error| runmat_accelerate_api::ProviderExecutionError::from_source(*error))?;
+    if let Some(receipt) = &receipt {
+        receipt
+            .checkpoint(runtime)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+    }
+    Ok((outcome, receipt))
+}
 
 pub(crate) fn plan_local_multi(
     provider: &dyn AccelProvider,
@@ -157,6 +273,16 @@ pub(super) fn plan_local_multi_with_provider(
     policy: PlacementPolicy,
     implementation: LocalProviderAdmission,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    plan_local_multi_with_provider_mode(provider, request, policy, implementation, false)
+}
+
+fn plan_local_multi_with_provider_mode(
+    provider: &dyn AccelProvider,
+    request: LocalMultiPlacementRequest<'_>,
+    policy: PlacementPolicy,
+    implementation: LocalProviderAdmission,
+    bounded_host: bool,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let LocalMultiPlacementRequest {
         operation,
         semantic_identity,
@@ -167,6 +293,7 @@ pub(super) fn plan_local_multi_with_provider(
         family,
         mut cpu,
         cpu_admission,
+        publication,
         physical,
         compare_profitability,
         runtime,
@@ -194,6 +321,9 @@ pub(super) fn plan_local_multi_with_provider(
         LocalCpuAdmission::Legacy => Some(cpu.route.resources),
         LocalCpuAdmission::Exact(resources) => Some(*resources),
         LocalCpuAdmission::ExactReadbacks { resources, .. } => Some(*resources),
+        LocalCpuAdmission::VmRegionAtUse => (cpu.route.kind
+            == ExecutionCandidateKind::OriginalVmRegion)
+            .then_some(cpu.route.resources),
         LocalCpuAdmission::Unavailable => None,
     };
     let constraint = physical
@@ -212,7 +342,8 @@ pub(super) fn plan_local_multi_with_provider(
     let cpu_resources = if matches!(
         constraint,
         runmat_execution::WholeWorkConstraint::ProviderRequired { .. }
-    ) {
+    ) && cpu.route.kind != ExecutionCandidateKind::OriginalVmRegion
+    {
         None
     } else {
         cpu_resources
@@ -237,7 +368,7 @@ pub(super) fn plan_local_multi_with_provider(
                 .components
                 .download_ns
                 .saturating_add(transfer_prior_ns(bytes));
-        } else if resident_bytes > 0 {
+        } else if resident_bytes > 0 && cpu.route.kind != ExecutionCandidateKind::OriginalVmRegion {
             cost.components.synchronization_ns =
                 cost.components.synchronization_ns.saturating_add(5_000);
             cost.components.download_ns = cost
@@ -250,6 +381,20 @@ pub(super) fn plan_local_multi_with_provider(
     let cpu_cost = cpu.route.cost;
     let mut admitted = Vec::new();
     let mut rejected = Vec::new();
+    admitted.try_reserve_exact(physical.len()).map_err(|_| {
+        Box::new(
+            runmat_runtime::build_runtime_error("admitted physical record allocation failed")
+                .with_identifier("RunMat:Placement:ResourceOverflow")
+                .build(),
+        )
+    })?;
+    rejected.try_reserve_exact(physical.len()).map_err(|_| {
+        Box::new(
+            runmat_runtime::build_runtime_error("rejected physical record allocation failed")
+                .with_identifier("RunMat:Placement:ResourceOverflow")
+                .build(),
+        )
+    })?;
     let physical_facts = super::session_facts::physical_facts(provider, runtime);
     for ((original_index, candidate), route) in physical.into_iter().enumerate().zip(routes) {
         debug_assert!(candidate.provider_kind.is_provider());
@@ -300,7 +445,7 @@ pub(super) fn plan_local_multi_with_provider(
                 let resources = candidate
                     .authority
                     .expect("checked prepared authority")
-                    .resources();
+                    .resources()?;
                 ProviderFeasibility::Supported {
                     estimate: runmat_accelerate_api::ProviderResourceEstimate {
                         transient_bytes: resources.peak_live.map(|peak| peak.peak_bytes),
@@ -516,7 +661,25 @@ pub(super) fn plan_local_multi_with_provider(
                 .build(),
             ));
         }
-        if cpu.route.cost.estimate().is_none() {
+        if cpu.route.cost.estimate().is_none()
+            && cpu.route.kind == ExecutionCandidateKind::OriginalVmRegion
+        {
+            if cpu.route.kind == ExecutionCandidateKind::OriginalVmRegion
+                && (vm_right.is_some()
+                    || vm_decline.is_some_and(|right| {
+                        runtime.is_some_and(|context| right.is_current(context))
+                    }))
+            {
+                if let Some((_, _, code)) = rejected.first() {
+                    // The original source instructions remain executable.
+                    // No price or whole-route host claim is manufactured.
+                    return Ok(LocalPlacementOutcome::ProviderRejected {
+                        code: *code,
+                        cpu_cost,
+                        feedback: None,
+                    });
+                }
+            }
             return Err(Box::new(
                 runmat_runtime::build_runtime_error(
                     "provider candidates rejected and the host route has no cost evidence",
@@ -552,25 +715,28 @@ pub(super) fn plan_local_multi_with_provider(
                 .expect("rejected candidate set serializes"),
             )
         };
-        let cpu = cpu.into_priced().expect("priced rejection route");
-        let feedback = rejected_cpu_feedback(
-            provider,
-            RejectedCpuFeedbackRequest {
-                runtime,
-                compare_profitability,
-                operation,
-                semantic_identity: rejection_identity.or(*identity),
-                observation_contract,
-                prepared_authority,
-                vm_right,
-                query,
-                code: *code,
-                cpu: &cpu,
-                cpu_resources: cpu_resources.as_ref().expect("checked host candidate"),
-                residency: &residency,
-                policy,
-            },
-        );
+        // Price evidence controls comparison/feedback, not the legality of
+        // this independently resource-admitted, sole remaining host route.
+        let feedback = cpu.into_priced().and_then(|cpu| {
+            rejected_cpu_feedback(
+                provider,
+                RejectedCpuFeedbackRequest {
+                    runtime,
+                    compare_profitability,
+                    operation,
+                    semantic_identity: rejection_identity.or(*identity),
+                    observation_contract,
+                    prepared_authority,
+                    vm_right,
+                    query,
+                    code: *code,
+                    cpu: &cpu,
+                    cpu_resources: cpu_resources.as_ref().expect("checked host candidate"),
+                    residency: &residency,
+                    policy,
+                },
+            )
+        });
         return Ok(LocalPlacementOutcome::ProviderRejected {
             code: *code,
             cpu_cost,
@@ -586,6 +752,7 @@ pub(super) fn plan_local_multi_with_provider(
         prepared_authority,
         vm_right,
         vm_decline,
+        publication,
         cpu,
         cpu_resources,
         cpu_cost,
@@ -597,5 +764,6 @@ pub(super) fn plan_local_multi_with_provider(
         compare_profitability,
         runtime,
         policy,
+        bounded_host,
     })
 }

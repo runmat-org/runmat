@@ -12,6 +12,8 @@ mod reuse;
 
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::allocation::{GpuTensorHandle, WeakGpuTensorHandle};
+use runmat_execution::resource::RetainedHostAllocationClaim;
+use std::sync::Arc;
 
 use super::WgpuProvider;
 pub(super) use drain::drain_detached;
@@ -33,6 +35,11 @@ impl CacheBudget {
 }
 
 impl WgpuProvider {
+    /// Exact inline/key payload of one selected cold moments entry. Cache
+    /// bucket infrastructure is separately bounded at the provider owner.
+    pub(in crate::backend::wgpu::provider) fn cold_key_payload_bytes(dims: usize) -> Option<u64> {
+        reuse::cold_key_payload_bytes(dims)
+    }
     /// Return the exact strong pair already held under this source view and
     /// dimension key. Unlike a warm boolean, the returned allocation leases
     /// remain valid if a later insertion evicts the cache entry before the
@@ -174,9 +181,15 @@ impl WgpuProvider {
         dims: &[usize],
         mean: &GpuTensorHandle,
         ex2: &GpuTensorHandle,
+        metadata_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
     ) -> Result<()> {
         self.validate_nd_moment_pair(source, dims, mean, ex2)?;
-        self.prune_dead_moment_sources()?;
+        // The selected finite route has already admitted its exact cold key.
+        // Do not clone the entire provider cache into an unquoted pruning
+        // snapshot; stale entries remain subject to the bounded LRU eviction.
+        if metadata_claim.is_none() {
+            self.prune_dead_moment_sources()?;
+        }
         let mean_bytes = self.get_entry_raw(mean)?.allocated_bytes;
         let ex2_bytes = self.get_entry_raw(ex2)?.allocated_bytes;
         // The cache retains physical allocations, not two view descriptors.
@@ -196,6 +209,7 @@ impl WgpuProvider {
                 mean.clone(),
                 ex2.clone(),
                 bytes,
+                metadata_claim,
             ),
             Err(_) => {
                 log::error!("WGPU reduction reuse cache poisoned; moments not retained");

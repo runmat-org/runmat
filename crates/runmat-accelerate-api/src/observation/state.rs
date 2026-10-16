@@ -25,6 +25,7 @@ struct State {
     failure: Option<ProviderObservationFailure>,
     taken: bool,
     selected_execution: Option<bool>,
+    selected_image_upload_device: Option<u32>,
     conditional_host_fallback: bool,
     conditional_provider_upload: bool,
     conditional_provider_upload_active: bool,
@@ -215,6 +216,7 @@ impl ProviderOperationReceipt {
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
                     selected_execution: None,
+                    selected_image_upload_device: None,
                     compound: None,
                     conditional_host_fallback: false,
                     conditional_provider_upload: false,
@@ -265,6 +267,23 @@ impl ProviderOperationReceipt {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.selected_execution = Some(false);
+            }
+        });
+    }
+
+    /// Bind one host image upload to this selected receipt before any provider
+    /// submission. The upload is not proof that the selected stages executed.
+    pub fn require_selected_image_upload(&mut self, device_id: u32) {
+        self.0.with(|state| {
+            if state.registered != 0
+                || state.publication.is_some()
+                || state.taken
+                || state.selected_execution != Some(false)
+                || state.selected_image_upload_device.is_some()
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.selected_image_upload_device = Some(device_id);
             }
         });
     }
@@ -605,6 +624,18 @@ impl ProviderOperationRecorder {
                     .expected_execution
                     .as_ref()
                     .is_some_and(|(expected, _)| *expected == device_id)
+                && state.failure.is_none()
+                && state.publication.is_none()
+                && !state.taken
+        })
+    }
+
+    /// Physical completion of the selected source upload remains distinct
+    /// from the later selected-stage execution witness.
+    pub fn observes_selected_image_upload(&self, device_id: u32) -> bool {
+        self.0.with(|state| {
+            state.selected_image_upload_device == Some(device_id)
+                && state.selected_execution == Some(false)
                 && state.failure.is_none()
                 && state.publication.is_none()
                 && !state.taken

@@ -1,20 +1,16 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
+use runmat_builtins::{RANDPERM_EXPLICIT_DOUBLE_EXTENSION, RANDPERM_LIKE_EXTENSION};
 
-use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
+#[cfg(test)]
+#[path = "randperm/owning_tests.rs"]
+mod owning_tests;
+
 use crate::build_runtime_error;
+#[cfg(test)]
 use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
@@ -23,27 +19,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use runmat_builtins::ResolveContext;
+#[cfg(test)]
 use runmat_builtins::Type;
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
-
-const RANDPERM_EXPLICIT_DOUBLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "randperm-explicit-double",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "the explicit randperm \"double\" selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RandpermExplicitDoubleExtension"),
-};
-
-const RANDPERM_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "randperm-like",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "the randperm \"like\" prototype selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RandpermLikeExtension"),
-};
-
-pub const RANDPERM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [RANDPERM_EXPLICIT_DOUBLE_EXTENSION, RANDPERM_LIKE_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -61,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses provider random_permutation(_like) hooks (WGPU implements a native kernel); falls back to host generation + upload when unavailable.",
+    notes: "Uses the prototype's exact owner for a validated Double permutation; only certified pre-effect unsupported hooks permit host generation and class-preserving restoration.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -70,6 +51,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+#[cfg(test)]
 fn randperm_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Unknown;
@@ -79,246 +61,6 @@ fn randperm_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
     row_vector_type(ctx)
 }
-
-const RANDPERM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Row vector containing permutation values.",
-}];
-
-const RANDPERM_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Population size.",
-}];
-
-const RANDPERM_SIG_NK_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Population size.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Number of selected elements.",
-    },
-];
-
-const RANDPERM_SIG_N_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Population size.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Class override ('double').",
-    },
-];
-
-const RANDPERM_SIG_NK_CLASS_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Population size.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Number of selected elements.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Class override ('double').",
-    },
-];
-
-const RANDPERM_SIG_N_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Population size.",
-    },
-    BuiltinParamDescriptor {
-        name: "like_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Like keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype array used for class/device.",
-    },
-];
-
-const RANDPERM_SIG_NK_LIKE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Population size.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Number of selected elements.",
-    },
-    BuiltinParamDescriptor {
-        name: "like_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Like keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype array used for class/device.",
-    },
-];
-
-const RANDPERM_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n)",
-        inputs: &RANDPERM_SIG_N_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n, k)",
-        inputs: &RANDPERM_SIG_NK_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n, \"double\")",
-        inputs: &RANDPERM_SIG_N_CLASS_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n, k, \"double\")",
-        inputs: &RANDPERM_SIG_NK_CLASS_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n, \"like\", prototype)",
-        inputs: &RANDPERM_SIG_N_LIKE_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = randperm(n, k, \"like\", prototype)",
-        inputs: &RANDPERM_SIG_NK_LIKE_INPUTS,
-        outputs: &RANDPERM_OUTPUT,
-    },
-];
-
-const RANDPERM_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.MISSING_N",
-        identifier: None,
-        when: "No N argument is provided.",
-        message: "randperm: requires at least one input argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.INVALID_SIZE_ARG",
-        identifier: None,
-        when: "N or K is not a supported non-negative integer scalar.",
-        message: "randperm: N/K must be non-negative integers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.INVALID_K",
-        identifier: None,
-        when: "K is larger than N.",
-        message: "randperm: K must satisfy 0 <= K <= N",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.LIKE_EXPECTED_PROTOTYPE",
-        identifier: None,
-        when: "The 'like' keyword is provided without a prototype argument.",
-        message: "randperm: expected prototype after 'like'",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.MULTIPLE_LIKE",
-        identifier: None,
-        when: "The 'like' keyword is provided multiple times.",
-        message: "randperm: duplicate 'like' prototype specified",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.CLASS_CONFLICT",
-        identifier: None,
-        when: "A class keyword and a 'like' prototype are both provided.",
-        message: "randperm: cannot combine 'double' with a 'like' prototype",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.UNSUPPORTED_CLASS",
-        identifier: None,
-        when: "An unsupported output class is requested.",
-        message: "randperm: single precision output is not implemented yet",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.RANDPERM.UNRECOGNIZED_OPTION",
-        identifier: None,
-        when: "A trailing option string is not recognized.",
-        message: "randperm: unrecognised option",
-    },
-];
-
-pub const RANDPERM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RANDPERM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RANDPERM_ERRORS,
-};
-
-const RANDPERM_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n or k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Both counts accept all eight documented integer classes and are decoded exactly before bounded allocation.",
-    }];
-pub const RANDPERM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "p = randperm(integer_n[,integer_k])",
-        inputs: &RANDPERM_INTEGER_COUNT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::FunctionSpecific,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Ordinary calls return a double row vector; the one-input GPU form is separately resident, while explicit double/like selectors remain declared RunMat extensions.",
-    }];
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -333,16 +75,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "randperm",
-    category = "array/creation",
-    summary = "Random permutations of 1:n.",
-    keywords = "randperm,permutation,random,indices,gpu,like",
-    accel = "array_construct",
-    type_resolver(randperm_type),
-    descriptor(crate::builtins::array::creation::randperm::RANDPERM_DESCRIPTOR),
-    extensions(crate::builtins::array::creation::randperm::RANDPERM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::array::creation::randperm::RANDPERM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -493,19 +226,84 @@ fn randperm_like(proto: &Value, n: usize, k: usize) -> crate::BuiltinResult<Valu
 }
 
 fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(device) = provider.random_permutation_like(handle, n, k) {
-            return Ok(Value::GpuTensor(device));
+    use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
+
+    let terminal = |detail: String| {
+        let mut error = builtin_error(format!("randperm: {detail}"));
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    };
+    handle.allocation_lease().validate_live().map_err(|cause| {
+        crate::runtime_error::with_provider_execution_source(
+            terminal(format!("prototype allocation is not live: {cause}")),
+            runmat_accelerate_api::ProviderExecutionError::from_source(cause)
+                .with_unproven_effects(),
+        )
+    })?;
+    if runmat_accelerate_api::handle_is_logical(handle) {
+        return Err(terminal(
+            "logical prototypes cannot represent permutation values".into(),
+        ));
+    }
+    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
+        return Err(terminal("complex prototypes are not supported".into()));
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| terminal("no provider owns the resident prototype".into()))?;
+    let output = match provider.random_permutation_like(handle, n, k) {
+        Ok(output) => Some(output),
+        Err(cause) if cause.is_unsupported() => None,
+        Err(cause) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                terminal(format!("provider permutation failed: {cause}")),
+                cause,
+            ))
         }
+    };
+    if let Some(mut output) = output {
+        let contract = UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision: Some(ProviderPrecision::F64),
+            integer: None,
+            logical: false,
+            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+        };
+        if !gpu_helpers::unary_gpu_output_matches_shape(
+            &output,
+            handle,
+            provider,
+            &[1, k],
+            contract,
+        ) {
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                terminal("provider returned a malformed, aliased, or foreign result".into()),
+            ));
+        }
+        if let Err(cause) = handle.allocation_lease().validate_live() {
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                terminal(format!(
+                    "prototype allocation retired during permutation: {cause}"
+                )),
+            ));
+        }
+        if let Err(cause) = gpu_helpers::propagate_output_provenance(&mut output, [handle]) {
+            return Err(gpu_helpers::reject_gpu_output(output, cause));
+        }
+        return gpu_helpers::resident_gpu_value(output).map_err(|mut cause| {
+            cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            cause
+        });
     }
 
     let tensor = randperm_tensor(n, k)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(device) = gpu_helpers::upload_tensor(provider, &tensor) {
-            return Ok(Value::GpuTensor(device));
-        }
-    }
-    Ok(tensor::tensor_into_value(tensor))
+    gpu_helpers::restore_class_preserving_value_protecting(
+        handle,
+        Value::Tensor(tensor),
+        "randperm",
+        &[],
+    )
 }
 
 fn randperm_tensor(n: usize, k: usize) -> crate::BuiltinResult<Tensor> {

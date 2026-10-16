@@ -55,7 +55,12 @@ impl ImageNormalizeStageSession {
                 let requested_uniform_bytes = cold.requested_uniform_bytes();
                 let executed = self
                     .provider
-                    .execute_cold_mean_nd(cold)
+                    .execute_cold_mean_nd(
+                        cold,
+                        self.provider_metadata_permit.as_ref().map(|permit| {
+                            permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                        }),
+                    )
                     .map_err(|source| ProviderExecutionError::from(source).after_effect())?;
                 nd_resources::executed_cold_mean(
                     self.provider,
@@ -142,6 +147,9 @@ impl ImageNormalizeStageSession {
                         &self.input,
                         &mean,
                         &[&self.input, &mean],
+                        self.provider_metadata_permit.as_ref().map(|permit| {
+                            permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                        }),
                     )
                     .await?
             } else {
@@ -186,15 +194,26 @@ impl ImageNormalizeStageSession {
                     .chain(scratch.iter())
                     .collect::<Vec<_>>();
                 selected
-                    .execute_add(&scratch[shifted_input], &protected)
+                    .execute_add(
+                        &scratch[shifted_input],
+                        &protected,
+                        self.provider_metadata_permit.as_ref().map(|permit| {
+                            permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                        }),
+                    )
                     .await?
             } else {
                 // Only the explicit unselected held fixture uses legacy hooks.
+                let runmat_accelerate_api::scalar_program::ScalarLiteral::F32Bits(bits) =
+                    self.program.epsilon
+                else {
+                    return Err(ProviderExecutionError::from(anyhow!(
+                        "unselected image Sigma requires its admitted F32 control"
+                    ))
+                    .after_effect());
+                };
                 self.provider
-                    .scalar_add(
-                        &scratch[shifted_input],
-                        f64::from(f32::from_bits(self.program.epsilon_f32_bits)),
-                    )
+                    .scalar_add(&scratch[shifted_input], f64::from(f32::from_bits(bits)))
                     .map_err(|error| ProviderExecutionError::from(error).after_effect())?
             };
             let shifted = self.admit_next(shifted, &self.moment_shape(), &scratch, &[&mean])?;
@@ -229,7 +248,13 @@ impl ImageNormalizeStageSession {
                     .chain(scratch.iter())
                     .collect::<Vec<_>>();
                 selected
-                    .execute_sqrt(&scratch[sqrt_input], &protected)
+                    .execute_sqrt(
+                        &scratch[sqrt_input],
+                        &protected,
+                        self.provider_metadata_permit.as_ref().map(|permit| {
+                            permit.as_ref() as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+                        }),
+                    )
                     .await?
             } else {
                 self.provider

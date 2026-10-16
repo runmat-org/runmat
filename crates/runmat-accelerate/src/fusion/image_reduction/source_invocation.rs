@@ -4,9 +4,6 @@
 //! arithmetic proof: full-stage numerical equivalence, effects, and resources
 //! remain separate admissions.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
-
 use runmat_accelerate_api::{
     GpuTensorHandle, ImageNormalizeDescriptor, ProviderImageMomentProgram,
     ProviderImageOutputOperand, ProviderImageOutputProgram, ProviderImageStageWorkload,
@@ -15,7 +12,8 @@ use runmat_accelerate_api::{
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::FusionPowerArithmeticReceipt;
 use runmat_types::ValueFact;
-use runmat_value::Value;
+use runmat_value::{NumericDType, Tensor, Value};
+use std::sync::Arc;
 
 use crate::fusion::{FusionGroupPlan, FusionOp, FusionPattern, ImageNormalizePattern, ImageScalar};
 use crate::graph::{AccelGraph, AccelNodeLabel, NodeId, ValueId};
@@ -46,12 +44,27 @@ pub(crate) use sigma_raw::ImageSelectedSigmaRaw;
 
 #[derive(Debug, Clone)]
 struct BoundImageStage {
-    input: GpuTensorHandle,
+    input: BoundImageInput,
     desc: ImageNormalizeDescriptor,
     source: ImageMeanAndPowerSource,
     sigma_control: Option<sigma_operations::BoundSigmaAddControl>,
     output_binary: Vec<super::source_output_hooks::SelectedBinaryStep>,
     output_real: Vec<super::source_output_hooks::SelectedRealStep>,
+}
+
+#[derive(Debug, Clone)]
+enum BoundImageInput {
+    Resident(GpuTensorHandle),
+    HostSingle(Tensor),
+}
+
+impl BoundImageInput {
+    fn shape(&self) -> &[usize] {
+        match self {
+            Self::Resident(handle) => handle.shape(),
+            Self::HostSingle(tensor) => tensor.shape(),
+        }
+    }
 }
 
 /// Source-bound arithmetic for one selected power producer. This does not
@@ -80,6 +93,26 @@ pub enum ImageSourceAdmissionFailure {
     CanonicalExecution(#[source] runmat_accelerate_api::ProviderExecutionError),
 }
 
+impl ImageSourceAdmissionFailure {
+    fn after_observed_probe(self) -> Self {
+        Self::CanonicalExecution(
+            runmat_accelerate_api::ProviderExecutionError::from_source(self)
+                .with_unproven_effects(),
+        )
+    }
+}
+
+fn after_probe_if(
+    error: ImageSourceAdmissionFailure,
+    observed: bool,
+) -> ImageSourceAdmissionFailure {
+    if observed {
+        error.after_observed_probe()
+    } else {
+        error
+    }
+}
+
 fn canonical_failure(
     failure: crate::fusion::semantics::FusionResolveFailure,
 ) -> ImageSourceAdmissionFailure {
@@ -89,27 +122,91 @@ fn canonical_failure(
     }
 }
 
-fn source_value_ids(source: &ImageSourceTranscript) -> BTreeSet<ValueId> {
-    source
-        .leaves
+fn source_value_ids(
+    source: &ImageSourceTranscript,
+) -> Result<Vec<ValueId>, ImageSourceAdmissionFailure> {
+    let upper = source
+        .steps
         .iter()
-        .map(|leaf| match leaf {
-            ImageSourceLeaf::Constant { id, .. } | ImageSourceLeaf::Live { id } => *id,
+        .try_fold(source.leaves.len(), |count, step| {
+            count.checked_add(step.inputs.len())?.checked_add(1)
         })
-        .chain(source.steps.iter().flat_map(|step| {
-            step.inputs
-                .iter()
+        .ok_or(ImageSourceAdmissionFailure::Inputs)?;
+    let mut ids = Vec::new();
+    ids.try_reserve_exact(upper).map_err(|error| {
+        ImageSourceAdmissionFailure::CanonicalExecution(
+            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+        )
+    })?;
+    ids.extend(source.leaves.iter().map(|leaf| match leaf {
+        ImageSourceLeaf::Constant { id, .. } | ImageSourceLeaf::Live { id } => *id,
+    }));
+    ids.extend(source.steps.iter().flat_map(|step| {
+        step.inputs
+            .iter()
+            .copied()
+            .chain(std::iter::once(step.output))
+    }));
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
+fn moment_source_outputs(
+    calls: &[runmat_accelerate_api::ProviderImageMomentPublication],
+) -> impl Iterator<Item = u64> + '_ {
+    calls.iter().flat_map(|call| {
+        std::iter::once(call.raw_output)
+            .chain(call.conversions.iter().map(|cast| cast.source_output))
+    })
+}
+
+/// Fixed-capacity request lookup. The selected input IDs are sorted once;
+/// each later lookup is a binary search and does not allocate a hash table.
+pub(super) struct ImageValuePositions(Vec<(ValueId, usize)>);
+
+impl ImageValuePositions {
+    pub(super) fn new(ids: &[ValueId]) -> Option<Self> {
+        Self::try_new(ids).ok().flatten()
+    }
+
+    fn try_new(ids: &[ValueId]) -> Result<Option<Self>, std::collections::TryReserveError> {
+        let mut positions = Vec::new();
+        positions.try_reserve_exact(ids.len())?;
+        positions.extend(
+            ids.iter()
                 .copied()
-                .chain(std::iter::once(step.output))
-        }))
-        .collect()
+                .enumerate()
+                .map(|(index, id)| (id, index)),
+        );
+        positions.sort_unstable_by_key(|(id, _)| *id);
+        if positions.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Ok(None);
+        }
+        Ok(Some(Self(positions)))
+    }
+
+    pub(super) fn get(&self, id: &ValueId) -> Option<&usize> {
+        self.0
+            .binary_search_by_key(id, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.0[index].1)
+    }
+
+    fn contains_key(&self, id: &ValueId) -> bool {
+        self.get(id).is_some()
+    }
+
+    fn ids(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.0.iter().map(|(id, _)| *id)
+    }
 }
 
 fn bound_scalar(
     scalar: &ImageScalar,
     plan: &FusionGroupPlan,
     inputs: &[Value],
-    positions: &HashMap<ValueId, usize>,
+    positions: &ImageValuePositions,
 ) -> Option<f64> {
     match scalar {
         ImageScalar::Constant(value) => Some(*value),
@@ -155,6 +252,8 @@ pub(super) fn same_image_pattern(
         && same_optional_scalar(&left.bias, &right.bias)
         && same_optional_scalar(&left.gamma, &right.gamma)
         && left.clamp_zero == right.clamp_zero
+        && left.clamp_zero_value == right.clamp_zero_value
+        && left.bound_mean_axes == right.bound_mean_axes
         && left.requires_single_input == right.requires_single_input
         && left.reduction_routes == right.reduction_routes
 }
@@ -167,16 +266,32 @@ fn selected_stage(
     graph: &AccelGraph,
     plan: &FusionGroupPlan,
     inputs: &[Value],
-    positions: &HashMap<ValueId, usize>,
+    positions: &ImageValuePositions,
 ) -> Option<BoundImageStage> {
     let FusionPattern::ImageNormalize(pattern) = plan.group.pattern.as_ref()? else {
         return None;
     };
-    let routes = pattern.reduction_routes.as_ref()?;
-    let Value::GpuTensor(input) = inputs.get(*positions.get(&pattern.input)?)? else {
+    if !super::bound_image_controls_match(pattern, |id| {
+        positions
+            .get(&id)
+            .and_then(|position| inputs.get(*position))
+    }) {
         return None;
+    }
+    let routes = pattern.reduction_routes.as_ref()?;
+    let input = match inputs.get(*positions.get(&pattern.input)?)? {
+        Value::GpuTensor(handle) => BoundImageInput::Resident(handle.clone()),
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == NumericDType::F32 && tensor.as_f32_slice().is_some() =>
+        {
+            BoundImageInput::HostSingle(tensor.clone())
+        }
+        _ => return None,
     };
     let [batch, height, width]: [usize; 3] = input.shape().try_into().ok()?;
+    if [batch, height, width].contains(&0) {
+        return None;
+    }
     let control = |scalar: &ImageScalar| bound_scalar(scalar, plan, inputs, positions);
     let desc = ImageNormalizeDescriptor {
         batch,
@@ -197,10 +312,23 @@ fn selected_stage(
         },
         clamp_zero: pattern.clamp_zero,
     };
-    let source = ImageMeanAndPowerSource::from_graph(graph, routes, [batch, height, width])?;
-    source.staged_workload(&desc)?;
+    let bound_final_exponent = match &pattern.gamma {
+        Some(ImageScalar::Value(id)) => Some(power_program::bound_final_exponent(
+            *id,
+            desc.gamma?,
+            inputs,
+            positions,
+        )?),
+        _ => None,
+    };
+    let source = ImageMeanAndPowerSource::from_selected_graph(
+        graph,
+        routes,
+        [batch, height, width],
+        bound_final_exponent,
+    )?;
     Some(BoundImageStage {
-        input: input.clone(),
+        input,
         desc,
         source,
         sigma_control: sigma_operations::freeze_control(plan, inputs, positions),
@@ -211,7 +339,7 @@ fn selected_stage(
 
 #[derive(Debug, Clone)]
 pub struct ImageSourceInvocation {
-    pub(super) source: ImageSourceTranscript,
+    pub(super) source: Arc<ImageSourceTranscript>,
     pub(super) facts: Vec<(ValueId, ValueFact)>,
     semantic_identity: Digest,
     output_program: Option<ProviderImageOutputProgram>,
@@ -219,6 +347,7 @@ pub struct ImageSourceInvocation {
     workload: Option<ProviderImageStageWorkload>,
     selected_stage: Option<BoundImageStage>,
     selected_powers: Vec<ImageSelectedPower>,
+    probe_observed: bool,
     publications_bound: bool,
 }
 
@@ -236,18 +365,32 @@ impl ImageSourceInvocation {
     ) -> Result<Self, ImageSourceAdmissionFailure> {
         let source = ImageSourceTranscript::from_graph(graph, &plan.group)
             .ok_or(ImageSourceAdmissionFailure::Source)?;
-        Self::bind_source(source, graph, plan, inputs, precision, placement).await
+        if !matches_selected_image_group(graph, plan) {
+            return Err(ImageSourceAdmissionFailure::Source);
+        }
+        Self::bind_source(
+            Arc::new(source),
+            graph,
+            plan,
+            inputs,
+            precision,
+            placement,
+            false,
+        )
+        .await
     }
 
-    /// The selected bytecode sealed this exact source graph once. Recheck
-    /// its live graph/plan join without rebuilding a second transcript.
-    pub async fn bind_selected(
+    /// The selected bytecode owner already sealed the exact graph transcript.
+    /// Borrow that immutable source through finite preflight and retain its
+    /// shared descriptor for the asynchronous staged execution session.
+    pub(crate) async fn bind_selected(
         source: Arc<ImageSourceTranscript>,
         graph: &AccelGraph,
         plan: &FusionGroupPlan,
         inputs: &[Value],
         precision: ProviderPrecision,
         placement: Option<PlacementCorrelationId>,
+        finite: bool,
     ) -> Result<Self, ImageSourceAdmissionFailure> {
         if source.steps.len() != plan.operations.len()
             || source.steps.iter().any(|step| {
@@ -261,37 +404,46 @@ impl ImageSourceInvocation {
         {
             return Err(ImageSourceAdmissionFailure::Source);
         }
-        let source = Arc::try_unwrap(source).unwrap_or_else(|shared| (*shared).clone());
-        Self::bind_source(source, graph, plan, inputs, precision, placement).await
+        Self::bind_source(source, graph, plan, inputs, precision, placement, finite).await
     }
 
     async fn bind_source(
-        source: ImageSourceTranscript,
+        source: Arc<ImageSourceTranscript>,
         graph: &AccelGraph,
         plan: &FusionGroupPlan,
         inputs: &[Value],
         precision: ProviderPrecision,
         placement: Option<PlacementCorrelationId>,
+        finite: bool,
     ) -> Result<Self, ImageSourceAdmissionFailure> {
-        if !matches_selected_image_group(graph, plan) {
-            return Err(ImageSourceAdmissionFailure::Source);
-        }
         if plan.inputs.len() != inputs.len() || plan.group.nodes.len() != plan.operations.len() {
             return Err(ImageSourceAdmissionFailure::Inputs);
         }
-        let mut input_positions = HashMap::with_capacity(plan.inputs.len());
-        for (position, &id) in plan.inputs.iter().enumerate() {
-            if input_positions.insert(id, position).is_some() {
-                return Err(ImageSourceAdmissionFailure::Inputs);
-            }
-        }
-        let selected: HashMap<_, _> = source.steps.iter().map(|step| (step.node, step)).collect();
-        if selected.len() != source.steps.len() {
+        let input_positions = ImageValuePositions::try_new(&plan.inputs)
+            .map_err(|error| {
+                ImageSourceAdmissionFailure::CanonicalExecution(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            })?
+            .ok_or(ImageSourceAdmissionFailure::Inputs)?;
+        let mut selected = Vec::new();
+        selected
+            .try_reserve_exact(source.steps.len())
+            .map_err(|error| {
+                ImageSourceAdmissionFailure::CanonicalExecution(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            })?;
+        selected.extend(source.steps.iter().map(|step| (step.node, step)));
+        selected.sort_unstable_by_key(|(node, _)| *node);
+        if selected.windows(2).any(|pair| pair[0].0 == pair[1].0) {
             return Err(ImageSourceAdmissionFailure::Source);
         }
         for (&node, operation) in plan.group.nodes.iter().zip(&plan.operations) {
             let step = selected
-                .get(&node)
+                .binary_search_by_key(&node, |(key, _)| *key)
+                .ok()
+                .map(|index| selected[index].1)
                 .ok_or(ImageSourceAdmissionFailure::Operation(node))?;
             let same = match (operation, &step.label) {
                 (
@@ -321,14 +473,19 @@ impl ImageSourceInvocation {
                 return Err(ImageSourceAdmissionFailure::Operation(node));
             }
         }
-        let mut source_ids = HashSet::new();
+        let mut source_ids = Vec::new();
+        source_ids
+            .try_reserve_exact(source.leaves.len())
+            .map_err(|error| {
+                ImageSourceAdmissionFailure::CanonicalExecution(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            })?;
         for leaf in &source.leaves {
             let id = match leaf {
                 ImageSourceLeaf::Constant { id, .. } | ImageSourceLeaf::Live { id } => *id,
             };
-            if !source_ids.insert(id) {
-                return Err(ImageSourceAdmissionFailure::Source);
-            }
+            source_ids.push(id);
             let actual = input_positions
                 .get(&id)
                 .and_then(|position| inputs.get(*position))
@@ -345,30 +502,24 @@ impl ImageSourceInvocation {
                 return Err(ImageSourceAdmissionFailure::MissingLeaf(id));
             }
         }
-        if input_positions.keys().any(|id| !source_ids.contains(id)) {
+        source_ids.sort_unstable();
+        if source_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(ImageSourceAdmissionFailure::Source);
+        }
+        if input_positions
+            .ids()
+            .any(|id| source_ids.binary_search(&id).is_err())
+        {
             return Err(ImageSourceAdmissionFailure::Inputs);
         }
-        let resolved =
-            crate::fusion::semantics::ResolvedProgram::resolve(plan, inputs, precision, placement)
-                .await
-                .map_err(canonical_failure)?;
-        // Retain the canonical operand facts while the exact request is bound.
-        // Equal scalar values of different classes can select different
-        // arithmetic, so output facts alone cannot describe this program.
-        let facts = source_value_ids(&source)
-            .into_iter()
-            .map(|id| {
-                resolved
-                    .fact(id)
-                    .cloned()
-                    .map(|fact| (id, fact))
-                    .map_err(ImageSourceAdmissionFailure::CanonicalUnproven)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let semantic_identity = resolved
-            .cache_identity()
-            .map_err(ImageSourceAdmissionFailure::CanonicalUnproven)?;
-        let selected_powers = source
+        let fact_ids = source_value_ids(&source)?;
+        let mut facts = Vec::new();
+        facts.try_reserve_exact(fact_ids.len()).map_err(|error| {
+            ImageSourceAdmissionFailure::CanonicalExecution(
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+        let power_count = source
             .steps
             .iter()
             .filter(|step| {
@@ -377,16 +528,59 @@ impl ImageSourceInvocation {
                     AccelNodeLabel::Primitive(crate::graph::PrimitiveOp::ElemPow)
                 )
             })
-            .map(|step| {
-                resolved
+            .count();
+        let mut selected_powers = Vec::new();
+        selected_powers
+            .try_reserve_exact(power_count)
+            .map_err(|error| {
+                ImageSourceAdmissionFailure::CanonicalExecution(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            })?;
+        let resolved = if finite {
+            crate::fusion::semantics::ResolvedProgram::resolve_finite_image(
+                plan, inputs, precision, placement,
+            )
+            .await
+        } else {
+            crate::fusion::semantics::ResolvedProgram::resolve(plan, inputs, precision, placement)
+                .await
+        }
+        .map_err(canonical_failure)?;
+        let probe_observed = resolved.observed_provider_probe();
+        // Retain the canonical operand facts while the exact request is bound.
+        // Equal scalar values of different classes can select different
+        // arithmetic, so output facts alone cannot describe this program.
+        for id in fact_ids {
+            let fact = resolved.fact(id).cloned().map_err(|error| {
+                after_probe_if(
+                    ImageSourceAdmissionFailure::CanonicalUnproven(error),
+                    probe_observed,
+                )
+            })?;
+            facts.push((id, fact));
+        }
+        let semantic_identity = resolved.cache_identity().map_err(|error| {
+            after_probe_if(
+                ImageSourceAdmissionFailure::CanonicalUnproven(error),
+                probe_observed,
+            )
+        })?;
+        for step in &source.steps {
+            if matches!(
+                &step.label,
+                AccelNodeLabel::Primitive(crate::graph::PrimitiveOp::ElemPow)
+            ) {
+                let arithmetic = resolved
                     .power_arithmetic(step.output)
-                    .map(|arithmetic| ImageSelectedPower {
-                        output: step.output,
-                        arithmetic,
-                    })
                     .ok_or(ImageSourceAdmissionFailure::Operation(step.node))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                    .map_err(|error| after_probe_if(error, probe_observed))?;
+                selected_powers.push(ImageSelectedPower {
+                    output: step.output,
+                    arithmetic,
+                });
+            }
+        }
         let mut invocation = Self {
             source,
             facts,
@@ -396,44 +590,61 @@ impl ImageSourceInvocation {
             workload: None,
             selected_stage: None,
             selected_powers,
+            probe_observed,
             publications_bound: false,
         };
         if let Some((moments, preparation)) = invocation
             .project_moment_program(plan, inputs, precision, placement)
-            .await?
+            .await
+            .map_err(|error| after_probe_if(error, probe_observed))?
         {
             invocation.moment_program = Some(moments);
-            let projected_output = invocation.project_output_program(plan, inputs);
-            invocation.output_program = projected_output
-                .as_ref()
-                .map(|output| output.program.clone());
+            let (binary_steps, real_steps) =
+                if let Some(projected) = invocation.project_output_program(plan, inputs) {
+                    invocation.output_program = Some(projected.program);
+                    (projected.binary_steps, projected.real_steps)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
             if let Some(stage) = selected_stage(graph, plan, inputs, &input_positions) {
                 let stage = {
                     let mut stage = stage;
-                    if let Some(projected) = projected_output.as_ref() {
-                        stage.output_binary = projected.binary_steps.clone();
-                        stage.output_real = projected.real_steps.clone();
-                    }
+                    // These companions have one selected owner. Move them
+                    // into the held stage rather than clone their nested
+                    // source operand vectors during preparation.
+                    stage.output_binary = binary_steps;
+                    stage.output_real = real_steps;
                     stage
                 };
                 let powers = invocation
                     .project_power_program(&stage.source)
-                    .ok_or(ImageSourceAdmissionFailure::Source)?;
+                    .ok_or(ImageSourceAdmissionFailure::Source)
+                    .map_err(|error| after_probe_if(error, probe_observed))?;
+                let epsilon = stage
+                    .sigma_control
+                    .as_ref()
+                    .ok_or(ImageSourceAdmissionFailure::Source)
+                    .map_err(|error| after_probe_if(error, probe_observed))?
+                    .literal();
                 let mut workload = stage
                     .source
-                    .staged_workload_selected(&stage.desc, powers)
-                    .expect("selected stage validated");
+                    .staged_workload_selected(&stage.desc, powers, epsilon)
+                    .ok_or(ImageSourceAdmissionFailure::Source)
+                    .map_err(|error| after_probe_if(error, probe_observed))?;
                 workload.moment_program = invocation.moment_program.clone();
                 workload.output_program = invocation.output_program.clone();
                 if workload.output_program.is_some() && workload.validate() {
                     // Preparation and all additional calls belong to this exact
                     // request identity; old arithmetic/resource receipts cannot
                     // authenticate the expanded source program.
-                    invocation.semantic_identity = Digest::sha256(
-                        serde_json::to_vec(&(semantic_identity, &workload, preparation)).map_err(
-                            |error| ImageSourceAdmissionFailure::CanonicalUnproven(error.into()),
-                        )?,
-                    );
+                    invocation.semantic_identity =
+                        Digest::sha256_serialized(&(semantic_identity, &workload, preparation))
+                            .map_err(|error| {
+                                after_probe_if(
+                                    ImageSourceAdmissionFailure::CanonicalUnproven(error.into()),
+                                    probe_observed,
+                                )
+                            })?;
                     invocation.workload = Some(workload);
                     invocation.selected_stage = Some(stage);
                 }
@@ -444,6 +655,10 @@ impl ImageSourceInvocation {
 
     pub fn semantic_identity(&self) -> Digest {
         self.semantic_identity
+    }
+
+    pub(crate) fn observed_provider_probe(&self) -> bool {
+        self.probe_observed
     }
 
     pub(crate) fn selected_publications_bound(&self) -> bool {
@@ -484,10 +699,40 @@ impl ImageSourceInvocation {
         input: &GpuTensorHandle,
     ) -> Option<(&ImageNormalizeDescriptor, &ImageMeanAndPowerSource)> {
         let selected = self.selected_stage.as_ref()?;
-        selected.input.allocation_lease().validate_live().ok()?;
+        let BoundImageInput::Resident(bound) = &selected.input else {
+            return None;
+        };
+        bound.allocation_lease().validate_live().ok()?;
         input.allocation_lease().validate_live().ok()?;
-        (selected.input.view_identity() == input.view_identity())
+        (bound.view_identity() == input.view_identity())
             .then_some((&selected.desc, &selected.source))
+    }
+
+    pub(crate) fn selected_staged_mean_power_host(
+        &self,
+        input: &Tensor,
+    ) -> Option<(&ImageNormalizeDescriptor, &ImageMeanAndPowerSource)> {
+        let selected = self.selected_stage.as_ref()?;
+        let BoundImageInput::HostSingle(bound) = &selected.input else {
+            return None;
+        };
+        let bound_words = bound.as_f32_slice()?;
+        let input_words = input.as_f32_slice()?;
+        (bound.shape() == input.shape()
+            && bound_words.len() == input_words.len()
+            && std::ptr::eq(bound_words.as_ptr(), input_words.as_ptr()))
+        .then_some((&selected.desc, &selected.source))
+    }
+
+    pub(crate) fn selected_staged_mean_power_for_value(
+        &self,
+        input: &Value,
+    ) -> Option<(&ImageNormalizeDescriptor, &ImageMeanAndPowerSource)> {
+        match input {
+            Value::GpuTensor(handle) => self.selected_staged_mean_power(handle),
+            Value::Tensor(tensor) => self.selected_staged_mean_power_host(tensor),
+            _ => None,
+        }
     }
 
     /// Every selected graph operation must have exactly one staged owner, in
@@ -512,21 +757,6 @@ impl ImageSourceInvocation {
         else {
             return false;
         };
-        let mut outputs = Vec::with_capacity(self.source.steps.len());
-        let append_moments =
-            |outputs: &mut Vec<u64>,
-             calls: &[runmat_accelerate_api::ProviderImageMomentPublication]| {
-                for call in calls {
-                    outputs.push(call.raw_output);
-                    outputs.extend(call.conversions.iter().map(|cast| cast.source_output));
-                }
-            };
-        append_moments(&mut outputs, &moments.mu);
-        outputs.push(binary.sigma_center().output());
-        outputs.push(u64::from(powers.square.output));
-        append_moments(&mut outputs, &moments.variance);
-        outputs.push(sigma.source_ids().2);
-        append_moments(&mut outputs, std::slice::from_ref(&moments.sigma));
         let Some(output_program) = self.output_program.as_ref() else {
             return false;
         };
@@ -545,8 +775,7 @@ impl ImageSourceInvocation {
                     )
                 })
                 .map(|call| call.source_output)
-                .collect::<Vec<_>>()
-                != [u64::from(powers.final_power.output)]
+                .ne([u64::from(powers.final_power.output)])
             || output_program
                 .calls
                 .iter()
@@ -565,13 +794,14 @@ impl ImageSourceInvocation {
         {
             return false;
         }
-        outputs.extend(output_program.calls.iter().map(|call| call.source_output));
-        outputs.len() == self.source.steps.len()
-            && outputs.iter().copied().eq(self
-                .source
-                .steps
-                .iter()
-                .map(|step| u64::from(step.output)))
+        moment_source_outputs(&moments.mu)
+            .chain(std::iter::once(binary.sigma_center().output()))
+            .chain(std::iter::once(u64::from(powers.square.output)))
+            .chain(moment_source_outputs(&moments.variance))
+            .chain(std::iter::once(sigma.source_ids().2))
+            .chain(moment_source_outputs(std::slice::from_ref(&moments.sigma)))
+            .chain(output_program.calls.iter().map(|call| call.source_output))
+            .eq(self.source.steps.iter().map(|step| u64::from(step.output)))
     }
 }
 
@@ -607,13 +837,13 @@ mod tests {
             }],
             checkpoints: vec![4],
         };
-        assert_eq!(source_value_ids(&source), BTreeSet::from([2, 4, 9]));
+        assert_eq!(source_value_ids(&source).unwrap(), vec![2, 4, 9]);
         let double = runmat_runtime::value_fact::value_fact(&Value::Num(2.0));
         let single = runmat_runtime::value_fact::value_fact(&Value::Tensor(
             runmat_value::Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap(),
         ));
         let invocation = ImageSourceInvocation {
-            source,
+            source: Arc::new(source),
             facts: vec![
                 (2, double.clone()),
                 (4, single.clone()),
@@ -625,6 +855,7 @@ mod tests {
             workload: None,
             selected_stage: None,
             selected_powers: vec![],
+            probe_observed: false,
             publications_bound: false,
         };
         assert_eq!(invocation.source_fact(2), Some(&double));
@@ -705,11 +936,11 @@ mod tests {
             },
         };
         let invocation = ImageSourceInvocation {
-            source: ImageSourceTranscript {
+            source: Arc::new(ImageSourceTranscript {
                 steps: vec![],
                 leaves: vec![],
                 checkpoints: vec![],
-            },
+            }),
             facts: vec![],
             semantic_identity: Digest::sha256("selected-stage-test"),
             output_program: None,
@@ -719,7 +950,7 @@ mod tests {
                 sigma_control: None,
                 output_binary: Vec::new(),
                 output_real: Vec::new(),
-                input: input.handle.clone(),
+                input: BoundImageInput::Resident(input.handle.clone()),
                 desc: ImageNormalizeDescriptor {
                     batch: 2,
                     height: 4,
@@ -733,6 +964,7 @@ mod tests {
                 source,
             }),
             selected_powers: vec![],
+            probe_observed: false,
             publications_bound: false,
         };
         assert!(invocation

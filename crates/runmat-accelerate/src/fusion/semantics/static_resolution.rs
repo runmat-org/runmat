@@ -58,7 +58,7 @@ impl ResolvedProgram {
                 // preparation. Do not parse MEAN controls on this static pass.
                 return Ok(None);
             }
-            let inferred = inferred_operation(&program, operation, *snapshot, &leaves)?;
+            let inferred = inferred_operation(&program, operation, *snapshot, &leaves, false)?;
             let mut values = selected_values(&leaves, &computed_scalars, inferred.input_ids);
             if host {
                 // Static owners may inspect literal scalar controls (including

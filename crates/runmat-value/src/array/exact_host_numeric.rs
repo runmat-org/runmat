@@ -52,7 +52,10 @@ impl std::error::Error for ExactHostNumericAllocationError {}
 /// lifetime, not merely until the decoder returns. The service implements
 /// atomic quota accounting and revocation; this allocation owner never
 /// invents a machine budget.
-pub trait ExactHostAllocationReservation: fmt::Debug + Send + Sync {}
+pub trait ExactHostAllocationReservation:
+    runmat_execution::resource::RetainedHostAllocationClaim
+{
+}
 
 /// Retains a quota claim through the physical output allocation's lifetime.
 /// Installed exact owners can use a known-layout Box; external permits keep

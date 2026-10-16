@@ -2,8 +2,9 @@ use super::*;
 use runmat_accelerate_api::allocation::AllocationCleanupPanicked;
 use runmat_accelerate_api::allocation::{
     AllocationIdentity, AllocationLease, AllocationRegistrationError, GpuPhysicalDescriptor,
-    GpuTensorView,
+    GpuTensorView, RetainedLeaseHostMetadata,
 };
+use runmat_execution::resource::{ProviderHostMetadataAdmission, ProviderHostRegistrationMetadata};
 
 #[derive(Debug)]
 pub(super) struct PublicationRegistrationFailure {
@@ -26,16 +27,29 @@ impl std::error::Error for PublicationRegistrationFailure {
 }
 
 impl AllocationState {
-    /// Only provider kernels/uploads which produce canonical boolean encoding
-    /// may request logical classification. No public view flag grants it.
-    pub(in super::super) fn register_produced(
+    pub(in super::super) fn registration_host_metadata_for_rank(
+        rank: usize,
+    ) -> Option<ProviderHostRegistrationMetadata> {
+        // The managed table's separately retained backing claim includes the
+        // inline `(id, Record)` bucket. Only this record's owned shape payload
+        // belongs in its independently retiring per-record claim.
+        let record = rank.checked_mul(std::mem::size_of::<usize>())?;
+        Some(ProviderHostRegistrationMetadata {
+            record_payload_bytes: u64::try_from(record).ok()?,
+            view_payload_bytes: GpuTensorHandle::view_host_upper_bytes(rank)?,
+            lease_payload_bytes: AllocationLease::host_upper_bytes()?,
+        })
+    }
+    pub(in super::super) fn register_produced_admitted(
         self: &super::super::owner_shared::OwnerShared<Self>,
         entry: BufferEntry,
         logical: bool,
+        admission: Option<&dyn ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         self.register_produced_with(
             entry,
             logical,
+            admission,
             |_| {},
             |entry| {
                 let _ = self.release_payload(entry);
@@ -49,6 +63,7 @@ impl AllocationState {
         self: &super::super::owner_shared::OwnerShared<Self>,
         entry: BufferEntry,
         logical: bool,
+        admission: Option<&dyn ProviderHostMetadataAdmission>,
         after_insert: impl FnOnce(u64),
         cleanup: impl FnOnce(BufferEntry),
     ) -> Result<GpuTensorHandle> {
@@ -79,18 +94,60 @@ impl AllocationState {
             payload,
             entry.buffer.size(),
         )?;
+        // The selected recipes construct output extents with exact-length
+        // Vecs (`to_vec`, `vec![...]`, or a cloned frozen shape). An admitted
+        // registration cannot publish spare Vec capacity outside its sealed
+        // rank quote; this is a provider contract check, not a host fallback.
+        if admission.is_some() && entry.shape.capacity() != entry.shape.len() {
+            return Err(AllocationStateError::Capacity.into());
+        }
+        let record_bytes = entry
+            .shape
+            .capacity()
+            .checked_mul(std::mem::size_of::<usize>())
+            .ok_or(AllocationStateError::Capacity)?;
+        let record_bytes =
+            u64::try_from(record_bytes).map_err(|_| AllocationStateError::Capacity)?;
+        let host_metadata_claim = admission
+            .map(|owner| owner.claim_record(record_bytes))
+            .transpose()?;
+        let lease_bytes =
+            AllocationLease::host_upper_bytes().ok_or(AllocationStateError::Capacity)?;
+        let host_lease_claim = admission
+            .map(|owner| owner.claim_record(lease_bytes))
+            .transpose()?;
+        let view_bytes = GpuTensorHandle::view_host_upper_bytes(entry.shape.len())
+            .ok_or(AllocationStateError::Capacity)?;
+        let host_view_grant = admission
+            .map(|owner| owner.claim_view(view_bytes))
+            .transpose()?;
+        let retained_lease = host_lease_claim
+            .map(|claim| {
+                host_view_grant
+                    .as_ref()
+                    .map(|grant| RetainedLeaseHostMetadata::new(claim, grant.issuer()))
+                    .ok_or(AllocationStateError::Capacity)
+            })
+            .transpose()?;
         let view = GpuTensorView::contiguous(entry.shape.clone()).with_logical(logical);
         view.validate(&physical)?;
         let id = self.next_identifier()?;
         {
             let mut records = self.lock_records()?;
-            records
-                .try_reserve(1)
-                .map_err(|_| AllocationStateError::Capacity)?;
             if records.contains_key(&id) {
                 return Err(AllocationStateError::IdentifierExhausted.into());
             }
-            records.insert(
+            if let Some(owner) = admission {
+                if !records.managed_slot_is_prepared() {
+                    return Err(AllocationStateError::Capacity.into());
+                }
+                owner.commit_registration_slot((&**self as *const Self) as usize)?;
+            } else {
+                records
+                    .try_reserve(1)
+                    .map_err(|_| AllocationStateError::Capacity)?;
+            }
+            let record = (
                 id,
                 Record {
                     phase: Phase::Registering(Stage::Registration),
@@ -100,12 +157,22 @@ impl AllocationState {
                     lease: None,
                     resource_ticket: None,
                     logical_producer: logical,
+                    host_metadata_claim,
                 },
             );
+            if admission.is_some() {
+                records.insert_managed(record.0, record.1);
+            } else {
+                records.insert(record.0, record.1);
+            }
         }
         after_insert(id);
         let identity = AllocationIdentity::new(self.device_id, id, 1);
-        let lease = match AllocationLease::register(identity, self.clone()) {
+        let lease = match AllocationLease::register_with_retained_metadata(
+            identity,
+            self.clone(),
+            retained_lease,
+        ) {
             Ok(lease) => lease,
             Err(error) => {
                 // No lease was armed. Remove its unpublished record under the
@@ -127,7 +194,11 @@ impl AllocationState {
                 .into());
             }
         };
-        Ok(GpuTensorHandle::from_allocation(lease, view)?)
+        Ok(if let Some(grant) = host_view_grant {
+            GpuTensorHandle::from_allocation_with_retained_grant(lease, view, grant)?
+        } else {
+            GpuTensorHandle::from_allocation(lease, view)?
+        })
     }
 
     pub(super) fn next_identifier(&self) -> Result<u64> {
@@ -147,6 +218,7 @@ impl AllocationState {
         let mut detached = entry;
         let mut released_ticket = None;
         let mut failed_ticket = None;
+        let mut released_host_metadata = None;
         {
             let mut records = self
                 .buffers
@@ -165,6 +237,7 @@ impl AllocationState {
                     Disposition::Released => {
                         record.retained_bytes = 0;
                         released_ticket = record.resource_ticket.take();
+                        released_host_metadata = record.host_metadata_claim.take();
                     }
                     Disposition::Uncertain => {
                         record.retained_bytes = u64::MAX;
@@ -180,6 +253,7 @@ impl AllocationState {
             ticket.fail_owner();
         }
         drop(released_ticket);
+        drop(released_host_metadata);
         let _ = catch_allocation_cleanup_unwind(|| drop(detached));
     }
 }
@@ -230,6 +304,7 @@ mod registration_failure_tests {
             .register_produced_with(
                 entry,
                 false,
+                None,
                 |inserted| {
                     id.set(inserted);
                     provider.allocations.mark_device_lost();

@@ -453,14 +453,15 @@ impl WgpuProvider {
         self.upload_numeric_produced(host, false)
     }
 
-    /// Report the first buffer-creation effect to the typed raw hook. Legacy
-    /// callers share the same upload routine without adopting a typed result.
-    pub(crate) fn upload_numeric_exec_observed(
+    /// Report the first buffer-creation effect to the typed raw hook while
+    /// keeping optional request-local metadata admission at registration.
+    pub(crate) fn upload_numeric_exec_observed_admitted(
         &self,
         host: &HostNumericTensorView,
         on_buffer_created: impl FnOnce() -> Result<()>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
-        self.upload_numeric_produced_observed(host, false, on_buffer_created)
+        self.upload_numeric_produced_observed(host, false, on_buffer_created, admission)
     }
 
     pub(crate) fn upload_logical_exec(
@@ -499,7 +500,7 @@ impl WgpuProvider {
         host: &HostNumericTensorView<'_>,
         logical: bool,
     ) -> Result<GpuTensorHandle> {
-        self.upload_numeric_produced_observed(host, logical, || Ok(()))
+        self.upload_numeric_produced_observed(host, logical, || Ok(()), None)
     }
 
     fn upload_numeric_produced_observed(
@@ -507,6 +508,7 @@ impl WgpuProvider {
         host: &HostNumericTensorView<'_>,
         logical: bool,
         on_buffer_created: impl FnOnce() -> Result<()>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         host.validate()?;
         let element_type = host.element_type();
@@ -563,7 +565,7 @@ impl WgpuProvider {
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
         let allocated_bytes = buffer.size();
-        self.register_numeric_buffer_produced(
+        self.register_numeric_buffer_produced_admitted(
             buffer,
             NumericBufferRegistration {
                 shape: host.shape.to_vec(),
@@ -574,6 +576,7 @@ impl WgpuProvider {
                 usage: crate::backend::wgpu::residency::BufferUsageClass::Generic,
             },
             logical,
+            admission,
         )
     }
 

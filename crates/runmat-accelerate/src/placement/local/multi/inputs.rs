@@ -58,11 +58,25 @@ pub(super) fn validate_set(
                 candidate.physical_identity != Some(plan.identity())
                     || !plan.matches(provider, candidate.data_inputs)
             }
-            super::PreparedPhysicalAuthority::ImageStages(plan) => {
+            super::PreparedPhysicalAuthority::ImageStages { plan, .. } => {
                 candidate.physical_identity != Some(plan.semantic_identity())
                     || candidate.data_inputs.len() != 1
                     || !matches!(candidate.data_inputs[0], Value::GpuTensor(handle) if handle.view_identity() == plan.input_view_identity())
                     || !matches!(plan.matches_pre_effect_snapshot(provider), Ok(true))
+            }
+            super::PreparedPhysicalAuthority::ImageHostStages(plan) => {
+                candidate.physical_identity != Some(plan.semantic_identity())
+                    || candidate.data_inputs.len() != 1
+                    || !matches!(
+                        plan.matches_source_and_provider(provider, candidate.data_inputs[0]),
+                        Ok(true)
+                    )
+                    || candidate.source_inputs.as_deref()
+                        != Some(std::slice::from_ref(&plan.source_representation()))
+                    || candidate.prepared_inputs.as_deref()
+                        != Some(std::slice::from_ref(plan.prepared_representation()))
+                    || candidate.input_adaptation != Some(plan.preparation_route())
+                    || candidate.required_upload_bytes != Some(plan.upload_bytes())
             }
         })
     }) {
@@ -75,14 +89,19 @@ pub(super) fn validate_set(
             .build(),
         ));
     }
-    let mut names = std::collections::BTreeSet::new();
-    if physical.iter().any(|candidate| {
-        !names.insert(candidate_name(
-            provider,
-            operation,
-            candidate.physical_identity,
-        ))
-    }) {
+    let duplicate_name = if physical.len() == 1 {
+        false
+    } else {
+        let mut names = std::collections::BTreeSet::new();
+        physical.iter().any(|candidate| {
+            !names.insert(candidate_name(
+                provider,
+                operation,
+                candidate.physical_identity,
+            ))
+        })
+    };
+    if duplicate_name {
         return Err(Box::new(
             runmat_runtime::build_runtime_error("duplicate physical candidate identity")
                 .with_identifier("RunMat:Placement:InvalidRequest")
@@ -91,22 +110,36 @@ pub(super) fn validate_set(
     }
     // Validate the entire set before any provider feasibility, preparation
     // snapshot, cost query or service graph can observe a partial set.
-    let routes = physical
-        .iter()
-        .map(|candidate| validate_candidate(provider, candidate))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut source_facts: Vec<_> = physical
-        .iter()
-        .map(|candidate| {
-            (
-                candidate.physical_identity,
-                candidate.source_inputs.clone(),
-                candidate.prepared_inputs.clone(),
-                candidate.input_adaptation,
-                candidate.required_upload_bytes,
+    let mut routes = Vec::new();
+    routes.try_reserve_exact(physical.len()).map_err(|_| {
+        Box::new(
+            runmat_runtime::build_runtime_error("physical route allocation failed")
+                .with_identifier("RunMat:Placement:ResourceOverflow")
+                .build(),
+        )
+    })?;
+    for candidate in physical {
+        routes.push(validate_candidate(provider, candidate)?);
+    }
+    let mut source_facts = Vec::new();
+    source_facts
+        .try_reserve_exact(physical.len())
+        .map_err(|_| {
+            Box::new(
+                runmat_runtime::build_runtime_error("physical source fact allocation failed")
+                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                    .build(),
             )
-        })
-        .collect();
+        })?;
+    source_facts.extend(physical.iter().map(|candidate| {
+        (
+            candidate.physical_identity,
+            candidate.source_inputs.as_ref(),
+            candidate.prepared_inputs.as_ref(),
+            candidate.input_adaptation,
+            candidate.required_upload_bytes,
+        )
+    }));
     source_facts.sort_by_key(|record| record.0);
     let source_digest = Digest::sha256_serialized(&("local-physical-sources-v1", source_facts))
         .expect("physical source facts serialize");

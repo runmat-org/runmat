@@ -124,6 +124,8 @@ mod observation_progress;
 mod pipeline_observation;
 #[path = "pipeline_recipe.rs"]
 mod pipeline_recipe;
+#[path = "vm_region_tail.rs"]
+mod vm_region_tail;
 #[path = "validated_fusion.rs"]
 mod validated_fusion;
 #[path = "ops/polynomial.rs"]

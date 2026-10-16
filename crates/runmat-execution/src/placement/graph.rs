@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CandidateOutputResidency, ExecutionCandidateDescriptor, PlacementResourceSnapshot,
-    PlacementSignature,
+    PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands, ResourceAccount,
 };
 
 mod source_output;
@@ -83,6 +83,41 @@ impl Default for CandidateResourceDemand {
             queue_slots: 0,
             peak_live: None,
         }
+    }
+}
+
+impl CandidateResourceDemand {
+    /// Charge one owner-issued observation envelope to the candidate peak.
+    /// Input-stage peaks are alternatives, so each receives the same added
+    /// fence/query requirement; retained output is not charged again.
+    pub fn with_provider_observation_peak(self, bytes: u64) -> Option<Self> {
+        let add = |bound| {
+            ResourceAccount::default()
+                .checked_add(bound)?
+                .checked_add(ResourceByteBound::Known(bytes))
+                .map(ResourceAccount::bound)
+        };
+        let mut demand = self;
+        demand.scratch_bytes = add(demand.scratch_bytes)?;
+        if let Some(peak) = &mut demand.peak_live {
+            peak.peak_bytes = peak.peak_bytes.checked_add(bytes)?;
+        }
+        demand.provider_input_stages = match demand.provider_input_stages {
+            None => None,
+            Some(stages) => {
+                let charged = stages
+                    .iter()
+                    .map(|stage| {
+                        Some(ProviderInputStageDemand {
+                            incremental_peak_bytes: add(stage.incremental_peak_bytes)?,
+                            ..stage
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(ProviderInputStageDemands::sequential(charged)?)
+            }
+        };
+        Some(demand)
     }
 }
 
@@ -228,6 +263,13 @@ impl PlacementPlanRequest {
             let mut candidate_arities = Vec::with_capacity(node.candidates.len());
             for candidate in &node.candidates {
                 candidate.descriptor.validate()?;
+                if candidate.descriptor.kind == super::ExecutionCandidateKind::OriginalVmRegion
+                    && (!whole_work_envelope
+                        || candidate.output_facts.is_some()
+                        || candidate.transactional_results)
+                {
+                    return Err("original VM region is only a source-ordered whole-work route");
+                }
                 let arity = source_output::output_arity(candidate)?;
                 candidate_arities.push(arity);
                 if !candidates.insert(candidate.descriptor.identity.as_str()) {

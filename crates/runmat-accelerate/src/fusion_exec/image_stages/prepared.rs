@@ -12,9 +12,116 @@ pub(crate) struct PreparedImageStages {
     semantic_identity: Digest,
     resources: resources::ImageStagePhysicalUpperBound,
     provider_snapshot: ProviderResourceSnapshot,
+    provider_metadata_bytes: Option<u64>,
+    provider_power_workspace_bytes: Option<u64>,
+    _placement_host_preparation:
+        Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
 }
 
 impl PreparedImageStages {
+    pub(super) fn retain_placement_preparation(
+        &mut self,
+        receipt: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+    ) {
+        self._placement_host_preparation = receipt;
+    }
+
+    pub(super) fn from_selected_host_upload(
+        session: ImageNormalizeStageSession,
+        semantic_identity: Digest,
+        resources: resources::ImageStagePhysicalUpperBound,
+        placement_preparation: Option<
+            runmat_runtime::context::host_allocation::HostAllocationReceipt,
+        >,
+    ) -> ProviderExecutionResult<Self> {
+        let provider_snapshot = session.provider.placement_resources();
+        provider_snapshot
+            .validate_typed()
+            .map_err(|error| ProviderExecutionError::from_source(error).after_effect())?;
+        if provider_snapshot.device_id != session.provider.device_id() || provider_snapshot.lost {
+            return Err(ProviderExecutionError::from(anyhow!(
+                "selected image provider changed after host upload"
+            ))
+            .after_effect());
+        }
+        Ok(Self {
+            session,
+            semantic_identity,
+            resources,
+            provider_snapshot,
+            provider_metadata_bytes: None,
+            provider_power_workspace_bytes: None,
+            _placement_host_preparation: placement_preparation,
+        })
+    }
+
+    pub(crate) fn physical_work(
+        &self,
+    ) -> Option<runmat_accelerate_api::ProviderImageStagePhysicalWork> {
+        let work = runmat_accelerate_api::ProviderImageStagePhysicalWork {
+            requested_bytes: self.resources.requested_bytes,
+            dispatches: self.resources.dispatches,
+            queue_submissions: self.resources.queue_submissions?,
+        };
+        work.validate().then_some(work)
+    }
+
+    pub(crate) fn observation_capability(
+        &self,
+        provider: &dyn AccelProvider,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::ProviderObservationCapability;
+        if !runmat_accelerate_api::same_provider_instance(self.session.provider, provider) {
+            return ProviderObservationCapability::Unsupported;
+        }
+        self.physical_work()
+            .map_or(ProviderObservationCapability::Unsupported, |work| {
+                provider.image_stage_observation_capability(work)
+            })
+    }
+
+    pub(crate) fn resources_with_observation(
+        &self,
+        observation: Option<runmat_accelerate_api::observation::ProviderObservationOverhead>,
+    ) -> Result<CandidateResourceDemand, Box<runmat_runtime::RuntimeError>> {
+        let Some(observation) = observation else {
+            return Ok(self.resource_demand());
+        };
+        let bytes = observation
+            .requested_total_peak_bytes()
+            .ok_or_else(observation_overflow)?;
+        self.resource_demand()
+            .with_provider_observation_peak(bytes)
+            .ok_or_else(observation_overflow)
+    }
+
+    pub(crate) fn resources_with_observation_and_tail(
+        &self,
+        observation: Option<runmat_accelerate_api::observation::ProviderObservationOverhead>,
+        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+    ) -> Result<CandidateResourceDemand, Box<runmat_runtime::RuntimeError>> {
+        let mut demand = self.resources_with_observation(observation)?;
+        if let Some(tail) = tail {
+            demand.queue_slots = demand.queue_slots.max(tail.queue_slots);
+            demand = demand
+                .with_provider_observation_peak(tail.provider_scratch_bytes)
+                .ok_or_else(observation_overflow)?;
+        }
+        Ok(demand)
+    }
+
+    pub(crate) fn resource_demand_with_tail(
+        &self,
+        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+    ) -> Option<CandidateResourceDemand> {
+        let mut demand = self.resource_demand();
+        if let Some(tail) = tail {
+            demand.queue_slots = demand.queue_slots.max(tail.queue_slots);
+            demand = demand.with_provider_observation_peak(tail.provider_scratch_bytes)?;
+        }
+        Some(demand)
+    }
+
     pub(crate) fn prepare(
         provider: &'static dyn AccelProvider,
         input: &GpuTensorHandle,
@@ -43,6 +150,9 @@ impl PreparedImageStages {
             semantic_identity: invocation.semantic_identity(),
             resources,
             provider_snapshot,
+            provider_metadata_bytes: None,
+            provider_power_workspace_bytes: None,
+            _placement_host_preparation: None,
         }))
     }
 
@@ -65,13 +175,74 @@ impl PreparedImageStages {
             retained_bytes: ResourceByteBound::Known(self.resources.requested_bytes),
             scratch_bytes: ResourceByteBound::Known(0),
             queue_slots: u32::from(self.resources.dispatches != 0),
-            provider_host_workspace: None,
+            provider_host_workspace: self
+                .provider_metadata_bytes
+                .and_then(|metadata| metadata.checked_add(self.provider_power_workspace_bytes?))
+                .map(ResourceByteBound::Known),
             provider_input_stages: None,
             peak_live: Some(CandidatePeakLiveDemand {
                 peak_bytes: self.resources.requested_bytes,
                 already_live_bytes: 0,
             }),
         }
+    }
+
+    pub(super) fn set_provider_metadata_bytes(&mut self, bytes: u64) {
+        self.provider_metadata_bytes = Some(bytes);
+    }
+
+    pub(super) fn set_provider_power_workspace_bytes(&mut self, bytes: u64) {
+        self.provider_power_workspace_bytes = Some(bytes);
+    }
+
+    pub(super) fn finite_power_workspace_bytes(&self) -> Option<u64> {
+        self.session
+            .selected_power_plans
+            .as_ref()?
+            .provider_host_workspace_bytes()
+    }
+
+    pub(super) fn finite_metadata_registration_count(&self) -> Option<usize> {
+        let means = self.session.selected_mean_plans.as_ref()?;
+        if !means.admitted_casts_supported() {
+            return None;
+        }
+        means
+            .registered_output_count()?
+            .checked_add(
+                self.session
+                    .selected_binary_plans
+                    .as_ref()?
+                    .registered_output_count(),
+            )?
+            .checked_add(
+                self.session
+                    .selected_real_plans
+                    .as_ref()?
+                    .registered_output_count(),
+            )?
+            .checked_add(
+                self.session
+                    .selected_power_plans
+                    .as_ref()?
+                    .registered_output_count()?,
+            )
+    }
+
+    pub(super) fn finite_metadata_derived_view_count(&self) -> Option<usize> {
+        2usize
+            .checked_add(
+                self.session
+                    .selected_mean_plans
+                    .as_ref()?
+                    .alias_view_count(),
+            )?
+            .checked_add(
+                self.session
+                    .selected_real_plans
+                    .as_ref()?
+                    .alias_view_count(),
+            )
     }
 
     /// The selector must consume the snapshot held by this same preparation.
@@ -116,4 +287,13 @@ impl PreparedImageStages {
     pub(crate) fn session_mut(&mut self) -> &mut ImageNormalizeStageSession {
         &mut self.session
     }
+}
+
+fn observation_overflow() -> Box<runmat_runtime::RuntimeError> {
+    Box::new(
+        runmat_runtime::build_runtime_error("image observation resource extent overflows")
+            .with_identifier("RunMat:Placement:ResourceOverflow")
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .build(),
+    )
 }

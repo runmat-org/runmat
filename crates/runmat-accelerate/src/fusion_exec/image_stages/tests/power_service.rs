@@ -69,7 +69,13 @@ pub(super) fn selected_program(
     desc.gamma = Some(gamma.value());
     source.final_power.represented_exponent = gamma.value();
     let program = source
-        .staged_workload_selected(&desc, powers(gamma))
+        .staged_workload_selected(
+            &desc,
+            powers(gamma),
+            runmat_accelerate_api::scalar_program::ScalarLiteral::F32Bits(
+                (desc.epsilon as f32).to_bits(),
+            ),
+        )
         .unwrap();
     (desc, program)
 }
@@ -92,6 +98,8 @@ fn power_session(
         selected_real_plans: None,
         reserved_mu: None,
         cold_mu: None,
+        retained_view_permit: None,
+        provider_metadata_permit: None,
         state: State::BeforeMean,
     }
 }

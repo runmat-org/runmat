@@ -68,6 +68,9 @@ impl PlacementResourceSnapshot {
     }
 
     pub fn validate_typed(&self) -> Result<(), ResourceSnapshotError> {
+        if let [provider] = self.providers.as_slice() {
+            return provider.validate_typed();
+        }
         let mut provider_ids = BTreeSet::new();
         for provider in &self.providers {
             if !provider_ids.insert(provider.device_id) {

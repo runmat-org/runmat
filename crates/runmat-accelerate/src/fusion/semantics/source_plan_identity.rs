@@ -42,6 +42,8 @@ enum PatternIdentity<'a> {
         bias: Option<ImageScalarIdentity>,
         gamma: Option<ImageScalarIdentity>,
         clamp_zero: bool,
+        clamp_zero_value: Option<ValueId>,
+        bound_mean_axes: &'a [(ValueId, runmat_execution::Digest)],
         requires_single_input: bool,
         reduction_routes: &'a Option<Box<crate::fusion::image_reduction::ImageReductionRoutes>>,
     },
@@ -73,6 +75,8 @@ fn pattern_identity(pattern: Option<&FusionPattern>) -> Option<PatternIdentity<'
                 bias,
                 gamma,
                 clamp_zero,
+                clamp_zero_value,
+                bound_mean_axes,
                 requires_single_input,
                 reduction_routes,
             } = pattern;
@@ -83,6 +87,8 @@ fn pattern_identity(pattern: Option<&FusionPattern>) -> Option<PatternIdentity<'
                 bias: bias.as_ref().map(Into::into),
                 gamma: gamma.as_ref().map(Into::into),
                 clamp_zero: *clamp_zero,
+                clamp_zero_value: *clamp_zero_value,
+                bound_mean_axes: bound_mean_axes.as_slice(),
                 requires_single_input: *requires_single_input,
                 reduction_routes,
             }

@@ -99,7 +99,7 @@ pub(super) async fn execute(
                 },
             };
             if let Some(selected) = selected {
-                match provider.execute_ordered_real_mean(selected) {
+                match provider.execute_ordered_real_mean(selected, None) {
                     Ok(executed) => {
                         return admit_result(
                             provider,

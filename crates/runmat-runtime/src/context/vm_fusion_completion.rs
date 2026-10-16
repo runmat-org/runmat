@@ -14,8 +14,8 @@ use super::vm_fusion_host_route::VmFusionHostOrigin;
 use super::{RuntimeContext, RuntimeContextLocalId, VmFusionHostRoute};
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_execution::{
-    cancellation::CancellationToken, PlacementExecutionAuthorityRevision, PlacementRevision,
-    ProgramRevision,
+    cancellation::CancellationToken, DomainContribution, PlacementExecutionAuthorityRevision,
+    PlacementRevision, ProgramRevision,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -170,6 +170,30 @@ impl VmFusionDeclineRight {
             && self.registration.span_start == span_start
             && self.registration.span_end == span_end
     }
+
+    /// Both routes must come from the same live VM installation. An equal
+    /// semantic digest or group span in another installation is insufficient.
+    /// This pre-placement join reads only the held session permit; selected
+    /// planning and final publication revalidate the full service revision.
+    pub fn same_installed_region(
+        &self,
+        completion: &VmFusionCompletionRight,
+        runtime: &RuntimeContext,
+    ) -> bool {
+        self.is_current(runtime)
+            && self.registration == completion.registration
+            && self.owner == completion.owner
+            && self.program == completion.program
+            && self.cancellation.same_generation(&completion.cancellation)
+            && completion.placement_revision().is_some()
+    }
+
+    /// Read the semantic identity retained by this exact live installation;
+    /// this is not a new placement or publication authority.
+    pub fn semantic_identity(&self, runtime: &RuntimeContext) -> Option<VmFusionSemanticIdentity> {
+        self.is_current(runtime)
+            .then_some(self.registration.semantic_identity())
+    }
 }
 
 impl VmFusionCompletionRight {
@@ -221,6 +245,18 @@ impl VmFusionCompletionRight {
     pub fn planning_revision(&self, runtime: &RuntimeContext) -> Option<PlacementRevision> {
         self.revalidated_session(runtime)
             .map(|session| session.revision().clone())
+    }
+
+    /// Borrow only the held program's contribution sizes before placement
+    /// admission. The slice is not an execution or feedback authority and may
+    /// be stale; actual planning revalidates the complete session after the
+    /// host receipt is admitted.
+    pub fn held_domain_contributions_for_sizing(&self) -> Option<&[DomainContribution]> {
+        let session = self.session.as_ref()?;
+        Some(match session.revision().program.as_ref() {
+            Some(program) => program.domain_contributions(),
+            None => &[],
+        })
     }
 
     pub fn completion_lease(self, runtime: &RuntimeContext) -> Option<VmFusionFeedbackLease> {

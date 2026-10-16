@@ -91,6 +91,10 @@ pub(super) fn plan(
     {
         return Ok(None);
     }
+    let mut receipts = Vec::new();
+    receipts
+        .try_reserve_exact(2)
+        .map_err(ProviderExecutionError::from_source)?;
     Ok(Some(SelectedSigmaOperationsPlan {
         source: source.clone(),
         moments: moments.clone(),
@@ -99,7 +103,7 @@ pub(super) fn plan(
         sqrt_identity: sqrt.identity().map_err(ProviderExecutionError::from)?,
         add,
         sqrt,
-        receipts: RefCell::new(Vec::with_capacity(2)),
+        receipts: RefCell::new(receipts),
         cutover: Cell::new(SigmaCutover::AddReady),
     }))
 }
@@ -131,30 +135,28 @@ impl SelectedSigmaOperationsPlan {
 
     pub(super) fn matches_program(&self, program: &ProviderImageStageWorkload) -> bool {
         program.moment_program.as_ref() == Some(&self.moments)
-            && match self.source.control() {
-                runmat_accelerate_api::scalar_program::ScalarLiteral::F32Bits(bits) => {
-                    bits == program.epsilon_f32_bits
-                }
-                runmat_accelerate_api::scalar_program::ScalarLiteral::F64Bits(bits) => {
-                    bits == f64::from(f32::from_bits(program.epsilon_f32_bits)).to_bits()
-                }
-            }
+            && program.selected_powers.is_some()
+            && self.source.control() == program.epsilon
     }
 
     pub(super) async fn execute_add(
         &self,
         input: &GpuTensorHandle,
         protected: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
-        self.execute(input, protected, SigmaOperation::Add).await
+        self.execute(input, protected, SigmaOperation::Add, admission)
+            .await
     }
 
     pub(super) async fn execute_sqrt(
         &self,
         input: &GpuTensorHandle,
         protected: &[&GpuTensorHandle],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
-        self.execute(input, protected, SigmaOperation::Sqrt).await
+        self.execute(input, protected, SigmaOperation::Sqrt, admission)
+            .await
     }
 
     async fn execute(
@@ -162,6 +164,7 @@ impl SelectedSigmaOperationsPlan {
         input: &GpuTensorHandle,
         protected: &[&GpuTensorHandle],
         operation: SigmaOperation,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
         let ids = self.source_ids();
         let (expected, recipe, recipe_identity, source_input, source_output, completed) =
@@ -195,7 +198,7 @@ impl SelectedSigmaOperationsPlan {
         // plan. This is set before the first provider future can be polled.
         self.cutover.set(SigmaCutover::Terminal);
         let executed = recipe
-            .execute_protected(input, protected)
+            .execute_protected_admitted(input, protected, admission)
             .await
             .map_err(ProviderExecutionError::after_effect)?;
         self.receipts.borrow_mut().push(SelectedSigmaReceipt {

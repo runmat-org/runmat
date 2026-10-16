@@ -70,24 +70,29 @@ impl WgpuProvider {
         ) else {
             return Ok(None);
         };
+        let Some(cache_payload) = Self::cold_key_payload_bytes(geometry.reduce.len()) else {
+            return Ok(None);
+        };
         Ok(Some(runmat_accelerate_api::ProviderColdNdMean::new(
             source.clone(),
             geometry.reduce,
             geometry.out_shape,
             resources.output_bytes,
             resources.uniform_bytes,
+            cache_payload,
         )))
     }
 
     pub(in crate::backend::wgpu::provider::backend) fn execute_cold_mean_nd_exec(
         &self,
-        selected: runmat_accelerate_api::ProviderColdNdMean,
+        mut selected: runmat_accelerate_api::ProviderColdNdMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<runmat_accelerate_api::ProviderExecutedColdNdMean> {
-        let source = selected.source();
-        let entry = self.real_floating_entry(source)?;
+        let source = selected.source().clone();
+        let entry = self.real_floating_entry(&source)?;
         ensure!(
             entry.storage == runmat_accelerate_api::GpuTensorStorage::Real
-                && !runmat_accelerate_api::handle_is_logical(source),
+                && !runmat_accelerate_api::handle_is_logical(&source),
             "selected cold N-D mean source class changed"
         );
         let geometry =
@@ -100,22 +105,46 @@ impl WgpuProvider {
         )
         .ok_or_else(|| anyhow!("selected cold ND mean exceeds device binding limits"))?;
         ensure!(
-            !runmat_accelerate_api::handle_is_transposed(source)
+            !runmat_accelerate_api::handle_is_transposed(&source)
                 && geometry.reduce.as_slice() == selected.dims()
                 && geometry.out_shape.as_slice() == selected.output_shape()
                 && selected.requested_uniform_bytes() == resources.uniform_bytes
-                && selected.requested_pair_bytes() == Some(resources.pair_bytes),
+                && selected.requested_pair_bytes() == Some(resources.pair_bytes)
+                && Self::cold_key_payload_bytes(geometry.reduce.len())
+                    == Some(selected.requested_cache_metadata_payload_bytes()),
             "selected cold ND mean geometry changed"
         );
         // Selection promised this two-output kernel. A newly warmed cache
         // cannot change the selected work or arithmetic at consumption.
-        let moments = self.reduce_moments_nd_exec(source, selected.dims())?;
+        let moments = self.reduce_moments_nd_exec_admitted(&source, selected.dims(), admission)?;
+        // The selected cold pair enters the provider reuse cache below. Give
+        // those two cache-held aliases their own move-only host-view claims;
+        // the unclaimed registration views remain request-local temporaries.
+        let moments = if let Some([mean_grant, ex2_grant]) = selected.take_cache_view_grants() {
+            runmat_accelerate_api::ProviderMoments2 {
+                mean: moments
+                    .mean
+                    .with_view_retained_grant(moments.mean.view().clone(), mean_grant)?,
+                ex2: moments
+                    .ex2
+                    .with_view_retained_grant(moments.ex2.view().clone(), ex2_grant)?,
+            }
+        } else {
+            moments
+        };
         let mean_bytes = self.get_entry_raw(&moments.mean)?.buffer.size();
         let ex2_bytes = self.get_entry_raw(&moments.ex2)?.buffer.size();
         let observed_pair_bytes = mean_bytes
             .checked_add(ex2_bytes)
             .ok_or_else(|| anyhow!("cold ND moments observed byte overflow"))?;
-        self.remember_moments(source, selected.dims(), &moments.mean, &moments.ex2)?;
+        let cache_metadata_claim = selected.take_cache_metadata_claim();
+        self.remember_moments(
+            &source,
+            selected.dims(),
+            &moments.mean,
+            &moments.ex2,
+            cache_metadata_claim,
+        )?;
         Ok(runmat_accelerate_api::ProviderExecutedColdNdMean {
             mean: moments.mean,
             ex2: moments.ex2,

@@ -141,6 +141,7 @@ fn nonowning_identifiers_cannot_acquire_or_validate_unpublished_records() {
                 lease: None,
                 resource_ticket: None,
                 logical_producer: false,
+                host_metadata_claim: None,
             },
         );
         assert_eq!(

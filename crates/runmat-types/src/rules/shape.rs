@@ -20,6 +20,36 @@ pub fn broadcast_shape(
     left: &ShapeFact,
     right: &ShapeFact,
 ) -> Result<ShapeFact, InferenceDiagnostic> {
+    broadcast_shape_checked(left, right).map_err(BroadcastShapeError::into_diagnostic)
+}
+
+/// The same broadcast projection used by public inference, with a typed
+/// failure that does not format or allocate a diagnostic on the finite
+/// facts-only path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BroadcastShapeError {
+    pub left: usize,
+    pub right: usize,
+    pub dimension: usize,
+}
+
+impl BroadcastShapeError {
+    pub fn into_diagnostic(self) -> InferenceDiagnostic {
+        InferenceDiagnostic::error(
+            "RM-TYPE-BROADCAST",
+            format!(
+                "dimensions {} and {} are not compatible for implicit expansion",
+                self.left, self.right
+            ),
+        )
+        .at_dimension(self.dimension)
+    }
+}
+
+pub fn broadcast_shape_checked(
+    left: &ShapeFact,
+    right: &ShapeFact,
+) -> Result<ShapeFact, BroadcastShapeError> {
     let Some(rank) = left.rank().zip(right.rank()).map(|(a, b)| a.max(b)) else {
         return Ok(ShapeFact::Unknown);
     };
@@ -37,14 +67,11 @@ pub fn broadcast_shape(
             }
             (DimensionFact::Known(1), other) | (other, DimensionFact::Known(1)) => other.clone(),
             (DimensionFact::Known(a), DimensionFact::Known(b)) => {
-                return Err(InferenceDiagnostic::error(
-                    "RM-TYPE-BROADCAST",
-                    format!(
-                        "dimensions {} and {} are not compatible for implicit expansion",
-                        a, b
-                    ),
-                )
-                .at_dimension(dimension));
+                return Err(BroadcastShapeError {
+                    left: *a,
+                    right: *b,
+                    dimension,
+                });
             }
             (DimensionFact::Symbolic(a), DimensionFact::Symbolic(b)) if a == b => left.clone(),
             (DimensionFact::Known(value), DimensionFact::Unknown)
@@ -427,6 +454,20 @@ mod broadcast_tests {
         ShapeFact::Shaped {
             dims: dims.iter().copied().map(DimensionFact::Known).collect(),
         }
+    }
+
+    #[test]
+    fn typed_broadcast_failure_renders_the_existing_public_diagnostic() {
+        let left = shaped(&[2, 3]);
+        let right = shaped(&[2, 4]);
+        let typed = broadcast_shape_checked(&left, &right).unwrap_err();
+        assert_eq!(typed.left, 3);
+        assert_eq!(typed.right, 4);
+        assert_eq!(typed.dimension, 1);
+        assert_eq!(
+            typed.into_diagnostic(),
+            broadcast_shape(&left, &right).unwrap_err()
+        );
     }
 
     #[test]

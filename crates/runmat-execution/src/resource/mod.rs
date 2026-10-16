@@ -9,6 +9,91 @@ mod matching;
 mod request;
 mod usage;
 
+/// Opaque lifetime claim for host metadata retained by an executable value.
+/// The allocating resource owner, not this neutral contract, decides its size
+/// and when the physical reservation is refunded.
+pub trait RetainedHostAllocationClaim: std::fmt::Debug + Send + Sync {}
+impl<T: std::fmt::Debug + Send + Sync + ?Sized> RetainedHostAllocationClaim for T {}
+
+/// Move-only funding for one owned view record. A handle clone shares that
+/// record; constructing another view consumes another grant from the issuer.
+/// The implementing resource owner retains the actual reservation inside it.
+pub trait RetainedHostViewGrant: std::fmt::Debug + Send + Sync {
+    fn view_bytes(&self) -> u64;
+    fn issuer(&self) -> std::sync::Arc<dyn RetainedHostViewIssuer>;
+    /// Keep the existing reservation alive while a weak view still retains
+    /// the ref-counted backing. This does not authorize another view.
+    fn backing_claim(&self) -> std::sync::Arc<dyn RetainedHostAllocationClaim>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetainedHostViewError {
+    Overflow,
+    Revoked,
+    ExceedsCapacity,
+}
+
+/// A live host resource owner can admit a new metadata record derived from
+/// an already-published view. It does not copy or authorize device payloads.
+pub trait RetainedHostViewIssuer: std::fmt::Debug + Send + Sync {
+    fn reserve_view(
+        self: std::sync::Arc<Self>,
+        view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, RetainedHostViewError>;
+}
+
+/// Request-bound, precharged host metadata admission for a provider-produced
+/// physical allocation. This authority is passed through the selected
+/// execution recipe; provider registration cannot obtain it from ambient
+/// state or infer it from a device buffer's size.
+pub trait ProviderHostMetadataAdmission: std::fmt::Debug {
+    fn claim_view(
+        &self,
+        view_bytes: u64,
+    ) -> Result<Box<dyn RetainedHostViewGrant>, ProviderHostMetadataError>;
+    fn claim_record(
+        &self,
+        record_bytes: u64,
+    ) -> Result<std::sync::Arc<dyn RetainedHostAllocationClaim>, ProviderHostMetadataError>;
+
+    /// Consume one slot from a provider-owned table reservation made before
+    /// the selected route's first physical effect. The caller holds the
+    /// provider registry lock through the ensuing insertion, so no other
+    /// route can take that slot. A generic host receipt cannot mint one.
+    fn commit_registration_slot(
+        &self,
+        _provider_owner: usize,
+    ) -> Result<(), ProviderHostMetadataError> {
+        Err(ProviderHostMetadataError::OwnerFailure)
+    }
+}
+
+/// Physical provider-owned host metadata for one newly registered output.
+/// These are payload bytes; the managed allocation owner adds the exact
+/// claim/issuer bookkeeping before reserving finite headroom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderHostRegistrationMetadata {
+    pub record_payload_bytes: u64,
+    pub view_payload_bytes: u64,
+    pub lease_payload_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderHostMetadataError {
+    Overflow,
+    Cancelled,
+    StaleAuthority,
+    ExceedsCapacity,
+    OwnerFailure,
+}
+
+impl std::fmt::Display for ProviderHostMetadataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "provider host metadata admission: {self:?}")
+    }
+}
+impl std::error::Error for ProviderHostMetadataError {}
+
 /// Encoded Graph V10 Program transport budget. The selected archive aggregate
 /// is separately limited to 4 GiB decoded; JSON byte arrays, duplicated
 /// selected-unit bytes, and graph metadata require a larger wire allowance.

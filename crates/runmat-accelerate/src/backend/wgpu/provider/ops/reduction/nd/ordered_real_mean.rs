@@ -142,6 +142,7 @@ impl WgpuProvider {
     pub(in crate::backend::wgpu::provider::backend) fn execute_ordered_real_mean_exec(
         &self,
         selected: ProviderOrderedRealMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedOrderedRealMean> {
         let source = selected.source();
         let recipe = selected.recipe();
@@ -169,7 +170,7 @@ impl WgpuProvider {
             )));
         }
         let (result, observed_incremental_peak_bytes) =
-            self.execute_ordered_mean_plan(source, &plan, recipe.nan_mode())?;
+            self.execute_ordered_mean_plan(source, &plan, recipe.nan_mode(), admission)?;
         let observed_output_bytes = self
             .real_floating_entry(&result)
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?

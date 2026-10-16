@@ -10,6 +10,14 @@ mod activation;
 mod budget;
 mod resource_activation;
 mod state;
+#[cfg(feature = "wgpu")]
+mod vm_region;
+#[cfg(feature = "wgpu")]
+pub use vm_region::{
+    record_vm_region_provider_selection, record_vm_region_unattributed_device_effect,
+    record_vm_region_wgpu_submission, set_vm_region_for_current_poll, with_vm_region_poll,
+    VmRegionRouteAudit, VmRegionRouteAuditSlot,
+};
 mod wgpu_query;
 #[cfg(feature = "wgpu")]
 mod wgpu_progress;
@@ -23,7 +31,7 @@ pub use activation::{
 };
 pub use budget::ProviderObservationBudget;
 #[cfg(feature = "wgpu")]
-pub use budget::WgpuQueryPermit;
+pub use budget::{WgpuQueryPermit, WgpuTailPermit};
 pub use resource_activation::{current_provider_resource_scope, observe_provider_resource_future};
 pub use state::{
     ProviderCompletedSubmission, ProviderOperationReceipt, ProviderOperationRecorder,
@@ -105,6 +113,15 @@ pub struct ProviderObservationOverhead {
     /// fence resource ticket. Absent for unsupported routes/devices.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wgpu_compute_query: Option<WgpuEncoderQueryProspective>,
+}
+
+impl ProviderObservationOverhead {
+    pub fn requested_total_peak_bytes(self) -> Option<u64> {
+        self.requested_peak_buffer_bytes.checked_add(
+            self.wgpu_compute_query
+                .map_or(0, |query| query.requested_peak_buffer_bytes),
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

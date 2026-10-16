@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) async fn execute(
     prepared: &PreparedResidentScalarPower,
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> Result<ExecutedResidentScalarPower, PowerServiceError> {
     let resident = &prepared.resident;
     let request = super::super::symbolic::exact_single_base_request(
@@ -22,7 +23,7 @@ pub(super) async fn execute(
     }
     let protected = prepared.protected_with(&[resident]);
     let output = recipe
-        .execute_protected(resident, &protected)
+        .execute_protected_admitted(resident, &protected, admission)
         .await
         .map_err(PowerServiceError)?
         .output;

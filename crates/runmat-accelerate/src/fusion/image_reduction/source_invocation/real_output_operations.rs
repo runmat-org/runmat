@@ -8,6 +8,8 @@ use runmat_accelerate_api::{
 #[cfg(test)]
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_builtins::MAX_CATALOG_ENTRY;
+#[cfg(test)]
+use std::sync::Arc;
 
 use super::binary_operations::CanonicalRealValue;
 
@@ -265,8 +267,7 @@ impl ImageSourceInvocation {
         replacement: ValueId,
     ) -> Self {
         let mut changed = self.clone();
-        let step = changed
-            .source
+        let step = Arc::make_mut(&mut changed.source)
             .steps
             .iter_mut()
             .find(|step| step.output == output)
@@ -282,8 +283,7 @@ impl ImageSourceInvocation {
         binding: BuiltinBindingIdentity,
     ) -> Self {
         let mut changed = self.clone();
-        changed
-            .source
+        Arc::make_mut(&mut changed.source)
             .steps
             .iter_mut()
             .find(|step| step.output == output)

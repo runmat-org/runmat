@@ -244,6 +244,32 @@ fn actual_pinned_warm_pair_survives_source_retirement_until_consumed() {
 #[test]
 #[ignore = "requires actual F32 WGPU adapter; verifies selected cold moments geometry and cache"]
 fn actual_selected_cold_mean_executes_one_exact_moments_route() {
+    use runmat_runtime::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+    use runmat_runtime::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+
+    struct ManagedParallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
     let provider = WgpuProvider::new(WgpuProviderOptions::default())
         .expect("qualification requires an actual WGPU adapter");
     assert_eq!(provider.precision, NumericPrecision::F32);
@@ -274,19 +300,130 @@ fn actual_selected_cold_mean_executes_one_exact_moments_route() {
     let concurrently_warmed = block_on(provider.reduce_mean_nd(&input, &[0]))
         .unwrap()
         .expect("admitted mean");
-    let executed = provider.execute_cold_mean_nd(selected).unwrap();
+    let registration = provider.registered_output_host_metadata(2).unwrap();
+    let table = provider.output_registration_table_upper_bytes(2).unwrap();
+    let preparation = provider
+        .output_registration_preparation_host_bytes()
+        .unwrap();
+    let view = HostAllocationPlan::retained_view_bytes(registration.view_payload_bytes).unwrap();
+    let record =
+        HostAllocationPlan::retained_metadata_bytes(registration.record_payload_bytes).unwrap();
+    let lease =
+        HostAllocationPlan::retained_metadata_bytes(registration.lease_payload_bytes).unwrap();
+    let cache_payload = selected.requested_cache_metadata_payload_bytes();
+    let cache_key = HostAllocationPlan::retained_metadata_bytes(cache_payload).unwrap();
+    let retained = [
+        HostAllocationPlan::retained_view_issuer_bytes().unwrap(),
+        HostAllocationPlan::retained_metadata_bytes(table).unwrap(),
+        cache_key,
+        record.checked_add(lease).unwrap().checked_mul(2).unwrap(),
+        view.checked_mul(4).unwrap(),
+    ]
+    .into_iter()
+    .try_fold(0_u64, |sum, bytes| sum.checked_add(bytes))
+    .unwrap();
+    let capacity = retained
+        .checked_add(preparation)
+        .and_then(|bytes| bytes.checked_add(view))
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(capacity, 11);
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let receipt = HostAllocationReceipt::admit(
+        Some(&runtime),
+        HostAllocationPlan::new(preparation, retained).unwrap(),
+    )
+    .unwrap()
+    .expect("finite managed output receipt");
+    let permit = receipt.retained_view_permit(&runtime).unwrap();
+    let selected = selected
+        .with_cache_view_grants([
+            permit.claim_view(registration.view_payload_bytes).unwrap(),
+            permit.claim_view(registration.view_payload_bytes).unwrap(),
+        ])
+        .with_cache_metadata_claim(permit.claim_metadata(cache_payload).unwrap());
+    let admission = provider
+        .prepare_output_host_metadata(Box::new(permit.clone()), 2)
+        .unwrap();
+    let executed = provider
+        .execute_cold_mean_nd(selected, Some(&*admission))
+        .unwrap();
+    drop(admission);
+    drop(permit);
+    drop(receipt);
+    let retained_after_publication = ledger.snapshot().live_claimed_bytes;
+    assert_eq!(retained_after_publication, retained - 2 * view);
+    assert_eq!(
+        ledger.snapshot().live_reserved_bytes,
+        retained_after_publication
+    );
     assert_eq!(executed.requested_pair_bytes, 16);
     assert!(executed.observed_pair_bytes >= executed.requested_pair_bytes);
     assert_eq!(executed.selected_submissions, 1);
     let mean = executed.mean;
+    let ex2 = executed.ex2;
     assert!(!mean.shares_allocation_with(&concurrently_warmed));
     assert_values(&provider, &mean, &[1.5, 3.5]);
+    let shared = mean.clone();
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        retained_after_publication
+    );
+    let derived = mean
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        retained_after_publication + view
+    );
+    drop(derived);
+    drop(shared);
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        retained_after_publication
+    );
     let warm = provider
         .reserve_cached_mean_nd(&input, &[0])
         .unwrap()
         .expect("cold route retains its hidden moment pair");
     assert_eq!(warm.retained_pair_bytes(), 16);
     assert!(warm.into_mean().shares_allocation_with(&mean));
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        retained_after_publication
+    );
+    let weak_mean = mean.downgrade();
+    let sibling_view = mean
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    drop(ex2);
+    drop(mean);
+    drop(concurrently_warmed);
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        retained_after_publication + view
+    );
+    drop(input);
+    assert!(
+        weak_mean.acquire().is_err(),
+        "retired source view stays dead"
+    );
+    assert!(
+        ledger.snapshot().live_claimed_bytes > 0,
+        "sibling physical view and dead weak view still retain their claims"
+    );
+    drop(sibling_view);
+    assert!(
+        ledger.snapshot().live_claimed_bytes > 0,
+        "weak view backing outlives the last strong physical view"
+    );
+    drop(weak_mean);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 
 #[test]

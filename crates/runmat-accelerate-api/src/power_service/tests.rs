@@ -57,6 +57,7 @@ impl AccelProvider for Recorder {
         &'a self,
         input: &'a GpuTensorHandle,
         recipe: &'a crate::ProviderRealElementwiseRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionFuture<'a, crate::ProviderExecutedRealElementwise> {
         Box::pin(async move {
             let output = self.owner.allocate_zeroed(

@@ -94,8 +94,8 @@ pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
     class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
-    InvalidNumericUploadResult, NumericUploadCompletionError, NumericUploadError,
-    NumericUploadResult,
+    upload_numeric_protecting_admitted, InvalidNumericUploadResult, NumericUploadCompletionError,
+    NumericUploadError, NumericUploadResult,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
@@ -152,6 +152,8 @@ pub enum ExecutionDeviceEffect {
 /// Monotone negative observation at the effect's owning ingress. This uses
 /// the same runtime callback as provider authorization, not a second registry.
 pub fn observe_execution_device_effect(effect: ExecutionDeviceEffect) {
+    #[cfg(feature = "wgpu")]
+    observation::record_vm_region_unattributed_device_effect();
     if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
         let _ = authorizer(ExecutionProviderAdmission::DeviceEffect(effect));
     }
@@ -159,6 +161,7 @@ pub fn observe_execution_device_effect(effect: ExecutionDeviceEffect) {
 
 #[cfg(feature = "wgpu")]
 fn observe_canonical_wgpu_submit(access: &WgpuDeviceAccess) {
+    observation::record_vm_region_wgpu_submission(access);
     if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
         let _ = authorizer(ExecutionProviderAdmission::CanonicalWgpuSubmit(access));
     }
@@ -1636,6 +1639,14 @@ pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwne
 pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
 pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNumericTensorOwned>;
 
+/// Provider-owned physical demand for one post-region queue-tail completion.
+/// Child operations retain their own receipts; this grants no execution right.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderVmRegionTailResources {
+    pub queue_slots: u32,
+    pub provider_scratch_bytes: u64,
+}
+
 #[derive(Debug)]
 pub struct UnsupportedProviderOperation {
     detail: String,
@@ -1676,6 +1687,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    fn vm_region_queue_tail_resources(&self) -> Option<ProviderVmRegionTailResources> {
+        None
+    }
+
+    fn observe_vm_region_queue_tail<'a>(
+        &'a self,
+        _device_id: u32,
+    ) -> ProviderExecutionFuture<'a, ()> {
+        unsupported_execution_future("VM region queue-tail observation is unsupported")
+    }
+
     /// Effect-free ordinary real Sub/Div proposal. Source-level numerical
     /// admission and any selected-program binding remain separate.
     fn propose_real_binary(
@@ -1691,12 +1713,51 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
         _recipe: &'a ProviderRealBinaryRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionFuture<'a, ProviderExecutedRealBinary> {
         Box::pin(async {
             Err(ProviderExecutionError::from(
                 unsupported_provider_operation("real binary recipe execution is unsupported"),
             ))
         })
+    }
+
+    /// Provider-owned retained host metadata for one canonical dense output
+    /// registration at the given shape rank. `None` is unknown, never zero:
+    /// finite selected callers must decline before an effect. This does not
+    /// claim arbitrary backend RSS or already-initialized provider caches.
+    fn registered_output_host_metadata(
+        &self,
+        _rank: usize,
+    ) -> Option<runmat_execution::resource::ProviderHostRegistrationMetadata> {
+        None
+    }
+
+    /// Additional provider-owned table backing for the selected number of
+    /// registrations at the current allocation-state snapshot. A changed
+    /// snapshot is rechecked by `prepare_output_host_metadata` pre-effect.
+    fn output_registration_table_upper_bytes(&self, _registrations: usize) -> Option<u64> {
+        None
+    }
+
+    /// Request-local preparation records retained until selected stage
+    /// settlement; distinct from registered outputs and table backing.
+    fn output_registration_preparation_host_bytes(&self) -> Option<u64> {
+        None
+    }
+
+    /// Prepare provider-owned registry backing and the exact number of output
+    /// slots before the selected operation can emit. `None` admission is only
+    /// an unbounded route; finite callers pass an owned managed receipt.
+    fn prepare_output_host_metadata(
+        &self,
+        _admission: Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        _registrations: usize,
+    ) -> ProviderExecutionResult<Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>>
+    {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation("provider output metadata reservation is unsupported"),
+        ))
     }
 
     /// Description-only physical proposal for one ordinary real-elementwise
@@ -1728,6 +1789,23 @@ pub trait AccelProvider: AcceleratorThreadBound {
                 ),
             ))
         })
+    }
+
+    fn execute_power_evaluation_recipe_admitted<'a>(
+        &'a self,
+        recipe: &'a power_service::PowerEvaluationRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
+        if admission.is_some() {
+            Box::pin(async {
+                Err(
+                    unsupported_provider_operation("admitted POWER evaluation is unsupported")
+                        .into(),
+                )
+            })
+        } else {
+            self.execute_power_evaluation_recipe(recipe)
+        }
     }
 
     /// Handle-free physical projection for sources described by original
@@ -1797,6 +1875,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _input: &'a GpuTensorHandle,
         _recipe: &'a ProviderRealElementwiseRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
         Box::pin(async {
             Err(ProviderExecutionError::from(
@@ -1863,6 +1942,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn execute_ordered_real_mean(
         &self,
         _selected: ProviderOrderedRealMean,
+        _admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedOrderedRealMean> {
         Err(ProviderExecutionError::from(
             unsupported_provider_operation("ordered real mean unavailable"),
@@ -1894,6 +1974,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn execute_cold_mean_nd(
         &self,
         _selected: ProviderColdNdMean,
+        _admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> anyhow::Result<ProviderExecutedColdNdMean> {
         Err(unsupported_provider_operation(
             "selected cold ND mean unavailable",
@@ -1993,6 +2074,25 @@ pub trait AccelProvider: AcceleratorThreadBound {
                 storage
             )
             .into()),
+        }
+    }
+
+    /// A selected finite request supplies its own retained host-metadata
+    /// authority. Providers without a typed admission implementation decline
+    /// before any upload effect; an ordinary unbounded request keeps the
+    /// existing raw-upload contract.
+    fn upload_numeric_raw_admitted(
+        &self,
+        host: &crate::HostNumericTensorView,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        if admission.is_some() {
+            Err(unsupported_provider_operation(
+                "provider does not implement admitted numeric upload",
+            )
+            .into())
+        } else {
+            self.upload_numeric_raw(host)
         }
     }
 
@@ -2256,6 +2356,20 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn begin_operation_observation(
         &self,
         _query: &ProviderFeasibilityQuery,
+    ) -> observation::ProviderObservationSupport {
+        observation::ProviderObservationSupport::Unsupported
+    }
+
+    fn image_stage_observation_capability(
+        &self,
+        _work: ProviderImageStagePhysicalWork,
+    ) -> observation::ProviderObservationCapability {
+        observation::ProviderObservationCapability::Unsupported
+    }
+
+    fn begin_image_stage_observation(
+        &self,
+        _work: ProviderImageStagePhysicalWork,
     ) -> observation::ProviderObservationSupport {
         observation::ProviderObservationSupport::Unsupported
     }
@@ -2933,18 +3047,21 @@ pub trait AccelProvider: AcceleratorThreadBound {
         unsupported_future("imfilter not supported by provider")
     }
 
-    /// Allocate a random permutation of 1..=n, returning the first k elements.
-    fn random_permutation(&self, _n: usize, _k: usize) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow!("random_permutation not supported by provider"))
+    /// Allocate a Double random permutation of 1..=n, returning the first k
+    /// elements. A provider may certify Unsupported only before random-state,
+    /// allocation, or dispatch effects; all other failures are terminal.
+    fn random_permutation(&self, _n: usize, _k: usize) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("random_permutation not supported by provider").into())
     }
 
-    /// Allocate a random permutation matching the prototype residency.
+    /// Allocate a Double permutation on the prototype's device. The output
+    /// class is Double even when the numeric prototype has another class.
     fn random_permutation_like(
         &self,
         _prototype: &GpuTensorHandle,
         n: usize,
         k: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.random_permutation(n, k)
     }
 
@@ -3548,6 +3665,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("unary_double not supported by provider").into())
         })
     }
+    fn unary_double_admitted<'a>(
+        &'a self,
+        value: &'a GpuTensorHandle,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        if admission.is_some() {
+            Box::pin(async {
+                Err(unsupported_provider_operation("admitted unary_double is unsupported").into())
+            })
+        } else {
+            self.unary_double(value)
+        }
+    }
     fn unary_single<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -3555,6 +3685,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Box::pin(async {
             Err(unsupported_provider_operation("unary_single not supported by provider").into())
         })
+    }
+    fn unary_single_admitted<'a>(
+        &'a self,
+        value: &'a GpuTensorHandle,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        if admission.is_some() {
+            Box::pin(async {
+                Err(unsupported_provider_operation("admitted unary_single is unsupported").into())
+            })
+        } else {
+            self.unary_single(value)
+        }
     }
     fn unary_pow2<'a>(
         &'a self,
@@ -5038,25 +5181,59 @@ pub unsafe fn register_device_provider(provider: &'static dyn AccelProvider) {
     unsafe { register_provider_for_device(provider.device_id(), provider) };
 }
 
+fn primary_provider_without_registry_scan() -> Option<&'static dyn AccelProvider> {
+    current_thread_provider()
+        .filter(|provider| provider_is_authorized(*provider))
+        .or_else(|| {
+            provider_registry::default().filter(|provider| provider_is_authorized(*provider))
+        })
+}
+
+/// Select the same current/default/registered owner as `provider` without
+/// constructing the registry's fallback candidate vector before a finite
+/// request's host-preparation receipt. Authorization runs outside the registry
+/// lock, and the fallback retains device-id order.
+pub fn provider_without_registry_allocation() -> Option<&'static dyn AccelProvider> {
+    let selected = primary_provider_without_registry_scan().or_else(|| {
+        let mut prior_device = None;
+        while let Some((device, provider)) = provider_registry::next_after(prior_device) {
+            if matches!(
+                provider_authorization(provider),
+                ExecutionProviderAuthorization::Allowed
+            ) {
+                return Some(provider);
+            }
+            prior_device = Some(device);
+        }
+        None
+    });
+    audit_vm_region_provider_selection(selected)
+}
+
 pub fn provider() -> Option<&'static dyn AccelProvider> {
-    if let Some(provider) =
-        current_thread_provider().filter(|provider| provider_is_authorized(*provider))
-    {
-        return Some(provider);
+    let selected = if let Some(provider) = primary_provider_without_registry_scan() {
+        Some(provider)
+    } else {
+        // Copy references before callbacks; no registry lock or RefCell borrow
+        // crosses provider code.
+        registered_providers().into_iter().find(|provider| {
+            matches!(
+                provider_authorization(*provider),
+                ExecutionProviderAuthorization::Allowed
+            )
+        })
+    };
+    audit_vm_region_provider_selection(selected)
+}
+
+fn audit_vm_region_provider_selection(
+    selected: Option<&'static dyn AccelProvider>,
+) -> Option<&'static dyn AccelProvider> {
+    #[cfg(feature = "wgpu")]
+    if let Some(provider) = selected {
+        observation::record_vm_region_provider_selection(provider);
     }
-    if let Some(provider) =
-        provider_registry::default().filter(|provider| provider_is_authorized(*provider))
-    {
-        return Some(provider);
-    }
-    // Copy references before callbacks; no registry lock or RefCell borrow
-    // crosses provider code.
-    registered_providers().into_iter().find(|provider| {
-        matches!(
-            provider_authorization(*provider),
-            ExecutionProviderAuthorization::Allowed
-        )
-    })
+    selected
 }
 
 /// Clear the active provider selection without invalidating providers that own live handles.
@@ -5071,22 +5248,23 @@ pub fn clear_provider() {
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    if let Some(registered) = provider_registry::get(device_id) {
-        return provider_is_authorized(registered).then_some(registered);
-    }
-    if let Some(provider) = current_thread_provider() {
-        if provider.device_id() == device_id {
-            return provider_is_authorized(provider).then_some(provider);
-        }
-    }
-    // Retained execution-selection compatibility only. Physical retirement
-    // never consults this registry or its ambient fallback.
-    provider_registry::default().filter(|provider| {
-        matches!(
-            provider_authorization(*provider),
-            ExecutionProviderAuthorization::Unrestricted
-        )
-    })
+    let selected = if let Some(registered) = provider_registry::get(device_id) {
+        provider_is_authorized(registered).then_some(registered)
+    } else if let Some(provider) =
+        current_thread_provider().filter(|provider| provider.device_id() == device_id)
+    {
+        provider_is_authorized(provider).then_some(provider)
+    } else {
+        // Retained execution-selection compatibility only. Physical retirement
+        // never consults this registry or its ambient fallback.
+        provider_registry::default().filter(|provider| {
+            matches!(
+                provider_authorization(*provider),
+                ExecutionProviderAuthorization::Unrestricted
+            )
+        })
+    };
+    audit_vm_region_provider_selection(selected)
 }
 
 /// Returns every addressable provider in deterministic process-local order.
@@ -5106,14 +5284,16 @@ pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn Acce
 /// deterministic by provider device id, allowing a native extension backend
 /// to coexist with a different ambient placement provider.
 pub fn provider_for_native_device(api: NativeDeviceApi) -> Option<&'static dyn AccelProvider> {
-    if let Some(selected) = current_thread_provider().filter(|provider| {
+    let selected = if let Some(selected) = current_thread_provider().filter(|provider| {
         provider.native_device_api() == Some(api) && provider_is_authorized(*provider)
     }) {
-        return Some(selected);
-    }
-    registered_providers().into_iter().find(|provider| {
-        provider.native_device_api() == Some(api) && provider_is_authorized(*provider)
-    })
+        Some(selected)
+    } else {
+        registered_providers().into_iter().find(|provider| {
+            provider.native_device_api() == Some(api) && provider_is_authorized(*provider)
+        })
+    };
+    audit_vm_region_provider_selection(selected)
 }
 
 /// Returns whether a process-local provider advertises the exact device

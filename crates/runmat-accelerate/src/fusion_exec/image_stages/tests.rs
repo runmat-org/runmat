@@ -234,6 +234,79 @@ impl StagedProvider {
 }
 
 impl AccelProvider for StagedProvider {
+    fn numeric_upload_physical_evidence(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
+        self.staged_numeric_upload_evidence(query)
+    }
+
+    fn floating_cast_physical_evidence(
+        &self,
+        input: &ProviderRepresentation,
+        target: ProviderPrecision,
+    ) -> Option<runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence> {
+        self.staged_floating_cast_evidence(input, target)
+    }
+
+    fn propose_power_pair_geometry(
+        &self,
+        inputs: &[ProviderRepresentation; 2],
+        descriptions: &[runmat_accelerate_api::PowerInputDescription; 2],
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerPairPhysicalProjection>,
+    > {
+        self.staged_power_pair_geometry(inputs, descriptions, frozen)
+    }
+
+    fn propose_power_probe(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    > {
+        self.staged_power_probe(base, exponent, frozen)
+    }
+
+    fn execute_power_probe_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerProbeRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::power_service::PowerProbeObserved,
+    > {
+        Box::pin(async move {
+            if self.pending_at == Some(self.calls.load(Ordering::SeqCst)) {
+                std::future::pending::<()>().await;
+            }
+            self.staged_power_probe_execute(recipe)
+        })
+    }
+
+    fn propose_power_evaluation(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        domain: PowerResultDomain,
+    ) -> ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerEvaluationPhysicalProposal>,
+    > {
+        self.staged_power_evaluation(base, exponent, domain)
+    }
+
+    fn execute_power_evaluation_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerEvaluationRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move { self.staged_power_evaluation_execute(recipe) })
+    }
+
     fn propose_real_binary(
         &self,
         request: &runmat_accelerate_api::ProviderRealBinaryRequest,
@@ -247,6 +320,7 @@ impl AccelProvider for StagedProvider {
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
         recipe: &'a runmat_accelerate_api::ProviderRealBinaryRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<
         'a,
         runmat_accelerate_api::ProviderExecutedRealBinary,
@@ -266,6 +340,7 @@ impl AccelProvider for StagedProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         recipe: &'a runmat_accelerate_api::ProviderRealElementwiseRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<
         'a,
         runmat_accelerate_api::ProviderExecutedRealElementwise,
@@ -417,6 +492,7 @@ impl AccelProvider for StagedProvider {
     fn execute_ordered_real_mean(
         &self,
         selected: ProviderOrderedRealMean,
+        _admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedOrderedRealMean> {
         let step = selected
             .steps()
@@ -887,6 +963,8 @@ mod ordered_mean;
 mod output_checkpoint;
 #[path = "tests/power_service.rs"]
 mod power_service;
+#[path = "tests/power_pair_provider.rs"]
+mod power_pair_provider;
 #[path = "tests/real_binary_provider.rs"]
 mod real_binary_provider;
 #[path = "tests/real_elementwise_provider.rs"]

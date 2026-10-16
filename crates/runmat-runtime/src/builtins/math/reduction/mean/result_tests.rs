@@ -217,6 +217,7 @@ impl AccelProvider for OrderedFailureProvider {
     fn execute_ordered_real_mean(
         &self,
         _: runmat_accelerate_api::ProviderOrderedRealMean,
+        _admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<
         runmat_accelerate_api::ProviderExecutedOrderedRealMean,
     > {
@@ -325,6 +326,7 @@ impl AccelProvider for OrderedPublicationProvider {
     fn execute_ordered_real_mean(
         &self,
         selected: runmat_accelerate_api::ProviderOrderedRealMean,
+        _admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<
         runmat_accelerate_api::ProviderExecutedOrderedRealMean,
     > {

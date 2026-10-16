@@ -62,6 +62,7 @@ impl AccelProvider for Fixture {
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
         recipe: &'a ProviderRealBinaryRecipe,
+        _admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> crate::ProviderExecutionFuture<'a, ProviderExecutedRealBinary> {
         Box::pin(async move {
             let mode = self.mode.load(Ordering::Relaxed);

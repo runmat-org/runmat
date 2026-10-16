@@ -1,9 +1,9 @@
 use super::policy::SparseStorageRule;
-use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy};
+use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy, DiagnosticCollector};
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    broadcast_shape, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact,
+    broadcast_shape_checked, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact,
     NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
@@ -14,24 +14,24 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     let (output, diagnostics) = infer_fact(policy, admitted, request);
-    finish_fixed(entry, request, output, diagnostics)
+    finish_fixed(entry, request, output, diagnostics.messages)
 }
 
 pub(super) fn infer_fact(
     policy: BinaryArithmeticInferencePolicy,
     admitted: AdmittedCall<'_>,
     request: &CallRequest,
-) -> (ValueFact, Vec<runmat_types::InferenceDiagnostic>) {
+) -> (ValueFact, DiagnosticCollector) {
     let mut diagnostics = admitted.diagnostics;
     let (Some(left), Some(right)) = (admitted.left, admitted.right) else {
         return (dynamic(), diagnostics);
     };
 
     let mut output = dynamic();
-    output.shape = match broadcast_shape(&left.shape, &right.shape) {
+    output.shape = match broadcast_shape_checked(&left.shape, &right.shape) {
         Ok(shape) => shape,
         Err(diagnostic) => {
-            diagnostics.push(diagnostic);
+            diagnostics.push(|| diagnostic.into_diagnostic());
             ShapeFact::Unknown
         }
     };
@@ -55,11 +55,13 @@ pub(super) fn infer_fact(
     match class::result(policy, left, right) {
         Ok(kind) => output.kind = kind,
         Err(DynamicReason::UnsupportedRepresentation) => {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-BINARY-ARITHMETIC-INPUT",
-                "operands do not form a supported arithmetic pair",
-                0,
-            ));
+            diagnostics.push(|| {
+                argument_error(
+                    "RM-CATALOG-BINARY-ARITHMETIC-INPUT",
+                    "operands do not form a supported arithmetic pair",
+                    0,
+                )
+            });
             output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
         Err(reason) => output.certainty = runmat_types::CertaintyFact::Dynamic(reason),
@@ -142,7 +144,7 @@ fn materialized_real_storage(
 fn apply_prototype(
     prototype: Option<&ValueFact>,
     output: &mut ValueFact,
-    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+    diagnostics: &mut DiagnosticCollector,
 ) {
     let Some(prototype) = prototype else { return };
     output.residency = match &prototype.residency {
@@ -166,7 +168,7 @@ fn apply_prototype(
             | ValueKindFact::Character
             | ValueKindFact::Unknown
     ) {
-        diagnostics.push(argument_error(
+        diagnostics.push(|| argument_error(
             "RM-CATALOG-BINARY-ARITHMETIC-PROTOTYPE",
             "the 'like' prototype must be numeric, logical, character, or provider-resident numeric data",
             3,

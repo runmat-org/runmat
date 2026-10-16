@@ -2,7 +2,7 @@
 //! operation-owned admission awaits; inference and hashing reuse these facts.
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::PrimitiveOp;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinBindingIdentity, BuiltinCatalogEntry};
 use runmat_runtime::builtins::common::spec::{
     canonical_fusion_declaration, selected_builtin_binding, CanonicalFusionDeclaration,
@@ -13,6 +13,26 @@ pub(crate) struct SemanticBinding {
     pub entry: &'static BuiltinCatalogEntry,
     pub declaration: CanonicalFusionDeclaration,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SemanticBindingCaptureError {
+    MissingCatalogAuthority,
+    AmbiguousBinding,
+    MissingFusionDeclaration,
+}
+
+impl std::fmt::Display for SemanticBindingCaptureError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingCatalogAuthority => "fusion builtin has no canonical type authority",
+            Self::AmbiguousBinding => "fusion builtin binding is ambiguous",
+            Self::MissingFusionDeclaration => "missing canonical fusion declaration",
+        })
+    }
+}
+
+impl std::error::Error for SemanticBindingCaptureError {}
+
 impl SemanticBinding {
     pub fn selected(declaration: CanonicalFusionDeclaration) -> Option<Self> {
         let entry = builtin_catalog_entry_by_name(declaration.binding.builtin.name)?;
@@ -23,9 +43,17 @@ impl SemanticBinding {
             .then_some(Self { entry, declaration })
     }
     pub fn capture(operation: &FusionOp) -> Result<Option<Self>> {
+        Self::capture_typed(operation).map_err(Into::into)
+    }
+
+    /// Same canonical lookup as `capture`, without constructing an anyhow
+    /// diagnostic before a finite preparation receipt has been admitted.
+    pub(crate) fn capture_typed(
+        operation: &FusionOp,
+    ) -> std::result::Result<Option<Self>, SemanticBindingCaptureError> {
         let entry = match operation {
             FusionOp::Builtin { name, .. } => builtin_catalog_entry_by_name(name)
-                .ok_or_else(|| anyhow!("fusion builtin has no canonical type authority"))?,
+                .ok_or(SemanticBindingCaptureError::MissingCatalogAuthority)?,
             FusionOp::Primitive {
                 op: PrimitiveOp::ElemPow,
                 ..
@@ -33,10 +61,10 @@ impl SemanticBinding {
             FusionOp::Primitive { .. } => return Ok(None),
         };
         let [binding] = entry.bindings else {
-            return Err(anyhow!("fusion builtin binding is ambiguous"));
+            return Err(SemanticBindingCaptureError::AmbiguousBinding);
         };
         let declaration = canonical_fusion_declaration(entry.binding_identity(binding))
-            .ok_or_else(|| anyhow!("missing canonical fusion declaration"))?;
+            .ok_or(SemanticBindingCaptureError::MissingFusionDeclaration)?;
         Ok(Some(Self { entry, declaration }))
     }
 }
@@ -101,4 +129,36 @@ pub(crate) fn capture(plan: &FusionGroupPlan) -> Result<Vec<Option<SemanticBindi
         snapshots.push(SemanticBinding::capture(operation)?);
     }
     Ok(snapshots)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_capture_preserves_public_binding_and_error_authority() {
+        let power = FusionOp::Primitive {
+            op: PrimitiveOp::ElemPow,
+            inputs: vec![0, 1],
+            output: Some(2),
+        };
+        let typed = SemanticBinding::capture_typed(&power).unwrap().unwrap();
+        let public = SemanticBinding::capture(&power).unwrap().unwrap();
+        assert_eq!(typed.declaration.binding, public.declaration.binding);
+
+        let missing = FusionOp::Builtin {
+            name: "__missing_fusion_binding__".into(),
+            origin: crate::graph::FusionCallOrigin::NamedUnresolved,
+            inputs: Vec::new(),
+            output: None,
+        };
+        assert_eq!(
+            SemanticBinding::capture_typed(&missing).unwrap_err(),
+            SemanticBindingCaptureError::MissingCatalogAuthority,
+        );
+        assert_eq!(
+            SemanticBinding::capture(&missing).unwrap_err().to_string(),
+            "fusion builtin has no canonical type authority",
+        );
+    }
 }

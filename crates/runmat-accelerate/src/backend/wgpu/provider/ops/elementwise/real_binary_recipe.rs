@@ -282,6 +282,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         recipe: &ProviderRealBinaryRecipe,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<ProviderExecutedRealBinary> {
         if !recipe.is_owned_by(self) {
             return Err(ProviderExecutionError::from(anyhow!(
@@ -325,7 +326,7 @@ impl WgpuProvider {
             ProviderRealBinaryOperation::Div => crate::backend::wgpu::types::BinaryOpCode::Div,
         };
         let result = self
-            .binary_op_exec_recorded(op, lhs, rhs, Some(&observed), None, None)
+            .binary_op_exec_recorded(op, lhs, rhs, Some(&observed), None, admission)
             .map_err(|cause| {
                 let error = ProviderExecutionError::from(cause);
                 if observed.borrow().effect {
