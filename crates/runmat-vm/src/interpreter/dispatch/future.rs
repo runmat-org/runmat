@@ -560,6 +560,10 @@ fn dispatch_call<'a>(
         imports: state.imports,
         pc: state.pc,
         source_id: meta.source_id,
+        source_ref: meta
+            .bytecode
+            .source_id
+            .and_then(crate::BytecodeSourceRef::runtime),
         call_arg_spans: meta.call_arg_spans,
         invocation_arity: meta.invocation_arity,
         function_registry: meta.function_registry,
@@ -670,6 +674,11 @@ async fn dispatch_logical(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> D
 }
 
 async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
+    let source_ref = meta
+        .bytecode
+        .source_id
+        .and_then(crate::BytecodeSourceRef::runtime);
+    let invocation_arity = meta.invocation_arity;
     match meta.instr {
         Instr::CreateMatrixFromSequences {
             row_lengths,
@@ -684,12 +693,23 @@ async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) ->
             )?;
             let _rows_roots = crate::call::root_values(rows.iter().flatten())?;
             runmat_runtime::create_matrix_from_values(&rows)
-                .await?
+                .await
+                .map_err(|error| {
+                    arrays::qualify_matrix_construction_shape(error, source_ref, invocation_arity)
+                })?
                 .with_owned(|value| state.stack.push(value));
         }
         Instr::CreateMatrixDynamic(num_rows) => {
             create_matrix_dynamic(state.stack, *num_rows, |rows_data| async move {
-                runmat_runtime::create_matrix_from_values(&rows_data).await
+                runmat_runtime::create_matrix_from_values(&rows_data)
+                    .await
+                    .map_err(|error| {
+                        arrays::qualify_matrix_construction_shape(
+                            error,
+                            source_ref,
+                            invocation_arity,
+                        )
+                    })
             })
             .await?;
         }

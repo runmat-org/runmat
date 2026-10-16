@@ -271,7 +271,7 @@ pub(super) fn evaluate_rvalue(
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
-            let mut invocation = runmat_runtime::execution::DeferredInvocation::Callable(
+            let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                     runmat_hir::CallableIdentity::BoundFunction(*function),
                     arguments,

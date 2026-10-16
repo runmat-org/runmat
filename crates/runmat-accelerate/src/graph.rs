@@ -51,6 +51,85 @@ impl AccelGraph {
         }
     }
 
+    /// Prove the compiler's folded matrix constructor from its original
+    /// row-major numeric literals. A constant fact on a general node is not
+    /// enough to replace an executable source producer.
+    pub fn exact_folded_literal_array(&self, id: ValueId) -> Option<&BuiltinValue> {
+        let info = self.value(id)?;
+        let ValueOrigin::NodeOutput { node, output: 0 } = info.origin else {
+            return None;
+        };
+        let producer = self.node(node)?;
+        if producer.id != node
+            || producer.outputs.as_slice() != [id]
+            || producer.span.start > producer.span.end
+            || producer.category != AccelOpCategory::Other
+            || producer.label != AccelNodeLabel::Primitive(PrimitiveOp::UPlus)
+            || producer.tags.as_slice() != [AccelGraphTag::FoldedLiteralArray]
+        {
+            return None;
+        }
+        let Some(BuiltinValue::Tensor(tensor)) = info.constant.as_ref() else {
+            return None;
+        };
+        let [rows, columns] = tensor.shape() else {
+            return None;
+        };
+        if !matches!(&info.shape, ShapeInfo::Tensor(dims)
+            if dims.as_slice() == [Some(*rows), Some(*columns)])
+            || !matches!(&info.ty, Type::Tensor { shape: Some(dims) }
+                if dims.as_slice() == [Some(*rows), Some(*columns)])
+            || producer.inputs.len() != rows.checked_mul(*columns)?
+        {
+            return None;
+        }
+        let elements = tensor.as_f64_slice()?;
+        if elements.len() != producer.inputs.len() {
+            return None;
+        }
+        for (position, input) in producer.inputs.iter().enumerate() {
+            let Some(ValueInfo {
+                origin: ValueOrigin::Constant,
+                constant: Some(BuiltinValue::Num(source)),
+                ..
+            }) = self.value(*input)
+            else {
+                return None;
+            };
+            let row = position / *columns;
+            let column = position % *columns;
+            if elements[row + column * *rows].to_bits() != source.to_bits() {
+                return None;
+            }
+        }
+        info.constant.as_ref()
+    }
+
+    /// Exact vector control represented by a proved folded source array.
+    pub fn folded_literal_numeric_vector(&self, id: ValueId) -> Option<&BuiltinValue> {
+        let value = self.exact_folded_literal_array(id)?;
+        let ValueOrigin::NodeOutput { node, .. } = self.value(id)?.origin else {
+            return None;
+        };
+        if self.var_binding(id).is_some()
+            || self.node_binding(node).is_some()
+            || self
+                .node(node)?
+                .inputs
+                .iter()
+                .any(|input| self.source_literal_constant(*input).is_none())
+        {
+            return None;
+        }
+        let BuiltinValue::Tensor(tensor) = value else {
+            return None;
+        };
+        let [rows, columns] = tensor.shape() else {
+            return None;
+        };
+        (*rows == 1 || *columns == 1).then_some(value)
+    }
+
     pub fn detect_fusion_groups(&self) -> Vec<crate::fusion::FusionGroup> {
         crate::fusion::detect_fusion_groups(self)
     }
@@ -292,7 +371,70 @@ impl ShapeInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::ShapeInfo;
+    use super::*;
+
+    #[test]
+    fn folded_axis_vector_requires_the_exact_constructor_proof() {
+        let mut graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Primitive(PrimitiveOp::UPlus),
+                category: AccelOpCategory::Other,
+                inputs: vec![0, 1],
+                outputs: vec![2],
+                span: InstrSpan { start: 3, end: 3 },
+                tags: vec![AccelGraphTag::FoldedLiteralArray],
+            }],
+            values: vec![
+                ValueInfo {
+                    id: 0,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(BuiltinValue::Num(2.0)),
+                },
+                ValueInfo {
+                    id: 1,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(BuiltinValue::Num(3.0)),
+                },
+                ValueInfo {
+                    id: 2,
+                    origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                    ty: Type::Tensor {
+                        shape: Some(vec![Some(1), Some(2)]),
+                    },
+                    shape: ShapeInfo::Tensor(vec![Some(1), Some(2)]),
+                    constant: Some(BuiltinValue::Tensor(
+                        runmat_value::Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap(),
+                    )),
+                },
+            ],
+            var_bindings: HashMap::new(),
+            node_bindings: HashMap::new(),
+        };
+        assert!(graph.folded_literal_numeric_vector(2).is_some());
+        graph.nodes[0].tags.push(AccelGraphTag::Elementwise);
+        assert!(graph.folded_literal_numeric_vector(2).is_none());
+        graph.nodes[0].tags.pop();
+        graph.nodes[0].label = AccelNodeLabel::Primitive(PrimitiveOp::Add);
+        assert!(graph.folded_literal_numeric_vector(2).is_none());
+        graph.nodes[0].label = AccelNodeLabel::Primitive(PrimitiveOp::UPlus);
+        graph.values[2].shape = ShapeInfo::Unknown;
+        assert!(graph.folded_literal_numeric_vector(2).is_none());
+        graph.values[2].shape = ShapeInfo::Tensor(vec![Some(1), Some(2)]);
+        graph.var_bindings.insert(
+            2,
+            VarBinding {
+                kind: VarKind::Global,
+                index: 2,
+            },
+        );
+        assert!(graph.exact_folded_literal_array(2).is_some());
+        assert!(graph.folded_literal_numeric_vector(2).is_none());
+    }
 
     #[test]
     fn test_unify_dims_basic() {

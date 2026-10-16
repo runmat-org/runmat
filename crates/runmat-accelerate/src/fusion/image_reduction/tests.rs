@@ -251,38 +251,34 @@ fn source_power_transcript_retains_square_and_final_pow_even_for_identity_gamma(
 fn approximate_or_unresolved_axes_never_create_staged_evidence() {
     let mut nodes = Vec::new();
     let near = vec_graph(&[2.4, 3.4]);
-    let peeled = peel_mean_dims(&near, 2, &[3.0, 2.0], &HashSet::new(), &mut nodes).unwrap();
-    assert_eq!(peeled.source, 0);
-    assert!(peeled.route.is_none());
+    assert!(peel_mean_dims(&near, 2, &[3.0, 2.0], &HashSet::new(), &mut nodes).is_none());
 
     let mut unresolved = vec_graph(&[2.0, 3.0]);
     unresolved.nodes[0].label = AccelNodeLabel::Builtin {
         name: "mean".into(),
         origin: FusionCallOrigin::NamedUnresolved,
     };
-    let peeled = peel_mean_dims(
+    assert!(peel_mean_dims(
         &unresolved,
         2,
         &[3.0, 2.0],
         &HashSet::new(),
         &mut Vec::new(),
     )
-    .unwrap();
-    assert!(peeled.route.is_none());
+    .is_none());
 
     unresolved.nodes[0].label = AccelNodeLabel::Builtin {
         name: "mean".into(),
         origin: FusionCallOrigin::named("single"),
     };
-    let peeled = peel_mean_dims(
+    assert!(peel_mean_dims(
         &unresolved,
         2,
         &[3.0, 2.0],
         &HashSet::new(),
         &mut Vec::new(),
     )
-    .unwrap();
-    assert!(peeled.route.is_none());
+    .is_none());
 }
 
 #[test]

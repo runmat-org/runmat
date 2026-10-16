@@ -31,6 +31,7 @@ pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub imports: &'a Vec<(Vec<String>, bool)>,
     pub pc: &'a mut usize,
     pub source_id: Option<runmat_hir::SourceId>,
+    pub source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,

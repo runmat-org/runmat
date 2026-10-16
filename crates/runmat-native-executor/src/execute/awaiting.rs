@@ -125,7 +125,8 @@ pub(super) async fn complete(
                 let result = match call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
                         runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
-                            &runtime, descriptor,
+                            &runtime,
+                            *descriptor,
                         )
                         .await
                     }
@@ -276,7 +277,7 @@ mod tests {
         let runtime = RuntimeContext::new(service.clone());
         let future = service
             .create_future(DeferredCall {
-                invocation: DeferredInvocation::Callable(
+                invocation: DeferredInvocation::callable(
                     runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                         CallableIdentity::BoundFunction(FunctionId(1)),
                         Vec::new(),

@@ -17,9 +17,9 @@ mod source_ref;
 mod statement_pc;
 mod subscript;
 
-/// Portable schema for serialized [`Bytecode`] payloads. Version 20 forwards
-/// anonymous body calls through destination-cardinality result sequences.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 20;
+/// Portable schema for serialized [`Bytecode`] payloads. Version 21 adds an
+/// internal capture-only statement-output label for isolated numeric text.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 21;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 16;
 

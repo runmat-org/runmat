@@ -668,6 +668,14 @@ fn select_fusion_provider_with_implementation(
         LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
             if host_unavailable {
+                if vm_right.is_some() {
+                    // No fused provider or whole-group host route exists, but
+                    // the VM still owns the original ordered instructions.
+                    // Decline before effects and without a CPU FullCall claim.
+                    return Ok(FusionExecutionOutcome::SharedRuntime(
+                        FusionCpuObservation::new(None),
+                    ));
+                }
                 return Err(anyhow!("fusion has neither an admitted provider route nor a complete host readback bound").into());
             }
             Ok(FusionExecutionOutcome::SharedRuntime(

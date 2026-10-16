@@ -15,7 +15,7 @@ pub use diagnostic::{
     HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,
     HirDiagnosticSuggestion,
 };
-pub use error::{set_error_namespace, HirError};
+pub use error::{set_error_namespace, HirError, HirErrorKind};
 pub use hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BindingOwner, BindingResolution,
     BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution, CallSyntax,

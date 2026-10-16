@@ -562,19 +562,6 @@ fn assert_cpu_fusion_was_selected_without_completion(reason: &str) {
     );
 }
 
-fn assert_cpu_region_failed_without_success(
-    placement: &runmat_accelerate::placement::PlacementSession,
-) {
-    let profile = placement.profile_snapshot();
-    let cpu = profile
-        .feedback
-        .iter()
-        .find(|series| series.candidate == "cpu.shared.fusion.elementwise")
-        .expect("CPU observation failure");
-    assert_eq!(cpu.samples, 0);
-    assert_eq!(cpu.failures, 1);
-}
-
 #[test]
 fn fusion_compiler_nested_expressions_and_branches_have_disjoint_regions() {
     gc_test_context(|| {
@@ -674,12 +661,8 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
 }
 
 #[test]
-fn fusion_cpu_region_cancellation_records_failure_not_completion() {
+fn missing_vm_full_call_right_cannot_inject_or_train_fusion_cancellation() {
     cancellation_after_cpu_fusion_selection(false, false);
-}
-
-#[test]
-fn rejected_provider_cpu_region_cancellation_records_failure_not_completion() {
     cancellation_after_cpu_fusion_selection(true, false);
 }
 
@@ -722,24 +705,28 @@ fn cancellation_after_cpu_fusion_selection(reject_provider: bool, vm_full_call: 
             runmat_runtime::context::RuntimeServicePorts::default().with_placement(service.clone()),
         );
         let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        let error = block_on(runmat_vm::interpret_with_vars_in_context(
+        let outcome = block_on(runmat_vm::interpret_with_vars_in_context(
             &bytecode, &mut vars, None, runtime,
-        ))
-        .expect_err("cancellation after CPU fusion selection");
+        ));
+        if !vm_full_call {
+            let _ =
+                outcome.expect("without an installed VM FullCall right, original instructions run");
+            assert!(!service.selected.get(), "no synthetic fusion selection");
+            assert!(service.observed.borrow().is_empty(), "no fusion receipt");
+            assert!(placement.profile_snapshot().feedback.is_empty());
+            return;
+        }
+        let error = outcome.expect_err("cancellation after installed CPU fusion selection");
         assert!(
             service.selected.get(),
             "real planner must select CPU fusion"
         );
         assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
-        if vm_full_call {
-            assert!(
-                service.observed.borrow().is_empty(),
-                "unfinished VM FullCall must not manufacture a receipt"
-            );
-            assert!(placement.profile_snapshot().feedback.is_empty());
-        } else {
-            assert_cpu_region_failed_without_success(&placement);
-        }
+        assert!(
+            service.observed.borrow().is_empty(),
+            "unfinished VM FullCall must not manufacture a receipt"
+        );
+        assert!(placement.profile_snapshot().feedback.is_empty());
         assert_cpu_fusion_was_selected_without_completion(if reject_provider {
             "provider_operation_unsupported"
         } else {

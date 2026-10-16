@@ -18,6 +18,7 @@ pub(super) async fn dispatch(
         invocation_arity,
         function_registry,
         current_function_name,
+        ..
     } = ctx;
     // A dynamic count is validated before argument collection or builtin work.
     let (name, arg_count, out_count, publication) = match instr {

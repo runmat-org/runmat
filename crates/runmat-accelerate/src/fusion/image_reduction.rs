@@ -1,7 +1,7 @@
 //! Source-form evidence for image-normalization means. This is metadata, not
 //! permission to execute a staged provider session.
 
-use super::{approx_eq, dims_match_unordered, match_mean_axes, node_from_value};
+use super::{dims_match_unordered, match_mean_axes, node_from_value};
 use crate::graph::{AccelGraph, AccelNodeLabel, FusionCallOrigin, NodeId, ValueId, ValueOrigin};
 use runmat_builtins::{MeanControl, MeanOutputClass, MAX_CATALOG_ENTRY, MEAN_CATALOG_ENTRY};
 use runmat_value::Value;
@@ -407,7 +407,7 @@ fn structural_peel(
         nodes.push(node);
         return Some(data);
     }
-    if dims.len() == 1 && approx_eq(dims[0], expected_dims[0]) {
+    if dims.len() == 1 && dims[0] == expected_dims[0] {
         nodes.push(node);
         return structural_peel(graph, data, &expected_dims[1..], assigned, nodes);
     }

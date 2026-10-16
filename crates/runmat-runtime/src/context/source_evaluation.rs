@@ -1,7 +1,8 @@
-//! Executor-owned evaluation of source text in a session's base workspace.
+//! Executor-owned evaluation of session source text.
 //!
 //! No caller-frame pointers are retained by this port. Executors acquire their
-//! live, session-owned workspace authority when they evaluate a request.
+//! captured session authority when they evaluate a request. Workspace
+//! callbacks additionally require the session's base-workspace authority.
 
 use super::{RuntimeContext, RuntimeContextLocalId, RuntimeLanguagePolicy, RuntimeServiceFuture};
 use crate::RuntimeError;
@@ -32,6 +33,19 @@ pub trait SourceEvaluationProvenance: std::fmt::Debug {
 /// Language settings captured when a source callback is admitted.
 pub type SourceEvaluationPolicy = RuntimeLanguagePolicy;
 
+/// A source request's execution domain is fixed before evaluation begins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionSourcePurpose {
+    WorkspaceCallback,
+    NumericText(NumericTextEvaluation),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumericTextEvaluation {
+    All,
+    Restricted,
+}
+
 /// An owned source invocation bound to one session, not its foreground stack.
 /// Source identity is supplied by the executor's source catalog authority.
 #[derive(Clone)]
@@ -41,9 +55,14 @@ pub struct SessionSourceEvaluation {
     provenance: Rc<dyn SourceEvaluationProvenance>,
     executor: Option<Rc<dyn RuntimeSourceEvaluationService>>,
     authority: Option<Rc<dyn RuntimeSourceEvaluationAuthority>>,
+    /// Exact host-granted base port captured with this source request. Pure
+    /// numeric text never reads it; explicit All-mode workspace operations
+    /// may use it under the base owner's ordinary at-use effect checks.
+    explicit_base_workspace: Option<Rc<dyn super::RuntimeBaseWorkspaceService>>,
     source_label: Arc<str>,
     requested_outputs: usize,
     policy: SourceEvaluationPolicy,
+    purpose: SessionSourcePurpose,
 }
 
 impl SessionSourceEvaluation {
@@ -55,6 +74,22 @@ impl SessionSourceEvaluation {
         source_label: Arc<str>,
         requested_outputs: usize,
     ) -> Result<Self, RuntimeError> {
+        Self::prepare_for_purpose(
+            runtime,
+            source,
+            source_label,
+            requested_outputs,
+            SessionSourcePurpose::WorkspaceCallback,
+        )
+    }
+
+    fn prepare_for_purpose(
+        runtime: &RuntimeContext,
+        source: Arc<str>,
+        source_label: Arc<str>,
+        requested_outputs: usize,
+        purpose: SessionSourcePurpose,
+    ) -> Result<Self, RuntimeError> {
         if !runtime.dynamic_eval_enabled() {
             return Err(crate::build_runtime_error(
                 "dynamic source evaluation is disabled by host policy",
@@ -65,8 +100,10 @@ impl SessionSourceEvaluation {
         if runtime.is_cancelled() {
             return Err(crate::execution::ExecutionServiceError::Cancelled.into_runtime_error());
         }
-        if let Some(workspace) = runtime.service_ports().workspace() {
-            workspace.ensure_effect_authority()?;
+        if purpose == SessionSourcePurpose::WorkspaceCallback {
+            if let Some(workspace) = runtime.service_ports().workspace() {
+                workspace.ensure_effect_authority()?;
+            }
         }
         let service = runtime
             .service_ports()
@@ -74,9 +111,27 @@ impl SessionSourceEvaluation {
             .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
         let mut request =
             service.capture_session_source(runtime, source, source_label, requested_outputs)?;
+        request.purpose = purpose;
         request.validate_session(runtime)?;
         request.executor = Some(service.clone());
         Ok(request)
+    }
+
+    /// Capture matrix-expression text through the same executor/source owner as
+    /// other dynamic requests, but execute it in an isolated value frame.
+    pub fn prepare_numeric_text(
+        runtime: &RuntimeContext,
+        text: &str,
+        method: NumericTextEvaluation,
+    ) -> Result<Self, RuntimeError> {
+        let source: Arc<str> = Arc::from(format!("[{text}]"));
+        Self::prepare_for_purpose(
+            runtime,
+            source,
+            Arc::from("<str2num>"),
+            1,
+            SessionSourcePurpose::NumericText(method),
+        )
     }
 
     /// Executor construction after allocating source identity in its catalog.
@@ -93,6 +148,7 @@ impl SessionSourceEvaluation {
             provenance,
             executor: None,
             authority: None,
+            explicit_base_workspace: runtime.service_ports().base_workspace().cloned(),
             source_label,
             requested_outputs,
             policy: SourceEvaluationPolicy {
@@ -101,6 +157,7 @@ impl SessionSourceEvaluation {
                 top_level_await_enabled: runtime.top_level_await_enabled(),
                 dynamic_eval_enabled: runtime.dynamic_eval_enabled(),
             },
+            purpose: SessionSourcePurpose::WorkspaceCallback,
         }
     }
 
@@ -152,8 +209,16 @@ impl SessionSourceEvaluation {
         self.policy
     }
 
+    pub fn purpose(&self) -> SessionSourcePurpose {
+        self.purpose
+    }
+
     pub fn evaluation_authority(&self) -> Option<Rc<dyn RuntimeSourceEvaluationAuthority>> {
         self.authority.clone()
+    }
+
+    pub fn explicit_base_workspace(&self) -> Option<Rc<dyn super::RuntimeBaseWorkspaceService>> {
+        self.explicit_base_workspace.clone()
     }
 
     /// A cold invocation: validation and executor entry happen on first poll.
@@ -232,6 +297,7 @@ impl std::fmt::Debug for SessionSourceEvaluation {
             .field("source_label", &self.source_label)
             .field("requested_outputs", &self.requested_outputs)
             .field("policy", &self.policy)
+            .field("purpose", &self.purpose)
             .finish_non_exhaustive()
     }
 }
@@ -259,8 +325,9 @@ pub trait RuntimeSourceEvaluationService {
         requested_outputs: usize,
     ) -> Result<SessionSourceEvaluation, RuntimeError>;
 
-    /// Resolve a stable base-workspace owner for `request.session()`, never an
-    /// ambient caller frame. Compile under the captured language/extension/
+    /// Execute in the request's typed domain, never an ambient caller frame.
+    /// Workspace callbacks resolve a stable base-workspace owner for
+    /// `request.session()`. Compile under the captured language/extension/
     /// await policy, subject to current host restrictions. Validate before effects; preserve
     /// mutations, cancellation and original errors through suspension/drop.
     fn evaluate_session_source(

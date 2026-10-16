@@ -137,6 +137,37 @@ fn request(runtime: &RuntimeContext) -> SessionSourceEvaluation {
 }
 
 #[test]
+fn numeric_text_capture_does_not_request_workspace_effect_authority() {
+    let owner = crate::workspace::BaseWorkspaceOwner::new();
+    let workspace = Rc::new(crate::workspace::BaseWorkspaceService::new(owner.clone()));
+    owner.close().unwrap();
+    let service = Rc::new(PendingExecutor {
+        entries: Rc::new(Cell::new(0)),
+        drops: Rc::new(Cell::new(0)),
+        retirements: Rc::new(Cell::new(0)),
+    });
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
+        super::super::RuntimeServicePorts::default()
+            .with_workspace(workspace)
+            .with_source_evaluation(service),
+    );
+    let callback_error =
+        SessionSourceEvaluation::prepare(&runtime, Arc::from("x = 1"), Arc::from("<callback>"), 0)
+            .expect_err("workspace callback needs an open workspace");
+    assert_eq!(callback_error.identifier(), Some("RunMat:Workspace:Closed"));
+    let numeric = SessionSourceEvaluation::prepare_numeric_text(
+        &runtime,
+        "1 + 2",
+        NumericTextEvaluation::Restricted,
+    )
+    .expect("isolated numeric capture retains source authority without workspace effects");
+    assert_eq!(
+        numeric.purpose(),
+        SessionSourcePurpose::NumericText(NumericTextEvaluation::Restricted)
+    );
+}
+
+#[test]
 fn executor_entry_is_cold_and_pending_drop_releases_exact_child_once() {
     let entries = Rc::new(Cell::new(0));
     let drops = Rc::new(Cell::new(0));

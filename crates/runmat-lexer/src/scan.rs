@@ -56,7 +56,7 @@ pub(crate) fn scan_leading_dot_float_suffix(s: &str) -> Option<usize> {
         return None;
     }
 
-    if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+    if i < bytes.len() && matches!(bytes[i], b'e' | b'E' | b'd' | b'D') {
         let exp_start = i;
         i += 1;
         if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {

@@ -6,6 +6,34 @@ use runmat_types::{
 };
 use runmat_value::{Closure, Value};
 
+/// The resolver exhausted callable selection at this source callsite. A
+/// selected callee's error never carries this cause, even if it uses the same
+/// public diagnostic identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MissingCallableTarget {
+    source: crate::source_context::RuntimeSourceRef,
+    invocation_arity: crate::context::RuntimeInvocationArity,
+}
+
+impl MissingCallableTarget {
+    pub fn in_source_script(&self, source: crate::source_context::RuntimeSourceRef) -> bool {
+        self.source == source
+            && self.invocation_arity == crate::context::RuntimeInvocationArity::Script
+    }
+}
+
+impl std::fmt::Display for MissingCallableTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "no callable target selected at source {:?}",
+            self.source.source_id()
+        )
+    }
+}
+
+impl std::error::Error for MissingCallableTarget {}
+
 /// Executor adapter used only to map stable source names to semantic functions.
 pub trait FunctionNameResolver {
     fn resolve_function(&self, name: &str) -> Option<FunctionId>;
@@ -33,6 +61,8 @@ pub struct CallableMetadata {
     pub call_kind: CallableCallKind,
     pub display_name: Option<String>,
     pub source_id: Option<runmat_types::SourceId>,
+    pub source_ref: Option<crate::source_context::RuntimeSourceRef>,
+    pub source_invocation: Option<crate::context::RuntimeInvocationArity>,
     pub span: Option<runmat_types::Span>,
     pub function_input_callsite: Option<crate::callsite::CallsiteInfo>,
 }
@@ -43,6 +73,8 @@ impl Default for CallableMetadata {
             call_kind: CallableCallKind::Direct,
             display_name: None,
             source_id: None,
+            source_ref: None,
+            source_invocation: None,
             span: None,
             function_input_callsite: None,
         }
@@ -55,6 +87,8 @@ impl CallableMetadata {
             call_kind: CallableCallKind::Feval,
             display_name,
             source_id: None,
+            source_ref: None,
+            source_invocation: None,
             span: None,
             function_input_callsite: None,
         }
@@ -531,13 +565,21 @@ fn undefined_identity_error(
         (None, Some(span)) => format!(" at span {}..{}", span.start, span.end),
         (None, None) => String::new(),
     };
-    semantic_error(
-        "UndefinedFunction",
-        format!(
-            "Undefined function in {}: {identity:?}{location}",
-            metadata.call_kind.label()
+    let message = format!(
+        "Undefined function in {}: {identity:?}{location}",
+        metadata.call_kind.label()
+    );
+    match (metadata.source_ref, metadata.source_invocation) {
+        (Some(source), Some(invocation_arity)) => crate::runtime_error::semantic_error_with_source(
+            "UndefinedFunction",
+            message,
+            MissingCallableTarget {
+                source,
+                invocation_arity,
+            },
         ),
-    )
+        _ => semantic_error("UndefinedFunction", message),
+    }
 }
 
 async fn call_builtin_with_requested_outputs(
@@ -577,6 +619,8 @@ async fn forward_named_fallback(
     args: Vec<Value>,
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
+    source_ref: Option<crate::source_context::RuntimeSourceRef>,
+    source_invocation: Option<crate::context::RuntimeInvocationArity>,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let invoke = crate::callsite::with_callsite(
         callsite,
@@ -592,10 +636,18 @@ async fn forward_named_fallback(
         None => invoke.await?,
     }
     .ok_or_else(|| {
-        crate::build_runtime_error(format!("Undefined function: {name}"))
+        let builder = crate::build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
-            .with_failure_origin(crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
-            .build()
+            .with_failure_origin(crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation);
+        match (source_ref, source_invocation) {
+            (Some(source), Some(invocation_arity)) => builder
+                .with_source(MissingCallableTarget {
+                    source,
+                    invocation_arity,
+                })
+                .build(),
+            _ => builder.build(),
+        }
     })
 }
 

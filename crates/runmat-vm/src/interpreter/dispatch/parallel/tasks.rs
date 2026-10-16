@@ -110,20 +110,19 @@ pub(super) fn create_future(
 ) -> Result<runmat_execution::FutureHandle, RuntimeError> {
     runmat_runtime::execution::validate_spawn_captures(&descriptor.args)?;
     let capabilities = callable_capabilities(&descriptor, function_registry)?;
-    let mut invocation = runmat_runtime::execution::DeferredInvocation::Callable(descriptor);
+    let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(descriptor);
     let graph_required =
         runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(&invocation);
     let builtin = matches!(
         &invocation,
-        runmat_runtime::execution::DeferredInvocation::Callable(
-            runmat_runtime::call::descriptor::CallableDescriptor {
+        runmat_runtime::execution::DeferredInvocation::Callable(descriptor)
+            if matches!(descriptor.as_ref(), runmat_runtime::call::descriptor::CallableDescriptor {
                 target: runmat_runtime::call::descriptor::CallableTarget::Resolved {
                     identity: runmat_hir::CallableIdentity::Builtin(_),
                     ..
                 },
                 ..
-            }
-        )
+            })
     );
     let program = if !context.runtime.execution().requires_program_capture() {
         runmat_runtime::execution::DeferredProgram::Local
@@ -156,6 +155,7 @@ pub(super) fn create_future(
             else {
                 unreachable!("future admission created a callable invocation")
             };
+            let descriptor = *descriptor;
             let runmat_runtime::call::descriptor::CallableTarget::Resolved {
                 identity: runmat_hir::CallableIdentity::Builtin(name),
                 fallback_policy: runmat_hir::CallableFallbackPolicy::None,
@@ -403,7 +403,7 @@ async fn await_sequence(
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
                         crate::call::execute_callable_descriptor(
                             &context.runtime,
-                            descriptor.clone(),
+                            descriptor.as_ref().clone(),
                         )
                         .await
                     }

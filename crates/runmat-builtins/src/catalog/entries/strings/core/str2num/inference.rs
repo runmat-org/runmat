@@ -1,7 +1,6 @@
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, NumericClass, NumericDomain, NumericFact,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, DynamicReason, ValueFact, ValueKindFact,
 };
 
 fn infer_outputs(
@@ -20,12 +19,24 @@ fn infer_outputs(
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    if request.arguments.len() != 1 {
+    if !matches!(request.arguments.len(), 1 | 3) {
         diagnostics.push(argument_error(
             "RM-CATALOG-STR2NUM-ARITY",
-            "str2num requires one text input",
+            "str2num requires text and optionally Evaluation=method",
             0,
         ));
+    }
+    for index in 1..request.arguments.len().min(3) {
+        if !matches!(
+            request.arguments[index].kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        ) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-STR2NUM-EVALUATION",
+                "Evaluation option and method must be scalar text",
+                index,
+            ));
+        }
     }
     if let Some(input) = request.arguments.first() {
         if !matches!(
@@ -43,14 +54,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         request,
         entry,
         vec![
-            ValueFact::proven(
-                ValueKindFact::Numeric(NumericFact {
-                    class: NumericClass::Double,
-                    domain: NumericDomain::Real,
-                }),
-                ShapeFact::Unknown,
-                StorageFact::Dense,
-            ),
+            ValueFact::unknown(DynamicReason::RuntimeValue),
             ValueFact::scalar(ValueKindFact::Logical),
         ],
         diagnostics,

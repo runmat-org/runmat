@@ -86,14 +86,20 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "str2num",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
+async fn str2num_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_bounded_outputs(
         &STR2NUM_DESCRIPTOR,
         &STR2NUM_ERROR_TOO_MANY_OUTPUTS,
         "str2num",
     )?;
+    let method = str2num_evaluation_method(&rest)?;
     if contains_numeric_or_resident_text_input(&text) {
         return Err(compat_error(
             "str2num",
@@ -104,15 +110,58 @@ async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
         .await
         .map_err(map_flow("str2num"))?;
     let text = scalar_text(&text, "str2num")?;
-    let (value, ok) = parse_str2num_matrix(&text);
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![value])),
-        Some(n) => Ok(crate::output_count::output_list_with_padding(
-            n,
-            vec![value, Value::Bool(ok)],
+    let runtime = runtime.ok_or_else(|| {
+        crate::context::RuntimeCapabilityError::new(
+            crate::context::RuntimeCapability::SourceEvaluation,
+            "evaluate str2num numeric expression",
+        )
+        .into_runtime_error()
+    })?;
+    let request =
+        crate::context::SessionSourceEvaluation::prepare_numeric_text(&runtime, &text, method)?;
+    let result = request.evaluate(runtime).await?;
+    result.try_map_owned(
+        |sequence| {
+            let value = sequence.as_slice().first().cloned();
+            let ok = value.is_some();
+            Ok(str2num_outputs(
+                value.unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0]))),
+                ok,
+            ))
+        },
+        |error| error.into_runtime_error(),
+    )
+}
+
+fn str2num_evaluation_method(
+    rest: &[Value],
+) -> BuiltinResult<crate::context::NumericTextEvaluation> {
+    use crate::context::NumericTextEvaluation;
+    match rest {
+        [] => Ok(NumericTextEvaluation::All),
+        [name, value] if scalar_text(name, "str2num")?.eq_ignore_ascii_case("Evaluation") => {
+            match scalar_text(value, "str2num")?.to_ascii_lowercase().as_str() {
+                "all" => Ok(NumericTextEvaluation::All),
+                "restricted" => Ok(NumericTextEvaluation::Restricted),
+                _ => Err(compat_error(
+                    "str2num",
+                    "str2num: Evaluation must be 'all' or 'restricted'",
+                )),
+            }
+        }
+        _ => Err(compat_error(
+            "str2num",
+            "str2num: expected one Evaluation name-value option",
         )),
-        None => Ok(value),
+    }
+}
+
+fn str2num_outputs(value: Value, ok: bool) -> Value {
+    match crate::output_count::current_output_count() {
+        Some(0) => Value::OutputList(Vec::new()),
+        Some(1) => Value::OutputList(vec![value]),
+        Some(n) => crate::output_count::output_list_with_padding(n, vec![value, Value::Bool(ok)]),
+        None => value,
     }
 }
 
@@ -546,54 +595,6 @@ fn char_rows_from_strings(rows: Vec<String>, fn_name: &str) -> BuiltinResult<Val
     }
     CharArray::new(data, row_count, cols)
         .map(Value::CharArray)
-        .map_err(|e| compat_error(fn_name, e))
-}
-
-fn parse_str2num_matrix(text: &str) -> (Value, bool) {
-    match parse_numeric_matrix(text, "str2num") {
-        Ok(value) => (value, true),
-        Err(_) => (Value::Tensor(Tensor::zeros(vec![0, 0])), false),
-    }
-}
-
-fn parse_numeric_matrix(text: &str, fn_name: &str) -> BuiltinResult<Value> {
-    let text = text.trim();
-    let text = text.strip_prefix('[').unwrap_or(text);
-    let text = text.strip_suffix(']').unwrap_or(text).trim();
-    let rows = text
-        .split(';')
-        .map(|row| {
-            row.split(|ch: char| ch.is_whitespace() || ch == ',')
-                .filter(|part| !part.is_empty())
-                .map(|part| {
-                    part.parse::<f64>().map_err(|_| {
-                        compat_error(
-                            fn_name,
-                            format!("{fn_name}: invalid numeric literal '{part}'"),
-                        )
-                    })
-                })
-                .collect::<BuiltinResult<Vec<_>>>()
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    if rows.is_empty() || rows.iter().all(Vec::is_empty) {
-        return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
-    }
-    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    if rows.iter().any(|row| row.len() != cols) {
-        return Err(compat_error(
-            fn_name,
-            format!("{fn_name}: rows must have the same number of columns"),
-        ));
-    }
-    let mut data = Vec::with_capacity(rows.len() * cols);
-    for col in 0..cols {
-        for row in &rows {
-            data.push(row[col]);
-        }
-    }
-    Tensor::new(data, vec![rows.len(), cols])
-        .map(Value::Tensor)
         .map_err(|e| compat_error(fn_name, e))
 }
 
@@ -1627,9 +1628,7 @@ mod tests {
         assert_eq!(decoded.shape, vec![2, 1]);
     }
 
-    fn block(
-        value: impl std::future::Future<Output = BuiltinResult<Value>>,
-    ) -> BuiltinResult<Value> {
+    fn block<T>(value: impl std::future::Future<Output = BuiltinResult<T>>) -> BuiltinResult<T> {
         futures::executor::block_on(value)
     }
 
@@ -2024,10 +2023,26 @@ mod tests {
             .unwrap(),
             Value::String("abc".into())
         );
+        let missing = block(str2num_builtin(
+            None,
+            Value::String("1 2; 3 4".into()),
+            Vec::new(),
+        ))
+        .expect_err("expression evaluation needs an executor-owned source service");
         assert_eq!(
-            block(str2num_builtin(Value::String("1 2; 3 4".into()))).unwrap(),
-            Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap())
+            missing.identifier(),
+            Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
         );
+        let bad_method = block(str2num_builtin(
+            None,
+            Value::String("1 2".into()),
+            vec![
+                Value::String("Evaluation".into()),
+                Value::String("other".into()),
+            ],
+        ))
+        .expect_err("invalid Evaluation method must precede text evaluation");
+        assert!(bad_method.message().contains("Evaluation must be"));
         assert_eq!(
             block(mat2str_builtin(
                 Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap()),
@@ -2309,7 +2324,7 @@ mod tests {
                 strtok.identifier(),
                 STRTOK_ERROR_TOO_MANY_OUTPUTS.identifier
             );
-            let str2num = block(str2num_builtin(Value::Num(7.0)))
+            let str2num = block(str2num_builtin(None, Value::Num(7.0), Vec::new()))
                 .expect_err("str2num must reject excess outputs first");
             assert_eq!(
                 str2num.identifier(),

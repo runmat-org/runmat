@@ -437,6 +437,18 @@ pub(super) fn plan_local_multi_with_provider(
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
     if admitted.is_empty() && cpu.route.cost.estimate().is_some() {
         if cpu_resources.is_none() {
+            // A VM-owned fusion window can decline this optimization and run
+            // its original instructions. That is not a host candidate for
+            // this whole group and must not receive a completion receipt.
+            if vm_right.is_some() {
+                if let Some((_, _, code)) = rejected.first() {
+                    return Ok(LocalPlacementOutcome::ProviderRejected {
+                        code: *code,
+                        cpu_cost,
+                        feedback: None,
+                    });
+                }
+            }
             return Err(Box::new(
                 runmat_runtime::build_runtime_error(
                     "typed provider candidates rejected and no executable host route exists",

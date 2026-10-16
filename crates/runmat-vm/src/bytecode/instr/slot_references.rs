@@ -322,7 +322,7 @@ fn visit_specs(specs: &[ArgumentSpec], visit: &mut impl FnMut(usize, VmSlotAcces
 fn visit_label(label: &EmitLabel, visit: &mut impl FnMut(usize, VmSlotAccess)) {
     match label {
         EmitLabel::Var(slot) => visit(*slot, VmSlotAccess::Other),
-        EmitLabel::Ans => {}
+        EmitLabel::Ans | EmitLabel::InternalCapture => {}
     }
 }
 

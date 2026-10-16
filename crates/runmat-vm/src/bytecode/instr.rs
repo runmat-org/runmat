@@ -187,6 +187,9 @@ impl BytecodeCollectiveOp {
 pub enum EmitLabel {
     Ans,
     Var(usize),
+    /// An internal numeric-text result site. The following StoreVar owns the
+    /// expression value; no statement echo or provider gather is permitted.
+    InternalCapture,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

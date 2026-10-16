@@ -30,6 +30,12 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                 // Normalize numeric literals: remove underscores in integers/floats
                 if matches!(tok, Token::Float | Token::Integer) {
                     s.retain(|c| c != '_');
+                    // MATLAB-style d/D exponents have the same numeric value
+                    // as e/E. Normalize once at the lexical boundary so all
+                    // HIR, MIR, and execution consumers see one float grammar.
+                    if matches!(tok, Token::Float) {
+                        s = s.replace(['d', 'D'], "e");
+                    }
                 }
                 let span = lex.span();
 
@@ -43,6 +49,7 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                         if let Some(len) = scan_leading_dot_float_suffix(rem) {
                             let mut lexeme = format!(".{}", &rem[..len]);
                             lexeme.retain(|c| c != '_');
+                            lexeme = lexeme.replace(['d', 'D'], "e");
                             lex.bump(len);
                             lex.extras.last_was_value = true;
                             lex.extras.line_start = false;

@@ -148,6 +148,7 @@ pub struct UserCallContext<'a> {
     pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
+    pub source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub current_function_name: &'a str,
     pub imports: &'a [(Vec<String>, bool)],
@@ -181,6 +182,7 @@ pub struct WorkspaceFirstCallContext<'a> {
     pub bare_identifier: bool,
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
+    pub source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub current_function_name: &'a str,
     pub imports: &'a [(Vec<String>, bool)],
@@ -420,6 +422,7 @@ pub async fn handle_prepared_user_function_call(
         fallback_policy,
         out_count,
         source_id,
+        source_ref,
         call_arg_spans,
         current_function_name,
         imports,
@@ -436,7 +439,7 @@ pub async fn handle_prepared_user_function_call(
 
     let preparation_callsite_guard =
         runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans.clone());
-    let prepared = user_preparation::prepare(
+    let mut prepared = user_preparation::prepare(
         identity,
         bound,
         fallback_policy,
@@ -445,6 +448,13 @@ pub async fn handle_prepared_user_function_call(
         current_class_context.as_ref(),
         imports,
     )?;
+    prepared.descriptor.metadata.source_id = source_id;
+    prepared.descriptor.metadata.source_ref = source_ref;
+    prepared.descriptor.metadata.source_invocation = Some(
+        runtime
+            .invocation_arity()
+            .unwrap_or(runmat_runtime::context::RuntimeInvocationArity::Script),
+    );
     drop(preparation_callsite_guard);
     let result = if let Some(driver) =
         process_driver.filter(|_| descriptor_needs_continuation(&prepared.descriptor))
@@ -541,6 +551,7 @@ pub async fn handle_workspace_first_prepared_call(
         bare_identifier,
         out_count,
         source_id,
+        source_ref,
         call_arg_spans,
         current_function_name,
         imports,
@@ -644,6 +655,7 @@ pub async fn handle_workspace_first_prepared_call(
             fallback_policy,
             out_count,
             source_id,
+            source_ref,
             call_arg_spans,
             current_function_name,
             imports,

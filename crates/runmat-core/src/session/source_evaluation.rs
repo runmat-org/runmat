@@ -149,9 +149,7 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
             Ok(registry) => registry,
             Err(error) => return Box::pin(async move { Err(error) }),
         };
-        let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
-            self.base_workspace.clone(),
-        ));
+        let base_workspace = self.base_workspace.clone();
         let source_lease = self.source_lease.clone();
         let evaluator = self.evaluator.clone();
         let admission = self.admission.clone();
@@ -178,11 +176,33 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
             let runtime = runtime
                 .without_selected_graph_program()
                 .with_language_policy(policy);
-            let services = runtime
-                .service_ports()
-                .clone()
-                .with_base_workspace(base_service);
-            let runtime = runtime.with_service_ports(services);
+            let runtime = if matches!(
+                request.purpose(),
+                runmat_runtime::context::SessionSourcePurpose::WorkspaceCallback
+            ) {
+                let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+                    base_workspace,
+                ));
+                let services = runtime
+                    .service_ports()
+                    .clone()
+                    .with_base_workspace(base_service);
+                runtime.with_service_ports(services)
+            } else if matches!(
+                request.purpose(),
+                runmat_runtime::context::SessionSourcePurpose::NumericText(
+                    runmat_runtime::context::NumericTextEvaluation::All
+                )
+            ) {
+                let mut services = runtime.service_ports().clone().without_base_workspace();
+                if let Some(base) = request.explicit_base_workspace() {
+                    services = services.with_base_workspace(base);
+                }
+                runtime.with_service_ports(services)
+            } else {
+                let services = runtime.service_ports().clone().without_base_workspace();
+                runtime.with_service_ports(services)
+            };
             let _evaluator = evaluator.upgrade().ok_or_else(|| {
                 build_runtime_error("source evaluation session has ended")
                     .with_identifier("RunMat:SourceEvaluation:RetiredSession")
@@ -197,20 +217,38 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
                 source_lease,
                 port: admission,
             };
-            runtime
-                .clone()
-                .scope(
-                    runmat_vm::evaluate_session_source_with_dynamic_admission_in_context(
-                        runtime,
-                        source,
-                        source_label,
-                        source_ref,
-                        requested_outputs,
-                        &registry,
-                        Some(selected),
-                    ),
-                )
-                .await
+            match request.purpose() {
+                runmat_runtime::context::SessionSourcePurpose::WorkspaceCallback => {
+                    runtime
+                        .clone()
+                        .scope(
+                            runmat_vm::evaluate_session_source_with_dynamic_admission_in_context(
+                                runtime,
+                                source,
+                                source_label,
+                                source_ref,
+                                requested_outputs,
+                                &registry,
+                                Some(selected),
+                            ),
+                        )
+                        .await
+                }
+                runmat_runtime::context::SessionSourcePurpose::NumericText(method) => {
+                    runtime
+                        .clone()
+                        .scope(runmat_vm::evaluate_numeric_text_source_in_context(
+                            runtime,
+                            source,
+                            source_label,
+                            source_ref,
+                            method,
+                            &registry,
+                            selected,
+                        ))
+                        .await
+                }
+            }
         })
     }
 }
@@ -763,6 +801,201 @@ mod tests {
         assert_eq!(
             error.identifier(),
             Some("RunMat:SourceEvaluation:GenerationInvalidated")
+        );
+    }
+
+    #[test]
+    fn numeric_text_uses_captured_generation_without_base_workspace_publication() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let evaluator = SessionSourceEvaluator::new(owner.clone(), runtime.local_identity());
+        let _publication = evaluator
+            .publish_for_execution(runmat_vm::FunctionRegistry::default(), None)
+            .expect("publish exact generation");
+        let bound = evaluator
+            .bind_background_authority()
+            .expect("bind generation");
+        let base = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+        let runtime = runtime.with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_workspace(base.clone())
+                .with_base_workspace(base)
+                .with_source_evaluation(bound),
+        );
+        let request = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "1+2",
+            runmat_runtime::context::NumericTextEvaluation::Restricted,
+        )
+        .expect("capture numeric expression");
+        let result = futures::executor::block_on(request.evaluate(runtime.clone()))
+            .expect("evaluate through VM compiler");
+        assert_eq!(result.as_slice().len(), 1);
+        match &result.as_slice()[0] {
+            runmat_value::Value::Num(value) => assert_eq!(*value, 3.0),
+            runmat_value::Value::Tensor(value) => {
+                assert_eq!(value.as_f64_slice(), Some([3.0].as_slice()))
+            }
+            other => panic!("numeric expression produced {other:?}"),
+        }
+        let matrix = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "1 2; 3 4",
+            runmat_runtime::context::NumericTextEvaluation::Restricted,
+        )
+        .expect("capture numeric matrix");
+        let matrix = futures::executor::block_on(matrix.evaluate(runtime.clone()))
+            .expect("evaluate matrix through canonical parser");
+        assert!(matches!(
+            matrix.as_slice(),
+            [runmat_value::Value::Tensor(value)]
+                if value.shape() == [2, 2]
+                    && value.as_f64_slice() == Some([1.0, 3.0, 2.0, 4.0].as_slice())
+        ));
+        let exponent_matrix = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "1D3 .5d-2; 2D+1 4e0",
+            runmat_runtime::context::NumericTextEvaluation::Restricted,
+        )
+        .expect("capture decimal-exponent matrix");
+        let exponent_matrix =
+            futures::executor::block_on(exponent_matrix.evaluate(runtime.clone()))
+                .expect("evaluate decimal exponents through the canonical parser");
+        assert!(matches!(
+            exponent_matrix.as_slice(),
+            [runmat_value::Value::Tensor(value)]
+                if value.shape() == [2, 2]
+                    && value.as_f64_slice() == Some([1000.0, 20.0, 0.005, 4.0].as_slice())
+        ));
+        let function = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "exp(2)",
+            runmat_runtime::context::NumericTextEvaluation::Restricted,
+        )
+        .expect("capture numerical function");
+        let function = futures::executor::block_on(function.evaluate(runtime.clone()))
+            .expect("evaluate through existing callable path");
+        assert_eq!(function.as_slice().len(), 1);
+        let observed = match &function.as_slice()[0] {
+            runmat_value::Value::Num(value) => *value,
+            runmat_value::Value::Tensor(value) => value.as_f64_slice().expect("double result")[0],
+            other => panic!("numerical function produced {other:?}"),
+        };
+        assert!((observed - 2.0f64.exp()).abs() < 1e-12);
+        let all_numeric = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "1+2",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture default-all numeric expression");
+        let all_numeric = futures::executor::block_on(all_numeric.evaluate(runtime.clone()))
+            .expect("default-all ordinary numeric expression");
+        match all_numeric.as_slice() {
+            [runmat_value::Value::Num(value)] => assert_eq!(*value, 3.0),
+            [runmat_value::Value::Tensor(value)] => {
+                assert_eq!(value.as_f64_slice(), Some([3.0].as_slice()))
+            }
+            other => panic!("default-all numeric expression produced {other:?}"),
+        }
+        let invalid = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "[1",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture malformed text");
+        assert!(
+            futures::executor::block_on(invalid.evaluate(runtime.clone()))
+                .expect("syntax failure is failed conversion")
+                .as_slice()
+                .is_empty()
+        );
+        let malformed_matrix = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "1 2; 3",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture valid syntax with invalid matrix geometry");
+        assert!(
+            futures::executor::block_on(malformed_matrix.evaluate(runtime.clone()))
+                .expect("source-owned matrix shape failure is failed conversion")
+                .as_slice()
+                .is_empty()
+        );
+        let selected_callee = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "reshape([1 2], 2, 2)",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture selected numerical call");
+        futures::executor::block_on(selected_callee.evaluate(runtime.clone()))
+            .expect_err("selected callee's shape error is not a matrix-literal conversion");
+        let undefined = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "unknown_numeric_name",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture undefined expression name");
+        assert!(
+            futures::executor::block_on(undefined.evaluate(runtime.clone()))
+                .expect("typed undefined source name is failed conversion")
+                .as_slice()
+                .is_empty()
+        );
+        let missing_call = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "missing_numeric_function(2)",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture unresolved numeric call");
+        assert!(
+            futures::executor::block_on(missing_call.evaluate(runtime.clone()))
+                .expect("no selected target at the captured source is failed conversion")
+                .as_slice()
+                .is_empty()
+        );
+        let rejected = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "missing_numeric_function(2)",
+            runmat_runtime::context::NumericTextEvaluation::Restricted,
+        )
+        .expect("capture rejected expression");
+        assert!(
+            futures::executor::block_on(rejected.evaluate(runtime.clone()))
+                .expect("restricted admission returns failed conversion")
+                .as_slice()
+                .is_empty()
+        );
+        // A numeric-text evaluation has no implicit base-workspace projection.
+        assert_eq!(owner.snapshot().expect("snapshot base workspace").len(), 0);
+
+        let mut seed = runmat_runtime::workspace::WorkspaceDelta::new();
+        seed.assign("base_answer", runmat_value::Value::Num(11.0))
+            .expect("valid base binding");
+        owner.apply(seed).expect("seed explicit base workspace");
+        let explicit_base = SessionSourceEvaluation::prepare_numeric_text(
+            &runtime,
+            "evalin('base', 'base_answer')",
+            runmat_runtime::context::NumericTextEvaluation::All,
+        )
+        .expect("capture explicit base access with host-granted port");
+        let explicit_base = futures::executor::block_on(explicit_base.evaluate(runtime))
+            .expect("All-mode explicit base read uses the captured service");
+        match explicit_base.as_slice() {
+            [runmat_value::Value::Num(value)] => assert_eq!(*value, 11.0),
+            [runmat_value::Value::Tensor(value)] => {
+                assert_eq!(value.as_f64_slice(), Some([11.0].as_slice()))
+            }
+            other => panic!("explicit base expression produced {other:?}"),
+        }
+        let snapshot = owner.snapshot().expect("base remains live");
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(
+            snapshot.get("base_answer"),
+            Some(&runmat_value::Value::Num(11.0))
         );
     }
 }

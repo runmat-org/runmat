@@ -22,8 +22,8 @@ pub(crate) use eval_hir_sites::SelectedClosureCapture;
 mod source_evaluation;
 pub use eval_static_selection::EvalSelectedSource;
 pub use source_evaluation::{
-    evaluate_session_source_in_context, evaluate_session_source_with_dynamic_admission_in_context,
-    DynamicSessionEvalAdmission,
+    evaluate_numeric_text_source_in_context, evaluate_session_source_in_context,
+    evaluate_session_source_with_dynamic_admission_in_context, DynamicSessionEvalAdmission,
 };
 
 #[derive(Clone, Copy)]
@@ -557,6 +557,7 @@ pub struct DynamicEvalCompileProduct {
     pub(crate) selected_natives: Vec<eval_static_selection::EvalSelectedNative>,
     workspace_bindings: HashMap<String, usize>,
     requested_outputs: usize,
+    result_capture: DynamicEvalResultCapture,
     source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
 }
 
@@ -642,6 +643,7 @@ impl DynamicEvalCompileProduct {
             &mut admitted,
             self.requested_outputs,
             &self.workspace_bindings,
+            self.result_capture,
         );
         if result_slot != self.result_slot {
             return Err(mex(
@@ -908,8 +910,40 @@ enum DynamicEvalCompiled {
     Selected(Box<DynamicEvalCompileProduct>),
 }
 
+/// Keep the source-lowering cause until a consumer chooses its conversion
+/// policy. Existing eval callers project the identical RuntimeError; numeric
+/// text may recognize only explicitly typed invalid-source causes.
+struct DynamicEvalCompileFailure {
+    error: RuntimeError,
+    source_kind: Option<runmat_hir::HirErrorKind>,
+}
+
+impl From<RuntimeError> for DynamicEvalCompileFailure {
+    fn from(error: RuntimeError) -> Self {
+        Self {
+            error,
+            source_kind: None,
+        }
+    }
+}
+
+impl From<DynamicEvalCompileFailure> for RuntimeError {
+    fn from(failure: DynamicEvalCompileFailure) -> Self {
+        failure.error
+    }
+}
+
 type DynamicProductSelector<'a> =
     &'a dyn Fn(&Bytecode, &FunctionRegistry) -> Result<bool, RuntimeError>;
+
+/// The internal numeric-text source is one bracketed expression statement.
+/// Await lowering can put its output before a trailing control-flow return, so
+/// it cannot use eval's historical terminal-Pop capture rule.
+#[derive(Clone, Copy)]
+enum DynamicEvalResultCapture {
+    TerminalPop,
+    ExpressionStatement,
+}
 
 struct DynamicEvalCompileRequest<'a> {
     builtin: &'a str,
@@ -919,6 +953,7 @@ struct DynamicEvalCompileRequest<'a> {
     function_registry: &'a FunctionRegistry,
     source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     requested_outputs: usize,
+    result_capture: DynamicEvalResultCapture,
     select_product: Option<DynamicProductSelector<'a>>,
     selected_sources: eval_static_selection::EvalSelectedSources,
 }
@@ -1005,6 +1040,7 @@ async fn eval_workspace_source(
             function_registry: &function_registry,
             source_ref,
             requested_outputs,
+            result_capture: DynamicEvalResultCapture::TerminalPop,
             select_product: dynamic_admission
                 .as_ref()
                 .map(|_| &requires_product as DynamicProductSelector<'_>),
@@ -1347,6 +1383,7 @@ fn compile_dynamic_workspace_eval(
         function_registry,
         source_ref,
         requested_outputs,
+        result_capture: DynamicEvalResultCapture::TerminalPop,
         select_product: None,
         selected_sources: eval_static_selection::EvalSelectedSources::default(),
     })
@@ -1377,6 +1414,7 @@ pub fn compile_dynamic_workspace_eval_product(
         function_registry,
         source_ref,
         requested_outputs,
+        result_capture: DynamicEvalResultCapture::TerminalPop,
         select_product: Some(&|_, _| Ok(true)),
         selected_sources: eval_static_selection::EvalSelectedSources::default(),
     })
@@ -1391,6 +1429,12 @@ pub fn compile_dynamic_workspace_eval_product(
 fn compile_dynamic_workspace_eval_inner(
     request: DynamicEvalCompileRequest<'_>,
 ) -> Result<Option<DynamicEvalCompiled>, RuntimeError> {
+    compile_dynamic_workspace_eval_inner_typed(request).map_err(Into::into)
+}
+
+fn compile_dynamic_workspace_eval_inner_typed(
+    request: DynamicEvalCompileRequest<'_>,
+) -> Result<Option<DynamicEvalCompiled>, DynamicEvalCompileFailure> {
     let DynamicEvalCompileRequest {
         builtin,
         ast,
@@ -1399,6 +1443,7 @@ fn compile_dynamic_workspace_eval_inner(
         function_registry,
         source_ref,
         requested_outputs,
+        result_capture,
         select_product,
         selected_sources,
     } = request;
@@ -1427,7 +1472,8 @@ fn compile_dynamic_workspace_eval_inner(
             return Err(mex(
                 "DynamicWorkspaceCompile",
                 "selected source alias collides with an existing function signature",
-            ));
+            )
+            .into());
         }
     }
     let mut bound_names = function_registry.names.clone();
@@ -1445,11 +1491,12 @@ fn compile_dynamic_workspace_eval_inner(
             .with_runmat_extensions_enabled(options.runmat_extensions_enabled)
             .with_top_level_await_enabled(options.top_level_await_enabled),
     )
-    .map_err(|err| {
-        mex(
+    .map_err(|err| DynamicEvalCompileFailure {
+        source_kind: Some(err.kind),
+        error: mex(
             "DynamicWorkspaceLower",
             &format!("{builtin}: lowering error: {err}"),
-        )
+        ),
     })?;
     let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
         return Ok(None);
@@ -1480,7 +1527,8 @@ fn compile_dynamic_workspace_eval_inner(
         return Err(mex(
             "DynamicWorkspaceCompile",
             "selected eval source or native artifact has no product admission",
-        ));
+        )
+        .into());
     }
     let canonical_bytecode = retain_product.then(|| bytecode.clone());
     if source_ref.is_some() {
@@ -1505,8 +1553,12 @@ fn compile_dynamic_workspace_eval_inner(
         })?;
     }
     let workspace_slot_remap = remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings);
-    let result_slot =
-        retain_dynamic_result_slot(&mut bytecode, requested_outputs, workspace_bindings);
+    let result_slot = retain_dynamic_result_slot(
+        &mut bytecode,
+        requested_outputs,
+        workspace_bindings,
+        result_capture,
+    );
     Ok(Some(match canonical_bytecode {
         Some(canonical_bytecode) => {
             DynamicEvalCompiled::Selected(Box::new(DynamicEvalCompileProduct {
@@ -1522,6 +1574,7 @@ fn compile_dynamic_workspace_eval_inner(
                 selected_natives: selected_sources.natives,
                 workspace_bindings: workspace_bindings.clone(),
                 requested_outputs,
+                result_capture,
                 source_ref,
             }))
         }
@@ -1601,6 +1654,7 @@ pub(crate) async fn compile_pending_closure(
         function_registry: &plan.inherited,
         source_ref: plan.source_ref,
         requested_outputs: plan.requested_outputs,
+        result_capture: DynamicEvalResultCapture::TerminalPop,
         select_product: Some(&|_, _| Ok(true)),
         selected_sources,
     })?
@@ -1662,11 +1716,29 @@ fn retain_dynamic_result_slot(
     bytecode: &mut Bytecode,
     requested_outputs: usize,
     workspace_bindings: &HashMap<String, usize>,
+    capture: DynamicEvalResultCapture,
 ) -> Option<usize> {
-    if requested_outputs == 0 || !matches!(bytecode.instructions.last(), Some(Instr::Pop)) {
+    if requested_outputs == 0 {
         return None;
     }
-    bytecode.instructions.pop();
+    let expression_pop = match capture {
+        DynamicEvalResultCapture::TerminalPop => {
+            matches!(bytecode.instructions.last(), Some(Instr::Pop))
+                .then_some(bytecode.instructions.len().saturating_sub(1))
+        }
+        DynamicEvalResultCapture::ExpressionStatement => {
+            let mut positions =
+                bytecode
+                    .instructions
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(|(pc, pair)| {
+                        matches!(pair, [Instr::EmitStackTop { .. }, Instr::Pop]).then_some(pc + 1)
+                    });
+            let position = positions.next()?;
+            positions.next().is_none().then_some(position)
+        }
+    }?;
     let next_workspace_slot = workspace_bindings
         .values()
         .copied()
@@ -1674,7 +1746,25 @@ fn retain_dynamic_result_slot(
         .map(|slot| slot + 1)
         .unwrap_or(0);
     let temp_slot = bytecode.var_count.max(next_workspace_slot);
-    bytecode.instructions.push(Instr::StoreVar(temp_slot));
+    match capture {
+        DynamicEvalResultCapture::TerminalPop => {
+            bytecode.instructions.pop();
+            bytecode.instructions.push(Instr::StoreVar(temp_slot));
+        }
+        DynamicEvalResultCapture::ExpressionStatement => {
+            // Keep the instruction count and all resume-point PCs unchanged.
+            // The preceding typed statement-output opcode proves this Pop
+            // consumes the expression being converted. Its capture-only label
+            // prevents internal conversion from publishing an `ans` echo or
+            // gathering a resident result solely for display.
+            let Instr::EmitStackTop { label } = &mut bytecode.instructions[expression_pop - 1]
+            else {
+                unreachable!("expression capture site must follow a statement output");
+            };
+            *label = crate::bytecode::EmitLabel::InternalCapture;
+            bytecode.instructions[expression_pop] = Instr::StoreVar(temp_slot);
+        }
+    }
     bytecode.var_count = temp_slot + 1;
     Some(temp_slot)
 }

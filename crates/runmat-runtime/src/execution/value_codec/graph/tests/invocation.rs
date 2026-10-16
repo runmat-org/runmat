@@ -13,7 +13,7 @@ fn typed_bound_target_uses_selected_proof_without_name_redispatch() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let issuer = GraphSourceIssuer::capture_session(&runtime);
-        let invocation = DeferredInvocation::Callable(CallableDescriptor::bound(
+        let invocation = DeferredInvocation::callable(CallableDescriptor::bound(
             // The selected session ID is not the portable function ordinal.
             BoundFunctionBinding::portable(23, origin(3)),
             vec![Value::Num(7.0)],
@@ -73,7 +73,7 @@ fn typed_bound_target_rejects_mismatched_local_definition_lease() {
         ));
         let issuer = GraphSourceIssuer::capture_session(&runtime);
         let definition = Arc::new(FunctionDefinitionOwner::default());
-        let invocation = DeferredInvocation::Callable(CallableDescriptor::bound(
+        let invocation = DeferredInvocation::callable(CallableDescriptor::bound(
             BoundFunctionBinding::local(
                 3,
                 runtime.session_lease(),
@@ -100,7 +100,7 @@ fn prepared_bound_target_has_no_wire_node_before_exact_unit_selection() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let issuer = GraphSourceIssuer::capture_session(&runtime);
-        let invocation = DeferredInvocation::Callable(CallableDescriptor::bound(
+        let invocation = DeferredInvocation::callable(CallableDescriptor::bound(
             BoundFunctionBinding::portable(3, origin(3)),
             vec![Value::Num(7.0)],
             1,

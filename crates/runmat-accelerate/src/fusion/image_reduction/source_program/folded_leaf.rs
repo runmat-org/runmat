@@ -6,8 +6,8 @@ use runmat_execution::Digest;
 use runmat_value::Value;
 
 use crate::graph::{
-    AccelGraph, AccelGraphTag, AccelNodeLabel, AccelOpCategory, FusionCallOrigin, PrimitiveOp,
-    ShapeInfo, ValueId, ValueOrigin,
+    AccelGraph, AccelGraphTag, AccelNodeLabel, AccelOpCategory, FusionCallOrigin, ShapeInfo,
+    ValueId, ValueOrigin,
 };
 
 /// Admit only a compiler-marked immutable producer that precedes this use.
@@ -28,38 +28,7 @@ pub(super) fn digest(graph: &AccelGraph, id: ValueId, before_pc: usize) -> Optio
     }
     let represented = info.constant.as_ref()?;
     if producer.tags.as_slice() == [AccelGraphTag::FoldedLiteralArray] {
-        let Value::Tensor(tensor) = represented else {
-            return None;
-        };
-        let [rows, cols] = tensor.shape() else {
-            return None;
-        };
-        let elements = tensor.as_f64_slice()?;
-        if producer.category != AccelOpCategory::Other
-            || producer.label != AccelNodeLabel::Primitive(PrimitiveOp::UPlus)
-            || info.shape != ShapeInfo::Tensor(vec![Some(*rows), Some(*cols)])
-            || info.ty
-                != (Type::Tensor {
-                    shape: Some(vec![Some(*rows), Some(*cols)]),
-                })
-            || producer.inputs.len() != rows.checked_mul(*cols)?
-            || elements.len() != producer.inputs.len()
-        {
-            return None;
-        }
-        for (position, source) in producer.inputs.iter().enumerate() {
-            let source_info = graph.value(*source)?;
-            let (ValueOrigin::Constant, Some(Value::Num(number))) =
-                (&source_info.origin, &source_info.constant)
-            else {
-                return None;
-            };
-            let row = position / *cols;
-            let col = position % *cols;
-            if elements[row + col * *rows].to_bits() != number.to_bits() {
-                return None;
-            }
-        }
+        graph.exact_folded_literal_array(id)?;
     } else if producer.tags.contains(&AccelGraphTag::UnaryScalarFold) {
         if producer.category != AccelOpCategory::Elementwise
             || producer.tags.as_slice()

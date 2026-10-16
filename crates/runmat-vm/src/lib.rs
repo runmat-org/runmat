@@ -69,10 +69,10 @@ pub use bytecode::{
     ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use call::builtins::{
-    compile_dynamic_workspace_eval_product, evaluate_session_source_in_context,
-    evaluate_session_source_with_dynamic_admission_in_context, push_dynamic_eval_options,
-    set_dynamic_eval_options, DynamicEvalCompileProduct, DynamicSessionEvalAdmission,
-    EvalSelectedSource,
+    compile_dynamic_workspace_eval_product, evaluate_numeric_text_source_in_context,
+    evaluate_session_source_in_context, evaluate_session_source_with_dynamic_admission_in_context,
+    push_dynamic_eval_options, set_dynamic_eval_options, DynamicEvalCompileProduct,
+    DynamicSessionEvalAdmission, EvalSelectedSource,
 };
 pub use compiler::CompileError;
 pub use interpreter::dynamic_admission::{

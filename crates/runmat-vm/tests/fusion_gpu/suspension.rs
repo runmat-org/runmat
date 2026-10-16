@@ -582,13 +582,13 @@ fn witness(resident: bool, cancel: bool) {
         drop(execution);
         assert_eq!(probe.drops.get(), 1);
         let profile = placement.profile_snapshot();
-        let feedback = profile
-            .feedback
-            .iter()
-            .find(|series| series.candidate.contains("fusion.elementwise"))
-            .expect("selected typed fusion reports terminal failure");
-        assert_eq!(feedback.samples, 0);
-        assert_eq!(feedback.failures, 1);
+        assert!(
+            profile
+                .feedback
+                .iter()
+                .all(|series| !series.candidate.contains("fusion.elementwise")),
+            "pending VM FullCall restoration has no completed candidate total to train"
+        );
         assert_eq!(
             probe.polls.get(),
             1,

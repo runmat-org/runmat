@@ -26,6 +26,7 @@ use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::future::Future;
 
+pub(crate) use arrays::MatrixConstructionAtSource;
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };

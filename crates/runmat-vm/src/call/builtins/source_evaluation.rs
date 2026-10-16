@@ -1,8 +1,9 @@
-//! Executor-owned source evaluation against a session base workspace.
+//! Executor-owned source evaluation for base-workspace callbacks and isolated text.
 
 use super::{
-    compile_dynamic_workspace_eval_inner, parse_dynamic_eval, DynamicEvalCompileRequest,
-    DynamicEvalCompiled, FunctionRegistry,
+    compile_dynamic_workspace_eval_inner, compile_dynamic_workspace_eval_inner_typed,
+    parse_dynamic_eval, DynamicEvalCompileRequest, DynamicEvalCompiled, DynamicEvalResultCapture,
+    FunctionRegistry,
 };
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
@@ -11,6 +12,10 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+
+#[path = "source_evaluation/numeric_text.rs"]
+mod numeric_text;
+pub use numeric_text::evaluate_numeric_text_source_in_context;
 
 /// Execute executor-owned source text against the session's canonical base
 /// workspace. Asynchronous callbacks enter here without borrowing an ambient
@@ -120,6 +125,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         function_registry,
         source_ref: Some(source_ref),
         requested_outputs,
+        result_capture: DynamicEvalResultCapture::TerminalPop,
         select_product: selected.as_ref().map(|_| {
             &requires_product
                 as &dyn Fn(

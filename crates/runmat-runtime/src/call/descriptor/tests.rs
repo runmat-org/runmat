@@ -36,21 +36,37 @@ impl RuntimeBuiltinService for FailingBuiltin {
 fn selected_named_fallback_error_is_not_absence_or_replayed() {
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(FailingBuiltin)));
+    let source = crate::source_context::lease_source_context_in_context(
+        &runtime,
+        "selected-numeric-expression",
+        None,
+        "logical(1)",
+    )
+    .expect("issued selected source");
     for identifier in ["RunMat:UndefinedFunction", "RunMat:ProbeReceiverInvalid"] {
         CALLS.with(|calls| calls.set(0));
         DIAGNOSTIC.with(|diagnostic| diagnostic.set(identifier));
-        let descriptor = CallableDescriptor::resolved(
+        let mut descriptor = CallableDescriptor::resolved(
             CallableIdentity::DynamicName(runmat_types::SymbolName("logical".into())),
             vec![Value::Num(1.0)],
             1,
             CallableFallbackPolicy::RuntimeNameResolution,
             CallableCallKind::Direct,
         );
+        descriptor.metadata.source_id = Some(source.source_id());
+        descriptor.metadata.source_ref = Some(source.source_ref());
+        descriptor.metadata.source_invocation =
+            Some(crate::context::RuntimeInvocationArity::Script);
         let err = futures::executor::block_on(try_execute_callable_descriptor_in_context(
             &runtime, descriptor,
         ))
         .expect_err("the selected builtin error must propagate");
         assert_eq!(err.identifier(), Some(identifier));
+        assert!(err
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<MissingCallableTarget>())
+            .is_none());
         assert_eq!(
             err.failure_origin(),
             crate::runtime_error::RuntimeFailureOrigin::Unclassified
@@ -63,12 +79,21 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
 fn absent_named_callable_is_a_producer_classified_language_failure() {
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
     let _scope = runtime.enter();
+    let source = crate::source_context::lease_source_context_in_context(
+        &runtime,
+        "numeric-expression",
+        None,
+        "missing_numeric_function(2)",
+    )
+    .expect("issued source");
     let error = futures::executor::block_on(forward_named_fallback(
         Some(&runtime),
         "__runmat_missing_input_callable__".into(),
         Vec::new(),
         1,
         None,
+        Some(source.source_ref()),
+        Some(crate::context::RuntimeInvocationArity::Script),
     ))
     .expect_err("missing callable");
     assert_eq!(
@@ -76,6 +101,28 @@ fn absent_named_callable_is_a_producer_classified_language_failure() {
         crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation
     );
     assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
+    let missing = error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<MissingCallableTarget>())
+        .expect("only absent selection carries the typed source cause");
+    assert!(missing.in_source_script(source.source_ref()));
+    let other_runtime =
+        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+    let other_source = crate::source_context::lease_source_context_in_context(
+        &other_runtime,
+        "other-numeric-expression",
+        None,
+        "missing_numeric_function(2)",
+    )
+    .expect("separate issuer");
+    assert_eq!(source.source_id(), other_source.source_id());
+    assert!(!missing.in_source_script(other_source.source_ref()));
+    let nested = MissingCallableTarget {
+        source: source.source_ref(),
+        invocation_arity: crate::context::RuntimeInvocationArity::function(1, 1),
+    };
+    assert!(!nested.in_source_script(source.source_ref()));
 }
 
 #[test]

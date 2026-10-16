@@ -65,7 +65,7 @@ mod tests {
 
     fn deferred() -> DeferredCall {
         DeferredCall {
-            invocation: DeferredInvocation::Callable(
+            invocation: DeferredInvocation::callable(
                 crate::call::descriptor::CallableDescriptor::resolved(
                     runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(1)),
                     vec![],

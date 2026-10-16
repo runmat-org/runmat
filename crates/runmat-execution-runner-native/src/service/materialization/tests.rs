@@ -70,7 +70,7 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
     let scope_id = crate::config::fresh_scope_id(b"materialization-test", 1);
     let id = FutureId::derive(&[scope_id.bytes(), b"future"]);
     let call = DeferredCall {
-        invocation: DeferredInvocation::Callable(CallableDescriptor {
+        invocation: DeferredInvocation::callable(CallableDescriptor {
             target: CallableTarget::FevalForward(Value::Num(13.0)),
             args: vec![Value::Num(29.0)],
             requested_outputs: 1,

@@ -77,8 +77,9 @@ fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
 fn graph_for_fusion_test(
     bytecode: &runmat_vm::Bytecode,
 ) -> Option<runmat_accelerate::graph::AccelGraph> {
-    let runtime_groups = bytecode.runtime_fusion_groups();
-    bytecode.runtime_accel_graph_for_fusion(&runtime_groups)
+    bytecode
+        .reconciled_runtime_fusion_graph()
+        .map(|(graph, _)| graph)
 }
 
 #[test]
@@ -235,6 +236,9 @@ impl AccelProvider for TestProvider {
         const OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
             ("transfer.upload", ProviderOperationFamily::Upload),
             ("transfer.download", ProviderOperationFamily::Download),
+            ("sin", ProviderOperationFamily::Elementwise),
+            ("single", ProviderOperationFamily::Elementwise),
+            ("sum", ProviderOperationFamily::Reduction),
             ("fusion.elementwise", ProviderOperationFamily::Fusion),
             ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
             ("fusion.centered_gram", ProviderOperationFamily::Fusion),
@@ -286,6 +290,57 @@ impl AccelProvider for TestProvider {
             == ProviderOperationIdentity::new(
                 runmat_accelerate::placement::fusion_operation_token(&FusionKind::ElementwiseChain),
             );
+        let ordinary = match (
+            query.operation.0.as_str(),
+            query.family,
+            query.inputs.as_slice(),
+        ) {
+            ("sin", ProviderOperationFamily::Elementwise, [input])
+                if input.element_type == ProviderElementType::F64
+                    && input.storage == ProviderStorage::DenseReal
+                    && query.outputs.is_empty() =>
+            {
+                input.checked_byte_len()
+            }
+            ("single", ProviderOperationFamily::Elementwise, [input])
+                if matches!(
+                    input.element_type,
+                    ProviderElementType::F32 | ProviderElementType::F64
+                ) && input.storage == ProviderStorage::DenseReal
+                    && query.outputs.is_empty() =>
+            {
+                input
+                    .checked_element_count()
+                    .and_then(|count| count.checked_mul(4))
+            }
+            ("sum", ProviderOperationFamily::Reduction, [input])
+                if input.element_type == ProviderElementType::F64
+                    && input.storage == ProviderStorage::DenseReal
+                    && input.shape.len() == 2
+                    && query.outputs.is_empty() =>
+            {
+                query.workload.sum.as_ref().and_then(|route| {
+                    if route.axes.iter().any(|axis| *axis > 1) {
+                        return None;
+                    }
+                    let mut shape = input.shape.clone();
+                    for &axis in &route.axes {
+                        *shape.get_mut(usize::try_from(axis).ok()?)? = 1;
+                    }
+                    shape
+                        .into_iter()
+                        .try_fold(8_u64, |bytes, extent| bytes.checked_mul(extent))
+                })
+            }
+            _ => None,
+        };
+        if let Some(bytes) = ordinary {
+            return ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: Some(bytes),
+                output_bytes: Some(bytes),
+                dispatches: Some(1),
+            });
+        }
         let supported = capability.supports_operation(&query.operation, query.family)
             && query.inputs.iter().all(|value| {
                 (value.element_type == ProviderElementType::F64
@@ -944,6 +999,19 @@ impl AccelProvider for TestProvider {
             .await;
             result.map_err(Into::into)
         })
+    }
+
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (data, shape) = self.pull(input)?;
+        Ok(self.push(
+            data.into_iter()
+                .map(|value| if value.is_nan() { 0.0 } else { value })
+                .collect(),
+            shape,
+        ))
     }
 
     fn reduce_any_dim<'a>(
@@ -2189,7 +2257,10 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
                 series.samples
             })
             .sum::<u64>();
-        assert_eq!(cpu_samples, rejected.len() as u64);
+        assert_eq!(
+            cpu_samples, 0,
+            "the rejected CPU-only route has no complete-call observation permit"
+        );
         assert!(feedback
             .iter()
             .all(|series| { !series.candidate.starts_with("provider.") || series.samples == 0 }));
@@ -3550,6 +3621,7 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
 fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
     gc_test_context(|| {
         ensure_provider_registered();
+        let provider = registered_provider().expect("fixture provider");
 
         let source = r#"
         x = [-2.5, -1.25, 0.5];
@@ -3572,12 +3644,15 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
             "expected x and scalar runtime inputs"
         );
 
-        let x = Tensor::new(vec![-2.5, -1.25, 0.5], vec![1, 3]).expect("tensor x");
+        let x = provider
+            .push(vec![-2.5, -1.25, 0.5], vec![1, 3])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit resident source");
         let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
-            inputs: vec![Value::Tensor(x), Value::Num(2.0)],
+            inputs: vec![Value::GpuTensor(x), Value::Num(2.0)],
             placement: None,
-            runtime: None,
+            runtime: Some(direct::selected_runtime_for_plan(group_plan)),
         }))
         .expect("direct fusion execution");
 
@@ -4578,9 +4653,12 @@ fn image_normalize_matches_cpu() {
 
         let graph = graph_for_fusion_test(&bytecode).expect("image normalize accel graph");
         let groups = graph.detect_fusion_groups();
-        assert!(groups
-            .iter()
-            .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
+        assert!(
+            groups
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)),
+            "nested image-normalization group not detected: {graph:#?}"
+        );
 
         let out_index = bytecode
             .instructions

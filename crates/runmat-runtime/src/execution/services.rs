@@ -22,7 +22,7 @@ static NEXT_SERVICE_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeferredInvocation {
-    Callable(crate::call::descriptor::CallableDescriptor),
+    Callable(Box<crate::call::descriptor::CallableDescriptor>),
     Program {
         callable: runmat_execution::ProgramCallable,
         context: runmat_execution::ProgramInvocationContext,
@@ -36,6 +36,12 @@ pub enum DeferredInvocation {
 mod deferred_roots_tests;
 
 impl DeferredInvocation {
+    /// Only a deferred callable pays for this allocation. Ordinary callable
+    /// descriptors remain inline at their non-deferred call sites.
+    pub fn callable(descriptor: crate::call::descriptor::CallableDescriptor) -> Self {
+        Self::Callable(Box::new(descriptor))
+    }
+
     /// Values retained by this invocation, including its callable target graph.
     pub fn visit_retained_values(
         &self,
@@ -793,7 +799,7 @@ mod tests {
 
     fn deferred_call(function: usize, arguments: Vec<Value>) -> DeferredCall {
         DeferredCall {
-            invocation: DeferredInvocation::Callable(
+            invocation: DeferredInvocation::callable(
                 crate::call::descriptor::CallableDescriptor::resolved(
                     runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(
                         function,
@@ -882,9 +888,12 @@ mod tests {
             panic!("expected deferred execution");
         };
         assert_eq!(handle, future);
+        let DeferredInvocation::Callable(descriptor) = call.invocation else {
+            panic!("expected callable deferred invocation")
+        };
         assert!(matches!(
-            call.invocation,
-            DeferredInvocation::Callable(crate::call::descriptor::CallableDescriptor {
+            *descriptor,
+            crate::call::descriptor::CallableDescriptor {
                 target: crate::call::descriptor::CallableTarget::Resolved {
                     identity: runmat_types::CallableIdentity::BoundFunction(
                         runmat_types::FunctionId(7)
@@ -892,7 +901,7 @@ mod tests {
                     ..
                 },
                 ..
-            })
+            }
         ));
         service
             .complete_future(

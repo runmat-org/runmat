@@ -1247,7 +1247,7 @@ mod tests {
 
     fn deferred_test_call(program: Vec<u8>) -> DeferredCall {
         DeferredCall {
-            invocation: runmat_runtime::execution::DeferredInvocation::Callable(
+            invocation: runmat_runtime::execution::DeferredInvocation::callable(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                     runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(0)),
                     Vec::new(),

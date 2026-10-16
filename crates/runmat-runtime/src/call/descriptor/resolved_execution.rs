@@ -355,6 +355,8 @@ async fn invoke_descriptor_required(
         args,
         requested_outputs,
         metadata.function_input_callsite,
+        metadata.source_ref,
+        metadata.source_invocation,
     )
     .await
 }

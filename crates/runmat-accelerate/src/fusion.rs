@@ -8,7 +8,8 @@ use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::{
-    builtin_catalog_entry_by_name, MeanControl, MeanOutputClass, SINGLE_CATALOG_ENTRY,
+    builtin_catalog_entry_by_name, MeanControl, MeanOutputClass, MEAN_CATALOG_ENTRY,
+    SINGLE_CATALOG_ENTRY,
 };
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
 use runmat_types::OperatorKind;
@@ -3401,7 +3402,8 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
     if let Some(scalar) = resolve_scalar_constant(graph, vid) {
         return Some(vec![scalar]);
     }
-    let constant = source_literal_constant(graph, vid)?;
+    let constant =
+        source_literal_constant(graph, vid).or_else(|| graph.folded_literal_numeric_vector(vid))?;
     match constant {
         // Axis and dimension vectors feed floating shader literals below, so
         // native integer tensors must take the normal unfused path rather than
@@ -3424,9 +3426,20 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
 
 fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId, Vec<f64>)> {
     let (node_id, node) = node_from_value(graph, vid)?;
-    match &node.label {
-        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mean") => {}
-        _ => return None,
+    let AccelNodeLabel::Builtin {
+        name,
+        origin: FusionCallOrigin::Named { binding },
+    } = &node.label
+    else {
+        return None;
+    };
+    let [variant] = MEAN_CATALOG_ENTRY.bindings else {
+        return None;
+    };
+    if !name.eq_ignore_ascii_case(MEAN_CATALOG_ENTRY.identity.name)
+        || *binding != MEAN_CATALOG_ENTRY.binding_identity(variant)
+    {
+        return None;
     }
     if !(2..=3).contains(&node.inputs.len()) {
         return None;
@@ -3454,10 +3467,10 @@ fn dims_match_unordered(found: &[f64], expected: &[f64]) -> bool {
     if found.len() != expected.len() {
         return false;
     }
-    let mut a: Vec<i64> = found.iter().map(|d| d.round() as i64).collect();
-    let mut b: Vec<i64> = expected.iter().map(|d| d.round() as i64).collect();
-    a.sort_unstable();
-    b.sort_unstable();
+    let mut a = found.to_vec();
+    let mut b = expected.to_vec();
+    a.sort_by(f64::total_cmp);
+    b.sort_by(f64::total_cmp);
     a == b
 }
 
@@ -4166,6 +4179,15 @@ mod tests {
             },
         );
         assert_eq!(resolve_numeric_vector_constant(&graph, 3), None);
+    }
+
+    #[test]
+    fn image_mean_axes_require_exact_source_dimensions() {
+        assert!(dims_match_unordered(&[3.0, 2.0], &[2.0, 3.0]));
+        assert!(!dims_match_unordered(&[2.4, 3.0], &[2.0, 3.0]));
+        assert!(!dims_match_unordered(&[2.0 + 1e-7], &[2.0]));
+        assert!(!dims_match_unordered(&[f64::NAN, 3.0], &[2.0, 3.0]));
+        assert!(!dims_match_unordered(&[f64::INFINITY, 3.0], &[2.0, 3.0]));
     }
 
     fn folded_single_clamp_graph(input: Value, folded: Option<Value>) -> AccelGraph {

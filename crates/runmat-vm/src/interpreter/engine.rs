@@ -79,8 +79,10 @@ pub fn debug_stack_enabled() -> bool {
         .unwrap_or(false)
 }
 
-pub fn check_cancelled() -> Result<(), RuntimeError> {
-    if runmat_runtime::interrupt::is_cancelled() {
+pub fn check_cancelled(
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<(), RuntimeError> {
+    if runmat_runtime::interrupt::is_cancelled() || runtime.is_cancelled() {
         return Err(cancellation_error());
     }
     Ok(())

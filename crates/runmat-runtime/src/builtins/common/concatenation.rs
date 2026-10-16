@@ -15,6 +15,36 @@ fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
 
+/// A language-level matrix literal whose already-evaluated numeric rows have
+/// incompatible widths. This is not a provider, allocation, or callee error.
+#[derive(Debug)]
+pub struct MatrixConstructionShapeError {
+    expected_columns: usize,
+    actual_columns: usize,
+}
+
+impl std::fmt::Display for MatrixConstructionShapeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "matrix literal row widths differ: {} vs {}",
+            self.expected_columns, self.actual_columns
+        )
+    }
+}
+
+impl std::error::Error for MatrixConstructionShapeError {}
+
+fn numeric_matrix_columns(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(value) => Some(value.cols()),
+        Value::ComplexTensor(value) => Some(value.cols()),
+        Value::LogicalArray(value) => Some(*value.shape.get(1).unwrap_or(&1)),
+        Value::Num(_) | Value::Int(_) | Value::Complex(_, _) | Value::Bool(_) => Some(1),
+        _ => None,
+    }
+}
+
 /// Converts an f64 code point to a 1x1 `CharArray`.
 ///
 /// Validates that the value is a finite integer in the valid Unicode code point range,
@@ -1236,6 +1266,35 @@ pub async fn create_matrix_from_values(
     let row_matrices = row_matrices
         .finish()
         .map_err(|error| error.into_runtime_error())?;
+
+    // The aggregate itself owns this structural check. Do it only after row
+    // expressions have completed, and only for numeric/logical rows; a
+    // selected callee's failure or another concatenation domain must retain
+    // its original cause.
+    let mut expected_columns = None;
+    for row in row_matrices.values() {
+        if matches!(row, Value::Tensor(value) if value.rows() == 0 && value.cols() == 0) {
+            continue;
+        }
+        let Some(columns) = numeric_matrix_columns(row) else {
+            break;
+        };
+        if let Some(expected) = expected_columns {
+            if columns != expected {
+                return Err(build_runtime_error(format!(
+                    "Cannot vertically concatenate matrices with different column counts: {expected} vs {columns}"
+                ))
+                .with_identifier("RunMat:MatrixConstruction:Shape")
+                .with_source(MatrixConstructionShapeError {
+                    expected_columns: expected,
+                    actual_columns: columns,
+                })
+                .build());
+            }
+        } else {
+            expected_columns = Some(columns);
+        }
+    }
 
     // Stack rows using vertcat builtin
     if row_matrices.len() == 1 {

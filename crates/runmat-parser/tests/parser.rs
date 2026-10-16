@@ -674,6 +674,21 @@ fn imaginary_suffix_is_one_numeric_atom_before_postfix_and_power() {
 }
 
 #[test]
+fn decimal_exponents_share_one_numeric_grammar_with_imaginary_and_matrix_atoms() {
+    let program = parse("a = [1d3 .5D-2; 2D+1i 4e0]; b = 3d-1j;").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &program.body[0] else {
+        panic!("matrix expression");
+    };
+    assert!(matches!(&rows[0][0], Expr::Number(value, _) if value == "1e3"));
+    assert!(matches!(&rows[0][1], Expr::Number(value, _) if value == ".5e-2"));
+    assert!(matches!(&rows[1][0], Expr::ImaginaryNumber(value, _) if value == "2e+1i"));
+    assert!(matches!(&rows[1][1], Expr::Number(value, _) if value == "4e0"));
+    assert!(
+        matches!(&program.body[1], Stmt::Assign(_, Expr::ImaginaryNumber(value, _), _, _) if value == "3e-1j")
+    );
+}
+
+#[test]
 fn final_semicolon_not_required() {
     let program = parse("1 + 2").unwrap();
     assert_eq!(program.body.len(), 1);

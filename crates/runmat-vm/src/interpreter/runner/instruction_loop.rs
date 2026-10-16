@@ -220,7 +220,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         set_vm_pc(*pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(*pc);
-        interp_engine::check_cancelled()?;
+        interp_engine::check_cancelled(&context.runtime)?;
         let active_catch = bytecode
             .catch_scopes
             .get(*pc)
@@ -415,7 +415,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             // the observation first so cancellation retires the
                             // selected ticket as failure, even for a one-instruction
                             // CPU region that could otherwise complete this turn.
-                            interp_engine::check_cancelled()?;
+                            interp_engine::check_cancelled(&context.runtime)?;
                         }
                         Err(accel_fusion::FusionAttemptError::Terminal(err)) => {
                             fusion_observations.abort();

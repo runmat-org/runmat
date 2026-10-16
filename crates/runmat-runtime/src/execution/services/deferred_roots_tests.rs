@@ -80,7 +80,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
         let registration =
             ValueRootRegistration::new(Box::new(DeferredServiceRoot(Rc::clone(&service)))).unwrap();
         let call = DeferredCall {
-            invocation: DeferredInvocation::Callable(CallableDescriptor {
+            invocation: DeferredInvocation::callable(CallableDescriptor {
                 target: CallableTarget::BoundLexical {
                     binding,
                     closure: RetainedClosureValue::new(closure),
@@ -100,7 +100,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
         service.create_future(call).unwrap();
         service
             .create_future(DeferredCall {
-                invocation: DeferredInvocation::Callable(CallableDescriptor {
+                invocation: DeferredInvocation::callable(CallableDescriptor {
                     target: CallableTarget::FevalForward(Value::Closure(Closure::from_data(
                         runmat_value::ClosureData {
                             function_name: "anonymous".into(),

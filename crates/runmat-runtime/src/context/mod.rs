@@ -151,8 +151,9 @@ pub use services::{
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
-    RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService, SessionSourceEvaluation,
-    SourceEvaluationPolicy, SourceEvaluationProvenance,
+    NumericTextEvaluation, RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService,
+    SessionSourceEvaluation, SessionSourcePurpose, SourceEvaluationPolicy,
+    SourceEvaluationProvenance,
 };
 pub(crate) use state::{RuntimeContextState, SourceState};
 pub(crate) use super_constructor::RetainedSuperConstructorTarget;

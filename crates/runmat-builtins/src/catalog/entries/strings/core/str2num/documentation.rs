@@ -2,14 +2,14 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Convert text containing numeric matrix literals to a numeric array.",
-        "Parses bracketed numeric matrix text with whitespace, comma, and semicolon separators.",
-        "When a second output is requested, returns a logical success flag instead of throwing for malformed numeric text.",
-        "RunMat currently implements numeric matrix literal parsing. The compatibility target's `Evaluation` option and general expression-evaluation surface remain implementation gaps.",
+        "Convert scalar text containing a matrix expression using the normal RunMat parser and executor.",
+        "The Evaluation option is 'all' by default, or 'restricted' for pure numeric expressions. Matrix spacing, commas, and semicolons follow the language's matrix syntax.",
+        "Invalid expression text returns an empty matrix and a false logical status when the second output is requested. Cancellation, host-policy denial, and execution-service errors remain errors.",
+        "All-mode execution has the host's existing dynamic-evaluation privileges and can invoke effectful functions. Do not use it for untrusted text; choose Evaluation='restricted' or str2double.",
     ] },
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
-        "Literal numeric text parsing is host-only. Integer, numeric, and provider-resident inputs are not text and reject before provider access.",
-        "Not eligible for fusion; this builtin materializes host numeric and logical results.",
+        "All text uses the session's captured source-evaluation authority and canonical parser in an isolated transactional frame; it does not publish implicit variables into the base workspace.",
+        "Not eligible for fusion. Dynamic source evaluation may suspend and requires the host's source-evaluation capability.",
     ] },
 ];
 
@@ -37,8 +37,8 @@ const LINKS: &[BuiltinDocumentationLink] = &[
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("str2num"), slug: Some("str2num"),
-    summary: "Convert text containing numeric matrix literals to a numeric array.",
-    description: "`str2num(text)` parses a scalar string or character array as a numeric matrix expression. It is a text parser, not a numeric conversion function; use `string` to turn numeric data into text and `str2double` for element-wise text parsing.",
+    summary: "Evaluate scalar text as a matrix expression.",
+    description: "`str2num(text)` evaluates a scalar string or character array as a matrix expression. `Evaluation='restricted'` admits only pure numeric expressions; the default 'all' mode uses the host's dynamic-evaluation policy. Use `str2double` for element-wise text parsing.",
     keywords: &["str2num", "strings", "core", "matlab", "compatibility"],
     related: &["string", "char"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,

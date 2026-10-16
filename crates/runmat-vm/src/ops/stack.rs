@@ -19,6 +19,7 @@ fn resolve_emit_label_text(
             .get(idx)
             .cloned()
             .or_else(|| Some(format!("var{idx}"))),
+        EmitLabel::InternalCapture => None,
     }
 }
 
@@ -28,6 +29,9 @@ pub async fn emit_stack_top(
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
+    if matches!(label, EmitLabel::InternalCapture) {
+        return Ok(());
+    }
     if let Some(value) = stack.last() {
         let label_text = resolve_emit_label_text(label, var_names);
         runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), value)
@@ -43,6 +47,9 @@ pub async fn emit_var(
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
+    if matches!(label, EmitLabel::InternalCapture) {
+        return Ok(());
+    }
     if let Some(value) = vars.get(var_index) {
         let label_text = resolve_emit_label_text(label, var_names);
         runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), value)

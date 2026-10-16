@@ -7,15 +7,15 @@ use crate::{
     EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration,
     EventDeclaration, ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers,
     FunctionName, FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock,
-    HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirExpr,
-    HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode,
-    HirStmtKind, ImportResolution, IndexComponent, IndexKind, IndexResultContext,
-    IndexingSemantics, InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess,
-    MemberName, MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation,
-    PlaceMutationKind, PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution,
-    RequestedOutputCount, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName,
-    WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirErrorKind,
+    HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace,
+    HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    IndexResultContext, IndexingSemantics, InheritanceDeclaration, LoweringContext, LoweringResult,
+    MemberAccess, MemberName, MethodDeclaration, ModuleId, OperatorKind, PackageName,
+    PlaceMutation, PlaceMutationKind, PropertyDeclaration, QualifiedName, ReferenceKind,
+    ReferenceResolution, RequestedOutputCount, SourceUnitKind, Span, StmtId, StringLiteral,
+    SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
+    NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use runmat_types::{
@@ -2798,6 +2798,7 @@ impl LoweringCtx {
                 } else {
                     return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
+                        .with_kind(HirErrorKind::UndefinedVariable)
                         .with_identifier(IDENT_UNDEFINED_VARIABLE));
                 }
             }

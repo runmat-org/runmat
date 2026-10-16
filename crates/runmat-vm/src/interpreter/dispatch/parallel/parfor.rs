@@ -337,7 +337,7 @@ async fn await_parallel_tasks(
     let mut results = vec![None; tasks.len()];
     let mut remaining = tasks.len();
     while remaining > 0 {
-        if let Err(error) = crate::interpreter::engine::check_cancelled() {
+        if let Err(error) = crate::interpreter::engine::check_cancelled(&context.runtime) {
             cancel_parallel_tasks(context, tasks, runmat_execution::CancellationReason::User);
             return Err(error);
         }
