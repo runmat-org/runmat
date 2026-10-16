@@ -69,7 +69,7 @@ impl CpuCooperationBudget {
             self.await_cancellable(service.submit(job)).await??;
             return self.await_cancellable(receive).await?.map_err(|_| {
                 ExecutionServiceError::WorkerLost(
-                    "owned blocking CPU worker ended before publication".into(),
+                    "owned blocking CPU job ended before publication".into(),
                 )
             })?;
         }
