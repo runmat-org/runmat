@@ -17,6 +17,34 @@ fn non_conjugate_transpose_and_dot_plus() {
     }
 }
 
+#[test]
+fn numeric_literals_do_not_absorb_adjacent_dot_operators() {
+    for (source, expected) in [
+        ("1./2", BinOp::ElemDiv),
+        ("2.^3", BinOp::ElemPow),
+        ("1.*2", BinOp::ElemMul),
+        ("1.\\2", BinOp::ElemLeftDiv),
+    ] {
+        let program = parse(source).expect("adjacent numeric dot operator");
+        let [Stmt::ExprStmt(Expr::Binary(left, op, right, _), _, _)] = program.body.as_slice()
+        else {
+            panic!("expected binary expression for {source}");
+        };
+        assert_eq!(*op, expected, "{source}");
+        assert!(matches!(&**left, Expr::Number(_, _)), "{source}");
+        assert!(matches!(&**right, Expr::Number(_, _)), "{source}");
+    }
+    let program = parse("1.'").expect("numeric nonconjugate transpose");
+    assert!(matches!(
+        program.body.as_slice(),
+        [Stmt::ExprStmt(
+            Expr::Unary(UnOp::NonConjugateTranspose, _, _),
+            _,
+            _
+        )]
+    ));
+}
+
 fn expression_tree(source: &str) -> String {
     fn tree(expr: &Expr) -> String {
         match expr {

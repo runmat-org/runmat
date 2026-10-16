@@ -1,6 +1,6 @@
 mod recovery;
 
-use crate::scan::{last_is_value_token, scan_leading_dot_float_suffix};
+use crate::scan::{last_is_value_token, scan_leading_dot_float_suffix, trailing_decimal_dot};
 use crate::token::{SpannedToken, Token};
 use logos::Logos;
 use recovery::recover_from_error;
@@ -25,7 +25,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
     let mut out: Vec<SpannedToken> = Vec::new();
     while let Some(res) = lex.next() {
         match res {
-            Ok(tok) => {
+            Ok(mut tok) => {
+                if matches!(tok, Token::Integer) && trailing_decimal_dot(lex.remainder()) {
+                    lex.bump(1);
+                    tok = Token::Float;
+                }
                 let mut s = lex.slice().to_string();
                 // Normalize numeric literals: remove underscores in integers/floats
                 if matches!(tok, Token::Float | Token::Integer) {

@@ -86,7 +86,10 @@ pub enum Token {
     #[regex(r"0[bB][0-9a-zA-Z_]*", |lex| { lex.extras.last_was_value = true; }, priority = 4)]
     RadixInteger,
     // Float with optional underscores as digit separators (strip later)
-    #[regex(r"\d(?:_?\d)*\.(?:\d(?:_?\d)*)?(?:[eEdD][+-]?\d(?:_?\d)*)?", |lex| {
+    #[regex(r"\d(?:_?\d)*\.\d(?:_?\d)*(?:[eEdD][+-]?\d(?:_?\d)*)?", |lex| {
+        lex.extras.last_was_value = true;
+    })]
+    #[regex(r"\d(?:_?\d)*\.[eEdD][+-]?\d(?:_?\d)*", |lex| {
         lex.extras.last_was_value = true;
     })]
     #[regex(r"\d(?:_?\d)*[eEdD][+-]?\d(?:_?\d)*", |lex| {
