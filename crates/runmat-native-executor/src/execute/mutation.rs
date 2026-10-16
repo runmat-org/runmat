@@ -267,16 +267,6 @@ pub(super) fn prepare_sequence_assignment(
     ))
 }
 
-pub(super) fn root_local_value(
-    state: &mut HostState,
-    place: &MirPlace,
-) -> NativeExecutorResult<Value> {
-    let mut segments = Vec::new();
-    let root = flatten_place(place, &mut segments)?;
-    let reference = state.local_reference(root.0)?;
-    state.arena.get(reference).cloned()
-}
-
 fn flatten_place(
     place: &MirPlace,
     segments: &mut Vec<PlaceSegment>,

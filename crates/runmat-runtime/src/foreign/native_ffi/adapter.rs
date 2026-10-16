@@ -634,7 +634,10 @@ impl ForeignAdapter for NativeFfiAdapter {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
-        if self.bootstrap_unverified.is_unverified() {
+        // Spawn evidence stays set while a verified, owned child is live. It
+        // blocks re-entry only when no client owns that child (for example,
+        // containment failed after OS spawn or retirement was unverified).
+        if self.bootstrap_unverified.is_unverified() && self.isolated_client.borrow().is_none() {
             return Box::pin(async {
                 Err(invalid_call(
                     "isolated native-library bootstrap has an unverified child",

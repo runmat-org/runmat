@@ -19,7 +19,7 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_value::{CellArray, SymbolicExpr, Tensor, Value};
+use runmat_value::{CellArray, SymbolicExpr, Value};
 
 mod scalar_read_and_cell;
 mod scalar_store;

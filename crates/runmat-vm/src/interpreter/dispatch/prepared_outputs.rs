@@ -54,7 +54,7 @@ pub(super) async fn dispatch(
                 Some(seed) => state.begin_destination(
                     *root_slot,
                     &seed,
-                    Some(seed.clone()),
+                    Some(Box::new(seed.clone())),
                     *root_creation,
                 )?,
                 None => state.begin_destination(*root_slot, original, None, *root_creation)?,

@@ -15,7 +15,7 @@ pub struct MexArgs {
     /// Primary compiler driver (defaults through CC, CXX, FC/F77, NVCC, or MW_NVCC_PATH)
     #[arg(long)]
     pub compiler: Option<PathBuf>,
-    /// Use R2017b separate-complex (mex default; mexcuda defaults to R2018a)
+    /// Use R2017b separate-complex (C/Fortran default; C++/CUDA default to R2018a)
     #[arg(
         long = "R2017b",
         conflicts_with_all = ["r2018a", "large_array_dims", "compatible_array_dims"]

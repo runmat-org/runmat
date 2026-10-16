@@ -111,7 +111,7 @@ pub struct SequenceState {
 struct PendingSequenceDestination {
     root_slot: usize,
     builder: runmat_runtime::sequence::SequenceDestinationBuilder,
-    absent_root: Option<Value>,
+    absent_root: Option<Box<Value>>,
     root_creation: runmat_mir::SequenceRootCreation,
 }
 
@@ -121,7 +121,7 @@ pub(super) enum PreparedOutputTarget {
     Sequence {
         root_slot: usize,
         endpoint: runmat_runtime::sequence::PreparedSequenceDestination,
-        absent_root: Option<Value>,
+        absent_root: Option<Box<Value>>,
         root_creation: runmat_mir::SequenceRootCreation,
     },
 }
@@ -180,7 +180,7 @@ impl SequenceState {
         &mut self,
         root_slot: usize,
         root: &Value,
-        absent_root: Option<Value>,
+        absent_root: Option<Box<Value>>,
         root_creation: runmat_mir::SequenceRootCreation,
     ) -> Result<(), RuntimeError> {
         if self.destination_builder.is_some() {
@@ -386,9 +386,7 @@ impl SequenceState {
         Ok(())
     }
 
-    pub(super) fn take_destination_builder(
-        &mut self,
-    ) -> Result<PendingSequenceDestination, RuntimeError> {
+    fn take_destination_builder(&mut self) -> Result<PendingSequenceDestination, RuntimeError> {
         if self.prepared_index_component_count.is_some() {
             return Err(crate::interpreter::errors::mex(
                 "RunMat:CommaSeparatedListState",

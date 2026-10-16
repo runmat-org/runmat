@@ -74,7 +74,9 @@ pub(super) async fn commit(
                                         && root_creation
                                             == runmat_mir::SequenceRootCreation::EmptyCell
                                     {
-                                        absent_root.unwrap_or_else(empty_cell_root)
+                                        absent_root
+                                            .map(|root| *root)
+                                            .unwrap_or_else(empty_cell_root)
                                     } else {
                                         root(vars, root_slot)?.clone()
                                     },
