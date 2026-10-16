@@ -1,8 +1,8 @@
 use super::super::{
     admit_provider_availability, host_f64_bytes, mark_fusion_output, scalar_upload_dtype,
-    select_fusion_provider, unbound_constant_values, AdmittedBindings, FusionCpuObservation,
-    FusionExecutionOutcome, FusionExecutionRequest, FusionPlacementObserver, FusionStageTimer,
-    PreparedInput,
+    select_fusion_provider_vm_decline, unbound_constant_values, AdmittedBindings,
+    FusionCpuObservation, FusionExecutionOutcome, FusionExecutionRequest, FusionPlacementObserver,
+    FusionStageTimer, PreparedInput,
 };
 use super::reduction_arithmetic;
 use crate::precision::ensure_provider_supports_dtype;
@@ -61,6 +61,7 @@ pub(super) fn execute_reduction_with_shape_core(
     output_shape: &[usize],
     workgroup_size: u32,
     arithmetic: Option<&reduction_arithmetic::PreparedReductionArithmetic>,
+    vm_decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
 ) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
@@ -140,12 +141,13 @@ pub(super) fn execute_reduction_with_shape_core(
         )
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
     FusionPlacementObserver::new(request.placement).shader_source_generation(shader_started);
-    let selection = select_fusion_provider(
+    let selection = select_fusion_provider_vm_decline(
         &request,
         &bindings,
         provider,
         &[output_shape.to_vec()],
         Some(generated_shader.requirements()),
+        vm_decline,
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

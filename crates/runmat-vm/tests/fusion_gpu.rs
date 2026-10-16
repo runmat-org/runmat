@@ -4757,14 +4757,21 @@ fn image_normalize_vecdim_double_reduction_does_not_claim_native_fusion() {
         out = ((imgs - mu) ./ sigma) .^ single(1.8);
         "#;
         let bytecode = compile_semantic(source);
-        let graph = graph_for_fusion_test(&bytecode).expect("double vecdim accel graph");
         assert!(
-            graph
-                .detect_fusion_groups()
+            bytecode
+                .runtime_fusion_groups()
                 .iter()
                 .all(|group| !matches!(group.kind, FusionKind::ImageNormalize)),
             "double-output mean cannot use the native-precision image kernel"
         );
+        // A program without an eligible group has no reconciled graph. Check
+        // detection too when another eligible group keeps the graph alive.
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
+            assert!(graph
+                .detect_fusion_groups()
+                .iter()
+                .all(|group| !matches!(group.kind, FusionKind::ImageNormalize)));
+        }
     });
 }
 

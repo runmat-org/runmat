@@ -594,13 +594,14 @@ pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
-    execute_fusion_elementwise_vm(request, stack_guard, None, None).await
+    execute_fusion_elementwise_vm(request, stack_guard, None, None, None).await
 }
 
 async fn execute_fusion_elementwise_vm(
     request: FusionExecutionRequest<'_>,
     mut stack_guard: StackSliceGuard<'_>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
     input_uses: Option<&runmat_accelerate::fusion_exec::VmHostInputUses>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let execution = if let Some(right) = right {
@@ -612,6 +613,9 @@ async fn execute_fusion_elementwise_vm(
         } else {
             runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right).await
         }
+    } else if let Some(decline) = decline {
+        runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(request, decline)
+            .await
     } else {
         execute_elementwise_placed(request)
             .await
@@ -711,8 +715,18 @@ pub use reduction_geometry::{resolve_reduction_geometry, ReductionGeometry};
 pub async fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
     request: FusionExecutionRequest<'_>,
+    stack_guard: StackSliceGuard<'_>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    execute_fusion_reduction_vm(plan, request, stack_guard, right, None).await
+}
+
+async fn execute_fusion_reduction_vm(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    request: FusionExecutionRequest<'_>,
     mut stack_guard: StackSliceGuard<'_>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let geom = match resolve_reduction_geometry(plan, &request) {
         Ok(geom) => geom,
@@ -735,17 +749,29 @@ pub async fn execute_fusion_reduction(
         plan: &resolved_plan,
         ..request
     };
-    if let Some(right) = right {
-        match execute_reduction_with_shape_placed_async_vm(
-            request,
-            geom.reduce_len,
-            geom.num_slices,
-            &geom.output_shape,
-            256u32,
-            right,
-        )
-        .await
-        {
+    if right.is_some() || decline.is_some() {
+        let execution = if let Some(right) = right {
+            execute_reduction_with_shape_placed_async_vm(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+                right,
+            )
+            .await
+        } else {
+            runmat_accelerate::fusion_exec::execute_reduction_with_shape_placed_async_vm_decline(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+                decline.expect("checked VM decline right"),
+            )
+            .await
+        };
+        match execution {
             Ok(FusionExecutionOutcome::Executed(result)) => {
                 stack_guard.commit();
                 Ok(FusionExecutionOutcome::Executed(FusionVmResult {
@@ -856,9 +882,9 @@ pub(crate) async fn try_execute_fusion_group_with_inputs(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise_vm(request, stack_guard, right, input_uses).await
+        execute_fusion_elementwise_vm(request, stack_guard, right, decline, input_uses).await
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(plan, request, stack_guard, right).await
+        execute_fusion_reduction_vm(plan, request, stack_guard, right, decline).await
     } else {
         execute_fusion_special_kind(
             plan.group.kind.clone(),

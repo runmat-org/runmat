@@ -41,11 +41,14 @@ pub(crate) use admission::binding_storage_bytes;
 use admission::AdmittedBindings;
 mod reduction;
 mod reduction_arithmetic;
+mod vm_authority;
 pub use reduction::{
     execute_reduction, execute_reduction_with_shape, execute_reduction_with_shape_placed,
     execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
-    CpuReadbackFailure, TypedReductionVmOutput,
+    execute_reduction_with_shape_placed_async_vm_decline, CpuReadbackFailure,
+    TypedReductionVmOutput,
 };
+use vm_authority::{VmFusionExecutionRight, VmFusionSelectionRight};
 mod reduction_program;
 pub use reduction_program::{
     resolve_reduction_program, ReductionDataInput, ResolvedReductionProgram,
@@ -63,7 +66,7 @@ pub use image_stages::{ImageVmCheckpoint, ImageVmPreparation, ImageVmStages};
 mod ownership_tests;
 pub use elementwise::{
     execute_elementwise, execute_elementwise_placed, execute_elementwise_placed_vm,
-    execute_elementwise_placed_vm_inputs,
+    execute_elementwise_placed_vm_decline, execute_elementwise_placed_vm_inputs,
 };
 pub use observation::{FusionCpuObservation, FusionExecutionOutcome, FusionProviderCompletion};
 
@@ -324,7 +327,25 @@ fn select_fusion_provider(
     output_shapes: &[Vec<usize>],
     shader_requirements: Option<ProviderShaderRequirements>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
-    select_fusion_provider_with_contract(
+    select_fusion_provider_vm_decline(
+        request,
+        bindings,
+        provider,
+        output_shapes,
+        shader_requirements,
+        None,
+    )
+}
+
+fn select_fusion_provider_vm_decline(
+    request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
+    provider: &dyn AccelProvider,
+    output_shapes: &[Vec<usize>],
+    shader_requirements: Option<ProviderShaderRequirements>,
+    vm_decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
+    select_fusion_provider_with_contract_vm_cpu(
         request,
         bindings,
         provider,
@@ -342,6 +363,8 @@ fn select_fusion_provider(
             preparation_program: None,
             shader_requirements,
         },
+        vm_decline.map(VmFusionSelectionRight::Decline),
+        host_readback::CpuHostPlacement::Legacy,
     )
 }
 
@@ -366,7 +389,7 @@ fn select_fusion_provider_with_contract_vm(
         bindings,
         provider,
         contract,
-        vm_right,
+        vm_right.map(VmFusionSelectionRight::Completion),
         host_readback::CpuHostPlacement::Legacy,
     )
 }
@@ -376,7 +399,7 @@ fn select_fusion_provider_with_contract_vm_cpu(
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     contract: FusionProviderContract<'_>,
-    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    vm_selection: Option<VmFusionSelectionRight<'_>>,
     host: host_readback::CpuHostPlacement<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     select_fusion_provider_with_implementation(
@@ -384,17 +407,10 @@ fn select_fusion_provider_with_contract_vm_cpu(
         bindings,
         provider,
         contract,
-        vm_right.map(VmFusionSelectionRight::Completion),
+        vm_selection,
         host,
         crate::placement::LocalProviderAdmission::Available,
     )
-}
-
-/// A FullCall continuation and an optimization-only decline are distinct
-/// selection routes. A request cannot promote the latter into the former.
-enum VmFusionSelectionRight<'a> {
-    Completion(&'a runmat_runtime::context::VmFusionCompletionRight),
-    Decline(&'a runmat_runtime::context::VmFusionDeclineRight),
 }
 
 fn select_fusion_provider_with_implementation(

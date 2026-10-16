@@ -103,6 +103,7 @@ pub fn execute_reduction_with_shape_placed(
         output_shape,
         workgroup_size,
         None,
+        None,
     )
 }
 
@@ -143,13 +144,36 @@ pub async fn execute_reduction_with_shape_placed_async_vm(
     workgroup_size: u32,
     right: runmat_runtime::context::VmFusionCompletionRight,
 ) -> ExecutionResult<FusionExecutionOutcome<TypedReductionVmOutput>> {
+    let mut right = Some(right);
     execute_reduction_with_shape_placed_async_inner(
         request,
         reduce_len,
         num_slices,
         output_shape,
         workgroup_size,
-        Some(right),
+        Some(super::VmFusionExecutionRight::Completion(&mut right)),
+        false,
+    )
+    .await
+}
+
+/// A sealed VM window may decline before effects without acquiring FullCall
+/// completion or host-readback authority.
+pub async fn execute_reduction_with_shape_placed_async_vm_decline(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    output_shape: &[usize],
+    workgroup_size: u32,
+    decline: runmat_runtime::context::VmFusionDeclineRight,
+) -> ExecutionResult<FusionExecutionOutcome<TypedReductionVmOutput>> {
+    execute_reduction_with_shape_placed_async_inner(
+        request,
+        reduce_len,
+        num_slices,
+        output_shape,
+        workgroup_size,
+        Some(super::VmFusionExecutionRight::Decline(&decline)),
         false,
     )
     .await
@@ -161,7 +185,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
     num_slices: usize,
     output_shape: &[usize],
     workgroup_size: u32,
-    mut right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    mut authority: Option<super::VmFusionExecutionRight<'_>>,
     synchronous: bool,
 ) -> ExecutionResult<FusionExecutionOutcome<TypedReductionVmOutput>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
@@ -278,13 +302,18 @@ async fn execute_reduction_with_shape_placed_async_inner(
                         &program,
                         &selections,
                         &input_plan,
-                        right.as_ref(),
+                        authority
+                            .as_ref()
+                            .and_then(super::VmFusionExecutionRight::as_selection),
                     )? {
                         select::Choice::Shared {
                             observation,
                             readback,
                         } => {
-                            let observation = match right.take() {
+                            let observation = match authority
+                                .take()
+                                .and_then(super::VmFusionExecutionRight::into_completion)
+                            {
                                 Some(right) => observation.with_vm_host_route_readback(
                                     right,
                                     request.runtime.as_ref(),
@@ -306,7 +335,8 @@ async fn execute_reduction_with_shape_placed_async_inner(
                                     selection,
                                     plan: input_plan,
                                     ticket,
-                                    right,
+                                    right: authority
+                                        .and_then(super::VmFusionExecutionRight::into_completion),
                                 },
                                 selected_identity,
                             )
@@ -341,6 +371,10 @@ async fn execute_reduction_with_shape_placed_async_inner(
         output_shape,
         workgroup_size,
         Some(&arithmetic),
+        authority
+            .as_ref()
+            .and_then(super::VmFusionExecutionRight::as_selection)
+            .and_then(super::VmFusionSelectionRight::decline),
     )?;
     Ok(match legacy {
         FusionExecutionOutcome::Executed(value) => {

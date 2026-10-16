@@ -17,7 +17,6 @@ use runmat_execution::{
     EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
     ExecutionCostComponents, ExecutionCostEstimate,
 };
-use runmat_runtime::context::VmFusionCompletionRight;
 
 pub(super) enum Choice {
     Provider {
@@ -36,8 +35,20 @@ pub(super) fn choose(
     program: &ResolvedReductionProgram<'_>,
     selections: &[ReductionSelection<'_>],
     input_plan: &TypedInputPlan<'_>,
-    vm_right: Option<&VmFusionCompletionRight>,
+    vm_selection: Option<super::super::VmFusionSelectionRight<'_>>,
 ) -> ExecutionResult<Choice> {
+    let vm_right = vm_selection.and_then(super::super::VmFusionSelectionRight::completion);
+    let vm_decline = vm_selection.and_then(super::super::VmFusionSelectionRight::decline);
+    let vm_decline = vm_decline.filter(|right| {
+        request.runtime.as_ref().is_some_and(|runtime| {
+            right.is_current(runtime)
+                && right.matches_group(
+                    request.plan.group.id,
+                    request.plan.group.span.start,
+                    request.plan.group.span.end,
+                )
+        })
+    });
     let data_inputs: Vec<_> = program
         .data_inputs()
         .iter()
@@ -162,7 +173,7 @@ pub(super) fn choose(
             },
             prepared_authority: None,
             vm_right,
-            vm_decline: None,
+            vm_decline,
             family: ProviderOperationFamily::Fusion,
             cpu: cpu.into(),
             cpu_admission,
@@ -177,14 +188,18 @@ pub(super) fn choose(
     match outcome {
         LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
-            if host.is_none() {
+            if host.is_none() && vm_decline.is_none() {
                 return Err(anyhow!(
                     "typed provider rejected and no executable host reduction route exists"
                 )
                 .into());
             }
             Ok(Choice::Shared {
-                observation: FusionCpuObservation::new(feedback),
+                observation: FusionCpuObservation::new(if host.is_some() {
+                    feedback
+                } else {
+                    None
+                }),
                 readback: selected_readback(host),
             })
         }

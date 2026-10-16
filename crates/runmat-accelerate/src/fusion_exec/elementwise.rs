@@ -169,10 +169,11 @@ fn admit_typed_producer_preparation(
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
-    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    vm_selection: Option<super::VmFusionSelectionRight<'_>>,
     input_uses: Option<&super::VmHostInputUses>,
     host_continuation: &mut Option<ElementwiseHostContinuation>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
+    let vm_right = vm_selection.and_then(super::VmFusionSelectionRight::completion);
     let finite_host_preparation = request
         .runtime
         .as_ref()
@@ -513,7 +514,7 @@ async fn execute_elementwise_outputs(
             ),
             shader_requirements: Some(shader_requirements),
         },
-        vm_right,
+        vm_selection,
         host,
     )?;
     if let (Some(receipt), Some(runtime)) = (&preparation_receipt, request.runtime.as_ref()) {
@@ -882,7 +883,13 @@ pub async fn execute_elementwise_placed_vm(
     request: FusionExecutionRequest<'_>,
     right: runmat_runtime::context::VmFusionCompletionRight,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
-    execute_elementwise_placed_inner(request, Some(right), None).await
+    let mut right = Some(right);
+    execute_elementwise_placed_inner(
+        request,
+        Some(super::VmFusionExecutionRight::Completion(&mut right)),
+        None,
+    )
+    .await
 }
 
 /// VM-only sibling retaining exact ordinary-load occurrences from the same
@@ -892,12 +899,32 @@ pub async fn execute_elementwise_placed_vm_inputs(
     right: runmat_runtime::context::VmFusionCompletionRight,
     input_uses: &super::VmHostInputUses,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
-    execute_elementwise_placed_inner(request, Some(right), Some(input_uses)).await
+    let mut right = Some(right);
+    execute_elementwise_placed_inner(
+        request,
+        Some(super::VmFusionExecutionRight::Completion(&mut right)),
+        Some(input_uses),
+    )
+    .await
+}
+
+/// An installed VM region may decline before effects and resume its original
+/// instructions. This right does not grant a host readback or FullCall route.
+pub async fn execute_elementwise_placed_vm_decline(
+    request: FusionExecutionRequest<'_>,
+    decline: runmat_runtime::context::VmFusionDeclineRight,
+) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
+    execute_elementwise_placed_inner(
+        request,
+        Some(super::VmFusionExecutionRight::Decline(&decline)),
+        None,
+    )
+    .await
 }
 
 async fn execute_elementwise_placed_inner(
     request: FusionExecutionRequest<'_>,
-    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    authority: Option<super::VmFusionExecutionRight<'_>>,
     input_uses: Option<&super::VmHostInputUses>,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseVmExecutionResult>> {
     let final_output = request
@@ -914,7 +941,9 @@ async fn execute_elementwise_placed_inner(
     let (mut outputs, selection) = match execute_elementwise_outputs(
         &request,
         &output_ids,
-        right.as_ref(),
+        authority
+            .as_ref()
+            .and_then(super::VmFusionExecutionRight::as_selection),
         input_uses,
         &mut host_continuation,
     )
@@ -922,7 +951,9 @@ async fn execute_elementwise_placed_inner(
     {
         FusionExecutionOutcome::Executed(outputs) => outputs,
         FusionExecutionOutcome::SharedRuntime(observation) => {
-            let observation = if let Some(right) = right {
+            let observation = if let Some(right) =
+                authority.and_then(super::VmFusionExecutionRight::into_completion)
+            {
                 let continuation = host_continuation.unwrap_or(ElementwiseHostContinuation {
                     operations: None,
                     readback: None,
@@ -961,12 +992,13 @@ async fn execute_elementwise_placed_inner(
                 .ok_or_else(|| anyhow!("fusion store output materialization missing"))
         })
         .collect::<Result<Vec<_>>>()?;
-    let completion = if let Some(right) = right {
-        selection.into_vm_completion(right)
-    } else {
-        selection.submitted();
-        None
-    };
+    let completion =
+        if let Some(right) = authority.and_then(super::VmFusionExecutionRight::into_completion) {
+            selection.into_vm_completion(right)
+        } else {
+            selection.submitted();
+            None
+        };
     Ok(FusionExecutionOutcome::Executed(
         ElementwiseVmExecutionResult {
             result: ElementwiseExecutionResult {
