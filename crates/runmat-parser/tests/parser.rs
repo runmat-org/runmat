@@ -874,6 +874,25 @@ fn whitespace_separated_matrix_allowed() {
 }
 
 #[test]
+fn matrix_sign_boundaries_apply_to_imaginary_values_but_not_nested_expressions() {
+    for (source, columns) in [
+        ("A = [2+1i  -1i; 0  4-2i];", 2),
+        ("A = [1 -2i];", 2),
+        ("A = [1 +2j];", 2),
+        ("A = [1 + 2j];", 1),
+        ("A = [1 - 2i];", 1),
+        ("A = [(1 -2) 3];", 2),
+        ("A = [complex(1 -2) 3];", 2),
+    ] {
+        let ast = parse(source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
+        let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+            panic!("expected matrix assignment: {source}");
+        };
+        assert!(rows.iter().all(|row| row.len() == columns), "{source}");
+    }
+}
+
+#[test]
 fn spaced_parenthesis_starts_next_matrix_element_after_computed_value() {
     let ast = parse("A = [ones(4,1) (1:4)']; B = [x(1)(2)];").unwrap();
     let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {

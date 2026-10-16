@@ -123,31 +123,16 @@ impl Parser {
     fn parse_add_sub(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_mul_div()?;
         loop {
-            if self.in_matrix_expr
+            if self.at_matrix_element_boundary
                 && matches!(self.peek_token(), Some(Token::Plus | Token::Minus))
                 && self.pos > 0
                 && !self.tokens_adjacent(self.pos - 1, self.pos)
                 && self.tokens_adjacent(self.pos, self.pos + 1)
             {
-                let rhs_index = self.pos + 1;
-                let rhs_is_imag_literal = self
-                    .tokens
-                    .get(rhs_index)
-                    .map(|info| matches!(info.token, Token::Integer | Token::Float))
-                    .unwrap_or(false)
-                    && self
-                        .tokens
-                        .get(rhs_index + 1)
-                        .map(|info| {
-                            matches!(info.token, Token::Ident)
-                                && (info.lexeme.eq_ignore_ascii_case("i")
-                                    || info.lexeme.eq_ignore_ascii_case("j"))
-                                && self.tokens_adjacent(rhs_index, rhs_index + 1)
-                        })
-                        .unwrap_or(false);
-                if !rhs_is_imag_literal {
-                    break;
-                }
+                // A spaced sign attached to its operand begins another column,
+                // including imaginary operands. Nested expressions do not have
+                // matrix-element separator semantics.
+                break;
             }
             let op = if self.consume(&Token::Plus) {
                 Some(BinOp::Add)
@@ -667,12 +652,9 @@ impl Parser {
     }
 
     fn parse_matrix_expr(&mut self) -> Result<Expr, SyntaxError> {
-        let prior = self.in_matrix_expr;
         let prior_boundary = self.at_matrix_element_boundary;
-        self.in_matrix_expr = true;
         self.at_matrix_element_boundary = true;
         let expr = self.parse_expr();
-        self.in_matrix_expr = prior;
         self.at_matrix_element_boundary = prior_boundary;
         expr
     }
