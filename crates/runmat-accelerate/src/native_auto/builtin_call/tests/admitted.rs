@@ -60,6 +60,52 @@ fn unquoted_dispatcher_call_observes_only_after_exact_full_call_publication() {
     ));
 }
 
+#[test]
+fn scalar_provider_preparation_fallback_keeps_original_host_body_without_feedback() {
+    let provider = super::admitted_owners::owner();
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    for (name, args, expected) in [
+        (
+            "int32",
+            vec![Value::Num(19.0)],
+            Value::Int(runmat_value::IntValue::I32(19)),
+        ),
+        (
+            "uint8",
+            vec![Value::Num(19.0)],
+            Value::Int(runmat_value::IntValue::U8(19)),
+        ),
+        (
+            "plus",
+            vec![Value::Num(19.0), Value::Num(2.0)],
+            Value::Num(21.0),
+        ),
+    ] {
+        let probe = Rc::new(Probe::default());
+        probe.provider.set(true);
+        let context = runtime(&probe);
+        let context = context.clone().with_service_ports(
+            context
+                .service_ports()
+                .clone()
+                .with_acceleration(Rc::new(Adapter(provider, 0))),
+        );
+        let output = futures::executor::block_on(context.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, name, &args),
+        ))
+        .unwrap();
+        assert_eq!(output.value(), &expected, "{name}");
+        assert!(
+            !probe.requests.borrow().is_empty(),
+            "{name} reached placement"
+        );
+        assert!(
+            probe.feedback.borrow().is_empty(),
+            "{name} must not publish a successful provider or private-host sample"
+        );
+    }
+}
+
 fn conversion_like_request(name: &str) -> AdmittedBuiltinPreparation {
     let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
     AdmittedBuiltinPreparation::new(

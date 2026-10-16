@@ -1774,6 +1774,7 @@ fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
     match instr {
         Instr::LoadVar(slot)
         | Instr::LoadVarForIndexAssignment(slot)
+        | Instr::LoadVarForCellAssignment(slot)
         | Instr::LoadVarForStructAssignment(slot)
         | Instr::StoreVar(slot) => {
             remap_slot(slot, slot_remap);

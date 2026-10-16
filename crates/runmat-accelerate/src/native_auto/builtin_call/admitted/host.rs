@@ -53,7 +53,7 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
     if prepared
         .observation
         .as_ref()
-        .is_some_and(|observation| !observation.host_selected())
+        .is_some_and(|observation| observation.provider_selected())
     {
         prepared.compound = compound;
     }

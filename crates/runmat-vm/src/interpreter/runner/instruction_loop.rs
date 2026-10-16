@@ -702,6 +702,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::LoadLocal(_)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
+            | Instr::LoadVarForCellAssignment(_)
             | Instr::LoadVarForStructAssignment(_)
             | Instr::StoreVar(_)
             | Instr::StoreLocal(_)

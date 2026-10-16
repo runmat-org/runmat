@@ -891,7 +891,9 @@ fn dispatch_immediate(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::LoadVarForIndexAssignment(index) | Instr::LoadVarForStructAssignment(index) => {
+        Instr::LoadVarForIndexAssignment(index)
+        | Instr::LoadVarForCellAssignment(index)
+        | Instr::LoadVarForStructAssignment(index) => {
             let root_presence = slot_authority::AssignmentSlotAuthority {
                 context,
                 global_aliases,
@@ -904,6 +906,14 @@ fn dispatch_immediate(
             if let slot_authority::AssignmentRootPresence::Absent(slot_name) = root_presence {
                 if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
                     let empty = Value::Struct(runmat_value::StructValue::new());
+                    debug::trace_load_var(*pc, *index, &empty);
+                    stack.push(empty);
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::FallThrough,
+                    )));
+                }
+                if matches!(instr, Instr::LoadVarForCellAssignment(_)) {
+                    let empty = slot_authority::empty_cell_root();
                     debug::trace_load_var(*pc, *index, &empty);
                     stack.push(empty);
                     return Ok(Some(DispatchHandled::Generic(

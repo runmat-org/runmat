@@ -14,10 +14,9 @@ impl HostState {
         )
     }
 
-    /// Return a staged empty-cell carrier only when the owning binding is
-    /// absent. The resident local value of an absent session alias is an
-    /// empty numeric workspace placeholder, so its class is not a presence
-    /// proof; consult the session authority for those aliases.
+    /// Return a staged empty-cell carrier only for a genuinely unassigned
+    /// binding. A declared global or persistent is present as an empty numeric
+    /// matrix even before its first canonical payload store.
     pub(in crate::execute) fn sequence_root(
         &mut self,
         slot: usize,
@@ -62,11 +61,10 @@ impl HostState {
         slot: usize,
         reference: NativeValueRef,
     ) -> NativeExecutorResult<bool> {
-        let authority = self.runtime.session_variable_authority();
-        if let Some(name) = self.global_bindings.name_for_slot(slot) {
-            Ok(authority.global_value(&name)?.is_none())
-        } else if let Some(binding) = self.persistent_bindings.get(&slot) {
-            Ok(!authority.persistent_named_present(&binding.function, &binding.name)?)
+        if self.global_bindings.binding_for_slot(slot).is_some()
+            || self.persistent_bindings.contains_key(&slot)
+        {
+            Ok(false)
         } else {
             Ok(reference.is_null())
         }

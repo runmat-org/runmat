@@ -29,10 +29,19 @@ pub(in crate::native_auto) struct BuiltinObservationPlan {
     pub(in crate::native_auto) provider_observation: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreparationRoute {
+    Host,
+    Provider,
+    // Provider preparation did not produce an executable provider route.
+    // This is not a new host selection and carries no completion right.
+    SharedFallback,
+}
+
 pub struct BuiltinCallObservation {
     pub(super) feedback: Option<Box<LocalPlacementFeedback>>,
     pub(super) trace: Option<PlacementTraceContext>,
-    provider_selected: bool,
+    route: PreparationRoute,
     host_inputs: bool,
     started: Instant,
     receipt: Option<ProviderOperationReceipt>,
@@ -103,7 +112,7 @@ impl BuiltinCallObservation {
         context: &RuntimeContext,
         form: &'static runmat_builtins::BuiltinPreparationForm,
     ) -> Option<runmat_runtime::context::preparation::PreparedHostExecution> {
-        if self.provider_selected {
+        if !self.host_selected() {
             return None;
         }
         let proof = self
@@ -115,7 +124,11 @@ impl BuiltinCallObservation {
     }
 
     pub(super) fn host_selected(&self) -> bool {
-        !self.provider_selected
+        self.route == PreparationRoute::Host
+    }
+
+    pub(super) fn provider_selected(&self) -> bool {
+        self.route == PreparationRoute::Provider
     }
     pub(super) fn new(
         feedback: Option<Box<LocalPlacementFeedback>>,
@@ -126,7 +139,11 @@ impl BuiltinCallObservation {
         Self {
             feedback,
             trace: Some(trace),
-            provider_selected,
+            route: if provider_selected {
+                PreparationRoute::Provider
+            } else {
+                PreparationRoute::Host
+            },
             host_inputs: !args
                 .iter()
                 .any(runmat_runtime::dispatcher::value_contains_gpu),
@@ -168,7 +185,7 @@ impl BuiltinCallObservation {
         provider: &dyn AccelProvider,
         query: Option<&runmat_accelerate_api::ProviderFeasibilityQuery>,
     ) {
-        if !self.provider_selected
+        if !self.provider_selected()
             || !self
                 .feedback
                 .as_ref()
@@ -202,7 +219,7 @@ impl BuiltinCallObservation {
         query: Option<&runmat_accelerate_api::ProviderFeasibilityQuery>,
         plan: &runmat_runtime::context::preparation::AdmittedBuiltinCompound,
     ) {
-        if !self.provider_selected
+        if !self.provider_selected()
             || !self
                 .feedback
                 .as_ref()
@@ -237,7 +254,7 @@ impl BuiltinCallObservation {
             self.feedback = None;
         }
         self.report(false);
-        self.provider_selected = false;
+        self.route = PreparationRoute::SharedFallback;
         if let Some(trace) = self.trace.as_ref() {
             trace.event(
                 PlacementEventKind::Fallback,
@@ -322,7 +339,7 @@ impl BuiltinCallObservation {
                 }
             }
             let attributable_success = result.as_ref().is_ok_and(|value| {
-                if self.provider_selected {
+                if self.provider_selected() {
                     self.receipt.is_some()
                 } else {
                     self.host_execution
@@ -340,7 +357,7 @@ impl BuiltinCallObservation {
                 right.deposit(Box::new(BackendCompletedCall {
                     binding,
                     feedback: self.feedback.take().expect("checked above"),
-                    receipt: if attributable_success && self.provider_selected {
+                    receipt: if attributable_success && self.provider_selected() {
                         self.receipt.take()
                     } else {
                         None
@@ -354,7 +371,7 @@ impl BuiltinCallObservation {
                 match result {
                     Err(_) => trace.fallback(None, "builtin_body_failed", None),
                     Ok(value)
-                        if self.provider_selected
+                        if self.provider_selected()
                             && runmat_runtime::dispatcher::value_contains_gpu(value) =>
                     {
                         trace.submitted(PlacementVariant::ProviderOperation, None)
@@ -379,7 +396,7 @@ impl BuiltinCallObservation {
             return;
         };
         let elapsed = duration_ns_saturating(self.started.elapsed()).max(1);
-        if self.provider_selected {
+        if self.provider_selected() {
             if let (Some(receipt), Some(feedback)) = (self.receipt.take(), self.feedback.take()) {
                 // The receipt independently requires explicit operation-owner
                 // route evidence. Resident/host result shape proves nothing.

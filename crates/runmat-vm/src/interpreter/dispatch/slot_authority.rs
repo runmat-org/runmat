@@ -5,6 +5,20 @@ use runmat_value::Value;
 
 use super::{lexical, persistent};
 
+pub(super) fn empty_cell_root() -> Value {
+    Value::Cell(
+        runmat_value::CellArray::new(Vec::new(), 0, 0)
+            .expect("the canonical empty cell shape is valid"),
+    )
+}
+
+fn empty_declared_root() -> Value {
+    Value::Tensor(
+        runmat_value::Tensor::new(Vec::new(), vec![0, 0])
+            .expect("the canonical declared-empty numeric shape is valid"),
+    )
+}
+
 pub(super) enum AssignmentRootPresence {
     Present,
     Absent(String),
@@ -35,11 +49,13 @@ impl AssignmentSlotAuthority<'_> {
     ) -> Result<AssignmentRootPresence, RuntimeError> {
         let global_binding = self.global_aliases.binding_for_slot(slot);
         let global_value = crate::runtime::globals::current_bound_value(self.global_aliases, slot);
-        if let Some(global_value) = global_value.as_ref() {
+        if let Some(global_value) =
+            global_value.or_else(|| global_binding.as_ref().map(|_| empty_declared_root()))
+        {
             if slot >= vars.len() {
                 vars.resize(slot + 1, Value::Num(0.0));
             }
-            vars[slot] = global_value.clone();
+            vars[slot] = global_value;
             crate::runtime::workspace::refresh_workspace_slot(slot, &vars[slot]);
         }
         let authority = self.context.runtime.session_variable_authority();
@@ -50,8 +66,6 @@ impl AssignmentSlotAuthority<'_> {
             self.current_function_name,
             slot,
         )?;
-        let persistent_present =
-            persistent::selected_presence(self.persistent_aliases, &authority, slot)?;
         let lexical_assigned = lexical::refresh(self.context, vars, slot)?;
         if self.missing_input_slots.contains(&slot) {
             return Err(crate::interpreter::errors::mex(
@@ -59,10 +73,10 @@ impl AssignmentSlotAuthority<'_> {
                 "Not enough input arguments.",
             ));
         }
-        let absent = if global_binding.is_some() {
-            global_value.is_none()
-        } else if let Some(present) = persistent_present {
-            !present
+        let absent = if global_binding.is_some() || self.persistent_aliases.contains_key(&slot) {
+            // A declaration itself owns a live, initially empty numeric
+            // binding even if the session has not stored its payload yet.
+            false
         } else if !lexical_assigned {
             true
         } else {

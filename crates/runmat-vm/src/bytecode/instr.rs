@@ -247,6 +247,8 @@ pub enum Instr {
     LoadCharRow(String),
     LoadVar(usize),
     LoadVarForIndexAssignment(usize),
+    /// A brace-first indexed write can create a cell only if the binding is absent.
+    LoadVarForCellAssignment(usize),
     StoreVar(usize),
 
     // Scalar and matrix arithmetic.
@@ -751,6 +753,7 @@ impl Instr {
             | Instr::CreateExternalBoundFunctionHandle(_, _, _)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
+            | Instr::LoadVarForCellAssignment(_)
             | Instr::LoadVarForStructAssignment(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)

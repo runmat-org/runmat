@@ -53,6 +53,7 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::LoadCharRow(..)
             | crate::bytecode::Instr::LoadVar(..)
             | crate::bytecode::Instr::LoadVarForIndexAssignment(..)
+            | crate::bytecode::Instr::LoadVarForCellAssignment(..)
             | crate::bytecode::Instr::StoreVar(..)
             | crate::bytecode::Instr::Add
             | crate::bytecode::Instr::Sub

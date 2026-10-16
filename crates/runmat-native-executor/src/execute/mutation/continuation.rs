@@ -52,6 +52,22 @@ fn root_creation_policy(
     }
 }
 
+fn assignment_root_for_segments(
+    state: &mut HostState,
+    root: MirLocalId,
+    outer: AssignmentCreationPolicy,
+    segments: &[PlaceSegment],
+) -> NativeExecutorResult<Value> {
+    if outer != AssignmentCreationPolicy::ExistingOnly
+        && matches!(segments.first(), Some(PlaceSegment::Index(indexing)) if indexing.kind == IndexKind::Brace)
+    {
+        return state
+            .sequence_root(root.0, runmat_mir::SequenceRootCreation::EmptyCell)
+            .map(|(value, _retained_seed)| value);
+    }
+    state.assignment_root(root.0, root_creation_policy(outer, segments))
+}
+
 pub(super) fn assignment_root_for_place(
     state: &mut HostState,
     place: &MirPlace,
@@ -60,7 +76,7 @@ pub(super) fn assignment_root_for_place(
     validate_creation_policy(place, false, creation)?;
     let mut segments = Vec::new();
     let root = flatten_place(place, &mut segments)?;
-    state.assignment_root(root.0, root_creation_policy(creation, &segments))
+    assignment_root_for_segments(state, root, creation, &segments)
 }
 
 mod sequence;
@@ -216,10 +232,9 @@ impl PendingAssign {
         let root = flatten_place(place, &mut segments)?;
         // MIR describes the outer place; the first segment alone selects the
         // absent root carrier, after that outer policy has been admitted.
-        let root_creation = root_creation_policy(creation, &segments);
         let current = match explicit_root {
             Some(root_value) => root_value,
-            None => state.assignment_root(root.0, root_creation)?,
+            None => assignment_root_for_segments(state, root, creation, &segments)?,
         };
         let current = state.arena.insert(current);
         let rhs = state.arena.insert(rhs);

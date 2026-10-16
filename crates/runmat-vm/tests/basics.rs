@@ -849,6 +849,25 @@ fn undefined_root_index_assignment_uses_index_assignment_load_semantics() {
 }
 
 #[test]
+fn undefined_brace_root_uses_cell_creation_without_reclassifying_assigned_numeric() {
+    let bytecode = compile_source("c{2} = 9; out = c;").unwrap();
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::LoadVarForCellAssignment(_))));
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+    let Value::Cell(cell) = vars.last().expect("assigned cell output") else {
+        panic!("undefined brace root did not become a cell");
+    };
+    assert_eq!(cell.get(0, 1).unwrap(), Value::Num(9.0));
+
+    let assigned = compile_source("c = 0; c{2} = 9;").unwrap();
+    let error =
+        test_helpers::interpret(&assigned).expect_err("assigned numeric is not an absent root");
+    assert_eq!(error.identifier(), Some("RunMat:CellAssignmentOnNonCell"));
+}
+
+#[test]
 fn string_array_scalar_index_assignment_executes() {
     let bytecode = compile_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();

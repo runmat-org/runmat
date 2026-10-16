@@ -333,19 +333,10 @@ pub enum SequenceRootCreation {
 
 impl MirSequenceTarget {
     pub fn root_creation(&self) -> SequenceRootCreation {
-        fn first_step(place: &MirPlace) -> Option<bool> {
-            match place {
-                MirPlace::Local(_) | MirPlace::Binding(_) => None,
-                MirPlace::Index(base, indexing) => {
-                    first_step(base).or(Some(indexing.kind == runmat_hir::IndexKind::Brace))
-                }
-                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
-                    first_step(base).or(Some(false))
-                }
+        match self.base().first_root_step() {
+            Some(crate::MirRootStep::Index(runmat_hir::IndexKind::Brace)) => {
+                SequenceRootCreation::EmptyCell
             }
-        }
-        match first_step(self.base()) {
-            Some(true) => SequenceRootCreation::EmptyCell,
             None if matches!(self, Self::CellContents { .. }) => SequenceRootCreation::EmptyCell,
             _ => SequenceRootCreation::Existing,
         }

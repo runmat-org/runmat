@@ -119,29 +119,6 @@ fn canonical(
     }
 }
 
-/// Presence of the selected persistent binding, independent of the VM frame's
-/// numeric placeholder and workspace lifecycle. A named binding never borrows
-/// a legacy slot's presence proof for sequence-root creation.
-pub(crate) fn selected_presence(
-    aliases: &PersistentAliases,
-    authority: &SessionVariableAuthority,
-    slot: usize,
-) -> Result<Option<bool>, RuntimeError> {
-    let Some(binding) = aliases.get(&slot) else {
-        return Ok(None);
-    };
-    binding.validate_selected(authority, &binding.function)?;
-    let present = match &binding.alias {
-        PersistentAlias::Named(name) | PersistentAlias::InheritedNamed(name) => {
-            authority.persistent_named_present(&binding.function, name)?
-        }
-        PersistentAlias::LegacySlot => {
-            authority.persistent_slot_present(&binding.function, slot)?
-        }
-    };
-    Ok(Some(present))
-}
-
 fn publish(
     authority: &SessionVariableAuthority,
     function: &str,

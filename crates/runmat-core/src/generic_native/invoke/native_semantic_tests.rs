@@ -219,7 +219,7 @@ fn absent_brace_root_completes_in_forced_native_with_vm_parity() {
 }
 
 #[test]
-fn fresh_persistent_brace_root_has_vm_and_forced_native_parity() {
+fn declared_persistent_brace_root_requires_cell_in_vm_and_forced_native() {
     let expected = Value::Cell(
         runmat_value::CellArray::new(
             vec![
@@ -247,7 +247,7 @@ fn fresh_persistent_brace_root_has_vm_and_forced_native_parity() {
         } else {
             InvocationControl::default()
         };
-        let result = block_on(session.invoke_executable(
+        let failure = block_on(session.invoke_executable(
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeFreshPersistentBrace".into()),
@@ -256,7 +256,31 @@ fn fresh_persistent_brace_root_has_vm_and_forced_native_parity() {
             },
             &control,
         ))
-        .expect("fresh persistent brace execution");
+        .expect_err("a declared persistent is an existing empty numeric binding");
+        let crate::RunError::Runtime(error) = failure else {
+            panic!("expected a runtime cell-assignment error, got {failure:?}");
+        };
+        assert_eq!(error.identifier(), Some("RunMat:CellAssignmentOnNonCell"));
+
+        let initialized = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-initialized-persistent-brace@1",
+                "nativeInitializedPersistentBrace.m",
+                "function [out, y] = nativeInitializedPersistentBrace()\npersistent c\nc = {};\n[c{2}, y] = deal(9, 4);\nout = c;\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile initialized persistent brace unit");
+        let result = block_on(session.invoke_executable(
+            &initialized,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeInitializedPersistentBrace".into()),
+                arguments: Vec::new(),
+                requested_outputs: 2,
+            },
+            &control,
+        ))
+        .expect("explicitly initialized persistent cell execution");
         assert_eq!(result.as_slice(), &[expected.clone(), Value::Num(4.0)]);
     }
 }

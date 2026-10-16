@@ -85,13 +85,37 @@ fn struct_assignment_opcode_round_trips_and_pre_creation_artifacts_reject() {
 
 #[test]
 fn sequence_root_creation_instruction_round_trips_with_current_revision() {
-    let ast = runmat_parser::parse("c{2} = 9;").unwrap();
-    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
-    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).unwrap();
-    let bytecode =
-        crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).unwrap();
-    let encoded = encode_interpreter_script_v2(&bytecode).unwrap();
-    let decoded = decode_interpreter_script_v2(&encoded).unwrap();
+    let compile_round_trip = |source| {
+        let ast = runmat_parser::parse(source).unwrap();
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
+        let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).unwrap();
+        let bytecode =
+            crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).unwrap();
+        decode_interpreter_script_v2(&encode_interpreter_script_v2(&bytecode).unwrap()).unwrap()
+    };
+    let direct = compile_round_trip("c{2} = 9;");
+    assert!(direct
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::LoadVarForCellAssignment(0))));
+
+    let old_direct = super::envelope::encode_payload(
+        InterpreterPayloadForm::ScriptV2,
+        SCRIPT_V2_PREAMBLE,
+        &[("bytecode", 18)],
+        &serde_json::to_value(&direct).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_interpreter_script_v2(&old_direct),
+        Err(InterpreterPayloadError::UnsupportedRevision {
+            field: InterpreterRevisionField::Bytecode,
+            actual: 18,
+            expected: BYTECODE_SCHEMA_VERSION,
+        })
+    ));
+
+    let decoded = compile_round_trip("[c{2}, y] = deal(9, 4);");
     assert!(matches!(
         decoded
             .instructions

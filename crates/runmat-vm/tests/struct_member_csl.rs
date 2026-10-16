@@ -179,9 +179,17 @@ fn prepared_cell_root_refreshes_global_after_selector_callback() {
 }
 
 #[test]
-fn fresh_persistent_cell_root_uses_canonical_absence_not_frame_placeholder() {
+fn declared_persistent_is_not_an_undefined_cell_root() {
+    let error = execute_source(
+        "function out = persistent_cell_destination(); persistent c; [c{2}, y] = deal(9, 4); out = c; end; out = persistent_cell_destination();",
+    )
+    .expect_err("a declared persistent is an existing empty numeric binding");
+    assert!(
+        error.to_string().contains("CellAssignmentOnNonCell"),
+        "{error}"
+    );
     execute_source(
-        "function out = persistent_cell_destination(); persistent c; [c{2}, y] = deal(9, 4); assert(y == 4); out = c; end; first = persistent_cell_destination(); assert(iscell(first)); assert(isempty(first{1})); assert(first{2} == 9); second = persistent_cell_destination(); assert(second{2} == 9);",
+        "function out = initialized_cell_destination(); persistent c; c = {}; [c{2}, y] = deal(9, 4); assert(y == 4); out = c; end; first = initialized_cell_destination(); assert(iscell(first)); assert(isempty(first{1})); assert(first{2} == 9);",
     )
     .unwrap();
 }

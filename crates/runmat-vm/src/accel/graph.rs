@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
@@ -59,6 +59,7 @@ struct GraphBuilder<'a> {
     values: Vec<ValueInfo>,
     stack: Vec<ValueId>,
     var_values: HashMap<VarKey, ValueId>,
+    creation_invalidated: HashSet<usize>,
     local_types: HashMap<usize, Type>,
     builtin_cache: HashMap<String, BuiltinInfo>,
     var_bindings: HashMap<ValueId, VarBinding>,
@@ -138,6 +139,7 @@ impl<'a> GraphBuilder<'a> {
             values: Vec::new(),
             stack: Vec::new(),
             var_values: HashMap::new(),
+            creation_invalidated: HashSet::new(),
             local_types: HashMap::new(),
             builtin_cache,
             var_bindings: HashMap::new(),
@@ -217,9 +219,13 @@ impl<'a> GraphBuilder<'a> {
             Instr::LoadCharRow(s) => {
                 self.push_constant(Type::String, Some(Value::String(s.clone())))
             }
-            Instr::LoadVar(idx)
-            | Instr::LoadVarForIndexAssignment(idx)
-            | Instr::LoadVarForStructAssignment(idx) => self.handle_load_var(*idx),
+            Instr::LoadVar(idx) => self.handle_load_var(*idx),
+            Instr::LoadVarForIndexAssignment(idx)
+            | Instr::LoadVarForCellAssignment(idx)
+            | Instr::LoadVarForStructAssignment(idx) => {
+                self.mark_unknown();
+                self.creation_invalidated.insert(*idx);
+            }
             Instr::StoreVar(idx) => self.handle_store_var(pc, *idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
             Instr::StoreLocal(idx) => self.handle_store_local(pc, *idx),
@@ -503,7 +509,11 @@ impl<'a> GraphBuilder<'a> {
             self.stack.push(id);
             return;
         }
-        let ty = self.var_types.get(idx).cloned().unwrap_or(Type::Unknown);
+        let ty = if self.creation_invalidated.contains(&idx) {
+            Type::Unknown
+        } else {
+            self.var_types.get(idx).cloned().unwrap_or(Type::Unknown)
+        };
         let id = self.new_value(
             ValueOrigin::Variable {
                 kind: VarKind::Global,
@@ -531,7 +541,11 @@ impl<'a> GraphBuilder<'a> {
             }
             let key = VarKey::Global(idx);
             self.var_values.insert(key, value_id);
-            if let Some(ty) = self.var_types.get(idx) {
+            if let Some(ty) = self
+                .var_types
+                .get(idx)
+                .filter(|_| !self.creation_invalidated.contains(&idx))
+            {
                 self.apply_type(value_id, ty);
             }
             self.var_bindings.insert(value_id, binding);
@@ -1548,6 +1562,38 @@ mod tests {
             graph.var_binding(stores[0].value_id),
             Some(&stores[1].binding)
         );
+    }
+
+    #[test]
+    fn assignment_creation_loads_do_not_reuse_numeric_graph_cache() {
+        for load in [
+            Instr::LoadVarForIndexAssignment(0),
+            Instr::LoadVarForCellAssignment(0),
+            Instr::LoadVarForStructAssignment(0),
+        ] {
+            let (graph, stores) = build_accel_graph_with_stores(
+                &[
+                    Instr::LoadConst(7.0),
+                    Instr::StoreVar(0),
+                    load,
+                    Instr::StoreVar(1),
+                    Instr::LoadVar(0),
+                    Instr::StoreVar(2),
+                ],
+                &[Type::Num, Type::Unknown, Type::Unknown],
+            );
+            assert_eq!(
+                stores.len(),
+                2,
+                "a creation load cannot reuse the cached numeric value"
+            );
+            assert_eq!(stores[0].pc, 1);
+            assert_eq!(stores[1].pc, 5);
+            assert!(matches!(
+                &graph.value(stores[1].value_id).unwrap().ty,
+                Type::Unknown
+            ));
+        }
     }
 
     #[test]

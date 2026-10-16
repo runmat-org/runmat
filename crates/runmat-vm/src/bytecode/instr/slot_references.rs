@@ -20,6 +20,7 @@ impl Instr {
             Instr::StoreVar(index) => visit(*index, VmSlotAccess::StoreVar),
             Instr::LoadVar(index) => visit(*index, VmSlotAccess::LoadVar),
             Instr::LoadVarForIndexAssignment(index)
+            | Instr::LoadVarForCellAssignment(index)
             | Instr::LoadVarForStructAssignment(index)
             | Instr::LoadLocal(index)
             | Instr::StoreLocal(index)

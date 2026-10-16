@@ -47,10 +47,7 @@ pub(super) async fn finish_destination(
 }
 
 pub(super) fn empty_cell_root() -> Value {
-    Value::Cell(
-        runmat_value::CellArray::new(Vec::new(), 0, 0)
-            .expect("the canonical empty cell shape is valid"),
-    )
+    super::super::slot_authority::empty_cell_root()
 }
 
 pub(super) fn root(vars: &[Value], slot: usize) -> Result<&Value, RuntimeError> {

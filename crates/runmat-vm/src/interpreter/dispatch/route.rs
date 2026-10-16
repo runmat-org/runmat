@@ -171,6 +171,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::LoadCharRow(..)
         | Instr::LoadVar(..)
         | Instr::LoadVarForIndexAssignment(..)
+        | Instr::LoadVarForCellAssignment(..)
         | Instr::LoadVarForStructAssignment(..)
         | Instr::StoreVar(..)
         | Instr::StochasticEvolution
