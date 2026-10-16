@@ -3,13 +3,12 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
+#[cfg(test)]
+use runmat_builtins::COND_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COND_ERROR_INTERNAL, COND_ERROR_INVALID_ARGUMENT,
+    COND_ERROR_INVALID_INPUT, COND_INTEGER_MATRIX_EXTENSION, COND_INTEGER_NORM_EXTENSION,
+    COND_LOGICAL_MATRIX_EXTENSION, COND_LOGICAL_NORM_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
@@ -21,148 +20,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cond";
-
-pub const COND_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-integer-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a typed-integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondIntegerMatrixExtension"),
-};
-
-pub const COND_LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-logical-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondLogicalMatrixExtension"),
-};
-
-pub const COND_INTEGER_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-integer-norm-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a typed-integer norm selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondIntegerNormSelectorExtension"),
-};
-
-pub const COND_LOGICAL_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-logical-norm-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a logical norm selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondLogicalNormSelectorExtension"),
-};
-
-pub const COND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COND_INTEGER_MATRIX_EXTENSION,
-    COND_LOGICAL_MATRIX_EXTENSION,
-    COND_INTEGER_NORM_EXTENSION,
-    COND_LOGICAL_NORM_EXTENSION,
-];
-
-const COND_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat mode accepts integer matrices only when every element is exactly representable at the floating linear-algebra boundary.",
-}];
-
-const COND_INTEGER_NORM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "Integer norm selectors are decoded structurally and accept only exact values 1 or 2.",
-    }];
-
-pub const COND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "c = cond(integer_A, p)", inputs: &COND_INTEGER_MATRIX_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "This RunMat extension requires exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision." },
-    BuiltinIntegerCapabilityDescriptor { form: "c = cond(A, integer_p)", inputs: &COND_INTEGER_NORM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Host typed-integer selectors do not enter matrix arithmetic and wide values are rejected without floating conversion; resident norm selectors are not supported." },
-];
-
-const COND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "c",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Condition number estimate of A.",
-}];
-
-const COND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const COND_INPUTS_NORM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Norm selector (1, 2, inf, or \"fro\").",
-    },
-];
-
-const COND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "c = cond(A)",
-        inputs: &COND_INPUTS,
-        outputs: &COND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "c = cond(A, p)",
-        inputs: &COND_INPUTS_NORM,
-        outputs: &COND_OUTPUT,
-    },
-];
-
-const COND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cond:InvalidArgument"),
-    when: "Norm selector argument is malformed or unsupported.",
-    message: "cond: invalid argument",
-};
-
-const COND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INVALID_INPUT",
-    identifier: Some("RunMat:cond:InvalidInput"),
-    when: "Input shape/type cannot be processed for condition-number evaluation.",
-    message: "cond: invalid input",
-};
-
-const COND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INTERNAL",
-    identifier: Some("RunMat:cond:Internal"),
-    when: "Runtime fails while computing cond or executing fallback/upload paths.",
-    message: "cond: internal runtime failure",
-};
-
-const COND_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    COND_ERROR_INVALID_ARGUMENT,
-    COND_ERROR_INVALID_INPUT,
-    COND_ERROR_INTERNAL,
-];
-
-pub const COND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COND_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -238,14 +98,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "cond",
-    category = "math/linalg/solve",
-    summary = "Compute matrix condition numbers.",
-    keywords = "cond,condition number,norm,gpu",
-    accel = "cond",
-    type_resolver(numeric_scalar_type),
-    extensions(COND_EXTENSIONS),
-    integer_capabilities(COND_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::linalg::solve::cond::COND_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
 async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -763,7 +616,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -778,17 +630,6 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 1.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn cond_type_returns_scalar() {
-        let out = numeric_scalar_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[test]

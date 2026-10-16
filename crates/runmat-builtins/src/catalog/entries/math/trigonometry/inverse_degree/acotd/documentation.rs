@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Compute inverse cotangent in degrees.",
     description: "Elementwise principal inverse cotangent in degrees. Real outputs follow [-90, 90]; complex input and out-of-real-domain values use the principal complex branch.",
     keywords: &["acotd", "inverse trigonometry", "degrees", "elementwise"],
-    related: &["atan", "cotd", "rad2deg"],
+    related: &["atan", "atand", "rad2deg"],
     sections: SECTIONS,
     examples: EXAMPLES,
     example_exemption: None,

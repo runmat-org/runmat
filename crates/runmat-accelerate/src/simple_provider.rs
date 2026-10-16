@@ -9439,17 +9439,37 @@ impl AccelProvider for InProcessProvider {
         matrix: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let source_precision =
+                runmat_accelerate_api::handle_precision(matrix).ok_or_else(|| {
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "rcond: floating input is required",
+                    )
+                })?;
             let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(matrix)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("rcond: unknown buffer {}", matrix.buffer_id()))?
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .unwrap_or_else(|error| error.into_inner());
+                match guard.get(matrix) {
+                    Some(InProcessNumericData::F32(values)) => {
+                        values.iter().copied().map(f64::from).collect()
+                    }
+                    Some(InProcessNumericData::F64(values)) => values.clone(),
+                    Some(_) => {
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "rcond: real floating input is required",
+                        ));
+                    }
+                    None => return Err(anyhow!("rcond: unknown buffer {}", matrix.buffer_id())),
+                }
             };
             let tensor =
                 Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("rcond: {e}"))?;
             let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-            self.allocate_tensor(vec![estimate], vec![1, 1])
+            let values = match source_precision {
+                ProviderPrecision::F32 => InProcessNumericData::F32(vec![estimate as f32]),
+                ProviderPrecision::F64 => InProcessNumericData::F64(vec![estimate]),
+            };
+            self.allocate_produced(values, vec![1, 1], GpuTensorStorage::Real, false)
         })
     }
 

@@ -72,6 +72,52 @@ pub(super) fn matrix_input(
     diagnostics
 }
 
+pub(super) fn schur_operand(
+    value: &ValueFact,
+    argument: usize,
+    invalid_input_code: &'static str,
+) -> Vec<InferenceDiagnostic> {
+    let mut diagnostics = Vec::new();
+    match &value.kind {
+        ValueKindFact::Numeric(numeric)
+            if matches!(numeric.class, NumericClass::Single | NumericClass::Double) => {}
+        ValueKindFact::Unknown => {}
+        _ => diagnostics.push(argument_error(
+            invalid_input_code,
+            "Schur operands must be single or double numeric matrices",
+            argument,
+        )),
+    }
+    if value.shape.rank().is_some_and(|rank| rank > 2)
+        || dimensions(value)
+            .is_some_and(|(rows, cols)| rows.zip(cols).is_some_and(|(rows, cols)| rows != cols))
+    {
+        diagnostics.push(argument_error(
+            invalid_input_code,
+            "Schur operands must be square two-dimensional matrices",
+            argument,
+        ));
+    }
+    if matches!(value.storage, StorageFact::Sparse | StorageFact::Opaque) {
+        diagnostics.push(argument_error(
+            invalid_input_code,
+            "Schur operands require dense storage",
+            argument,
+        ));
+    }
+    if matches!(
+        &value.residency,
+        ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+    ) {
+        diagnostics.push(argument_error(
+            invalid_input_code,
+            "Schur operands require host residency",
+            argument,
+        ));
+    }
+    diagnostics
+}
+
 pub(super) fn dimensions(value: &ValueFact) -> Option<(Option<usize>, Option<usize>)> {
     let dimensions = value.shape.known_dims()?;
     match dimensions.as_slice() {

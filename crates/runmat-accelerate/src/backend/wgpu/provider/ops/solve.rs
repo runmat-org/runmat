@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
 #[path = "solve/validated_triangular.rs"]
 mod validated_triangular;
@@ -134,15 +135,30 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let source_precision = runmat_accelerate_api::handle_precision(matrix)
+            .ok_or_else(|| anyhow!("rcond: floating input is required"))?;
         let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
         let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [estimate];
         let shape = [1usize, 1usize];
-        self.upload_exec(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
-        })
+        match source_precision {
+            ProviderPrecision::F32 => {
+                let scalar = [estimate as f32];
+                self.upload_numeric_exec(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&scalar),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+            }
+            ProviderPrecision::F64 => {
+                let scalar = [estimate];
+                self.upload_numeric_exec(&HostNumericTensorView {
+                    data: HostNumericDataView::F64(&scalar),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+            }
+        }
     }
 
     pub(crate) async fn mldivide_exec(

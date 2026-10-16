@@ -58,3 +58,11 @@ pub(super) const fn factor_entry(spec: FactorEntrySpec) -> BuiltinCatalogEntry {
         suppress_auto_output: false,
     }
 }
+
+/// The ordinary Schur transformations have no provider factorization hook.
+pub(super) const fn host_factor_entry(spec: FactorEntrySpec) -> BuiltinCatalogEntry {
+    let mut entry = factor_entry(spec);
+    entry.placement.accelerator = BuiltinAcceleratorPolicy::Forbidden;
+    entry.placement.distributed = BuiltinDistributedPolicy::Unsupported;
+    entry
+}

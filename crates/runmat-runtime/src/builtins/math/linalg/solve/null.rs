@@ -7,13 +7,12 @@ use std::mem::size_of;
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::NULL_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, NULL_ERROR_INTERNAL, NULL_ERROR_INVALID_ARGUMENT,
+    NULL_ERROR_INVALID_INPUT, NULL_ERROR_PROVIDER_OWNERSHIP, NULL_INTEGER_MATRIX_EXTENSION,
+    NULL_LOGICAL_MATRIX_EXTENSION, NULL_RESIDENT_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -30,165 +29,9 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::solve::rref::{
     default_complex_tolerance, default_real_tolerance, rref_complex_impl, rref_real_impl,
 };
-use crate::builtins::math::linalg::type_resolvers::null_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "null";
-
-const INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-integer-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with a native-class integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullIntegerMatrixExtension"),
-};
-const LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-logical-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullLogicalMatrixExtension"),
-};
-const RESIDENT_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-resident-tolerance",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with an explicit gpuArray tolerance is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullResidentToleranceExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_MATRIX_EXTENSION,
-    LOGICAL_MATRIX_EXTENSION,
-    RESIDENT_TOLERANCE_EXTENSION,
-];
-
-const INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The compatibility target documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization.",
-}];
-const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented real numeric scalar tolerance accepts native integer scalars and converts only when exactly representable as binary64.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Z = null(integer_A, ___)", inputs: &INTEGER_MATRIX_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer A is a RunMat-only extension; exact host or resident values enter double SVD/RREF computation and return double bases." },
-    BuiltinIntegerCapabilityDescriptor { form: "Z = null(A, integer_tol)", inputs: &INTEGER_TOLERANCE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer tolerance values are parsed exactly before the floating rank threshold; resident tolerance controls are a separately gated extension." },
-];
-
-const NULL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Basis for the null space of A.",
-}];
-
-const NULL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const NULL_INPUTS_A_TOL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Rank tolerance.",
-    },
-];
-
-const NULL_INPUTS_A_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "`\"rational\"` requests a row-reduction basis; `\"r\"` is a legacy alias.",
-    },
-];
-
-const NULL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A)",
-        inputs: &NULL_INPUTS_A,
-        outputs: &NULL_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A, tol)",
-        inputs: &NULL_INPUTS_A_TOL,
-        outputs: &NULL_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A, \"rational\")",
-        inputs: &NULL_INPUTS_A_OPTION,
-        outputs: &NULL_OUTPUT,
-    },
-];
-
-const NULL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:null:InvalidArgument"),
-    when: "Optional tolerance or basis option is malformed or outside accepted bounds.",
-    message: "null: invalid argument",
-};
-
-const NULL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INVALID_INPUT",
-    identifier: Some("RunMat:null:InvalidInput"),
-    when: "Input shape/type cannot be processed for null-space evaluation.",
-    message: "null: invalid input",
-};
-
-const NULL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INTERNAL",
-    identifier: Some("RunMat:null:Internal"),
-    when: "Runtime fails while computing the null space or executing fallback/upload paths.",
-    message: "null: internal runtime failure",
-};
-const NULL_ERROR_PROVIDER_OWNERSHIP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.PROVIDER_OWNERSHIP_MISMATCH",
-    identifier: Some("RunMat:gpu:ProviderOwnershipMismatch"),
-    when: "A resident input has no exact owning provider.",
-    message: "null: no acceleration provider owns the input handle",
-};
-
-const NULL_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    NULL_ERROR_INVALID_ARGUMENT,
-    NULL_ERROR_INVALID_INPUT,
-    NULL_ERROR_INTERNAL,
-    NULL_ERROR_PROVIDER_OWNERSHIP,
-];
-
-pub const NULL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NULL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NULL_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::null")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -270,14 +113,7 @@ enum NullMode {
 
 #[runtime_builtin(
     name = "null",
-    category = "math/linalg/solve",
-    summary = "Compute a basis for a matrix null space.",
-    keywords = "null,null space,kernel,svd,rref,rational,gpu",
-    accel = "sink",
-    type_resolver(null_type),
-    descriptor(crate::builtins::math::linalg::solve::null::NULL_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::null::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::null::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::null"
 )]
 async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -308,12 +144,18 @@ async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 fn ensure_null_input_compatibility(value: &Value) -> BuiltinResult<()> {
     if crate::builtins::common::validation::value_contains_native_integer_class(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_MATRIX_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NULL_INTEGER_MATRIX_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_MATRIX_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NULL_LOGICAL_MATRIX_EXTENSION,
+            NAME,
+        )?;
     }
     Ok(())
 }
@@ -334,7 +176,7 @@ async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
             }
             if crate::builtins::common::validation::value_contains_explicit_gpu(&args[0]) {
                 crate::compatibility::ensure_builtin_extension_enabled(
-                    &RESIDENT_TOLERANCE_EXTENSION,
+                    &NULL_RESIDENT_TOLERANCE_EXTENSION,
                     NAME,
                 )?;
             }
@@ -871,7 +713,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CharArray, IntValue, IntegerStorage, StringArray};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -989,22 +830,6 @@ pub(crate) mod tests {
                 assert!(dot.norm() <= tol, "column dot {dot}");
             }
         }
-    }
-
-    #[test]
-    fn null_type_uses_input_column_count_and_unknown_nullity() {
-        let out = null_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), None])
-            }
-        );
     }
 
     #[test]
@@ -1138,7 +963,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             error.identifier(),
-            INTEGER_MATRIX_EXTENSION.error_identifier
+            NULL_INTEGER_MATRIX_EXTENSION.error_identifier
         );
     }
 

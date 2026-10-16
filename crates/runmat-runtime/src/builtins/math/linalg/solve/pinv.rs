@@ -3,13 +3,12 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPinvOptions};
+#[cfg(test)]
+use runmat_builtins::PINV_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, PINV_ERROR_INVALID_ARGUMENT, PINV_ERROR_INVALID_INPUT,
+    PINV_INTEGER_INPUT_EXTENSION, PINV_INTEGER_TOLERANCE_EXTENSION, PINV_LOGICAL_INPUT_EXTENSION,
+    PINV_LOGICAL_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -23,166 +22,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::type_resolvers::pinv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pinv";
-
-pub const PINV_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pinv-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pinv with a typed-integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PinvIntegerInputExtension"),
-};
-
-pub const PINV_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "pinv-integer-tolerance",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "pinv with a typed-integer tolerance is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PinvIntegerToleranceExtension"),
-    };
-pub const PINV_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pinv-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pinv with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PinvLogicalInputExtension"),
-};
-pub const PINV_LOGICAL_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "pinv-logical-tolerance",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "pinv with a logical tolerance is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PinvLogicalToleranceExtension"),
-    };
-
-pub const PINV_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    PINV_INTEGER_INPUT_EXTENSION,
-    PINV_INTEGER_TOLERANCE_EXTENSION,
-    PINV_LOGICAL_INPUT_EXTENSION,
-    PINV_LOGICAL_TOLERANCE_EXTENSION,
-];
-
-const PINV_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public matrix classes are single and double; RunMat mode admits real integer matrices only when every value is exactly representable as binary64.",
-    }];
-
-const PINV_INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64.",
-    }];
-
-pub const PINV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = pinv(integer_A, tol?)",
-        inputs: &PINV_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated integer matrix crosses one checked binary64 SVD boundary. Host output is double, and automatic residency may restore the floating result to the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = pinv(A, integer_tol)",
-        inputs: &PINV_INTEGER_TOLERANCE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation.",
-    },
-];
-
-const PINV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Pseudoinverse of A.",
-}];
-
-const PINV_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const PINV_INPUTS_TOL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Singular-value threshold.",
-    },
-];
-
-const PINV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "X = pinv(A)",
-        inputs: &PINV_INPUTS,
-        outputs: &PINV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "X = pinv(A, tol)",
-        inputs: &PINV_INPUTS_TOL,
-        outputs: &PINV_OUTPUT,
-    },
-];
-
-const PINV_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PINV.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pinv:InvalidArgument"),
-    when: "Optional tolerance argument is malformed or outside accepted bounds.",
-    message: "pinv: invalid argument",
-};
-
-const PINV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PINV.INVALID_INPUT",
-    identifier: Some("RunMat:pinv:InvalidInput"),
-    when: "Input shape/type cannot be processed for pseudoinverse evaluation.",
-    message: "pinv: invalid input",
-};
-
-const PINV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PINV.INTERNAL",
-    identifier: Some("RunMat:pinv:Internal"),
-    when: "Runtime fails while computing pseudoinverse or executing fallback/upload paths.",
-    message: "pinv: internal runtime failure",
-};
-
-const PINV_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PINV_ERROR_INVALID_ARGUMENT,
-    PINV_ERROR_INVALID_INPUT,
-    PINV_ERROR_INTERNAL,
-];
-
-pub const PINV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PINV_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PINV_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -249,14 +91,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "pinv",
-    category = "math/linalg/solve",
-    summary = "Compute Moore-Penrose pseudoinverses using SVD-based tolerance rules.",
-    keywords = "pinv,pseudoinverse,svd,least squares,gpu",
-    accel = "pinv",
-    type_resolver(pinv_type),
-    descriptor(crate::builtins::math::linalg::solve::pinv::PINV_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::pinv::PINV_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::pinv::PINV_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -462,7 +297,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CharArray, IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -486,22 +320,6 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.25).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn pinv_type_swaps_dims() {
-        let out = pinv_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)])
-            }
-        );
     }
 
     #[test]

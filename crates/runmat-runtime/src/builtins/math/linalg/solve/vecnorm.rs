@@ -1,13 +1,11 @@
 //! MATLAB-compatible `vecnorm` builtin.
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::VECNORM_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, VECNORM_ERROR_INTERNAL, VECNORM_ERROR_INVALID_ARGUMENT,
+    VECNORM_ERROR_INVALID_INPUT, VECNORM_INTEGER_INPUT_EXTENSION, VECNORM_INTEGER_ORDER_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
@@ -18,196 +16,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::solve::norm::{root_sum_of_squares, NormOrder};
-use crate::builtins::math::linalg::type_resolvers::vecnorm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "vecnorm";
-
-pub const VECNORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "vecnorm-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "vecnorm with typed-integer array data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:VecnormIntegerInputExtension"),
-    };
-pub const VECNORM_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "vecnorm-integer-order",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "vecnorm with a typed-integer norm order is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:VecnormIntegerOrderExtension"),
-    };
-pub const VECNORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    VECNORM_INTEGER_INPUT_EXTENSION,
-    VECNORM_INTEGER_ORDER_EXTENSION,
-];
-
-const VECNORM_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data classes are single and double. RunMat mode accepts real integer arrays only when every value is exactly representable at the binary64 norm boundary.",
-    }];
-const VECNORM_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed norm order is a RunMat extension and enters the floating exponent only after exact binary64 representability is proved.",
-    }];
-const VECNORM_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented dimension accepts every integer class and is decoded exactly as a positive platform-sized structural value.",
-    }];
-
-pub const VECNORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(integer_A, ___)",
-        inputs: &VECNORM_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated integer array crosses one checked binary64 norm boundary. Host results are double and automatic residency restores results to the owning provider when supported.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(A, integer_p, dim?)",
-        inputs: &VECNORM_INTEGER_ORDER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The gated typed p is checked before conversion into the norm exponent; it does not select the output class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(A, p, integer_dim)",
-        inputs: &VECNORM_INTEGER_DIM_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Dimension selection remains exact and does not enter norm arithmetic; invalid or non-platform-sized values reject without floating conversion.",
-    },
-];
-
-const VECNORM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vector-wise norm values.",
-}];
-
-const VECNORM_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input numeric array.",
-}];
-
-const VECNORM_INPUTS_A_P: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input numeric array.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("2"),
-        description: "Positive norm order or Inf.",
-    },
-];
-
-const VECNORM_INPUTS_A_P_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input numeric array.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("2"),
-        description: "Positive norm order or Inf.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Dimension to operate along.",
-    },
-];
-
-const VECNORM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A)",
-        inputs: &VECNORM_INPUTS_A,
-        outputs: &VECNORM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A, p)",
-        inputs: &VECNORM_INPUTS_A_P,
-        outputs: &VECNORM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A, p, dim)",
-        inputs: &VECNORM_INPUTS_A_P_DIM,
-        outputs: &VECNORM_OUTPUT,
-    },
-];
-
-const VECNORM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:vecnorm:InvalidArgument"),
-    when: "The norm order or dimension argument is malformed or unsupported.",
-    message: "vecnorm: invalid argument",
-};
-
-const VECNORM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INVALID_INPUT",
-    identifier: Some("RunMat:vecnorm:InvalidInput"),
-    when: "Input values cannot be converted to a supported numeric array domain.",
-    message: "vecnorm: invalid input",
-};
-
-const VECNORM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INTERNAL",
-    identifier: Some("RunMat:vecnorm:Internal"),
-    when: "Runtime fails while reducing, allocating, gathering, or uploading values.",
-    message: "vecnorm: internal runtime failure",
-};
-
-const VECNORM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    VECNORM_ERROR_INVALID_ARGUMENT,
-    VECNORM_ERROR_INVALID_INPUT,
-    VECNORM_ERROR_INTERNAL,
-];
-
-pub const VECNORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VECNORM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &VECNORM_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::vecnorm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -285,16 +96,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "vecnorm",
-    category = "math/linalg/solve",
-    summary = "Compute vector-wise array norms.",
-    keywords = "vecnorm,vector norm,array norm,euclidean,gpu",
-    accel = "reduction",
-    type_resolver(vecnorm_type),
-    descriptor(crate::builtins::math::linalg::solve::vecnorm::VECNORM_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::vecnorm::VECNORM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::linalg::solve::vecnorm::VECNORM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::vecnorm"
 )]
 async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -712,7 +514,6 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
@@ -728,37 +529,6 @@ mod tests {
 
     fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::vecnorm_builtin(value, rest))
-    }
-
-    #[test]
-    fn vecnorm_type_reduces_default_dimension() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = vecnorm_type(&[ty], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn vecnorm_type_uses_unknown_shape_for_nonliteral_explicit_dim() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = vecnorm_type(
-            &[ty, Type::Num, Type::Num],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[test]

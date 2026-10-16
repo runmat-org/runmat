@@ -3,13 +3,11 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderInvOptions};
+#[cfg(test)]
+use runmat_builtins::INV_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, INV_ERROR_INTERNAL, INV_ERROR_INVALID_INPUT,
+    INV_INTEGER_INPUT_EXTENSION, INV_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericDType;
@@ -20,90 +18,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "inv";
 const PROVIDER_UNSUPPORTED: &str = "inv not supported by provider";
-
-const INV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Inverse of A.",
-}];
-
-const INV_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input square matrix.",
-}];
-
-const INV_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = inv(A)",
-    inputs: &INV_INPUTS,
-    outputs: &INV_OUTPUT,
-}];
-
-const INV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INV.INVALID_INPUT",
-    identifier: Some("RunMat:inv:InvalidInput"),
-    when: "Input shape/type is unsupported or matrix is singular for inversion.",
-    message: "inv: invalid input",
-};
-
-const INV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INV.INTERNAL",
-    identifier: Some("RunMat:inv:Internal"),
-    when: "Runtime fails while executing inversion or fallback/upload paths.",
-    message: "inv: internal runtime failure",
-};
-
-const INV_ERRORS: [BuiltinErrorDescriptor; 2] = [INV_ERROR_INVALID_INPUT, INV_ERROR_INTERNAL];
-
-pub const INV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INV_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INV_ERRORS,
-};
-
-const INV_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "inv-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "inv with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:InvIntegerInputExtension"),
-};
-const INV_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "inv-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "inv with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:InvLogicalInputExtension"),
-};
-pub const INV_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INV_INTEGER_INPUT_EXTENSION, INV_LOGICAL_INPUT_EXTENSION];
-const INV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes:
-        "Every element must be exactly representable before the binary64 matrix-inversion boundary.",
-}];
-pub const INV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "X = inv(integer_A)",
-        inputs: &INV_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat-only integer matrices cross one checked binary64 boundary. Resident integer input is classified before provider execution and the double result is restored only when the owning provider can represent it truthfully.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -171,14 +89,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "inv",
-    category = "math/linalg/solve",
-    summary = "Compute the inverse of a square matrix.",
-    keywords = "inv,matrix inverse,linear solve,gpu",
-    accel = "inv",
-    type_resolver(matrix_unary_type),
-    descriptor(crate::builtins::math::linalg::solve::inv::INV_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::inv::INV_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::inv::INV_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
 async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
@@ -457,7 +368,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -474,22 +384,6 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.25).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn inv_type_preserves_matrix_shape() {
-        let out = matrix_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
     }
 
     #[test]

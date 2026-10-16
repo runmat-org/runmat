@@ -242,3 +242,39 @@ fn square_requirement_does_not_leak_to_rectangular_factors() {
         assert!(inferred.diagnostics.is_empty());
     }
 }
+
+#[test]
+fn schur_dynamic_mode_and_mixed_factor_domains_do_not_prove_real_outputs() {
+    let mut dynamic_mode = request(2, 2, 2);
+    dynamic_mode
+        .arguments
+        .push(ValueFact::scalar(ValueKindFact::Character));
+    dynamic_mode.literals.literal_args = vec![LiteralValue::Unknown, LiteralValue::Unknown];
+    let inferred = infer_catalog_call(&SCHUR_CATALOG_ENTRY, &dynamic_mode);
+    assert!(inferred.diagnostics.is_empty());
+    assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(2)])
+    );
+
+    dynamic_mode.literals.literal_args[1] = LiteralValue::Character(" complex ".to_owned());
+    let inferred = infer_catalog_call(&SCHUR_CATALOG_ENTRY, &dynamic_mode);
+    assert!(
+        matches!(&inferred.outputs[0].kind, ValueKindFact::Numeric(n) if n.domain == NumericDomain::Complex)
+    );
+
+    let mut reorder = request(2, 2, 2);
+    reorder.arguments[0].kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    });
+    reorder.arguments.push(matrix(2, 2));
+    reorder.arguments.push(ValueFact::unknown(
+        runmat_types::DynamicReason::RuntimeValue,
+    ));
+    let inferred = infer_catalog_call(&ORDSCHUR_CATALOG_ENTRY, &reorder);
+    assert!(
+        matches!(&inferred.outputs[0].kind, ValueKindFact::Numeric(n) if n.domain == NumericDomain::Complex)
+    );
+}

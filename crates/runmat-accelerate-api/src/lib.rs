@@ -3726,7 +3726,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("rcond not supported by provider")) })
+        unsupported_future("rcond not supported by provider")
     }
     fn mldivide<'a>(
         &'a self,

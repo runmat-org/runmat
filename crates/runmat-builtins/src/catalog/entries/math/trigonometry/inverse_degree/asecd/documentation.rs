@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Compute inverse secant in degrees.",
     description: "Elementwise principal inverse secant in degrees. Real outputs follow [0, 180]; complex input and out-of-real-domain values use the principal complex branch.",
     keywords: &["asecd", "inverse trigonometry", "degrees", "elementwise"],
-    related: &["acos", "secd", "rad2deg"],
+    related: &["acos", "acosd", "rad2deg"],
     sections: SECTIONS,
     examples: EXAMPLES,
     example_exemption: None,
