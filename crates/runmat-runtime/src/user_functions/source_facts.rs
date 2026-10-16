@@ -5,7 +5,8 @@ use super::*;
 mod explicit_context_tests;
 
 type StaticSiteResolver = dyn Fn(
-    &SourceFunctionInfo,
+    usize,
+    Option<&SourceFunctionInfo>,
     &Arc<runmat_value::FunctionDefinitionOwner>,
 ) -> Option<Vec<runmat_value::StaticSiteDefinitionLease>>;
 
@@ -260,7 +261,7 @@ impl ExecutionSourceFacts {
             by_function,
             by_source,
             by_owners,
-            by_static_sites: Rc::new(|_, _| Some(Vec::new())),
+            by_static_sites: Rc::new(|_, _, _| Some(Vec::new())),
             by_origin,
             selected_class: None,
             external_source: None,
@@ -315,10 +316,11 @@ impl ExecutionSourceFacts {
 
     fn static_sites(
         &self,
-        info: &SourceFunctionInfo,
+        function: usize,
+        info: Option<&SourceFunctionInfo>,
         owner: &std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
     ) -> Option<Vec<runmat_value::StaticSiteDefinitionLease>> {
-        (self.by_static_sites)(info, owner)
+        (self.by_static_sites)(function, info, owner)
     }
 
     fn origin(
@@ -518,7 +520,7 @@ fn authority_for_info(
             return dead_bound_authority(function);
         };
         let static_sites = match selected {
-            Some(facts) => match info.and_then(|info| facts.static_sites(info, owner)) {
+            Some(facts) => match facts.static_sites(function, info, owner) {
                 Some(sites) => sites,
                 None => return dead_bound_authority(function),
             },

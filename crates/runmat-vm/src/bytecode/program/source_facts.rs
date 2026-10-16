@@ -36,8 +36,8 @@ impl FunctionRegistry {
                     by_origin.execution_source_fact_for_origin_in(&origin_runtime, origin)
                 }),
             )
-            .with_static_sites(Rc::new(move |info, owner| {
-                by_static_sites.execution_static_site_leases(&static_runtime, info, owner)
+            .with_static_sites(Rc::new(move |function, info, owner| {
+                by_static_sites.execution_static_site_leases(&static_runtime, function, info, owner)
             }))
             .with_selected_class(Rc::new(move |binding| {
                 by_selected_class.selected_class_projection_for_binding(binding)
@@ -79,17 +79,43 @@ impl FunctionRegistry {
     fn execution_static_site_leases(
         &self,
         runtime: &runmat_runtime::context::RuntimeContext,
-        info: &runmat_runtime::user_functions::SourceFunctionInfo,
+        function: usize,
+        info: Option<&runmat_runtime::user_functions::SourceFunctionInfo>,
         owner: &Arc<runmat_value::FunctionDefinitionOwner>,
     ) -> Option<Vec<runmat_value::StaticSiteDefinitionLease>> {
-        let function = FunctionId(info.function);
-        let lease = runmat_value::FunctionDefinitionOwner::issue(owner, info.function);
-        let body = self.get_owned(function, &lease)?;
-        if body.binding_origin != info.binding_origin
-            || body.source_id?.resolve_in(runtime)? != info.source_id
-            || !Arc::ptr_eq(&body.definition_owner, owner)
-        {
+        let lease = runmat_value::FunctionDefinitionOwner::issue(owner, function);
+        let body = self.get_owned(FunctionId(function), &lease)?;
+        if !Arc::ptr_eq(&body.definition_owner, owner) {
             return None;
+        }
+        match info {
+            Some(info) => {
+                if info.function != function
+                    || body.binding_origin != info.binding_origin
+                    || body.source_id?.resolve_in(runtime)? != info.source_id
+                {
+                    return None;
+                }
+            }
+            None => {
+                // A compiler ordinal without an installed source table is not
+                // issued source authority. Exact local definitions still permit
+                // callbacks, but never selected imports or portable exports.
+                let issued_source = body.source_id.is_some_and(|source| match source {
+                    super::BytecodeSourceRef::Program(ordinal) => {
+                        runtime.program_source_id(ordinal).is_some()
+                    }
+                    super::BytecodeSourceRef::Runtime(_) => true,
+                });
+                if issued_source
+                    || body.binding_origin.is_some()
+                    || body.selected_source_owner.is_some()
+                    || body.selected_executable_product.is_some()
+                    || body.selected_static_capture.is_some()
+                {
+                    return None;
+                }
+            }
         }
         self.static_site_leases_for_body(body)
     }

@@ -37,7 +37,8 @@ pub(super) fn exact_origin_resolver(
             }),
             Rc::new(move |origin| unique_origin(&by_origin, origin)),
         )
-        .with_static_sites(Rc::new(move |info, owner| {
+        .with_static_sites(Rc::new(move |function, info, owner| {
+            let info = info.filter(|info| info.function == function)?;
             by_static_sites.selected_static_site_leases_for_issued_info(info, owner)
         }))
         .with_selected_class(Rc::new(move |binding| {
