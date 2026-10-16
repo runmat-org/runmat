@@ -1671,7 +1671,10 @@ impl RunMatSession {
 
         let last_assign_var = display_context.last_assign_var;
         let last_expr_emits = display_context.last_expr_emits;
-        if !is_semicolon_suppressed && result_value.is_none() {
+        // Only a completed entry can supply its final public result. Earlier
+        // statement output has already been recorded in the console stream;
+        // an errored final assignment must not read its initialized VM slot.
+        if error.is_none() && !is_semicolon_suppressed && result_value.is_none() {
             let can_emit_from_context = !display_var_ids.is_empty() || last_expr_emits;
             if can_emit_from_context {
                 if let Some(value) = runmat_runtime::console::take_last_value_output() {
@@ -1873,7 +1876,8 @@ impl RunMatSession {
             debug!("Execution completed in {execution_time_ms}ms (JIT: {used_jit})");
         }
 
-        if !is_expression_stmt
+        if error.is_none()
+            && !is_expression_stmt
             && !is_semicolon_suppressed
             && last_assign_var.is_some()
             && !display_context.single_stmt_non_assign
@@ -1882,17 +1886,6 @@ impl RunMatSession {
             if let Some(var_id) = last_store_var_index(&bytecode) {
                 if var_id < variable_array.len() {
                     result_value = Some(variable_array[var_id].clone());
-                }
-            } else if matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
-                && result_value.is_none()
-            {
-                if let Some(v) = variable_array
-                    .iter()
-                    .rev()
-                    .find(|v| !matches!(v, Value::Num(0.0)))
-                    .cloned()
-                {
-                    result_value = Some(v);
                 }
             }
         }

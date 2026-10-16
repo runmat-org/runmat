@@ -177,6 +177,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sprintf_shared_scientific_and_general_conversions() {
+        let result = sprintf_builtin(
+            Value::String("%.1e|%.3g|%d".to_string()),
+            vec![Value::Num(8.8e8), Value::Num(0.000123456), Value::Num(2.5)],
+        )
+        .expect("sprintf");
+        assert_eq!(
+            char_value_to_string(result),
+            "8.8e+08|0.000123|2.500000e+00"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sprintf_array_repeat() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = sprintf_builtin(

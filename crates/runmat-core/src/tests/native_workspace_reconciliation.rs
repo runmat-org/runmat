@@ -407,6 +407,75 @@ fn ordinary_assignment_survives_a_later_error_in_interpreter_and_native_executio
 }
 
 #[test]
+fn failed_final_assignment_does_not_publish_an_initialized_result() {
+    runmat_gc::gc_test_context(|| {
+        for jit in [false, true] {
+            let mut session = RunMatSession::with_options(jit, false).unwrap();
+            if jit {
+                session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+                    generic_hot_threshold: 1,
+                    specialized_hot_threshold: 100,
+                    deterministic: true,
+                    ..Default::default()
+                });
+            }
+            let mut entered_native = false;
+            let attempts = if jit { 6 } else { 1 };
+            for attempt in 0..attempts {
+                let outcome = super::execute_text_request(
+                    &mut session,
+                    "prefix = 7\nq = [1 2];\nd = q(str2double('100'))",
+                )
+                .expect("runtime index error remains an execution outcome");
+                entered_native |= outcome.used_jit;
+                assert!(
+                    outcome.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.severity == crate::abi::DiagnosticSeverity::Error
+                    }),
+                    "jit={jit} attempt={attempt}: expected the final assignment to fail"
+                );
+                assert!(matches!(&outcome.flow, crate::abi::RuntimeFlow::NoValue));
+                assert!(outcome.display_events.is_empty());
+                assert!(
+                    outcome
+                        .streams
+                        .iter()
+                        .any(|entry| entry.text.contains("prefix = 7")),
+                    "jit={jit} attempt={attempt}: completed prefix output must survive"
+                );
+                assert!(
+                    !outcome
+                        .streams
+                        .iter()
+                        .any(|entry| entry.text.contains("d = 0")),
+                    "jit={jit} attempt={attempt}: failed assignment displayed its initialized slot"
+                );
+                let workspace = session.get_variables().unwrap();
+                assert!(
+                    workspace.contains_key("q"),
+                    "jit={jit}: completed q was lost"
+                );
+                assert!(
+                    !workspace.contains_key("d"),
+                    "jit={jit}: failed d was published"
+                );
+            }
+            if jit {
+                assert!(
+                    entered_native,
+                    "failed assignment must exercise native execution"
+                );
+            } else {
+                assert!(
+                    !entered_native,
+                    "interpreter witness unexpectedly used native"
+                );
+            }
+        }
+    });
+}
+
+#[test]
 fn native_assignment_before_suspended_cancellation_remains_in_base_workspace() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(true, false).unwrap();

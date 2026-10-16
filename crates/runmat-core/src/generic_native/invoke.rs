@@ -671,12 +671,26 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
     let active = user_functions::push_active_semantic_function(function.0 as usize);
-    let runtime = super::super_constructor::bind_selected(
-        runtime,
-        &registry,
-        runmat_hir::FunctionId(function.0 as usize),
-        &execution_sources,
-    )?;
+    // The compiler deliberately omits the synthetic script entrypoint from
+    // the semantic FunctionRegistry. It cannot own a superclass constructor;
+    // every real function still has to pass the exact retained-owner check.
+    let runtime = if Some(selected_function) == unit.script_entrypoint()
+        && unit
+            .mir()
+            .functions
+            .get(&selected_function)
+            .is_some_and(|metadata| metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint)
+        && registry.get(selected_function).is_none()
+    {
+        runtime
+    } else {
+        super::super_constructor::bind_selected(
+            runtime,
+            &registry,
+            selected_function,
+            &execution_sources,
+        )?
+    };
     let osr = osr
         .map(|(target, point)| {
             runmat_native_executor::osr::OsrTarget::new(target.executor, function, point)

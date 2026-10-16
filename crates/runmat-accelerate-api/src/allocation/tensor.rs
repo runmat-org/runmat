@@ -26,6 +26,14 @@ struct OwnedTensorView {
     metadata_grant: Option<Box<dyn runmat_execution::resource::RetainedHostViewGrant>>,
 }
 
+// Constructor errors must drop the proposed view (including its shape Vec)
+// before refunding a supplied or newly reserved metadata grant. Function
+// arguments alone have the opposite drop order for these two values.
+struct PendingTensorView {
+    view: GpuTensorView,
+    metadata_grant: Option<Box<dyn runmat_execution::resource::RetainedHostViewGrant>>,
+}
+
 /// Clone retains one shared view without copying shape or tensor payloads.
 /// A new validated view retains the same physical allocation lease.
 ///
@@ -115,34 +123,37 @@ impl GpuTensorHandle {
         view: GpuTensorView,
         metadata_grant: Option<Box<dyn runmat_execution::resource::RetainedHostViewGrant>>,
     ) -> Result<Self, AllocationAcquisitionError> {
+        let mut pending = PendingTensorView {
+            view,
+            metadata_grant,
+        };
         allocation.validate_live()?;
-        view.validate(allocation.physical())
+        pending
+            .view
+            .validate(allocation.physical())
             .map_err(AllocationAcquisitionError::InvalidView)?;
-        allocation.validate_view(&view)?;
-        let metadata_grant = match (allocation.view_issuer(), metadata_grant) {
-            (Some(issuer), Some(grant)) => {
+        allocation.validate_view(&pending.view)?;
+        if let Some(issuer) = allocation.view_issuer() {
+            if let Some(grant) = pending.metadata_grant.as_ref() {
                 if !std::sync::Arc::ptr_eq(issuer, &grant.issuer()) {
                     return Err(AllocationAcquisitionError::WrongOwner);
                 }
-                Some(grant)
-            }
-            (Some(issuer), None) => {
-                let bytes = Self::view_host_upper_bytes(view.shape_capacity()).ok_or(
+            } else {
+                let bytes = Self::view_host_upper_bytes(pending.view.shape_capacity()).ok_or(
                     AllocationAcquisitionError::RetainedHostView(
                         runmat_execution::resource::RetainedHostViewError::Overflow,
                     ),
                 )?;
-                Some(
+                pending.metadata_grant = Some(
                     issuer
                         .clone()
                         .reserve_view(bytes)
                         .map_err(AllocationAcquisitionError::RetainedHostView)?,
-                )
+                );
             }
-            (None, grant) => grant,
-        };
-        if let Some(grant) = &metadata_grant {
-            let required = Self::view_host_upper_bytes(view.shape_capacity()).ok_or(
+        }
+        if let Some(grant) = &pending.metadata_grant {
+            let required = Self::view_host_upper_bytes(pending.view.shape_capacity()).ok_or(
                 AllocationAcquisitionError::RetainedHostView(
                     runmat_execution::resource::RetainedHostViewError::Overflow,
                 ),
@@ -159,6 +170,10 @@ impl GpuTensorHandle {
                 .next_view_identity()
                 .map_err(AllocationAcquisitionError::InvalidView)?,
         };
+        let PendingTensorView {
+            view,
+            metadata_grant,
+        } = pending;
         Ok(Self {
             inner: Shared::new(OwnedTensorView {
                 cleanup: crate::residency::ViewCleanup::new(identity),

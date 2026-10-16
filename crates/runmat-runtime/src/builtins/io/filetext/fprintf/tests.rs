@@ -263,6 +263,36 @@ fn fprintf_matrix_column_major() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn fprintf_uses_shared_scientific_and_general_conversions() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let path = unique_path("fprintf_floating");
+    let open = run_fopen(&[
+        Value::from(path.to_string_lossy().to_string()),
+        Value::from("w"),
+    ])
+    .expect("fopen");
+    let fid = open.as_open().unwrap().fid as i32;
+    let eval = run_evaluate(&[
+        Value::Num(fid as f64),
+        Value::String("%E|%G|%d".to_string()),
+        Value::Num(1234.5),
+        Value::Num(1.0e-10),
+        Value::Num(2.5),
+    ])
+    .expect("fprintf");
+    let expected = "1.234500E+03|1E-10|2.500000e+00";
+    assert_eq!(eval.bytes_written(), expected.len());
+    run_fclose(&[Value::Num(fid as f64)]).unwrap();
+    assert_eq!(
+        test_support::fs::read_to_string(&path).expect("read"),
+        expected
+    );
+    test_support::fs::remove_file(path).unwrap();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn fprintf_ascii_encoding_errors() {
     let _guard = registry_guard();
     registry::reset_for_tests();

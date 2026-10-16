@@ -909,7 +909,12 @@ fn matrix_sign_boundaries_apply_to_imaginary_values_but_not_nested_expressions()
 
 #[test]
 fn spaced_parenthesis_starts_next_matrix_element_after_computed_value() {
-    let ast = parse("A = [ones(4,1) (1:4)']; B = [x(1)(2)];").unwrap();
+    let ast = parse(concat!(
+        "A = [ones(4,1) (1:4)']; B = [x(1)(2)]; p = 2; ",
+        "C = [1 p (3)]; D = [-180 (-180 + Pm)]; ",
+        "E = [0 -(I+m*l^2)*b/p (m^2*g*l^2)/p 0];"
+    ))
+    .unwrap();
     let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
         panic!("expected matrix assignment");
     };
@@ -928,6 +933,19 @@ fn spaced_parenthesis_starts_next_matrix_element_after_computed_value() {
     };
     assert_eq!(rows[0].len(), 1);
     assert!(matches!(&rows[0][0], Expr::Index(_, _, _)));
+
+    for (statement, columns) in [(3, 3), (4, 2), (5, 4)] {
+        let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[statement] else {
+            panic!("expected matrix assignment at statement {statement}");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), columns);
+    }
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[3] else {
+        unreachable!();
+    };
+    assert!(matches!(&rows[0][1], Expr::Ident(name, _) if name == "p"));
+    assert!(matches!(&rows[0][2], Expr::Number(value, _) if value == "3"));
 }
 
 #[test]
