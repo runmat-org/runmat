@@ -435,6 +435,7 @@ pub enum Instr {
     },
     BeginSequenceOutputTarget {
         root_slot: usize,
+        root_creation: runmat_mir::SequenceRootCreation,
     },
     PrepareMemberPathStep(runmat_types::MemberName),
     PrepareDynamicMemberPathStep,

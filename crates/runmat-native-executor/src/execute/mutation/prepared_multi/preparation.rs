@@ -6,7 +6,7 @@ use runmat_runtime::sequence::{DestinationCardinality, DestinationLayout};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::target::PendingSequenceTarget;
+use super::target::{PendingSequenceTarget, PreparedSequenceTarget};
 use super::{PreparedMultiAssignment, PreparedTarget};
 use crate::execute::state::HostState;
 
@@ -22,11 +22,18 @@ pub(in crate::execute) struct PendingMultiPreparation {
 
 impl PendingMultiPreparation {
     pub(in crate::execute) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
-        self.retained.iter().copied().chain(
-            self.active
-                .iter()
-                .flat_map(PendingSequenceTarget::root_references),
-        )
+        self.retained
+            .iter()
+            .copied()
+            .chain(self.prepared.iter().filter_map(|target| match target {
+                PreparedTarget::Sequence { absent_root, .. } => *absent_root,
+                _ => None,
+            }))
+            .chain(
+                self.active
+                    .iter()
+                    .flat_map(PendingSequenceTarget::root_references),
+            )
     }
 }
 
@@ -82,16 +89,24 @@ pub(super) fn prepare(
                     None => PendingSequenceTarget::new(state, target)?,
                 };
                 match active.advance(state) {
-                    Ok(Some((root, destination))) => {
+                    Ok(Some(PreparedSequenceTarget {
+                        root,
+                        destination,
+                        absent_root,
+                        root_creation,
+                    })) => {
                         destination.visit_retained_values(&mut |value| {
                             pending.retained.push(state.arena.insert(value.clone()));
                         });
                         pending
                             .cardinalities
                             .push(DestinationCardinality::Sequence(destination.cardinality()));
-                        pending
-                            .prepared
-                            .push(PreparedTarget::Sequence { root, destination });
+                        pending.prepared.push(PreparedTarget::Sequence {
+                            root,
+                            destination,
+                            absent_root,
+                            root_creation,
+                        });
                     }
                     Ok(None) => {
                         return Err(NativeExecutorError::Host(

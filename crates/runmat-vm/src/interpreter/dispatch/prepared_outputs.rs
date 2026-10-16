@@ -8,14 +8,20 @@ use super::{PreparedOutputTarget, SequenceState};
 mod commit;
 mod legacy;
 mod support;
-use support::{finish_destination, pop_selector_components, root, stack_underflow};
+use support::{
+    empty_cell_root, finish_destination, pop_selector_components, root, stack_underflow,
+};
+
+pub(super) struct PreparedOutputContext<'a> {
+    pub authority: super::slot_authority::AssignmentSlotAuthority<'a>,
+}
 
 pub(super) async fn dispatch(
     instruction: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut Vec<Value>,
     state: &mut SequenceState,
-    current_function_name: &str,
+    context: PreparedOutputContext<'_>,
     before_overwrite: &mut dyn FnMut(&Value, &Value),
     after_store: &mut dyn FnMut(usize, &Value),
 ) -> Result<bool, RuntimeError> {
@@ -31,15 +37,35 @@ pub(super) async fn dispatch(
         Instr::PrepareDiscardOutputTarget => {
             state.push_output_target(PreparedOutputTarget::Discard)
         }
-        Instr::BeginSequenceOutputTarget { root_slot } => {
-            state.begin_destination(*root_slot, root(vars, *root_slot)?)?;
+        Instr::BeginSequenceOutputTarget {
+            root_slot,
+            root_creation,
+        } => {
+            let root_presence = context.authority.refresh(vars, *root_slot)?;
+            let absent_root = if *root_creation == runmat_mir::SequenceRootCreation::EmptyCell
+                && root_presence.is_absent()
+            {
+                Some(empty_cell_root())
+            } else {
+                None
+            };
+            let original = root(vars, *root_slot)?;
+            match absent_root {
+                Some(seed) => state.begin_destination(
+                    *root_slot,
+                    &seed,
+                    Some(seed.clone()),
+                    *root_creation,
+                )?,
+                None => state.begin_destination(*root_slot, original, None, *root_creation)?,
+            }
         }
         Instr::PrepareMemberPathStep(member) => {
             state
                 .destination_builder_mut()?
                 .push_step(
                     AssignmentStepSpec::Member(member.clone()),
-                    Some(current_function_name),
+                    Some(context.authority.current_function_name),
                 )
                 .await?;
         }
@@ -51,7 +77,7 @@ pub(super) async fn dispatch(
                 .destination_builder_mut()?
                 .push_step(
                     AssignmentStepSpec::Member(member),
-                    Some(current_function_name),
+                    Some(context.authority.current_function_name),
                 )
                 .await?;
         }
@@ -87,7 +113,7 @@ pub(super) async fn dispatch(
                 .destination_builder_mut()?
                 .push_step(
                     AssignmentStepSpec::Parentheses { selectors },
-                    Some(current_function_name),
+                    Some(context.authority.current_function_name),
                 )
                 .await?;
         }
@@ -105,7 +131,7 @@ pub(super) async fn dispatch(
                 .destination_builder_mut()?
                 .push_step(
                     AssignmentStepSpec::Braces(indices),
-                    Some(current_function_name),
+                    Some(context.authority.current_function_name),
                 )
                 .await?;
         }
@@ -145,7 +171,7 @@ pub(super) async fn dispatch(
                 vars,
                 state,
                 *retained_outputs,
-                current_function_name,
+                &context.authority,
                 before_overwrite,
                 after_store,
             )

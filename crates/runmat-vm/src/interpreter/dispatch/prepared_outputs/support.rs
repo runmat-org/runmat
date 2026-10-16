@@ -3,7 +3,7 @@ use runmat_runtime::sequence::SequenceEndpointSpec;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
-use super::super::{PreparedOutputTarget, SequenceState};
+use super::super::{PendingSequenceDestination, PreparedOutputTarget, SequenceState};
 
 pub(super) fn pop_selector_components(
     stack: &mut Vec<Value>,
@@ -30,13 +30,27 @@ pub(super) async fn finish_destination(
     state: &mut SequenceState,
     endpoint: SequenceEndpointSpec,
 ) -> Result<(), RuntimeError> {
-    let (root_slot, builder) = state.take_destination_builder()?;
+    let PendingSequenceDestination {
+        root_slot,
+        builder,
+        absent_root,
+        root_creation,
+    } = state.take_destination_builder()?;
     let endpoint = builder.finish(endpoint).await?;
     state.push_output_target(PreparedOutputTarget::Sequence {
         root_slot,
         endpoint,
+        absent_root,
+        root_creation,
     });
     Ok(())
+}
+
+pub(super) fn empty_cell_root() -> Value {
+    Value::Cell(
+        runmat_value::CellArray::new(Vec::new(), 0, 0)
+            .expect("the canonical empty cell shape is valid"),
+    )
 }
 
 pub(super) fn root(vars: &[Value], slot: usize) -> Result<&Value, RuntimeError> {

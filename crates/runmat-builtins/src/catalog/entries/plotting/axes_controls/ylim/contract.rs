@@ -49,7 +49,7 @@ const YLIM_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Limit mode string ('auto', 'tight', or 'manual').",
+    description: "Axis-limit text token: 'auto'/'manual' set mode; 'tight'/'padded'/'tickaligned' select an automatic method; 'mode'/'method' query state.",
 }];
 
 const YLIM_TARGET: BuiltinParamDescriptor = BuiltinParamDescriptor {

@@ -9,7 +9,6 @@ use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::super::root_local_value;
 use crate::execute::state::HostState;
 
 use crate::execute::call_suspension::{
@@ -34,6 +33,14 @@ pub(super) struct PendingSequenceTarget {
     region: Option<usize>,
     step: usize,
     retained: Vec<NativeValueRef>,
+    absent_root: Option<NativeValueRef>,
+}
+
+pub(super) struct PreparedSequenceTarget {
+    pub root: runmat_mir::MirLocalId,
+    pub destination: PreparedSequenceDestination,
+    pub absent_root: Option<NativeValueRef>,
+    pub root_creation: runmat_mir::SequenceRootCreation,
 }
 
 impl PendingSequenceTarget {
@@ -44,7 +51,7 @@ impl PendingSequenceTarget {
         let base = target.base();
         let mut path = Vec::new();
         let root = flatten_root(base, &mut path)?;
-        let root_value = root_local_value(state, base)?;
+        let (root_value, absent_root) = state.sequence_root(root.0, target.root_creation())?;
         let path = path.into_iter().cloned().collect();
         let builder = SequenceDestinationBuilder::new(&root_value)?;
         let mut pending = Self {
@@ -57,13 +64,14 @@ impl PendingSequenceTarget {
             region: None,
             step: 0,
             retained: Vec::new(),
+            absent_root,
         };
         pending.refresh_retained(state);
         Ok(pending)
     }
 
     pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
-        self.retained.iter().copied()
+        self.retained.iter().copied().chain(self.absent_root)
     }
 
     fn refresh_retained(&mut self, state: &mut HostState) {
@@ -93,7 +101,7 @@ impl PendingSequenceTarget {
     pub(super) fn advance(
         &mut self,
         state: &mut HostState,
-    ) -> NativeExecutorResult<Option<(runmat_mir::MirLocalId, PreparedSequenceDestination)>> {
+    ) -> NativeExecutorResult<Option<PreparedSequenceTarget>> {
         let (region, next_step, _) = state.enter_contextual_region();
         match self.region {
             Some(expected) if expected != region || self.step != next_step => {
@@ -112,9 +120,17 @@ impl PendingSequenceTarget {
             state.finish_contextual_step(region, step, next_step)?;
             match result {
                 Ok(Some(destination)) => {
-                    let root = state.local_reference(self.root.0)?;
+                    let root = match self.absent_root {
+                        Some(seed) => seed,
+                        None => state.local_reference(self.root.0)?,
+                    };
                     state.finish_contextual_region(region, vec![root]);
-                    return Ok(Some((self.root, destination)));
+                    return Ok(Some(PreparedSequenceTarget {
+                        root: self.root,
+                        destination,
+                        absent_root: self.absent_root,
+                        root_creation: self.target.root_creation(),
+                    }));
                 }
                 Ok(None) => {
                     self.step += 1;

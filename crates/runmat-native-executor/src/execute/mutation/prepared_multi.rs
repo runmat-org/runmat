@@ -21,6 +21,8 @@ pub(super) enum PreparedTarget {
     Sequence {
         root: runmat_mir::MirLocalId,
         destination: PreparedSequenceDestination,
+        absent_root: Option<NativeValueRef>,
+        root_creation: runmat_mir::SequenceRootCreation,
     },
     Discard,
 }
@@ -91,6 +93,10 @@ impl PreparedMultiAssignment {
                 .flatten()
                 .copied()
                 .chain(self.retained.iter().copied())
+                .chain(self.targets.iter().filter_map(|target| match target {
+                    PreparedTarget::Sequence { absent_root, .. } => *absent_root,
+                    _ => None,
+                }))
                 .chain(self.roots.values().copied()),
         )
     }
@@ -140,10 +146,26 @@ impl PreparedMultiAssignment {
                     };
                     self.roots.insert(local, reference);
                 }
-                PreparedTarget::Sequence { root, destination } => {
+                PreparedTarget::Sequence {
+                    root,
+                    destination,
+                    absent_root,
+                    root_creation,
+                } => {
                     let current = match self.roots.get(&root) {
                         Some(reference) => state.arena.get(*reference)?.clone(),
-                        None => local_value(state, root)?,
+                        None => {
+                            if root_creation == runmat_mir::SequenceRootCreation::EmptyCell
+                                && state.sequence_root_still_absent(root.0)?
+                            {
+                                match absent_root {
+                                    Some(reference) => state.arena.get(reference)?.clone(),
+                                    None => HostState::empty_cell_root(),
+                                }
+                            } else {
+                                local_value(state, root)?
+                            }
+                        }
                     };
                     let updated = continuation::assign_prepared_sequence(
                         state,

@@ -1536,7 +1536,10 @@ impl Compiler {
         target: &runmat_mir::MirSequenceTarget,
     ) -> Result<(), CompileError> {
         let root_slot = self.mir_place_root_slot(target.base())?;
-        self.emit(Instr::BeginSequenceOutputTarget { root_slot });
+        self.emit(Instr::BeginSequenceOutputTarget {
+            root_slot,
+            root_creation: target.root_creation(),
+        });
         self.compile_mir_sequence_target_path(target.base())?;
         match target {
             runmat_mir::MirSequenceTarget::Member { member, .. } => {

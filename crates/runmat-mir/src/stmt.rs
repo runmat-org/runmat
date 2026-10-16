@@ -322,7 +322,35 @@ pub enum MirSequenceTarget {
     },
 }
 
+/// The root carrier permitted by the first indexed step of a sequence write.
+/// This is only a creation recipe; the executor must separately prove that
+/// the binding is absent before using it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SequenceRootCreation {
+    Existing,
+    EmptyCell,
+}
+
 impl MirSequenceTarget {
+    pub fn root_creation(&self) -> SequenceRootCreation {
+        fn first_step(place: &MirPlace) -> Option<bool> {
+            match place {
+                MirPlace::Local(_) | MirPlace::Binding(_) => None,
+                MirPlace::Index(base, indexing) => {
+                    first_step(base).or(Some(indexing.kind == runmat_hir::IndexKind::Brace))
+                }
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    first_step(base).or(Some(false))
+                }
+            }
+        }
+        match first_step(self.base()) {
+            Some(true) => SequenceRootCreation::EmptyCell,
+            None if matches!(self, Self::CellContents { .. }) => SequenceRootCreation::EmptyCell,
+            _ => SequenceRootCreation::Existing,
+        }
+    }
+
     pub fn base(&self) -> &MirPlace {
         match self {
             Self::Member { base, .. }

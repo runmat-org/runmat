@@ -812,6 +812,13 @@ fn analyze_body_applies_canonical_index_member_and_mutation_rules() {
 
     let (body, store) = analyze_single_body("function y = f(); c{2} = 'created'; y = c{2}; end");
     assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Character);
+
+    let (body, store) = analyze_single_body("function y = f(c); c{2} = 'created'; y = c{2}; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
+
+    let (body, store) =
+        analyze_single_body("function y = f(); c = 0; c{2} = 'created'; y = c{2}; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
 }
 
 #[test]

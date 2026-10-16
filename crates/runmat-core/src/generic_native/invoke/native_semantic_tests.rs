@@ -164,3 +164,99 @@ fn prepared_multi_output_initializes_undefined_indexed_root_with_vm_parity() {
     assert_eq!(vm.as_slice(), &expected);
     assert_eq!(native.as_slice(), &expected);
 }
+
+#[test]
+fn absent_brace_root_completes_in_forced_native_with_vm_parity() {
+    let source = ExecutableSource::new(
+        "native-absent-brace-root@1",
+        "nativeAbsentBraceRoot.m",
+        "function [direct, prepared, y] = nativeAbsentBraceRoot()\nc{2} = 9;\n[d{2}, y] = deal(4, 5);\ndirect = c;\nprepared = d;\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeAbsentBraceRoot".into()),
+        arguments: Vec::new(),
+        requested_outputs: 3,
+    };
+    let vm = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("VM absent brace-root execution");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("forced generic-native absent brace-root execution");
+    let direct = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![
+                Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(9.0),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let prepared = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![
+                Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(4.0),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let expected = [direct, prepared, Value::Num(5.0)];
+    assert_eq!(vm.as_slice(), &expected);
+    assert_eq!(native.as_slice(), &expected);
+}
+
+#[test]
+fn fresh_persistent_brace_root_has_vm_and_forced_native_parity() {
+    let expected = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![
+                Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(9.0),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    for force_native in [false, true] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-fresh-persistent-brace@1",
+                "nativeFreshPersistentBrace.m",
+                "function [out, y] = nativeFreshPersistentBrace()\npersistent c\n[c{2}, y] = deal(9, 4);\nout = c;\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile fresh persistent brace unit");
+        let control = if force_native {
+            InvocationControl::default().force_generic_native()
+        } else {
+            InvocationControl::default()
+        };
+        let result = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeFreshPersistentBrace".into()),
+                arguments: Vec::new(),
+                requested_outputs: 2,
+            },
+            &control,
+        ))
+        .expect("fresh persistent brace execution");
+        assert_eq!(result.as_slice(), &[expected.clone(), Value::Num(4.0)]);
+    }
+}

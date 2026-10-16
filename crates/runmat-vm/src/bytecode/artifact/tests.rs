@@ -44,6 +44,23 @@ fn struct_assignment_opcode_round_trips_and_pre_creation_artifacts_reject() {
             expected: BYTECODE_SCHEMA_VERSION,
         })
     ));
+    // Bytecode 17 has no root-creation field on prepared sequence targets.
+    // Reject its envelope before deserializing even a well-formed payload.
+    let stale_sequence = super::envelope::encode_payload(
+        InterpreterPayloadForm::ScriptV2,
+        SCRIPT_V2_PREAMBLE,
+        &[("bytecode", 17)],
+        &serde_json::to_value(Bytecode::with_instructions(vec![Instr::Return], 0)).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_interpreter_script_v2(&stale_sequence),
+        Err(InterpreterPayloadError::UnsupportedRevision {
+            field: InterpreterRevisionField::Bytecode,
+            actual: 17,
+            expected: BYTECODE_SCHEMA_VERSION,
+        })
+    ));
     let stale_registry = format!("runmat-interpreter-program-v2\nbytecode={BYTECODE_SCHEMA_VERSION}\nfunction_registry=4\n\n{{}}\n");
     assert!(matches!(
         decode_interpreter_program_v2(stale_registry.as_bytes()),
@@ -62,6 +79,27 @@ fn struct_assignment_opcode_round_trips_and_pre_creation_artifacts_reject() {
         Err(InterpreterPayloadError::UnsupportedRevision {
             field: InterpreterRevisionField::Bytecode,
             ..
+        })
+    ));
+}
+
+#[test]
+fn sequence_root_creation_instruction_round_trips_with_current_revision() {
+    let ast = runmat_parser::parse("c{2} = 9;").unwrap();
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).unwrap();
+    let bytecode =
+        crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).unwrap();
+    let encoded = encode_interpreter_script_v2(&bytecode).unwrap();
+    let decoded = decode_interpreter_script_v2(&encoded).unwrap();
+    assert!(matches!(
+        decoded
+            .instructions
+            .iter()
+            .find(|instruction| matches!(instruction, Instr::BeginSequenceOutputTarget { .. })),
+        Some(Instr::BeginSequenceOutputTarget {
+            root_slot: 0,
+            root_creation: runmat_mir::SequenceRootCreation::EmptyCell,
         })
     ));
 }

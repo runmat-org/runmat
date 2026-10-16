@@ -13,6 +13,31 @@ impl SessionVariableAuthority {
         self.with_state(|state| state.persistent_named_value(function, name))
     }
 
+    /// Exact binding-presence check without cloning its possibly large value.
+    pub fn persistent_named_present(
+        &self,
+        function: &str,
+        name: &str,
+    ) -> Result<bool, crate::RuntimeError> {
+        self.with_state(|state| {
+            state
+                .persistent_names
+                .contains_key(&(function.to_string(), name.to_string()))
+        })
+    }
+
+    pub fn persistent_slot_present(
+        &self,
+        function: &str,
+        slot: usize,
+    ) -> Result<bool, crate::RuntimeError> {
+        self.with_state(|state| {
+            state
+                .persistent_slots
+                .contains_key(&(function.to_string(), slot))
+        })
+    }
+
     pub fn persistent_slot_value(
         &self,
         function: &str,

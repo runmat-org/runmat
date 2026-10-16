@@ -121,6 +121,24 @@ fn mixed_cell_contents_destination_uses_canonical_brace_cardinality() {
 }
 
 #[test]
+fn absent_cell_root_is_created_only_at_successful_sequence_commit() {
+    execute_source(
+        "c{2} = 9; assert(iscell(c)); assert(isequal(size(c), [1, 2])); assert(isempty(c{1})); assert(c{2} == 9); [d{2}, y] = deal(4, 5); assert(iscell(d)); assert(isempty(d{1})); assert(d{2} == 4 && y == 5);",
+    )
+    .unwrap();
+    let error = execute_source("c = 0; c{2} = 9;")
+        .expect_err("an assigned numeric binding is not an absent cell root");
+    assert!(
+        error.to_string().contains("CellAssignmentOnNonCell"),
+        "{error}"
+    );
+    execute_source(
+        "try; [fresh{2}, other{2}] = deal(9); catch; end; assert(exist('fresh', 'var') == 0); assert(exist('other', 'var') == 0); c = {1}; try; [c{1}, c{2}] = deal(9); catch; end; assert(c{1} == 1);",
+    )
+    .unwrap();
+}
+
+#[test]
 fn member_destination_cardinality_is_exact() {
     let error = execute_source("s = struct('value', {1, 2}); [s.value] = 7;")
         .expect_err("one value cannot fill a two-element sequence destination");
@@ -148,6 +166,22 @@ fn indexed_member_destination_updates_its_root() {
 fn sequence_destination_is_evaluated_once_before_rhs() {
     execute_source(
         "global trace; trace = 0; function idx = select_target(); global trace; trace = trace * 10 + 1; idx = [1, 2]; end; function name = select_member(); global trace; trace = trace * 10 + 1; name = 'value'; end; function [first, second] = make_values(); global trace; trace = trace * 10 + 2; first = 7; second = 8; end; s = struct('value', {1, 2}); [s(select_target()).value] = make_values(); assert(trace == 12); trace = 0; [s.(select_member())] = make_values(); assert(trace == 12); assert(isequal(horzcat(s.value), [7, 8]));",
+    )
+    .unwrap();
+}
+
+#[test]
+fn prepared_cell_root_refreshes_global_after_selector_callback() {
+    execute_source(
+        "global c; c = {1}; function idx = replace_root(); global c; c = {99}; idx = 2; end; [c{replace_root()}, y] = deal(2, 3); assert(c{1} == 99); assert(c{2} == 2); assert(y == 3);",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fresh_persistent_cell_root_uses_canonical_absence_not_frame_placeholder() {
+    execute_source(
+        "function out = persistent_cell_destination(); persistent c; [c{2}, y] = deal(9, 4); assert(y == 4); out = c; end; first = persistent_cell_destination(); assert(iscell(first)); assert(isempty(first{1})); assert(first{2} == 9); second = persistent_cell_destination(); assert(second{2} == 9);",
     )
     .unwrap();
 }

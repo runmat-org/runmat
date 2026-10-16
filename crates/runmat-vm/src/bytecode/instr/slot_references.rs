@@ -74,7 +74,9 @@ impl Instr {
             | Instr::PrepareCellContentsSequenceOutputTarget {
                 root_slot: index, ..
             }
-            | Instr::BeginSequenceOutputTarget { root_slot: index } => {
+            | Instr::BeginSequenceOutputTarget {
+                root_slot: index, ..
+            } => {
                 visit(*index, VmSlotAccess::Other);
             }
             Instr::CallSemanticNestedFunctionMulti { capture_slots, .. } => {

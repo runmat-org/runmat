@@ -67,6 +67,8 @@ pub(super) async fn dispatch(
     state.push_output_target(PreparedOutputTarget::Sequence {
         root_slot,
         endpoint,
+        absent_root: None,
+        root_creation: runmat_mir::SequenceRootCreation::Existing,
     });
     Ok(true)
 }

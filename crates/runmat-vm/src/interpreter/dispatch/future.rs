@@ -525,7 +525,16 @@ async fn dispatch_prepared_output(
         state.stack,
         state.vars,
         state.sequence_register,
-        meta.current_function_name,
+        prepared_outputs::PreparedOutputContext {
+            authority: slot_authority::AssignmentSlotAuthority {
+                context: state.context,
+                global_aliases: state.global_aliases,
+                persistent_aliases: state.persistent_aliases,
+                missing_input_slots: state.missing_input_slots,
+                var_names: meta.var_names,
+                current_function_name: meta.current_function_name,
+            },
+        },
         hooks.store_var_before_overwrite,
         hooks.store_var_after_store,
     )

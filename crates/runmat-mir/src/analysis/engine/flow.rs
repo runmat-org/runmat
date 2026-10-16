@@ -23,6 +23,8 @@ use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
 #[path = "flow/call_observations.rs"]
 mod call_observations;
 pub(crate) use call_observations::CallObservation;
+#[path = "flow/sequence.rs"]
+mod sequence;
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -231,14 +233,7 @@ fn transfer_statement(
                         state,
                     ),
                     MirOutputTarget::Sequence(target) => {
-                        if let Some(local) = place_root_local(target.base()) {
-                            if let Some(fact) = state.locals.get_mut(local.0) {
-                                fact.set(
-                                    ValueFact::unknown(DynamicReason::RuntimeValue),
-                                    LiteralValue::Unknown,
-                                );
-                            }
-                        }
+                        sequence::assign_sequence_target(target, outputs.get(index), state)
                     }
                     MirOutputTarget::Discard => {}
                 }
@@ -248,19 +243,7 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
-            let base = match target {
-                crate::MirSequenceTarget::Member { base, .. }
-                | crate::MirSequenceTarget::DynamicMember { base, .. }
-                | crate::MirSequenceTarget::CellContents { base, .. } => base,
-            };
-            if let Some(local) = place_root_local(base) {
-                if let Some(fact) = state.locals.get_mut(local.0) {
-                    fact.set(
-                        ValueFact::unknown(DynamicReason::RuntimeValue),
-                        LiteralValue::Unknown,
-                    );
-                }
-            }
+            sequence::assign_sequence_target(target, None, state);
         }
         MirStmtKind::CaptureSequence {
             destination,
@@ -317,16 +300,6 @@ fn transfer_statement(
                 }
             }
         }
-    }
-}
-
-fn place_root_local(place: &crate::MirPlace) -> Option<crate::MirLocalId> {
-    match place {
-        crate::MirPlace::Local(local) => Some(*local),
-        crate::MirPlace::Binding(_) => None,
-        crate::MirPlace::Member(base, _)
-        | crate::MirPlace::DynamicMember(base, _)
-        | crate::MirPlace::Index(base, _) => place_root_local(base),
     }
 }
 

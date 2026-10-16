@@ -16,7 +16,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The two-element limits vector may use single, double, or any native integer class.",
             "Native integer endpoints are ordered using their exact values before conversion to graphics coordinates.",
             "Endpoints must be finite, increasing, and remain distinct in the graphics coordinate domain.",
-            "`'auto'` restores automatic selection, `'manual'` freezes the current numeric range, and `'mode'` queries the current auto/manual state.",
+            "The accepted text tokens include `'auto'`, `'tight'`, and `'manual'`: `'auto'` restores automatic selection, `'tight'` selects the tight automatic-limit method, and `'manual'` freezes the current numeric range. `'mode'` queries the auto/manual state.",
             "`'tight'`, `'padded'`, and `'tickaligned'` select distinct automatic limit methods; `'method'` queries the selected method.",
             "An existing axes handle can be supplied first for query or setter forms without selecting it as the current axes. Semiautomatic infinite endpoints and datetime/duration/categorical limits still require graphics-state support.",
         ] },

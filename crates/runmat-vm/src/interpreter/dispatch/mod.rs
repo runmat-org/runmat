@@ -11,6 +11,7 @@ mod object;
 mod parallel;
 mod prepared_outputs;
 mod route;
+mod slot_authority;
 pub(crate) use parallel::encode_spmd_output;
 mod stack;
 
@@ -97,7 +98,7 @@ pub struct SequenceState {
     captures: BTreeMap<usize, SequenceRegister>,
     output_targets: Vec<PreparedOutputTarget>,
     expected_output_targets: Option<usize>,
-    destination_builder: Option<(usize, runmat_runtime::sequence::SequenceDestinationBuilder)>,
+    destination_builder: Option<PendingSequenceDestination>,
     prepared_index_component_count: Option<usize>,
     contextual_indices: Vec<(usize, Vec<usize>)>,
     subscript_receivers: Vec<(
@@ -107,12 +108,21 @@ pub struct SequenceState {
     )>,
 }
 
+struct PendingSequenceDestination {
+    root_slot: usize,
+    builder: runmat_runtime::sequence::SequenceDestinationBuilder,
+    absent_root: Option<Value>,
+    root_creation: runmat_mir::SequenceRootCreation,
+}
+
 pub(super) enum PreparedOutputTarget {
     Fixed,
     Discard,
     Sequence {
         root_slot: usize,
         endpoint: runmat_runtime::sequence::PreparedSequenceDestination,
+        absent_root: Option<Value>,
+        root_creation: runmat_mir::SequenceRootCreation,
     },
 }
 
@@ -121,14 +131,24 @@ impl SequenceState {
     pub(crate) fn visit_retained_values(&self, visit: &mut impl FnMut(&Value)) {
         for target in &self.output_targets {
             match target {
-                PreparedOutputTarget::Sequence { endpoint, .. } => {
-                    endpoint.visit_retained_values(visit)
+                PreparedOutputTarget::Sequence {
+                    endpoint,
+                    absent_root,
+                    ..
+                } => {
+                    endpoint.visit_retained_values(visit);
+                    if let Some(root) = absent_root {
+                        visit(root);
+                    }
                 }
                 PreparedOutputTarget::Fixed | PreparedOutputTarget::Discard => {}
             }
         }
-        if let Some((_, builder)) = &self.destination_builder {
-            builder.visit_retained_values(visit);
+        if let Some(pending) = &self.destination_builder {
+            pending.builder.visit_retained_values(visit);
+            if let Some(root) = &pending.absent_root {
+                visit(root);
+            }
         }
         for (receiver, _, _) in &self.subscript_receivers {
             visit(receiver.receiver());
@@ -160,6 +180,8 @@ impl SequenceState {
         &mut self,
         root_slot: usize,
         root: &Value,
+        absent_root: Option<Value>,
+        root_creation: runmat_mir::SequenceRootCreation,
     ) -> Result<(), RuntimeError> {
         if self.destination_builder.is_some() {
             return Err(crate::interpreter::errors::mex(
@@ -167,10 +189,12 @@ impl SequenceState {
                 "a prepared destination path is already live",
             ));
         }
-        self.destination_builder = Some((
+        self.destination_builder = Some(PendingSequenceDestination {
             root_slot,
-            runmat_runtime::sequence::SequenceDestinationBuilder::new(root)?,
-        ));
+            builder: runmat_runtime::sequence::SequenceDestinationBuilder::new(root)?,
+            absent_root,
+            root_creation,
+        });
         Ok(())
     }
 
@@ -179,7 +203,7 @@ impl SequenceState {
     ) -> Result<&mut runmat_runtime::sequence::SequenceDestinationBuilder, RuntimeError> {
         self.destination_builder
             .as_mut()
-            .map(|(_, builder)| builder)
+            .map(|pending| &mut pending.builder)
             .ok_or_else(|| {
                 crate::interpreter::errors::mex(
                     "RunMat:CommaSeparatedListState",
@@ -364,7 +388,7 @@ impl SequenceState {
 
     pub(super) fn take_destination_builder(
         &mut self,
-    ) -> Result<(usize, runmat_runtime::sequence::SequenceDestinationBuilder), RuntimeError> {
+    ) -> Result<PendingSequenceDestination, RuntimeError> {
         if self.prepared_index_component_count.is_some() {
             return Err(crate::interpreter::errors::mex(
                 "RunMat:CommaSeparatedListState",
@@ -870,44 +894,16 @@ fn dispatch_immediate(
             )))
         }
         Instr::LoadVarForIndexAssignment(index) | Instr::LoadVarForStructAssignment(index) => {
-            if let Some(global_value) =
-                crate::runtime::globals::current_bound_value(global_aliases, *index)
-            {
-                if *index >= vars.len() {
-                    vars.resize(*index + 1, Value::Num(0.0));
-                }
-                vars[*index] = global_value;
-                refresh_workspace_slot(*index, &vars[*index]);
-            }
-            persistent::refresh(
+            let root_presence = slot_authority::AssignmentSlotAuthority {
+                context,
+                global_aliases,
                 persistent_aliases,
-                vars,
-                &context.runtime.session_variable_authority(),
+                missing_input_slots,
+                var_names,
                 current_function_name,
-                *index,
-            )?;
-            let lexical_assigned = lexical::refresh(context, vars, *index)?;
-            if missing_input_slots.contains(index) {
-                return Err(crate::interpreter::errors::mex(
-                    "NotEnoughInputs",
-                    "Not enough input arguments.",
-                ));
             }
-            let unassigned_name = if !lexical_assigned {
-                var_names.get(index).cloned()
-            } else {
-                match (
-                    workspace_slot_assigned(*index),
-                    workspace_slot_name(*index),
-                    var_names.get(index),
-                ) {
-                    (Some(false), Some(slot_name), Some(var_name)) if slot_name == *var_name => {
-                        Some(slot_name)
-                    }
-                    _ => None,
-                }
-            };
-            if let Some(slot_name) = unassigned_name {
+            .refresh(vars, *index)?;
+            if let slot_authority::AssignmentRootPresence::Absent(slot_name) = root_presence {
                 if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
                     let empty = Value::Struct(runmat_value::StructValue::new());
                     debug::trace_load_var(*pc, *index, &empty);

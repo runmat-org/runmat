@@ -7,6 +7,71 @@ use runmat_value::Value;
 mod tests;
 
 impl HostState {
+    pub(in crate::execute) fn empty_cell_root() -> Value {
+        Value::Cell(
+            runmat_value::CellArray::new(Vec::new(), 0, 0)
+                .expect("the canonical empty cell shape is valid"),
+        )
+    }
+
+    /// Return a staged empty-cell carrier only when the owning binding is
+    /// absent. The resident local value of an absent session alias is an
+    /// empty numeric workspace placeholder, so its class is not a presence
+    /// proof; consult the session authority for those aliases.
+    pub(in crate::execute) fn sequence_root(
+        &mut self,
+        slot: usize,
+        creation: runmat_mir::SequenceRootCreation,
+    ) -> NativeExecutorResult<(Value, Option<NativeValueRef>)> {
+        if self
+            .missing_input_locals
+            .iter()
+            .any(|local| local.0 as usize == slot)
+        {
+            return Err(runmat_runtime::runtime_error::semantic_error(
+                "NotEnoughInputs",
+                "Not enough input arguments.",
+            )
+            .into());
+        }
+        let reference = self.local_reference(slot)?;
+        let absent = if creation == runmat_mir::SequenceRootCreation::EmptyCell {
+            self.sequence_binding_absent(slot, reference)?
+        } else {
+            false
+        };
+        if absent {
+            let cell = Self::empty_cell_root();
+            let seed = self.arena.insert(cell.clone());
+            Ok((cell, Some(seed)))
+        } else {
+            Ok((self.arena.get(reference)?.clone(), None))
+        }
+    }
+
+    pub(in crate::execute) fn sequence_root_still_absent(
+        &mut self,
+        slot: usize,
+    ) -> NativeExecutorResult<bool> {
+        let reference = self.local_reference(slot)?;
+        self.sequence_binding_absent(slot, reference)
+    }
+
+    fn sequence_binding_absent(
+        &self,
+        slot: usize,
+        reference: NativeValueRef,
+    ) -> NativeExecutorResult<bool> {
+        let authority = self.runtime.session_variable_authority();
+        if let Some(name) = self.global_bindings.name_for_slot(slot) {
+            Ok(authority.global_value(&name)?.is_none())
+        } else if let Some(binding) = self.persistent_bindings.get(&slot) {
+            Ok(!authority.persistent_named_present(&binding.function, &binding.name)?)
+        } else {
+            Ok(reference.is_null())
+        }
+    }
+
     /// Initialization is a frame-state transition shared by ordinary writes,
     /// call/edge results, optimized writes, and workspace reconciliation.
     /// A NULL transfer is still unassigned and cannot satisfy an omitted input.

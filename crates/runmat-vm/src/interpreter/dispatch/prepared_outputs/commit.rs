@@ -6,14 +6,14 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 use super::super::{PreparedOutputTarget, SequenceState};
-use super::support::root;
+use super::support::{empty_cell_root, root};
 
 pub(super) async fn commit(
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut Vec<Value>,
     state: &mut SequenceState,
     retained_outputs: usize,
-    current_function_name: &str,
+    authority: &super::super::slot_authority::AssignmentSlotAuthority<'_>,
     before_overwrite: &mut dyn FnMut(&Value, &Value),
     after_store: &mut dyn FnMut(usize, &Value),
 ) -> Result<(), RuntimeError> {
@@ -55,16 +55,31 @@ pub(super) async fn commit(
             PreparedOutputTarget::Sequence {
                 root_slot,
                 endpoint,
+                absent_root,
+                root_creation,
             } => {
                 let position = match root_positions.get(&root_slot).copied() {
                     Some(position) => position,
                     None => {
+                        // Selectors and the RHS may have called code that changed
+                        // a global, persistent, or shared lexical root. Resolve
+                        // that binding at commit, not from Begin's old slot copy.
+                        let absent_now = authority.refresh(vars, root_slot)?.is_absent();
                         let position = roots.len();
                         roots.push((
                             root_slot,
                             Some(
-                                RootedValue::new(root(vars, root_slot)?.clone())
-                                    .map_err(|error| error.into_runtime_error())?,
+                                RootedValue::new(
+                                    if absent_now
+                                        && root_creation
+                                            == runmat_mir::SequenceRootCreation::EmptyCell
+                                    {
+                                        absent_root.unwrap_or_else(empty_cell_root)
+                                    } else {
+                                        root(vars, root_slot)?.clone()
+                                    },
+                                )
+                                .map_err(|error| error.into_runtime_error())?,
                             ),
                         ));
                         root_positions.insert(root_slot, position);
@@ -81,7 +96,7 @@ pub(super) async fn commit(
                     .assign(
                         root_value.value().clone(),
                         values,
-                        Some(current_function_name),
+                        Some(authority.current_function_name),
                     )
                     .await?;
                 roots[position].1 = Some(updated);
@@ -106,6 +121,7 @@ pub(super) async fn commit(
             crate::runtime::workspace::admit_workspace_slot_write(slot, &value)?;
             vars[slot] = value;
             after_store(slot, &vars[slot]);
+            authority.publish(vars, slot)?;
             Ok::<_, RuntimeError>(())
         })?;
     }
