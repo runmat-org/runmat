@@ -37,6 +37,7 @@ async fn execute_portable_envelope(
         entrypoint: function.0.to_string(),
         outputs: runmat_execution::OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable(

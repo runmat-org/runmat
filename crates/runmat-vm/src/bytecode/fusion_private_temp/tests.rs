@@ -34,8 +34,10 @@ fn authentic_function_private_temp_survives_ordinary_dispatch_and_portable_round
     let body = registry.get(function).expect("compiled definition");
     let executable = body.execution_bytecode(&registry);
     assert!(
-        executable.layout.is_none(),
-        "ordinary runner has no entrypoint layout"
+        executable.layout.as_ref().is_some_and(
+            |layout| layout.entrypoints.is_empty() && layout.functions.contains_key(&function)
+        ),
+        "ordinary runner retains only the compiler-selected function layout"
     );
     let private_bridges = bridges(&executable);
     let [bridge] = private_bridges.as_slice() else {

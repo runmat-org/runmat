@@ -679,6 +679,7 @@ mod tests {
             entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("runner-native-interface-test"),
@@ -804,6 +805,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-mex-execution"),
@@ -1115,6 +1117,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-java-execution"),

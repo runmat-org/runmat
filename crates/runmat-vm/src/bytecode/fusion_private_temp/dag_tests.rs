@@ -232,8 +232,10 @@ fn authentic_function_private_dag_survives_dispatch_and_program_v2_roundtrip() {
         .expect("selected compiled definition");
     let executable = body.execution_bytecode(&registry);
     assert!(
-        executable.layout.is_none(),
-        "ordinary function runner has no entrypoint layout"
+        executable.layout.as_ref().is_some_and(
+            |layout| layout.entrypoints.is_empty() && layout.functions.contains_key(&function)
+        ),
+        "ordinary function runner retains only the selected function layout"
     );
     let edges = bridges(&executable);
     assert_eq!(
@@ -265,7 +267,9 @@ fn authentic_function_private_dag_survives_dispatch_and_program_v2_roundtrip() {
         .expect("canonical portable definition");
     let decoded_body = decoded.get(function).expect("decoded selected definition");
     let decoded_execution = decoded_body.execution_bytecode(&decoded);
-    assert!(decoded_execution.layout.is_none());
+    assert!(decoded_execution.layout.as_ref().is_some_and(
+        |layout| layout.entrypoints.is_empty() && layout.functions.contains_key(&function)
+    ));
     assert_eq!(bridges(&decoded_execution).len(), edges.len());
     let (decoded_plan, decoded_graph) = decoded_execution.prepare_vm_fusion_plan();
     assert!(decoded_graph.is_some());
@@ -470,8 +474,10 @@ fn ordinary_function_private_dag_preserves_exact_stack_inputs_and_transaction() 
         .expect("selected function")
         .execution_bytecode(&registry);
     assert!(
-        executable.layout.is_none(),
-        "ordinary function has no entrypoint layout"
+        executable.layout.as_ref().is_some_and(
+            |layout| layout.entrypoints.is_empty() && layout.functions.contains_key(&function)
+        ),
+        "ordinary function retains its selected function layout"
     );
     assert_private_dag_uses_exact_vm_stack(&executable);
 }

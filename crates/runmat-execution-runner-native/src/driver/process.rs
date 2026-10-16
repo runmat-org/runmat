@@ -180,7 +180,7 @@ pub(super) fn execute_attempt(
         resources: request.resource_assignment.clone(),
     };
     let worker_request = if let Some(graph) = completion.graph_authority.as_ref() {
-        if request.task.program_artifact_id != graph.artifact_id
+        if request.task.program_artifact_id() != Some(graph.artifact_id)
             || request.task.invocation_context != graph.context
             || request.task.outputs.requested_outputs != graph.requested_outputs
             || request.task.callable.program != graph.callable
@@ -201,9 +201,12 @@ pub(super) fn execute_attempt(
             },
         }))
     } else {
+        let artifact_id = request.task.program_artifact_id().ok_or_else(|| {
+            TransferFailure::Infrastructure("native program attempt has no program artifact".into())
+        })?;
         let stored = driver
             .artifacts
-            .get(request.task.program_artifact_id)
+            .get(artifact_id)
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
         let stored: StoredProgram = serde_json::from_slice(&stored)
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
@@ -661,6 +664,7 @@ mod tests {
             entrypoint: "0".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("process-outcome-test"),

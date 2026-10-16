@@ -3,10 +3,10 @@ use crate::*;
 const OUTPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "A",
-        ty: BuiltinParamType::NumericArray,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Scanned numeric values.",
+        description: "Scanned numeric values or a character array for character-only formats.",
     },
     BuiltinParamDescriptor {
         name: "count",
@@ -17,10 +17,10 @@ const OUTPUTS: [BuiltinParamDescriptor; 4] = [
     },
     BuiltinParamDescriptor {
         name: "errmsg",
-        ty: BuiltinParamType::StringScalar,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
         default: None,
-        description: "Scan diagnostic text.",
+        description: "Scan diagnostic character vector.",
     },
     BuiltinParamDescriptor {
         name: "nextindex",
@@ -51,7 +51,7 @@ const INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
         default: None,
-        description: "Optional scalar or two-element output size.",
+        description: "Optional positive scalar or two-element output size and read limit.",
     },
 ];
 
@@ -89,5 +89,5 @@ pub const SSCANF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double.",
+        notes: "sizeA limits admitted reads and controls output shape. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, character-only formats return char, and mixed numeric/character formats return double.",
     }];

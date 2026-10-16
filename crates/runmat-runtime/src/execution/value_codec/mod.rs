@@ -3,6 +3,7 @@ mod durable;
 mod encode;
 mod error;
 mod graph;
+mod owned_prepare;
 mod path;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,6 +23,7 @@ pub use graph::{
     GraphSourceIssuer, GraphSourceUnitFacts, PreparedPayloadGraph,
 };
 pub use graph::{GraphCallableProof, GraphCaptureProof, GraphNestedZeroCopy};
+pub use owned_prepare::OwnedInlineTransportPlan;
 
 #[cfg(test)]
 mod tests {
@@ -598,6 +600,7 @@ mod tests {
                 scope_id: service.scope_id(),
                 outputs: runmat_execution::OutputContract {
                     requested_outputs: 1,
+                    owned_work: None,
                 },
             }),
         );
@@ -616,6 +619,7 @@ mod tests {
             scope_id: service.scope_id(),
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
         };
         assert!(encode_inline_value(&Value::Future(future)).is_err());

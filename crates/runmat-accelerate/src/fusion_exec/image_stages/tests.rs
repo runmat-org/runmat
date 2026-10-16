@@ -391,6 +391,7 @@ impl AccelProvider for StagedProvider {
                 },
                 steps,
                 incremental_peak_bytes: incremental_bytes,
+                queue_submissions: u32::try_from(axes_zero_based.len()).expect("test axes fit u32"),
             },
         )))
     }

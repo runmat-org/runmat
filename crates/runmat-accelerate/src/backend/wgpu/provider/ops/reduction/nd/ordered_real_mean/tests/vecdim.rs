@@ -50,6 +50,7 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
         limits: symbolic.limits(),
         steps: symbolic.steps().to_vec(),
         incremental_peak_bytes: symbolic.requested_incremental_peak_bytes(),
+        queue_submissions: symbolic.queue_submissions(),
     };
     let mut forged = Vec::new();
 
@@ -99,6 +100,13 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
 
     let mut changed = resources.clone();
     changed.limits.max_buffer_size -= 1;
+    forged.push(ProviderOrderedRealMeanRecipe::new(
+        source_facts.clone(),
+        control.clone(),
+        changed,
+    ));
+    let mut changed = resources.clone();
+    changed.queue_submissions += 1;
     forged.push(ProviderOrderedRealMeanRecipe::new(
         source_facts.clone(),
         control.clone(),

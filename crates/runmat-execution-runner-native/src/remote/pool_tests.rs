@@ -380,12 +380,16 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
                         id: task_id,
                         scope_id,
                         pool_id,
-                        program_artifact_id: artifact_id,
+                        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                            artifact_id,
+                        ),
                         callable: Callable::for_program("remote-test", &program.callable),
                         invocation_context: runmat_execution::ProgramInvocationContext::Direct,
                         inputs: Vec::new(),
                         outputs: OutputContract {
                             requested_outputs: 1,
+                            owned_work: None,
                         },
                         resources: request(),
                         host: host_requirement(),
@@ -521,12 +525,16 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
                     id: task_id,
                     scope_id,
                     pool_id,
-                    program_artifact_id: artifact_id,
+                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                    executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                        artifact_id,
+                    ),
                     callable: Callable::for_program("remote-parfor", &callable),
                     invocation_context: context,
                     inputs,
                     outputs: OutputContract {
                         requested_outputs: 1,
+                        owned_work: None,
                     },
                     resources: request(),
                     host: host_requirement(),
@@ -971,12 +979,14 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
             id: task_id,
             scope_id,
             pool_id,
-            program_artifact_id: artifact_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
             callable: Callable::for_program("remote-test", &program.callable),
             invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: vec![object],
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: request(),
             host: host_requirement(),
@@ -1445,7 +1455,8 @@ fn submission(
             id: task_id,
             scope_id,
             pool_id,
-            program_artifact_id: artifact_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
             callable: Callable::for_program(
                 "remote-test",
                 &runmat_execution::ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -1454,6 +1465,7 @@ fn submission(
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: request(),
             host: host_requirement(),
@@ -1551,6 +1563,7 @@ end
         entrypoint: ProgramCallable::parallel_region(region.contract.id).recipe_entrypoint(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-parfor-test"),
@@ -1721,6 +1734,7 @@ async fn compile_spmd_region_bundle(
         entrypoint: ProgramCallable::spmd_region(region_id).recipe_entrypoint(),
         outputs: OutputContract {
             requested_outputs: u16::try_from(expected_outputs).unwrap(),
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-spmd-test"),
@@ -1834,6 +1848,7 @@ async fn build_executable_bundle(
         entrypoint,
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-pool-test"),

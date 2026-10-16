@@ -19,6 +19,22 @@ pub(super) struct ImagePowerPlans {
     pub final_power: PowerSymbolicPlan,
 }
 
+impl ImagePowerPlans {
+    pub(super) fn physical_upper_bound(
+        &self,
+    ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
+        for plan in [&self.square, &self.final_power] {
+            let physical = plan.exact_physical_proposal()?;
+            bound.add(
+                physical.requested_incremental_peak_bytes()?,
+                physical.dispatches,
+            )?;
+        }
+        Some(bound)
+    }
+}
+
 fn future_representation(class: NumericClass, shape: [u64; 3]) -> Option<ProviderRepresentation> {
     Some(ProviderRepresentation {
         element_type: match class {

@@ -64,6 +64,7 @@ num-complex = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"
 nalgebra = "0.32"
+faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg"] }
 rustfft = "6.2"
 futures = "0.3"
 async-recursion = "1.1"

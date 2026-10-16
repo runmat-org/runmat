@@ -56,7 +56,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "How to allow numerical noise with a tolerance",
         program: "D = [1 1+1e-12; 1-1e-12 1];\ntf = ishermitian(D, 1e-9)",
         display_output: Some("tf = logical\n   1"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

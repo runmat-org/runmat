@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::{Rc, Weak};
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
@@ -26,11 +26,15 @@ use runmat_value::Value;
 
 use super::host::BrowserExecutionHost;
 use super::model::BrowserExecutionCapabilities;
+use super::request::BrowserWorkerRequest;
 use super::resources::{
     browser_accelerators, browser_execution_host_inventory, browser_inventory, browser_request,
     browser_worker_inventory, driver_error,
 };
 use super::state::{FutureState, State, TaskRecord};
+
+mod owned_builtin;
+use owned_builtin::OwnedTask;
 
 pub(crate) struct BrowserExecutionService {
     scope_id: ExecutionScopeId,
@@ -38,6 +42,7 @@ pub(crate) struct BrowserExecutionService {
     host: Option<BrowserExecutionHost>,
     capabilities: BrowserExecutionCapabilities,
     state: RefCell<State>,
+    owned: RefCell<HashMap<TaskId, OwnedTask>>,
     self_weak: RefCell<Weak<Self>>,
 }
 
@@ -182,6 +187,7 @@ impl BrowserExecutionService {
                 pool_generation: 1,
                 pool_open: false,
             }),
+            owned: RefCell::new(HashMap::new()),
             self_weak: RefCell::new(Weak::new()),
         });
         service.self_weak.replace(Rc::downgrade(&service));
@@ -300,15 +306,19 @@ impl BrowserExecutionService {
             backend: self.pool_backend(),
             resources: attempt.resource_assignment.clone(),
         };
+        let selected_assignment = assignment.clone();
         match &mut program {
-            runmat_execution_artifact::WorkerProgramRequest::Direct(request) => {
-                request.assignment = Some(assignment)
-            }
-            runmat_execution_artifact::WorkerProgramRequest::Graph(request) => {
-                request.assignment = Some(assignment)
-            }
+            BrowserWorkerRequest::Direct(request) => request.assignment = Some(assignment),
+            BrowserWorkerRequest::Graph(request) => request.assignment = Some(assignment),
+            BrowserWorkerRequest::OwnedBuiltin(request) => request.assignment = Some(assignment),
+        }
+        if matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_)) {
+            self.mark_owned_launched(&attempt, selected_assignment);
         }
         let weak = self.self_weak.borrow().clone();
+        let retained_service = matches!(&program, BrowserWorkerRequest::OwnedBuiltin(_))
+            .then(|| weak.upgrade())
+            .flatten();
         let host = self.host.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let response = match host {
@@ -322,7 +332,7 @@ impl BrowserExecutionService {
                 }
                 None => Ok(super::admission::execute_local_worker_program(program).await),
             };
-            if let Some(service) = weak.upgrade() {
+            if let Some(service) = retained_service.or_else(|| weak.upgrade()) {
                 service.finish_attempt(attempt, response);
             }
         });
@@ -333,6 +343,10 @@ impl BrowserExecutionService {
         attempt: AttemptRequest,
         response: Result<ProgramExecutionResponse, String>,
     ) {
+        if self.owned.borrow().contains_key(&attempt.task_id) {
+            self.finish_owned_attempt(attempt, response);
+            return;
+        }
         let (selected_request, graph_receipt) = {
             let state = self.state.borrow();
             let selected_request = state.requests.get(&attempt.task_id).cloned();
@@ -348,11 +362,10 @@ impl BrowserExecutionService {
         };
         let response = response.and_then(|response| {
             match selected_request.as_ref() {
-                Some(runmat_execution_artifact::WorkerProgramRequest::Direct(request)) => {
-                    response.validate_against(request)
-                }
-                Some(runmat_execution_artifact::WorkerProgramRequest::Graph(request)) => {
-                    request.validate_response(&response)
+                Some(BrowserWorkerRequest::Direct(request)) => response.validate_against(request),
+                Some(BrowserWorkerRequest::Graph(request)) => request.validate_response(&response),
+                Some(BrowserWorkerRequest::OwnedBuiltin(request)) => {
+                    response.validate_owned_builtin(request)
                 }
                 None => return Err("browser scheduler lost the exact program request".into()),
             }
@@ -510,6 +523,9 @@ impl BrowserExecutionService {
     }
 
     fn cancel_attempt(&self, attempt: &AttemptRequest) -> Result<(), ExecutionServiceError> {
+        if self.owned.borrow().contains_key(&attempt.task_id) {
+            return self.cancel_owned_attempt(attempt);
+        }
         if let Some(host) = &self.host {
             host.cancel(&attempt.task_id.to_string())
                 .map_err(ExecutionServiceError::Failed)?;
@@ -648,7 +664,10 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
-            outputs: OutputContract { requested_outputs },
+            outputs: OutputContract {
+                requested_outputs,
+                owned_work: None,
+            },
         })
     }
 
@@ -759,7 +778,10 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     id: task_id,
                     scope_id: task_scope_id,
                     pool_id: self.pool_id,
-                    program_artifact_id: artifact_id,
+                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                    executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                        artifact_id,
+                    ),
                     callable: Callable::for_program("browser-session", &callable),
                     invocation_context,
                     inputs: arguments,
@@ -782,10 +804,9 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 return Err(driver_error(error));
             }
         };
-        state.requests.insert(
-            task_id,
-            runmat_execution_artifact::WorkerProgramRequest::Direct(request),
-        );
+        state
+            .requests
+            .insert(task_id, BrowserWorkerRequest::Direct(request));
         state.tasks.insert(
             task_id,
             TaskRecord {
@@ -1193,7 +1214,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         for task_id in task_ids {
             record_browser_completion(&mut state, task_id);
         }
-        state.requests.clear();
+        self.retain_launched_owned_requests(&mut state);
         drop(state);
         self.dispatch(actions);
     }

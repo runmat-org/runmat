@@ -47,6 +47,10 @@ pub(super) async fn bound(
         ImageSourceInvocation::bind(&graph, plan, &values, ProviderPrecision::F64, None)
             .await
             .unwrap();
+    assert!(
+        ImageArithmeticProof::for_selected(&invocation).is_none(),
+        "a graph-only provisional checkpoint cannot authorize selected execution"
+    );
     let session = ImageNormalizeStageSession::begin_selected(
         provider,
         &input.handle,

@@ -296,17 +296,23 @@ async fn rsf2csf_builtin(vectors: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 #[runtime_builtin(
     name = "ordeig",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::linalg::factor::schur"
+    builtin_path = "crate::builtins::math::linalg::factor::schur",
+    context = true
 )]
-async fn ordeig_builtin(triangular: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ordeig_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    triangular: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     const NAME: SchurContext = ORDEIG;
+    if let [second] = rest.as_slice() {
+        return super::qz::generalized_ordeig(runtime.as_ref(), &triangular, second).await;
+    }
     if !rest.is_empty() {
-        return Err(
-            build_runtime_error("generalized ordeig(AA,BB) requires QZ support")
-                .with_builtin(NAME.name)
-                .with_identifier("RunMat:ordeig:QzPending")
-                .build(),
-        );
+        return Err(invalid(
+            NAME,
+            "ordeig expects one ordinary or two generalized Schur factors",
+        ));
     }
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(invalid(NAME, "ordeig returns one output"));

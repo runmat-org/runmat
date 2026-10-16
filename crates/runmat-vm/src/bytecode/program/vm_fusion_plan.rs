@@ -20,7 +20,7 @@ use runmat_runtime::context::{
 mod semantic_identity;
 #[path = "vm_fusion_plan/host_input_uses.rs"]
 mod host_input_uses;
-use semantic_identity::{vm_fusion_executable_identity, vm_fusion_semantic_identity};
+pub(crate) use semantic_identity::{vm_fusion_executable_identity, vm_fusion_semantic_identity};
 
 /// VM-private owner retained beside the exact store-reconciled plan. Runtime
 /// can certify session/generation but only this module can check actual

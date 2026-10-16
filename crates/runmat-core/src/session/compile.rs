@@ -1445,6 +1445,8 @@ impl RunMatSession {
                     )
                 },
             )?;
+            bytecode.function_registry.finalize_selected_image_views();
+            session_registry.finalize_selected_image_views();
             return Ok((
                 session_registry,
                 next_semantic_function_id,
@@ -1563,6 +1565,10 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        // Remapping and session publication invalidate the compiler's
+        // generation, so seal both published registries before any call.
+        bytecode.function_registry.finalize_selected_image_views();
+        session_registry.finalize_selected_image_views();
         Ok((
             session_registry,
             next_semantic_function_id,

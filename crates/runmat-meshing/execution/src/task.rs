@@ -104,7 +104,10 @@ pub fn build_task_submission(
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: context.program_artifact_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                context.program_artifact_id,
+            ),
             callable: Callable::for_program(
                 MESHING_EXECUTION_CALLABLE_OWNER,
                 &runmat_execution::ProgramCallable::semantic(
@@ -121,6 +124,7 @@ pub fn build_task_submission(
                 .collect(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources,
             retry,

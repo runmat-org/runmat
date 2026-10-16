@@ -286,7 +286,10 @@ impl JobStore {
             id: job_id,
             run_id,
             generation: 1,
-            outputs: OutputContract { requested_outputs },
+            outputs: OutputContract {
+                requested_outputs,
+                owned_work: None,
+            },
         };
         let job_dir = self.job_dir(job_id);
         secure_directory(&job_dir)?;

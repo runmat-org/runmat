@@ -30,7 +30,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "Allowing numerical noise with a tolerance",
         program: "A = [1 1+1e-12; 1-1e-12 1];\ntf = issymmetric(A, 1e-9)",
         display_output: Some("tf = logical\n   1"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

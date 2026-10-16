@@ -118,6 +118,7 @@ fn derive_recipe(
     let mut input_bytes = source_buffer_bytes;
     let mut steps = Vec::with_capacity(axes.len());
     let mut incremental_peak_bytes = 0u64;
+    let mut queue_submissions = 0u32;
     for (ordinal, &axis) in axes.iter().enumerate() {
         let Ok(geometry) = NdReductionGeometry::new(&shape, &[axis], "ordered real mean") else {
             return Ok(None);
@@ -171,6 +172,12 @@ fn derive_recipe(
         shape = geometry.out_shape;
         input_precision = output_precision;
         input_bytes = output_bytes;
+        // execute_ordered_mean_plan_with invokes elementwise::run once for
+        // this step; that owner submits exactly one command encoder.
+        let Some(next) = queue_submissions.checked_add(1) else {
+            return Ok(None);
+        };
+        queue_submissions = next;
     }
     Ok(Some(ProviderOrderedRealMeanRecipe::new(
         source_facts,
@@ -179,6 +186,7 @@ fn derive_recipe(
             limits,
             steps,
             incremental_peak_bytes,
+            queue_submissions,
         },
     )))
 }

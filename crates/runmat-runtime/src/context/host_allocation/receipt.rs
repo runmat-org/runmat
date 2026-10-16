@@ -79,6 +79,11 @@ pub struct HostAllocationReceipt {
 }
 
 impl HostAllocationReceipt {
+    /// Keep the scratch claim alive until an owned CPU job physically settles.
+    pub fn retain_scratch_for_cpu_work(&self) -> Arc<ManagedHostEffectStageReservation> {
+        self.stage.clone()
+    }
+
     /// `None` denotes the existing unbounded policy. A finite parallel lease
     /// without the same managed owner fails closed before any allocation.
     pub fn admit(

@@ -62,6 +62,9 @@ pub use private_resolution::PublishedNameResolutionView;
 #[cfg(feature = "native-accel")]
 #[path = "program/vm_fusion_plan.rs"]
 mod vm_fusion_plan;
+#[cfg(feature = "native-accel")]
+#[path = "program/vm_image_plan.rs"]
+mod vm_image_plan;
 pub use function_remap::{
     instruction_reference_sites, remap_reference_sites, FunctionReferenceKind,
 };
@@ -71,6 +74,10 @@ pub use function_remap::{
 };
 #[cfg(feature = "native-accel")]
 pub(crate) use vm_fusion_plan::VmFusionPlanInstallation;
+#[cfg(feature = "native-accel")]
+pub(crate) use vm_image_plan::SealedFunctionImage;
+#[cfg(feature = "native-accel")]
+pub(crate) use vm_image_plan::VmImagePlanInstallation;
 #[path = "program/bound_binding.rs"]
 mod bound_binding;
 #[path = "program/retained_artifacts.rs"]
@@ -473,6 +480,39 @@ impl FunctionBytecode {
         // execution snapshot. Duplicating every body into the legacy fallback
         // map on each call makes invocation scale with the whole program.
         bytecode.function_registry = registry.clone();
+        #[cfg(feature = "native-accel")]
+        if registry
+            .get(self.function)
+            .is_some_and(|selected| std::ptr::eq(selected, self))
+            && registry.static_overlay.is_none()
+            && (registry
+                .data
+                .selected_image_views
+                .borrow()
+                .contains_key(&self.function)
+                || self.validate_fusion_stage_projection().is_ok())
+        {
+            if let Some(layout) = self
+                .fusion_stage_projection
+                .as_ref()
+                .and_then(|projection| projection.selected_function_layout.as_ref())
+                .filter(|layout| {
+                    layout.function == self.function
+                        && layout.resume_points == self.resume_points
+                        && layout.local_count == self.var_count
+                })
+            {
+                bytecode.layout = Some(VmAssemblyLayout {
+                    functions: HashMap::from([(self.function, layout.clone())]),
+                    entrypoints: HashMap::new(),
+                    storage_bindings: HashMap::new(),
+                });
+            }
+        }
+        #[cfg(feature = "native-accel")]
+        {
+            bytecode.sealed_function_image = registry.finalize_selected_image_for(self, &bytecode);
+        }
         bytecode
     }
 
@@ -560,6 +600,11 @@ impl FunctionBytecode {
                         .as_mut()
                         .is_some_and(|projection| {
                             let projection = std::sync::Arc::make_mut(projection);
+                            if let Some(layout) = &mut projection.selected_function_layout {
+                                layout.function = function;
+                                layout.resume_points = self.resume_points.clone();
+                                layout.parent = self.lexical_parent;
+                            }
                             if reseal_stage {
                                 projection.rebind_owner(
                                     program_function,
@@ -648,6 +693,25 @@ pub struct FunctionRegistryData {
     #[cfg(feature = "native-accel")]
     #[serde(skip)]
     admitted_fusion_scaffolds: OnceLock<HashMap<usize, std::sync::Arc<FunctionFusionScaffold>>>,
+    /// Derived immutable image views belong to this exact copy-on-write
+    /// registry generation, not to a session-wide function ordinal.
+    #[cfg(feature = "native-accel")]
+    #[serde(skip)]
+    selected_image_views: std::cell::RefCell<vm_image_plan::SelectedImageViews>,
+    #[cfg(feature = "native-accel")]
+    #[serde(skip)]
+    selected_image_generation: u64,
+}
+
+#[cfg(feature = "native-accel")]
+impl FunctionRegistryData {
+    fn invalidate_selected_image_views(&mut self) {
+        self.selected_image_views.get_mut().clear();
+        self.selected_image_generation = self
+            .selected_image_generation
+            .checked_add(1)
+            .expect("selected image registry generation exhausted");
+    }
 }
 
 impl std::ops::Deref for FunctionRegistry {
@@ -666,6 +730,8 @@ impl std::ops::DerefMut for FunctionRegistry {
         data.execution_stacks.take();
         #[cfg(feature = "native-accel")]
         data.admitted_fusion_scaffolds.take();
+        #[cfg(feature = "native-accel")]
+        data.invalidate_selected_image_views();
         data
     }
 }
@@ -709,6 +775,9 @@ fn source_index(
 }
 
 impl FunctionRegistry {
+    #[cfg(not(feature = "native-accel"))]
+    pub fn finalize_selected_image_views(&self) {}
+
     /// Exact immutable execution-view identity, including any site-qualified
     /// static overlay. Derived lookup caches are intentionally excluded.
     pub fn same_immutable_execution_view(&self, other: &Self) -> bool {
@@ -873,6 +942,10 @@ impl FunctionRegistry {
                 execution_stacks: OnceLock::new(),
                 #[cfg(feature = "native-accel")]
                 admitted_fusion_scaffolds: OnceLock::new(),
+                #[cfg(feature = "native-accel")]
+                selected_image_views: std::cell::RefCell::new(HashMap::new()),
+                #[cfg(feature = "native-accel")]
+                selected_image_generation: 0,
             }),
             static_overlay: None,
         }
@@ -1235,6 +1308,8 @@ impl FunctionRegistry {
     pub fn insert_replacing_name(&mut self, mut function: FunctionBytecode) {
         self.static_overlay = None;
         let data = std::rc::Rc::make_mut(&mut self.data);
+        #[cfg(feature = "native-accel")]
+        data.invalidate_selected_image_views();
         data.execution_stacks.take();
         #[cfg(feature = "native-accel")]
         data.admitted_fusion_scaffolds.take();
@@ -1342,6 +1417,8 @@ impl FunctionRegistry {
         }
         self.static_overlay = None;
         let data = std::rc::Rc::make_mut(&mut self.data);
+        #[cfg(feature = "native-accel")]
+        data.invalidate_selected_image_views();
         data.execution_stacks.take();
         #[cfg(feature = "native-accel")]
         data.admitted_fusion_scaffolds.take();
@@ -1889,6 +1966,11 @@ pub struct Bytecode {
     #[cfg(feature = "native-accel")]
     #[serde(skip)]
     pub(crate) function_private_layout: Option<FunctionPrivateSlotLayout>,
+    /// Only the exact canonical registry body can install this runtime-only
+    /// view. Public mutable Bytecode/entrypoint paths retain checked lookup.
+    #[cfg(feature = "native-accel")]
+    #[serde(skip)]
+    pub(crate) sealed_function_image: SealedFunctionImage,
     #[serde(default)]
     pub async_metadata: AsyncMetadata,
     /// Canonical region identities mapped onto function-local bytecode PCs.
@@ -1969,10 +2051,14 @@ pub struct FusionMetadata {
     pub instruction_windows: Vec<FusionInstructionWindow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_projection: Option<std::sync::Arc<crate::bytecode::FusionStageProjection>>,
+    /// Process-local selected-source descriptor. Serialized artifacts carry
+    /// the underlying compiler facts, never this derived execution view.
+    #[serde(skip)]
+    pub(crate) selected_image: std::rc::Rc<vm_image_plan::SelectedImageCache>,
 }
 
 #[cfg(feature = "native-accel")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FusionCandidateGroup {
     pub id: usize,
     pub signal_count: usize,
@@ -2077,6 +2163,8 @@ impl Bytecode {
             layout: None,
             #[cfg(feature = "native-accel")]
             function_private_layout: None,
+            #[cfg(feature = "native-accel")]
+            sealed_function_image: SealedFunctionImage::Unsealed,
             async_metadata: AsyncMetadata::default(),
             regions: Vec::new(),
             parfor_regions: Vec::new(),
@@ -2145,6 +2233,13 @@ impl Bytecode {
         }
         bytecode.var_types = vec![Type::Unknown; function.var_count];
         bytecode.layout = Some(layout);
+        #[cfg(feature = "native-accel")]
+        {
+            // This public constructor accepts a caller-supplied layout. It
+            // must use checked source lookup, never the canonical registry's
+            // pre-finalized function view.
+            bytecode.sealed_function_image = SealedFunctionImage::Unsealed;
+        }
         bytecode
     }
 

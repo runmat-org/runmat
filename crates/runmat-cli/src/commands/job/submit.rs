@@ -141,6 +141,7 @@ pub async fn submit(
         entrypoint: executable_function.to_string(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),

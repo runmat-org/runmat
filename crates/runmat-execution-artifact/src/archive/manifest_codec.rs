@@ -468,7 +468,10 @@ fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe
         schema_version,
         program_revision,
         entrypoint,
-        outputs: OutputContract { requested_outputs },
+        outputs: OutputContract {
+            requested_outputs,
+            owned_work: None,
+        },
         execution_mode,
         target,
         interop,

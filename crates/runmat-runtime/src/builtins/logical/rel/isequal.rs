@@ -14,6 +14,7 @@ use runmat_value::{
 use runmat_value::{IntValue, SparseTensor};
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::shape::array_shapes_equal;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "isequal";
@@ -147,7 +148,7 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         }
         (a, Value::Complex(br, bi)) if real_numeric_view(a).is_some() => {
             let real = real_numeric_view(a).expect("guarded real numeric value");
-            real.shape() == vec![1, 1]
+            array_shapes_equal(&real.shape(), &[1, 1])
                 && numeric_scalars_equal(real.value_at(0), NumericScalar::F64(*br), nan_equal)
                 && numeric_scalars_equal(
                     NumericScalar::F64(*bi),
@@ -157,7 +158,7 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         }
         (Value::Complex(ar, ai), b) if real_numeric_view(b).is_some() => {
             let real = real_numeric_view(b).expect("guarded real numeric value");
-            real.shape() == vec![1, 1]
+            array_shapes_equal(&real.shape(), &[1, 1])
                 && numeric_scalars_equal(NumericScalar::F64(*ar), real.value_at(0), nan_equal)
                 && numeric_scalars_equal(
                     NumericScalar::F64(*ai),
@@ -179,19 +180,21 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::StringArray(a), Value::StringArray(b)) => string_arrays_equal(a, b),
         (Value::String(a), Value::StringArray(b)) => {
-            b.shape == vec![1, 1] && b.data.len() == 1 && b.data[0] == *a
+            array_shapes_equal(&b.shape, &[1, 1]) && b.data.len() == 1 && b.data[0] == *a
         }
         (Value::StringArray(a), Value::String(b)) => {
-            a.shape == vec![1, 1] && a.data.len() == 1 && a.data[0] == *b
+            array_shapes_equal(&a.shape, &[1, 1]) && a.data.len() == 1 && a.data[0] == *b
         }
 
         // Cells
-        (Value::Cell(a), Value::Cell(b)) => a.shape == b.shape && cells_equal(a, b, nan_equal),
+        (Value::Cell(a), Value::Cell(b)) => {
+            array_shapes_equal(&a.shape, &b.shape) && cells_equal(a, b, nan_equal)
+        }
 
         // Structs
         (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b, nan_equal),
         (Value::StructArray(a), Value::StructArray(b)) => {
-            a.shape() == b.shape()
+            array_shapes_equal(a.shape(), b.shape())
                 && a.field_names().count() == b.field_names().count()
                 && a.field_names().all(|name| {
                     a.field_values(name)
@@ -284,7 +287,7 @@ fn real_complex_equal(
     complex: &ComplexTensor,
     nan_equal: bool,
 ) -> bool {
-    if real.shape() != complex.shape() || real.len() != complex.len() {
+    if !array_shapes_equal(&real.shape(), complex.shape()) || real.len() != complex.len() {
         return false;
     }
     (0..real.len()).all(|index| {
@@ -301,7 +304,7 @@ fn real_numeric_views_equal(
     b: &RealNumericView<'_>,
     nan_equal: bool,
 ) -> bool {
-    if a.shape() != b.shape() || a.len() != b.len() {
+    if !array_shapes_equal(&a.shape(), &b.shape()) || a.len() != b.len() {
         return false;
     }
     (0..a.len()).all(|index| numeric_scalars_equal(a.value_at(index), b.value_at(index), nan_equal))
@@ -343,7 +346,7 @@ fn integer_equals_float(integer: IntValue, float: NumericScalar) -> bool {
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
-    if a.shape() != b.shape() || a.len() != b.len() {
+    if !array_shapes_equal(a.shape(), b.shape()) || a.len() != b.len() {
         return false;
     }
     (0..a.len()).all(|index| {
@@ -363,7 +366,7 @@ fn complex_scalar_tensor_equal(
     tensor: &ComplexTensor,
     nan_equal: bool,
 ) -> bool {
-    if tensor.shape() != [1, 1] || tensor.len() != 1 {
+    if !array_shapes_equal(tensor.shape(), &[1, 1]) || tensor.len() != 1 {
         return false;
     }
     let (tensor_real, tensor_imag) = tensor
@@ -374,7 +377,7 @@ fn complex_scalar_tensor_equal(
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
-    if a.shape != b.shape {
+    if !array_shapes_equal(&a.shape, &b.shape) {
         return false;
     }
     a.data == b.data

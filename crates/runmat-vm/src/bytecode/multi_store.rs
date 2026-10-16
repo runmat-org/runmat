@@ -23,6 +23,7 @@ pub use image_normalize::{
     ImageCheckpoint, ImageLiveOut, ImageLiveOutSource, ImageNormalizePublicationJoin,
     ImageRegionStore, ImageStoreDestination, ImageStoreOrdinal,
 };
+pub(crate) use image_normalize::{SelectedImageRegion, SelectedImageRegionSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProspectiveStore {
@@ -83,8 +84,25 @@ impl<'a> SelectedMultiStoreGraph<'a> {
     /// calls and materializations can separate its source-visible stores.
     pub(super) fn for_image(bytecode: &'a Bytecode) -> Option<Self> {
         bytecode.fusion_metadata.stage_projection.as_ref()?;
-        let (graph, stores) =
+        let (mut graph, stores) =
             build_accel_graph_with_stores(&bytecode.instructions, &bytecode.var_types);
+        let groups = graph
+            .detect_fusion_groups()
+            .into_iter()
+            .filter(|group| group.kind == runmat_accelerate::FusionKind::ImageNormalize)
+            .collect::<Vec<_>>();
+        if groups.is_empty()
+            || !crate::bytecode::fusion_private_temp::project_private_bindings(
+                &mut graph,
+                &groups,
+                &crate::bytecode::fusion_private_temp::bridges(bytecode),
+                &crate::bytecode::fusion_private_temp::empty_controls(bytecode),
+                &crate::bytecode::fusion_private_temp::literal_controls(bytecode),
+                &stores,
+            )
+        {
+            return None;
+        }
         Some(Self {
             bytecode,
             graph,
@@ -113,10 +131,12 @@ impl<'a> SelectedMultiStoreGraph<'a> {
                     let body = bytecode.function_registry.get(active)?;
                     let selected_stage = body.fusion_stage_projection.as_ref()?;
                     let view_stage = bytecode.fusion_metadata.stage_projection.as_ref()?;
+                    let selected_layout = view_stage.selected_function_layout.as_ref()?;
                     if body.validate_fusion_stage_projection().is_err()
                         || bytecode.validate_fusion_stage_projection().is_err()
                         || selected_stage.portable_origin != body.portable_function
                         || selected_stage.as_ref() != view_stage.as_ref()
+                        || selected_layout != function
                         || body.resume_points != bytecode.resume_points
                         || body.source_id != bytecode.source_id
                         || body.var_count != bytecode.var_count

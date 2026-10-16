@@ -105,6 +105,7 @@ fn portable_function_request_invokes_the_admitted_local_registry_body() {
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("portable-function-dispatch-test"),

@@ -5,6 +5,7 @@
 //! remain separate admissions.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, ImageNormalizeDescriptor, ProviderImageMomentProgram,
@@ -16,41 +17,31 @@ use runmat_runtime::builtins::common::spec::FusionPowerArithmeticReceipt;
 use runmat_types::ValueFact;
 use runmat_value::Value;
 
-use crate::fusion::{
-    detect_fusion_groups, FusionGroupPlan, FusionOp, FusionPattern, ImageNormalizePattern,
-    ImageScalar,
-};
+use crate::fusion::{FusionGroupPlan, FusionOp, FusionPattern, ImageNormalizePattern, ImageScalar};
 use crate::graph::{AccelGraph, AccelNodeLabel, NodeId, ValueId};
 use crate::placement::PlacementCorrelationId;
 
 use super::{ImageMeanAndPowerSource, ImageSourceLeaf, ImageSourceTranscript};
 
-#[cfg(test)]
 #[path = "source_invocation/moment_bindings.rs"]
 mod moment_bindings;
-#[cfg(test)]
 #[path = "source_invocation/binary_operations.rs"]
 mod binary_operations;
-#[cfg(test)]
 #[path = "source_invocation/real_output_operations.rs"]
 mod real_output_operations;
 #[path = "source_invocation/power_program.rs"]
 mod power_program;
-#[cfg(test)]
+#[path = "source_invocation/publications.rs"]
+mod publications;
+pub use publications::ImageSourcePublication;
 #[path = "source_invocation/sigma_raw.rs"]
 mod sigma_raw;
-#[cfg(test)]
 #[path = "source_invocation/sigma_operations.rs"]
 mod sigma_operations;
-#[cfg(test)]
 pub(crate) use binary_operations::{ImageSelectedBinaryCall, ImageSelectedBinaryCalls};
-#[cfg(test)]
 pub(crate) use moment_bindings::{ImageSelectedMomentBindings, ImageSelectedMomentConversion};
-#[cfg(test)]
 pub(crate) use real_output_operations::{ImageSelectedRealCall, ImageSelectedRealCalls};
-#[cfg(test)]
 pub(crate) use sigma_operations::ImageSelectedSigmaOperations;
-#[cfg(test)]
 pub(crate) use sigma_raw::ImageSelectedSigmaRaw;
 
 #[derive(Debug, Clone)]
@@ -58,11 +49,8 @@ struct BoundImageStage {
     input: GpuTensorHandle,
     desc: ImageNormalizeDescriptor,
     source: ImageMeanAndPowerSource,
-    #[cfg(test)]
     sigma_control: Option<sigma_operations::BoundSigmaAddControl>,
-    #[cfg(test)]
     output_binary: Vec<super::source_output_hooks::SelectedBinaryStep>,
-    #[cfg(test)]
     output_real: Vec<super::source_output_hooks::SelectedRealStep>,
 }
 
@@ -157,7 +145,10 @@ fn same_optional_scalar(left: &Option<ImageScalar>, right: &Option<ImageScalar>)
     }
 }
 
-fn same_image_pattern(left: &ImageNormalizePattern, right: &ImageNormalizePattern) -> bool {
+pub(super) fn same_image_pattern(
+    left: &ImageNormalizePattern,
+    right: &ImageNormalizePattern,
+) -> bool {
     left.input == right.input
         && same_scalar(&left.epsilon, &right.epsilon)
         && same_optional_scalar(&left.gain, &right.gain)
@@ -169,20 +160,7 @@ fn same_image_pattern(left: &ImageNormalizePattern, right: &ImageNormalizePatter
 }
 
 fn matches_selected_image_group(graph: &AccelGraph, plan: &FusionGroupPlan) -> bool {
-    let Some(FusionPattern::ImageNormalize(pattern)) = plan.group.pattern.as_ref() else {
-        return false;
-    };
-    detect_fusion_groups(graph).iter().any(|selected| {
-        let Some(FusionPattern::ImageNormalize(actual)) = selected.pattern.as_ref() else {
-            return false;
-        };
-        selected.id == plan.group.id
-            && selected.kind == plan.group.kind
-            && selected.nodes == plan.group.nodes
-            && selected.shape == plan.group.shape
-            && selected.span == plan.group.span
-            && same_image_pattern(actual, pattern)
-    })
+    super::source_extension::matches_extended_group(graph, &plan.group)
 }
 
 fn selected_stage(
@@ -225,11 +203,8 @@ fn selected_stage(
         input: input.clone(),
         desc,
         source,
-        #[cfg(test)]
         sigma_control: sigma_operations::freeze_control(plan, inputs, positions),
-        #[cfg(test)]
         output_binary: Vec::new(),
-        #[cfg(test)]
         output_real: Vec::new(),
     })
 }
@@ -244,6 +219,7 @@ pub struct ImageSourceInvocation {
     workload: Option<ProviderImageStageWorkload>,
     selected_stage: Option<BoundImageStage>,
     selected_powers: Vec<ImageSelectedPower>,
+    publications_bound: bool,
 }
 
 impl ImageSourceInvocation {
@@ -260,6 +236,43 @@ impl ImageSourceInvocation {
     ) -> Result<Self, ImageSourceAdmissionFailure> {
         let source = ImageSourceTranscript::from_graph(graph, &plan.group)
             .ok_or(ImageSourceAdmissionFailure::Source)?;
+        Self::bind_source(source, graph, plan, inputs, precision, placement).await
+    }
+
+    /// The selected bytecode sealed this exact source graph once. Recheck
+    /// its live graph/plan join without rebuilding a second transcript.
+    pub async fn bind_selected(
+        source: Arc<ImageSourceTranscript>,
+        graph: &AccelGraph,
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        precision: ProviderPrecision,
+        placement: Option<PlacementCorrelationId>,
+    ) -> Result<Self, ImageSourceAdmissionFailure> {
+        if source.steps.len() != plan.operations.len()
+            || source.steps.iter().any(|step| {
+                graph.node(step.node).is_none_or(|node| {
+                    node.inputs != step.inputs
+                        || node.outputs.as_slice() != [step.output]
+                        || node.label != step.label
+                        || node.span != step.pc
+                })
+            })
+        {
+            return Err(ImageSourceAdmissionFailure::Source);
+        }
+        let source = Arc::try_unwrap(source).unwrap_or_else(|shared| (*shared).clone());
+        Self::bind_source(source, graph, plan, inputs, precision, placement).await
+    }
+
+    async fn bind_source(
+        source: ImageSourceTranscript,
+        graph: &AccelGraph,
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        precision: ProviderPrecision,
+        placement: Option<PlacementCorrelationId>,
+    ) -> Result<Self, ImageSourceAdmissionFailure> {
         if !matches_selected_image_group(graph, plan) {
             return Err(ImageSourceAdmissionFailure::Source);
         }
@@ -383,6 +396,7 @@ impl ImageSourceInvocation {
             workload: None,
             selected_stage: None,
             selected_powers,
+            publications_bound: false,
         };
         if let Some((moments, preparation)) = invocation
             .project_moment_program(plan, inputs, precision, placement)
@@ -394,7 +408,6 @@ impl ImageSourceInvocation {
                 .as_ref()
                 .map(|output| output.program.clone());
             if let Some(stage) = selected_stage(graph, plan, inputs, &input_positions) {
-                #[cfg(test)]
                 let stage = {
                     let mut stage = stage;
                     if let Some(projected) = projected_output.as_ref() {
@@ -431,6 +444,10 @@ impl ImageSourceInvocation {
 
     pub fn semantic_identity(&self) -> Digest {
         self.semantic_identity
+    }
+
+    pub(crate) fn selected_publications_bound(&self) -> bool {
+        self.publications_bound
     }
 
     /// Canonical request-bound evidence, not a certificate that a provider
@@ -471,6 +488,90 @@ impl ImageSourceInvocation {
         input.allocation_lease().validate_live().ok()?;
         (selected.input.view_identity() == input.view_identity())
             .then_some((&selected.desc, &selected.source))
+    }
+
+    /// Every selected graph operation must have exactly one staged owner, in
+    /// source order. A matching pattern and final value alone do not prove
+    /// that intermediate casts or a source-visible output were preserved.
+    pub(crate) fn selected_stage_covers_source(&self) -> bool {
+        let Some(moments) = self.moment_program.as_ref() else {
+            return false;
+        };
+        let Some(binary) = self.selected_binary_calls() else {
+            return false;
+        };
+        let Some(sigma) = self.selected_sigma_operations() else {
+            return false;
+        };
+        let Some(real) = self.selected_real_output_calls() else {
+            return false;
+        };
+        let Some(powers) = self
+            .requested_staged_workload()
+            .and_then(|workload| workload.selected_powers.as_ref())
+        else {
+            return false;
+        };
+        let mut outputs = Vec::with_capacity(self.source.steps.len());
+        let append_moments =
+            |outputs: &mut Vec<u64>,
+             calls: &[runmat_accelerate_api::ProviderImageMomentPublication]| {
+                for call in calls {
+                    outputs.push(call.raw_output);
+                    outputs.extend(call.conversions.iter().map(|cast| cast.source_output));
+                }
+            };
+        append_moments(&mut outputs, &moments.mu);
+        outputs.push(binary.sigma_center().output());
+        outputs.push(u64::from(powers.square.output));
+        append_moments(&mut outputs, &moments.variance);
+        outputs.push(sigma.source_ids().2);
+        append_moments(&mut outputs, std::slice::from_ref(&moments.sigma));
+        let Some(output_program) = self.output_program.as_ref() else {
+            return false;
+        };
+        if output_program.calls.len() != real.calls().len() + 3
+            || output_program.calls.first().map(|call| call.source_output)
+                != Some(binary.output_sub().output())
+            || output_program.calls.get(1).map(|call| call.source_output)
+                != Some(binary.output_div().output())
+            || output_program
+                .calls
+                .iter()
+                .filter(|call| {
+                    matches!(
+                        call.hook,
+                        runmat_accelerate_api::ProviderImageOutputHook::ElemPow
+                    )
+                })
+                .map(|call| call.source_output)
+                .collect::<Vec<_>>()
+                != [u64::from(powers.final_power.output)]
+            || output_program
+                .calls
+                .iter()
+                .filter(|call| {
+                    matches!(
+                        call.hook,
+                        runmat_accelerate_api::ProviderImageOutputHook::ScalarMul
+                            | runmat_accelerate_api::ProviderImageOutputHook::ScalarAdd
+                            | runmat_accelerate_api::ProviderImageOutputHook::ScalarMax
+                            | runmat_accelerate_api::ProviderImageOutputHook::CastSingle
+                            | runmat_accelerate_api::ProviderImageOutputHook::CastDouble
+                    )
+                })
+                .map(|call| call.source_output)
+                .ne(real.calls().iter().map(ImageSelectedRealCall::output))
+        {
+            return false;
+        }
+        outputs.extend(output_program.calls.iter().map(|call| call.source_output));
+        outputs.len() == self.source.steps.len()
+            && outputs.iter().copied().eq(self
+                .source
+                .steps
+                .iter()
+                .map(|step| u64::from(step.output)))
     }
 }
 
@@ -524,6 +625,7 @@ mod tests {
             workload: None,
             selected_stage: None,
             selected_powers: vec![],
+            publications_bound: false,
         };
         assert_eq!(invocation.source_fact(2), Some(&double));
         assert_eq!(invocation.source_fact(9), Some(&single));
@@ -616,7 +718,6 @@ mod tests {
             selected_stage: Some(BoundImageStage {
                 sigma_control: None,
                 output_binary: Vec::new(),
-                #[cfg(test)]
                 output_real: Vec::new(),
                 input: input.handle.clone(),
                 desc: ImageNormalizeDescriptor {
@@ -632,6 +733,7 @@ mod tests {
                 source,
             }),
             selected_powers: vec![],
+            publications_bound: false,
         };
         assert!(invocation
             .selected_staged_mean_power(&input.handle)

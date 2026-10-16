@@ -299,6 +299,7 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         entrypoint: "root_answer".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-package-closure-v1"),

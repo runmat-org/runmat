@@ -247,7 +247,10 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                 id: task_id,
                 scope_id: scope,
                 pool_id: pool,
-                program_artifact_id: ArtifactId::derive(&[b"meshing-host"]),
+                schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                    ArtifactId::derive(&[b"meshing-host"]),
+                ),
                 callable: Callable::for_program(
                     "runmat.meshing",
                     &runmat_execution::ProgramCallable::semantic(
@@ -259,6 +262,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                 inputs: Vec::new(),
                 outputs: OutputContract {
                     requested_outputs: 1,
+                    owned_work: None,
                 },
                 resources: ResourceRequest {
                     cpu_millicores: 1_000,

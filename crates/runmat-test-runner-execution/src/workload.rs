@@ -74,6 +74,7 @@ impl TestAttemptWorkload {
             entrypoint: "test_attempt".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: TEST_ATTEMPT_EXECUTION_MODE.into(),
             target: runmat_execution_artifact::ProgramTarget::portable(TEST_ATTEMPT_TARGET_PROFILE),

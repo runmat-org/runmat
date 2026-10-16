@@ -1250,6 +1250,8 @@ pub struct RuntimeServicePorts {
     local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
     source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
     selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    blocking_cpu: Option<Rc<dyn crate::execution::RuntimeBlockingCpuService>>,
+    owned_builtin_work: Option<Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>>,
     callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
 }
 
@@ -1284,6 +1286,11 @@ impl Default for RuntimeServicePorts {
             local_tasks: None,
             source_evaluation: None,
             selected_source_evaluation: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            blocking_cpu: Some(crate::execution::native_default_blocking_cpu_service()),
+            #[cfg(target_arch = "wasm32")]
+            blocking_cpu: None,
+            owned_builtin_work: None,
             callable_artifacts: None,
         }
     }
@@ -1328,6 +1335,8 @@ impl std::fmt::Debug for RuntimeServicePorts {
             "selected_source_evaluation",
             &self.selected_source_evaluation.is_some(),
         );
+        debug.field("blocking_cpu", &self.blocking_cpu.is_some());
+        debug.field("owned_builtin_work", &self.owned_builtin_work.is_some());
         debug.field("callable_artifacts", &self.callable_artifacts.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
@@ -1358,6 +1367,32 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    pub fn with_blocking_cpu(
+        mut self,
+        service: Rc<dyn crate::execution::RuntimeBlockingCpuService>,
+    ) -> Self {
+        self.blocking_cpu = Some(service);
+        self
+    }
+
+    pub fn blocking_cpu(&self) -> Option<&Rc<dyn crate::execution::RuntimeBlockingCpuService>> {
+        self.blocking_cpu.as_ref()
+    }
+
+    pub fn with_owned_builtin_work(
+        mut self,
+        service: Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>,
+    ) -> Self {
+        self.owned_builtin_work = Some(service);
+        self
+    }
+
+    pub fn owned_builtin_work(
+        &self,
+    ) -> Option<&Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>> {
+        self.owned_builtin_work.as_ref()
+    }
+
     /// Only effect-routing ports affect the command's device-route proof.
     /// Workspace/base-workspace replacements during ordinary Core execution
     /// must not erase an otherwise exact canonical admission.

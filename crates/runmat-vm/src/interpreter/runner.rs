@@ -1618,6 +1618,8 @@ async fn run_interpreter_inner(
     // One wakeable scope owns all instruction execution, including provider
     // fusion and idioms that execute outside ordinary bytecode dispatch. Keep
     // roots and frame state outside it until suspended work has been dropped.
+    #[cfg(feature = "native-accel")]
+    let image_installation = bytecode.prepare_vm_image_plan_installation(&context.runtime);
     let instruction_loop = instruction_loop::boxed(instruction_loop::InstructionLoopContext {
         bytecode: &bytecode,
         pc: &mut pc,
@@ -1647,6 +1649,8 @@ async fn run_interpreter_inner(
         fusion_plan: &fusion_plan,
         #[cfg(feature = "native-accel")]
         fusion_installation: &fusion_installation,
+        #[cfg(feature = "native-accel")]
+        image_installation: &image_installation,
         #[cfg(feature = "native-accel")]
         fusion_observations: &mut fusion_observations,
         #[cfg(all(

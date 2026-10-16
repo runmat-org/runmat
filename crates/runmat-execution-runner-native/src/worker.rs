@@ -234,6 +234,7 @@ mod tests {
             entrypoint: "0".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable(

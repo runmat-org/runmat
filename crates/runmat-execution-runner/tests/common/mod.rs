@@ -99,7 +99,10 @@ pub fn task(
             id: TaskId::derive(&[name.as_bytes()]),
             scope_id: scope,
             pool_id: pool,
-            program_artifact_id: ArtifactId::derive(&[b"artifact"]),
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                ArtifactId::derive(&[b"artifact"]),
+            ),
             callable: Callable::for_program(
                 "fixture",
                 &runmat_execution::ProgramCallable::semantic(
@@ -112,6 +115,7 @@ pub fn task(
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: ResourceRequest {
                 cpu_millicores: 1_000,

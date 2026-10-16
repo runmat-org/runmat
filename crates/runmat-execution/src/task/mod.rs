@@ -4,19 +4,28 @@ mod assignment;
 mod callable;
 mod failure;
 mod parallel;
+mod owned_builtin;
 
 pub use assignment::ProgramExecutionAssignment;
 pub use callable::ProgramCallable;
 pub use failure::{
     ProgramCallFrame, ProgramDetachedDiagnosticSource, ProgramRuntimeFailure, ProgramSourceSpan,
 };
+pub use owned_builtin::{
+    OwnedBuiltinBinding, OwnedBuiltinDenseOutputContract, OwnedBuiltinResponseContract,
+    OwnedBuiltinWorkRequest, OwnedBuiltinWorkResponse, OWNED_BUILTIN_FAILURE_WIRE_BYTES,
+    OWNED_BUILTIN_MAX_RESPONSE_WIRE_BYTES, OWNED_BUILTIN_VALUE_LIMITS,
+    OWNED_BUILTIN_WORK_SCHEMA_VERSION,
+};
 pub use parallel::{
     ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
     ParallelTaskGraph, ProgramInvocationContext,
 };
 
+pub const TASK_REQUEST_SCHEMA_VERSION: u16 = crate::schema::EXECUTION_SCHEMA_V2;
+
 use crate::handle::OutputContract;
-use crate::identity::{ArtifactId, ExecutionScopeId, PoolId, TaskId};
+use crate::identity::{ArtifactId, Digest, ExecutionScopeId, PoolId, TaskId};
 use crate::resource::ResourceRequest;
 use crate::value::ValuePayload;
 
@@ -60,11 +69,25 @@ pub enum RetryPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "identity",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum TaskExecutableIdentity {
+    ProgramArtifact(ArtifactId),
+    /// Exact digest of an admitted canonical binding and catalog revision.
+    OwnedBuiltin(Digest),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TaskRequest {
+    pub schema_version: u16,
     pub id: TaskId,
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
-    pub program_artifact_id: ArtifactId,
+    pub executable: TaskExecutableIdentity,
     pub callable: Callable,
     /// Compiler-derived runtime, target, interop, stack, and trust contract.
     /// Scheduling must satisfy it before an attempt receives resources.
@@ -79,4 +102,43 @@ pub struct TaskRequest {
     pub resources: ResourceRequest,
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
+}
+
+impl TaskRequest {
+    pub fn validate_executable(&self) -> Result<(), crate::ContractError> {
+        if self.schema_version != TASK_REQUEST_SCHEMA_VERSION {
+            return Err(crate::ContractError::invalid(
+                "task request",
+                "unsupported executable-work schema",
+            ));
+        }
+        if matches!(&self.executable, TaskExecutableIdentity::OwnedBuiltin(_))
+            && (!matches!(&self.callable.program, ProgramCallable::Builtin { .. })
+                || self.outputs.owned_work.is_none())
+        {
+            return Err(crate::ContractError::invalid(
+                "task request",
+                "owned builtin identity lacks its exact callable or output contract",
+            ));
+        }
+        if !matches!(&self.executable, TaskExecutableIdentity::OwnedBuiltin(_))
+            && self.outputs.owned_work.is_some()
+        {
+            return Err(crate::ContractError::invalid(
+                "task request",
+                "program artifact cannot carry an owned builtin output contract",
+            ));
+        }
+        if let Some(contract) = &self.outputs.owned_work {
+            contract.validate(self.outputs.requested_outputs)?;
+        }
+        Ok(())
+    }
+
+    pub fn program_artifact_id(&self) -> Option<ArtifactId> {
+        match &self.executable {
+            TaskExecutableIdentity::ProgramArtifact(id) => Some(*id),
+            TaskExecutableIdentity::OwnedBuiltin(_) => None,
+        }
+    }
 }

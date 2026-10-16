@@ -12,7 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     },
     BuiltinDocumentationSection {
         heading: "GPU residency and provider behavior",
-        paragraphs: &["No. The runtime gathers GPU matrices automatically when computing the permutation today. When native GPU implementations land, the same builtin will run entirely on the device without code changes. You can still call `gpuArray` explicitly to mirror MATLAB workflows, but it is optional in RunMat.", "RunMat first asks the active acceleration provider whether it implements the `sym_rcm` hook. The WGPU backend exposes this hook today and downloads the matrix once to reuse the optimised CPU algorithm before returning the permutation. Providers without support (or those that report an error) trigger an automatic gather and reuse the host implementation, so results stay correct regardless of GPU capabilities.", "Acceleration providers may implement the `sym_rcm` hook. The WGPU backend currently downloads the matrix, runs the host algorithm, and returns the permutation."],
+        paragraphs: &["Resident matrix input is admitted through its owning acceleration provider. Explicit `gpuArray` is optional in RunMat; the current WGPU `sym_rcm` hook downloads the matrix and runs the host ordering algorithm rather than claiming a device-side RCM kernel.", "RunMat first asks the active acceleration provider whether it implements the `sym_rcm` hook. A typed unsupported-hook result permits an owning-provider gather and host calculation. Other provider errors remain terminal and are not replayed as a host calculation.", "Acceleration providers may implement the `sym_rcm` hook. The WGPU backend currently downloads the matrix, runs the host algorithm, and returns the permutation."],
     },
 ];
 

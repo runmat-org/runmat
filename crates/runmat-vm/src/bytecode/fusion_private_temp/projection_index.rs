@@ -60,7 +60,9 @@ impl ProjectionIndex {
                 .filter(|group| {
                     matches!(
                         group.kind,
-                        FusionKind::Reduction | FusionKind::ElementwiseChain
+                        FusionKind::Reduction
+                            | FusionKind::ElementwiseChain
+                            | FusionKind::ImageNormalize
                     )
                 })
                 .map(|group| (group.span.start, group.span.end)),
@@ -74,7 +76,12 @@ impl ProjectionIndex {
             reductions: CoverageIndex::new(
                 groups
                     .iter()
-                    .filter(|group| group.kind == FusionKind::Reduction)
+                    .filter(|group| {
+                        matches!(
+                            group.kind,
+                            FusionKind::Reduction | FusionKind::ImageNormalize
+                        )
+                    })
                     .map(|group| (group.span.start, group.span.end)),
             ),
         };

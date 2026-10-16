@@ -216,8 +216,13 @@ pub(crate) struct ResolvedProgram {
 #[derive(Debug)]
 pub(crate) enum FusionResolveFailure {
     Structural(anyhow::Error),
+    /// A completed, read-only real-domain eligibility check did not admit
+    /// the optimization. No selected arithmetic has executed; ordinary
+    /// evaluation remains available, including complex-valued results.
+    DomainIneligible(BuiltinBindingIdentity),
     Admission(anyhow::Error),
     Runtime(Box<runmat_runtime::RuntimeError>),
+    ObservedProbe(Box<FusionResolveFailure>),
 }
 
 impl std::fmt::Display for FusionResolveFailure {
@@ -227,6 +232,11 @@ impl std::fmt::Display for FusionResolveFailure {
                 std::fmt::Display::fmt(error, formatter)
             }
             Self::Runtime(error) => std::fmt::Display::fmt(error, formatter),
+            Self::DomainIneligible(binding) => write!(
+                formatter,
+                "selected fusion real domain is ineligible for {binding:?}"
+            ),
+            Self::ObservedProbe(error) => std::fmt::Display::fmt(error, formatter),
         }
     }
 }
@@ -236,6 +246,8 @@ impl std::error::Error for FusionResolveFailure {
         match self {
             Self::Structural(error) | Self::Admission(error) => Some(error.as_ref()),
             Self::Runtime(error) => Some(error.as_ref()),
+            Self::DomainIneligible(_) => None,
+            Self::ObservedProbe(error) => Some(error.as_ref()),
         }
     }
 }
@@ -253,14 +265,28 @@ impl From<runmat_runtime::RuntimeError> for FusionResolveFailure {
 }
 
 impl FusionResolveFailure {
+    fn after_observed_probe(self) -> Self {
+        match self {
+            Self::DomainIneligible(_) => self,
+            other => Self::ObservedProbe(Box::new(other)),
+        }
+    }
+
     pub(crate) fn into_execution_or_structural(
         self,
     ) -> std::result::Result<anyhow::Error, runmat_accelerate_api::ProviderExecutionError> {
         match self {
             Self::Structural(error) => Ok(error),
+            Self::DomainIneligible(binding) => Ok(anyhow!(
+                "selected fusion real domain is ineligible for {binding:?}"
+            )),
             Self::Admission(error) => Err(error.into()),
             Self::Runtime(error) => Err(
                 runmat_accelerate_api::ProviderExecutionError::from_source(*error),
+            ),
+            Self::ObservedProbe(error) => Err(
+                runmat_accelerate_api::ProviderExecutionError::from_source(*error)
+                    .with_unproven_effects(),
             ),
         }
     }
@@ -334,6 +360,35 @@ impl ResolvedProgram {
         correlation: Option<crate::placement::PlacementCorrelationId>,
         snapshots: &[Option<SemanticBinding>],
     ) -> std::result::Result<Self, FusionResolveFailure> {
+        let mut provider_probe_observed = false;
+        let result = Self::resolve_observed_inner(
+            plan,
+            inputs,
+            provider_precision,
+            precision_policy,
+            correlation,
+            snapshots,
+            &mut provider_probe_observed,
+        )
+        .await;
+        result.map_err(|error| {
+            if provider_probe_observed {
+                error.after_observed_probe()
+            } else {
+                error
+            }
+        })
+    }
+
+    async fn resolve_observed_inner(
+        plan: &FusionGroupPlan,
+        inputs: &[&Value],
+        provider_precision: ProviderPrecision,
+        precision_policy: PrecisionPolicy,
+        correlation: Option<crate::placement::PlacementCorrelationId>,
+        snapshots: &[Option<SemanticBinding>],
+        provider_probe_observed: &mut bool,
+    ) -> std::result::Result<Self, FusionResolveFailure> {
         let (mut program, invocation_leaves) = source_assembly(
             plan,
             inputs,
@@ -357,6 +412,7 @@ impl ResolvedProgram {
                     .and_then(|semantics| semantics.admit)
                 {
                     let mut observed = super::admission::AdmissionObservation::new(correlation);
+                    let mut real_domain_completed = false;
                     let mut operand_evidence = inferred
                         .input_ids
                         .iter()
@@ -406,7 +462,7 @@ impl ResolvedProgram {
                             );
                         };
                         let prior_sign = operand_evidence[0].and_then(|evidence| evidence.sign);
-                        operand_evidence[0] = super::real_domain::prove(
+                        operand_evidence[0] = super::real_domain::prove_observed(
                             super::real_domain::RealDomainProofContext {
                                 plan,
                                 snapshots,
@@ -419,12 +475,14 @@ impl ResolvedProgram {
                             *operand_id,
                             predicate,
                             &mut observed.work,
+                            provider_probe_observed,
                         )
                         .await?
                         .map(|mut evidence| {
                             evidence.sign = prior_sign;
                             evidence
                         });
+                        real_domain_completed = true;
                     }
                     let context = FusionAdmissionContext::new(
                         inferred.input_ids,
@@ -435,10 +493,15 @@ impl ResolvedProgram {
                     )
                     .ok_or_else(|| anyhow!("fusion operand evidence identity mismatch"))?
                     .with_output_fact(&inferred.fact);
-                    let result = admit(context)
-                        .await
-                        .map_err(FusionResolveFailure::Admission)?;
+                    let result = admit(context).await;
+                    *provider_probe_observed |= observed.work.provider_effect_observed();
+                    let result = result.map_err(FusionResolveFailure::Admission)?;
                     let work = observed.completed();
+                    if result.is_none() && real_domain_completed && *provider_probe_observed {
+                        return Err(FusionResolveFailure::DomainIneligible(
+                            snapshot.declaration.binding,
+                        ));
+                    }
                     let evidence = result.ok_or_else(|| anyhow!(
                         "fusion operation requires unavailable domain evidence: binding={:?}, output={output:?}, inputs={:?}, represented_operands={:?}",
                         snapshot.declaration.binding, inferred.input_ids,

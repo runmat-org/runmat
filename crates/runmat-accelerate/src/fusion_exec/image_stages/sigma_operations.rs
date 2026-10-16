@@ -108,9 +108,11 @@ impl SelectedSigmaOperationsPlan {
     pub(super) fn source_ids(&self) -> (u64, u64, u64, u64) {
         self.source.source_ids()
     }
+    #[cfg(test)]
     pub(super) fn identity(&self) -> Digest {
         self.identity
     }
+    #[cfg(test)]
     pub(super) fn receipts(&self) -> Vec<SelectedSigmaReceipt> {
         self.receipts.borrow().clone()
     }
@@ -122,6 +124,7 @@ impl SelectedSigmaOperationsPlan {
     ) {
         (self.add.physical(), self.sqrt.physical())
     }
+    #[cfg(test)]
     pub(super) fn recipe_identities(&self) -> (Digest, Digest) {
         (self.add_identity, self.sqrt_identity)
     }

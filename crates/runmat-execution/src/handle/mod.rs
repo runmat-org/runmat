@@ -6,6 +6,8 @@ use crate::state::PoolState;
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OutputContract {
     pub requested_outputs: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_work: Option<crate::task::OwnedBuiltinResponseContract>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]

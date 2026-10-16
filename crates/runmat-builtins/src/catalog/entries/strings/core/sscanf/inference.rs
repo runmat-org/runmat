@@ -64,7 +64,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         vec![
             scanned,
             double_scalar(),
-            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::Unknown,
+                StorageFact::Dense,
+            ),
             double_scalar(),
         ],
         diagnostics,

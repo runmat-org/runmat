@@ -141,6 +141,7 @@ impl ImageSelectedSigmaOperations {
     pub(crate) fn control(&self) -> ScalarLiteral {
         self.control.literal
     }
+    #[cfg(test)]
     pub(crate) fn control_digest(&self) -> Digest {
         self.control.value_digest
     }
@@ -152,6 +153,7 @@ impl ImageSelectedSigmaOperations {
             self.sqrt_output,
         )
     }
+    #[cfg(test)]
     pub(crate) fn mode(&self) -> RealFloatingAddMode {
         self.mode
     }

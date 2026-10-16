@@ -29,6 +29,7 @@ fn fixture_ordered_recipe(
         .last()
         .expect("fixture has a selected axis")
         .output_precision();
+    let queue_submissions = u32::try_from(steps.len()).expect("test steps fit u32");
     ProviderOrderedRealMeanRecipe::new(
         ProviderOrderedRealMeanSource {
             representation: ProviderRepresentation {
@@ -56,6 +57,7 @@ fn fixture_ordered_recipe(
             },
             steps,
             incremental_peak_bytes,
+            queue_submissions,
         },
     )
 }

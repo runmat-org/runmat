@@ -230,6 +230,7 @@ impl MeshingHostWorkload {
             entrypoint: HOST_ENTRYPOINT.into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
             target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),

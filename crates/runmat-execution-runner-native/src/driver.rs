@@ -422,7 +422,8 @@ impl LocalDriver {
             id: task_id,
             scope_id: self.scope_id,
             pool_id: self.pool_id,
-            program_artifact_id: artifact_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
             callable: Callable::for_program("local-session", &callable),
             host,
             invocation_context,
@@ -539,7 +540,8 @@ impl LocalDriver {
             id: graph.task_id,
             scope_id: self.scope_id,
             pool_id: self.pool_id,
-            program_artifact_id: artifact_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
             callable: Callable::for_program("local-session", &callable),
             host,
             invocation_context: invocation_context.clone(),
@@ -628,7 +630,7 @@ impl LocalDriver {
         };
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
-            || submission.request.program_artifact_id != artifact_id
+            || submission.request.program_artifact_id() != Some(artifact_id)
             || submission
                 .request
                 .invocation_context

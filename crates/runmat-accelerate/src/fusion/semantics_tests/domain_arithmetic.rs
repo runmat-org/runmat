@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn selected_admission_work_distinguishes_host_proof_from_entered_provider_probe() {
+    use runmat_runtime::builtins::common::spec::{FusionAdmissionWork, FusionProofStage};
+
+    let entry = &runmat_builtins::POWER_CATALOG_ENTRY;
+    let binding = entry.binding_identity(&entry.bindings[0]);
+    let host = FusionAdmissionWork::DomainProof {
+        binding,
+        provider_precision: ProviderPrecision::F32,
+        stages: vec![FusionProofStage::HostScan { elements: 1 }],
+    };
+    assert!(!host.provider_effect_observed());
+    let readback = FusionAdmissionWork::DomainProof {
+        binding,
+        provider_precision: ProviderPrecision::F32,
+        stages: vec![FusionProofStage::ScalarReadback { elements: 1 }],
+    };
+    assert!(readback.provider_effect_observed());
+    let paired = FusionAdmissionWork::ProviderProbe {
+        binding,
+        precision: ProviderPrecision::F32,
+        provider_precision: ProviderPrecision::F32,
+        inputs: Vec::new(),
+    };
+    assert!(paired.provider_effect_observed());
+}
+
+#[test]
 fn runtime_admission_failure_retains_identifier_source_and_no_replay_policy() {
     let runtime = runmat_runtime::build_runtime_error("domain probe failed")
         .with_identifier("RunMat:acosh:Internal")
@@ -22,6 +49,24 @@ fn runtime_admission_failure_retains_identifier_source_and_no_replay_policy() {
         .source
         .as_ref()
         .is_some_and(|source| source.to_string().contains("injected provider failure")));
+}
+
+#[test]
+fn resident_probe_failure_retains_nested_effect_disposition() {
+    let provider = runmat_accelerate_api::ProviderExecutionError::from_source(
+        std::io::Error::other("injected probe completion failure"),
+    )
+    .after_effect();
+    let runtime = runmat_runtime::build_runtime_error("domain probe failed")
+        .with_identifier("RunMat:acosh:Internal")
+        .with_source(provider)
+        .build();
+    let execution = FusionResolveFailure::from(runtime)
+        .after_observed_probe()
+        .into_execution_or_structural()
+        .expect_err("an observed resident probe cannot authorize replay");
+    assert!(execution.is_after_effect());
+    assert!(!execution.is_unsupported());
 }
 
 #[test]

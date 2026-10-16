@@ -71,6 +71,43 @@ fn function_only_full_image_source_uses_its_selected_function_layout() {
         crate::bytecode::compile_semantic_function_registry(&hir.assembly, &mir)
             .expect("compile function-only registry"),
     );
+    let ordinary_view = registry
+        .get(function)
+        .expect("selected function")
+        .execution_bytecode(&registry);
+    let repeated_view = registry
+        .get(function)
+        .expect("same immutable selected function")
+        .execution_bytecode(&registry);
+    match (
+        &ordinary_view.sealed_function_image,
+        &repeated_view.sealed_function_image,
+    ) {
+        (
+            crate::bytecode::program::SealedFunctionImage::Selected { regions: first, .. },
+            crate::bytecode::program::SealedFunctionImage::Selected {
+                regions: repeated, ..
+            },
+        ) => assert!(std::rc::Rc::ptr_eq(first, repeated)),
+        _ => panic!("function descriptor was not finalized once per registry generation"),
+    }
+    let mut changed_registry = registry.clone();
+    changed_registry
+        .functions
+        .get_mut(&function)
+        .expect("authoring body")
+        .instructions[0] = Instr::LoadConst(99.0);
+    let changed_view = changed_registry
+        .get(function)
+        .expect("mutated body")
+        .execution_bytecode(&changed_registry);
+    assert!(matches!(
+        changed_view.sealed_function_image,
+        crate::bytecode::program::SealedFunctionImage::Unsealed
+    ));
+    assert!(ordinary_view
+        .sealed_selected_image_regions()
+        .is_some_and(|selected| !selected.regions.is_empty()));
     let layout = crate::layout::derive_layout(&hir.assembly, &mir).expect("selected layout");
     let mut conflicting_layout = layout.clone();
     let other_resume_points = registry
@@ -122,6 +159,25 @@ fn function_only_full_image_source_uses_its_selected_function_layout() {
     assert!(joined
         .iter()
         .any(|region| region.output_checkpoints().count() == 3));
+    let first = bytecode
+        .sealed_selected_image_regions()
+        .expect("selected bytecode descriptor");
+    let second = bytecode
+        .sealed_selected_image_regions()
+        .expect("reuse the exact descriptor");
+    assert!(std::rc::Rc::ptr_eq(&first, &second));
+    let mut next_invocation = bytecode.clone();
+    if !next_invocation.initially_unassigned_slots.insert(0) {
+        next_invocation.initially_unassigned_slots.remove(&0);
+    }
+    let reused = next_invocation
+        .sealed_selected_image_regions()
+        .expect("invocation state cannot invalidate immutable source");
+    assert!(std::rc::Rc::ptr_eq(&first, &reused));
+    let mut changed = bytecode.clone();
+    changed.instructions[0] = Instr::LoadConst(99.0);
+    assert!(changed.sealed_selected_image_regions().is_none());
+    assert!(bytecode.sealed_selected_image_regions().is_some());
     let portable_registry: crate::bytecode::FunctionRegistry =
         serde_json::from_slice(&serde_json::to_vec(&registry).unwrap()).unwrap();
     let portable_view = Bytecode::for_function(

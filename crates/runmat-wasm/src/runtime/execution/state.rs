@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use super::request::BrowserWorkerRequest;
 use runmat_execution::value::PayloadGraph;
 use runmat_execution::{ExecutionScopeId, FutureId, TaskId};
-use runmat_execution_artifact::WorkerProgramRequest;
 use runmat_execution_runner::Driver;
 use runmat_runtime::execution::{DeferredCall, ExecutionServiceError, GraphResultReceipt};
 
@@ -53,7 +53,7 @@ pub(super) struct State {
     pub(super) next_completion: u64,
     pub(super) futures: HashMap<FutureId, FutureState>,
     pub(super) tasks: HashMap<TaskId, TaskRecord>,
-    pub(super) requests: HashMap<TaskId, WorkerProgramRequest>,
+    pub(super) requests: HashMap<TaskId, BrowserWorkerRequest>,
     pub(super) driver: Driver,
     pub(super) pool_generation: u64,
     pub(super) pool_open: bool,

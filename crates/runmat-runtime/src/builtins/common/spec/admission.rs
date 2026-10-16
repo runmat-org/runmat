@@ -122,6 +122,23 @@ pub enum FusionAdmissionWork {
     },
 }
 
+impl FusionAdmissionWork {
+    /// A selected provider hook or scalar readback was entered during proof.
+    /// Later failure cannot certify pre-effect numerical replay.
+    pub fn provider_effect_observed(&self) -> bool {
+        match self {
+            Self::ProviderProbe { .. } => true,
+            Self::DomainProof { stages, .. } => stages.iter().any(|stage| {
+                matches!(
+                    stage,
+                    FusionProofStage::Provider { .. } | FusionProofStage::ScalarReadback { .. }
+                )
+            }),
+            Self::None | Self::Host { .. } | Self::SignProof { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum FusionProofStage {
     GraphIndex {

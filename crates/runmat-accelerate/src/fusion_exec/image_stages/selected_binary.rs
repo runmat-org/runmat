@@ -4,14 +4,17 @@
 
 use super::*;
 use crate::fusion::image_reduction::{ImageSelectedBinaryCall, ImageSelectedBinaryCalls};
+#[cfg(test)]
+use runmat_accelerate_api::ProviderRealBinaryObserved;
 use runmat_accelerate_api::{
-    handle_precision, ProviderElementType, ProviderExecutedRealBinary, ProviderImageOutputCall,
-    ProviderImageOutputHook, ProviderImageOutputOperand, ProviderRealBinaryInput,
-    ProviderRealBinaryObserved, ProviderRealBinaryRecipe, ProviderRealBinaryRequest,
-    ProviderRepresentation,
+    handle_precision, ProviderElementType, ProviderImageOutputCall, ProviderImageOutputHook,
+    ProviderImageOutputOperand, ProviderRealBinaryInput, ProviderRealBinaryRecipe,
+    ProviderRealBinaryRequest, ProviderRepresentation,
 };
 use runmat_execution::Digest;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum BinaryStage {
@@ -20,6 +23,7 @@ pub(super) enum BinaryStage {
     OutputDiv,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 pub(super) struct SelectedBinaryReceipt {
     pub selected_identity: Digest,
@@ -32,6 +36,7 @@ pub(super) struct SelectedBinaryReceipt {
 struct PlannedCall {
     source: ImageSelectedBinaryCall,
     recipe: ProviderRealBinaryRecipe,
+    #[cfg(test)]
     identity: Digest,
 }
 
@@ -39,7 +44,24 @@ pub(super) struct SelectedBinaryPlans {
     semantic_identity: Digest,
     calls: [PlannedCall; 3],
     next: Cell<usize>,
+    #[cfg(test)]
     observed: RefCell<Vec<SelectedBinaryReceipt>>,
+}
+
+impl SelectedBinaryPlans {
+    pub(super) fn physical_upper_bound(
+        &self,
+    ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
+        for call in &self.calls {
+            let physical = call.recipe.physical();
+            bound.add(
+                physical.requested_incremental_peak_bytes()?,
+                physical.dispatches,
+            )?;
+        }
+        Some(bound)
+    }
 }
 
 fn operand(representation: ProviderRepresentation, buffer_bytes: u64) -> ProviderRealBinaryInput {
@@ -91,10 +113,12 @@ fn plan_call(
     if output.element_type != expected_type || output.shape.as_slice() != source.output_shape() {
         return Ok(None);
     }
+    #[cfg(test)]
     let identity = recipe.identity().map_err(ProviderExecutionError::from)?;
     Ok(Some(PlannedCall {
         source: source.clone(),
         recipe,
+        #[cfg(test)]
         identity,
     }))
 }
@@ -186,6 +210,7 @@ pub(super) fn plan(
         semantic_identity: source.semantic_identity(),
         calls: [center, output_sub, output_div],
         next: Cell::new(0),
+        #[cfg(test)]
         observed: RefCell::new(Vec::new()),
     }))
 }
@@ -270,19 +295,20 @@ impl SelectedBinaryPlans {
         // Advance before the first await: a dropped future cannot replay an
         // operation whose submission status is unknown.
         self.next.set(index + 1);
-        let ProviderExecutedRealBinary { output, observed } = planned
+        let executed = planned
             .recipe
             .execute_protected(lhs, rhs, protected)
             .await
             .map_err(ProviderExecutionError::after_effect)?;
+        #[cfg(test)]
         self.observed.borrow_mut().push(SelectedBinaryReceipt {
             selected_identity: self.semantic_identity,
             source_inputs: planned.source.inputs(),
             source_output: planned.source.output(),
             recipe_identity: planned.identity,
-            observed,
+            observed: executed.observed,
         });
-        Ok(output)
+        Ok(executed.output)
     }
 
     #[cfg(test)]

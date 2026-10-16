@@ -1,4 +1,6 @@
 pub const EXECUTION_SCHEMA_V1: u16 = 1;
+/// Task V2 distinguishes compiled artifacts from admitted owned builtin work.
+pub const EXECUTION_SCHEMA_V2: u16 = 2;
 pub const EXECUTABLE_UNIT_SCHEMA_V2: u16 = 2;
 pub const EXECUTABLE_UNIT_SCHEMA_V3: u16 = 3;
 pub const EXECUTABLE_UNIT_SCHEMA_V4: u16 = 4;

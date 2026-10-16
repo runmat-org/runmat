@@ -83,6 +83,7 @@ mod tests {
         static BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
             variant: "default",
             availability: BuiltinBindingAvailability::Required,
+            owned_worker: crate::BuiltinOwnedWorkerPolicy::Forbidden,
         }];
         BuiltinCatalogEntry {
             audience: crate::BuiltinCatalogAudience::Public,

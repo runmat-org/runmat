@@ -22,6 +22,7 @@ fn submit_local(driver: &Arc<LocalDriver>, label: &[u8]) -> (TaskId, Arc<TaskCom
             inputs: request.arguments,
             outputs: OutputContract {
                 requested_outputs: request.requested_outputs,
+                owned_work: None,
             },
             retry: RetryPolicy::Never,
         })

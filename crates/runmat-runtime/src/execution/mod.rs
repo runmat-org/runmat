@@ -1,3 +1,5 @@
+mod blocking_cpu;
+mod owned_builtin;
 mod capture;
 mod completion;
 mod cooperation;
@@ -10,6 +12,9 @@ mod storable;
 pub(crate) mod staged_file;
 pub mod value_codec;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use blocking_cpu::native_default_blocking_cpu_service;
+pub use blocking_cpu::{OwnedCpuJob, RuntimeBlockingCpuService};
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
 pub use completion::{
     RootedResult, RootedValue, RootedValueLease, RootedValueSequence, RootedValues,
@@ -22,6 +27,9 @@ pub use errors::{
     encode_runtime_failure, encode_runtime_failure_in_context,
     encode_runtime_failure_with_source_issuer_in_context, preserve_source_call_stack_in_context,
     render_source_call_stack_in_context, ExecutionServiceError,
+};
+pub use owned_builtin::{
+    admit_owned_builtin_work, execute_owned_builtin_work, RuntimeOwnedBuiltinWorkService,
 };
 pub use running_future::RunningFutureLease;
 pub use services::{

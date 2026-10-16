@@ -15,6 +15,7 @@ pub(super) fn select(
         observation_contract,
         prepared_authority,
         vm_right,
+        vm_decline,
         cpu,
         cpu_resources,
         cpu_cost,
@@ -113,6 +114,16 @@ pub(super) fn select(
         }
     }).collect::<Vec<_>>();
     if candidates.is_empty() {
+        if vm_decline.is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
+        {
+            return Ok(LocalPlacementOutcome::ProviderRejected {
+                code: rejected
+                    .first()
+                    .map_or(ProviderRejectionCode::ResourceLimit, |entry| entry.2),
+                cpu_cost,
+                feedback: None,
+            });
+        }
         return Err(plan_error(
             crate::placement::session::no_resource_candidate(insufficient),
         ));

@@ -397,10 +397,12 @@ fn ambiguous_selected_form_or_binding_is_rejected() {
         BuiltinBindingDeclaration {
             variant: "default",
             availability: BuiltinBindingAvailability::Required,
+            owned_worker: runmat_builtins::BuiltinOwnedWorkerPolicy::Forbidden,
         },
         BuiltinBindingDeclaration {
             variant: "default",
             availability: BuiltinBindingAvailability::Required,
+            owned_worker: runmat_builtins::BuiltinOwnedWorkerPolicy::Forbidden,
         },
     ];
     assert!(AdmittedBuiltinPreparation::from_entry(

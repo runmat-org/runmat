@@ -278,3 +278,63 @@ fn schur_dynamic_mode_and_mixed_factor_domains_do_not_prove_real_outputs() {
         matches!(&inferred.outputs[0].kind, ValueKindFact::Numeric(n) if n.domain == NumericDomain::Complex)
     );
 }
+
+#[test]
+fn generalized_schur_facts_follow_mode_pair_class_and_retained_block_shapes() {
+    let mut qz = request(3, 3, 6);
+    qz.arguments.push(matrix(3, 3));
+    let default = infer_catalog_call(&QZ_CATALOG_ENTRY, &qz);
+    assert!(default.diagnostics.is_empty());
+    assert_eq!(default.outputs.len(), 6);
+    assert!(default.outputs.iter().all(|output| {
+        output.shape == ShapeFact::from(vec![Some(3), Some(3)])
+            && matches!(&output.kind, ValueKindFact::Numeric(n) if n.class == NumericClass::Double && n.domain == NumericDomain::Complex)
+    }));
+
+    qz.arguments
+        .push(ValueFact::scalar(ValueKindFact::Character));
+    qz.literals.literal_args = vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Character(" REAL ".to_owned()),
+    ];
+    let real = infer_catalog_call(&QZ_CATALOG_ENTRY, &qz);
+    assert!(real.diagnostics.is_empty());
+    assert!(
+        matches!(&real.outputs[4].kind, ValueKindFact::Numeric(n) if n.domain == NumericDomain::Real)
+    );
+
+    qz.arguments[0].kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Complex,
+    });
+    let invalid_real = infer_catalog_call(&QZ_CATALOG_ENTRY, &qz);
+    assert!(invalid_real
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM.QZ.INVALID_INPUT"));
+
+    let mut generalized = request(3, 3, 1);
+    generalized.arguments.push(matrix(3, 3));
+    let spectrum = infer_catalog_call(&ORDEIG_CATALOG_ENTRY, &generalized);
+    assert!(spectrum.diagnostics.is_empty());
+    assert_eq!(
+        spectrum.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    assert!(matches!(&spectrum.outputs[0].kind, ValueKindFact::Unknown));
+
+    let mut reorder = request(3, 3, 4);
+    reorder
+        .arguments
+        .extend([matrix(3, 3), matrix(3, 3), matrix(3, 3)]);
+    reorder.arguments.push(ValueFact::unknown(
+        runmat_types::DynamicReason::RuntimeValue,
+    ));
+    let inferred = infer_catalog_call(&ORDQZ_CATALOG_ENTRY, &reorder);
+    assert!(inferred.diagnostics.is_empty());
+    assert!(inferred.outputs.iter().all(|output| {
+        output.shape == ShapeFact::from(vec![Some(3), Some(3)])
+            && matches!(&output.kind, ValueKindFact::Numeric(n) if n.domain == NumericDomain::Real)
+    }));
+}

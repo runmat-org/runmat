@@ -188,6 +188,7 @@ fn unsupported_canonical_binding_and_effectful_declarations_fail_closed() {
     const WRONG: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
         variant: "not-the-registered-binding",
         availability: BuiltinBindingAvailability::Required,
+        owned_worker: runmat_builtins::BuiltinOwnedWorkerPolicy::Forbidden,
     }];
     entry.bindings = &WRONG;
     assert!(canonical_kind(&entry, Some(1)).is_none());

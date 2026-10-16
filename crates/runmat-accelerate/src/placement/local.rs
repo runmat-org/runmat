@@ -14,7 +14,7 @@ mod cpu;
 pub(crate) use cpu::LocalCpuCandidate;
 pub(crate) use multi::{
     plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
-    LocalProviderAdmission,
+    LocalProviderAdmission, PreparedPhysicalAuthority,
 };
 mod rejected;
 mod session_facts;
@@ -359,7 +359,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             cpu,
             cpu_admission,
             physical: vec![multi::LocalPhysicalCandidate {
-                compound,
+                authority: compound.map(multi::PreparedPhysicalAuthority::Compound),
                 physical_identity: compound.map(|plan| plan.identity()),
                 provider_kind,
                 data_inputs: inputs,

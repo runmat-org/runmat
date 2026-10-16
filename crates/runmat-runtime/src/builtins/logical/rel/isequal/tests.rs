@@ -106,6 +106,23 @@ fn isequal_tensors_equal() {
     assert_eq!(result, Value::Bool(true));
 }
 
+#[test]
+fn equality_ignores_only_trailing_singleton_axes_for_numeric_arrays() {
+    for extra_axes in [vec![2, 1, 1], vec![2, 1, 1, 1]] {
+        let complex = |shape| {
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], shape).unwrap())
+        };
+        let real = |shape| Value::Tensor(Tensor::new(vec![1.0, 3.0], shape).unwrap());
+        for inputs in [
+            vec![complex(extra_axes.clone()), complex(vec![2, 1])],
+            vec![real(extra_axes), real(vec![2, 1])],
+        ] {
+            assert_eq!(run_isequal(inputs.clone()).unwrap(), Value::Bool(true));
+            assert_eq!(run_isequaln(inputs).unwrap(), Value::Bool(true));
+        }
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn isequal_tensors_different_shape() {

@@ -2,11 +2,15 @@
 //! This is a structural proposal, not arithmetic, provider, or cost admission.
 
 use runmat_accelerate::fusion::{
-    image_reduction::{publication_follows_stage, ImageSourceTranscript},
-    FusionGroup, FusionKind, FusionPattern,
+    image_reduction::{
+        publication_follows_stage, selected_group_with_publications, ImageSourcePublication,
+        ImageSourceTranscript,
+    },
+    FusionGroup, FusionGroupPlan, FusionKind, FusionPattern, FusionPlan,
 };
 use runmat_accelerate::graph::{AccelGraph, ValueId, ValueOrigin};
 use runmat_types::{ProgramPointId, RegionValueId};
+use std::sync::Arc;
 
 use super::{ProspectiveStore, SelectedMultiStoreGraph};
 use crate::bytecode::Bytecode;
@@ -15,12 +19,30 @@ use crate::layout::VmSlotId;
 #[path = "image_normalize/statement_region.rs"]
 mod statement_region;
 use statement_region::{selected_image_region, ImageStatementRegion};
+#[path = "image_normalize/capture.rs"]
+mod capture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageNormalizePublicationJoin {
     pcs: std::ops::Range<usize>,
     stores: Vec<ImageRegionStore>,
     live_outs: Vec<ImageLiveOut>,
+}
+
+/// An installed candidate is derived with its graph and publication join in
+/// one selected bytecode walk. Its plan is only a source description until
+/// runtime binding, physical placement, and the ordered VM driver admit it.
+#[derive(Debug)]
+pub(crate) struct SelectedImageRegion {
+    pub(crate) plan: FusionGroupPlan,
+    pub(crate) publication: ImageNormalizePublicationJoin,
+    pub(crate) source: Arc<ImageSourceTranscript>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SelectedImageRegionSet {
+    pub(crate) graph: AccelGraph,
+    pub(crate) regions: Vec<SelectedImageRegion>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +98,20 @@ pub struct ImageLiveOut {
 }
 
 impl ImageNormalizePublicationJoin {
+    pub(crate) fn source_publications(&self) -> Option<Vec<ImageSourcePublication>> {
+        self.stores
+            .iter()
+            .filter(|entry| matches!(entry.destination, ImageStoreDestination::Checkpoint(_)))
+            .map(|entry| {
+                Some(ImageSourcePublication {
+                    producer: entry.raw_stage_dependency?,
+                    published: entry.public_output,
+                    statement: self.pcs.start..entry.store.pc.checked_add(1)?,
+                })
+            })
+            .collect()
+    }
+
     pub fn pcs(&self) -> std::ops::Range<usize> {
         self.pcs.clone()
     }
@@ -119,22 +155,30 @@ impl Bytecode {
     /// bytecode walk. No caller-supplied graph or coincident ValueIds are an
     /// authority. This does not permit staged provider execution.
     pub fn prospective_image_normalize_publications(&self) -> Vec<ImageNormalizePublicationJoin> {
-        let Some(projection) = self.fusion_metadata.stage_projection.as_ref() else {
-            return Vec::new();
-        };
+        self.selected_image_regions()
+            .map(|selected| {
+                selected
+                    .regions
+                    .into_iter()
+                    .map(|region| region.publication)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn selected_image_regions(&self) -> Option<SelectedImageRegionSet> {
+        let projection = self.fusion_metadata.stage_projection.as_ref()?;
         if self.validate_fusion_stage_projection().is_err() {
-            return Vec::new();
+            return None;
         }
-        let Some(selected) = SelectedMultiStoreGraph::for_image(self) else {
-            return Vec::new();
-        };
+        let selected = SelectedMultiStoreGraph::for_image(self)?;
         let groups: Vec<_> = selected
             .graph
             .detect_fusion_groups()
             .into_iter()
             .filter(|group| group.kind == FusionKind::ImageNormalize)
             .collect();
-        groups
+        let mut regions = groups
             .iter()
             .filter_map(|group| {
                 let region = selected_image_region(self, projection, &selected, group)?;
@@ -147,9 +191,38 @@ impl Bytecode {
                 {
                     return None;
                 }
-                reconcile_image_publications(&region, &selected.graph, group)
+                let publication = reconcile_image_publications(&region, &selected.graph, group)?;
+                let extended = selected_group_with_publications(
+                    &selected.graph,
+                    group,
+                    &publication.source_publications()?,
+                )?;
+                let plan = FusionPlan::from_graph(&selected.graph, std::slice::from_ref(&extended))
+                    .groups
+                    .into_iter()
+                    .next()?;
+                let source = Arc::new(ImageSourceTranscript::from_graph(
+                    &selected.graph,
+                    &plan.group,
+                )?);
+                Some(SelectedImageRegion {
+                    plan,
+                    publication,
+                    source,
+                })
             })
-            .collect()
+            .collect::<Vec<_>>();
+        regions.sort_by_key(|region| region.publication.pcs.start);
+        if regions
+            .windows(2)
+            .any(|pair| pair[0].publication.pcs.end > pair[1].publication.pcs.start)
+        {
+            return None;
+        }
+        Some(SelectedImageRegionSet {
+            graph: selected.graph,
+            regions,
+        })
     }
 }
 
@@ -240,6 +313,7 @@ fn reconcile_image_publications(
         return None;
     }
     let mut roles = vec![None; region.stores.len()];
+    let mut raw_dependencies = vec![None; region.stores.len()];
     for (index, producer) in sources.iter().take(2).enumerate() {
         let selected = &region.stores[named_indices[index]];
         let statement = &selected.stage.pc;
@@ -258,6 +332,7 @@ fn reconcile_image_publications(
         } else {
             ImageCheckpoint::Sigma
         });
+        raw_dependencies[named_indices[index]] = Some(*producer);
     }
     let mut next_source = 0;
     for index in named_indices.iter().copied().skip(2) {
@@ -278,6 +353,7 @@ fn reconcile_image_publications(
             })?;
         next_source += matched + 1;
         roles[index] = Some(source_outputs[next_source - 1].1);
+        raw_dependencies[index] = Some(source_outputs[next_source - 1].0);
     }
     let named = named_indices
         .iter()
@@ -305,11 +381,7 @@ fn reconcile_image_publications(
         .map(|(index, selected)| ImageRegionStore {
             store: selected.store.clone(),
             public_output: selected.store.value_id,
-            raw_stage_dependency: match roles[index] {
-                Some(ImageCheckpoint::Mu) => Some(producers.mu),
-                Some(ImageCheckpoint::Sigma) => Some(producers.sigma),
-                _ => None,
-            },
+            raw_stage_dependency: raw_dependencies[index],
             statement: selected.stage.contract.point,
             slot: selected.slot,
             mir_defs: selected.defs.clone(),

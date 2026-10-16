@@ -389,6 +389,43 @@ pub enum ProgramExecutionResponse {
 }
 
 impl ProgramExecutionResponse {
+    pub fn validate_owned_builtin(
+        &self,
+        request: &runmat_execution::OwnedBuiltinWorkRequest,
+    ) -> ArtifactResult<()> {
+        request.validate_wire().map_err(contract_error)?;
+        request
+            .response
+            .validate_json_wire(self)
+            .map_err(contract_error)?;
+        match self {
+            Self::Success { outputs } => request
+                .validate_output_values(outputs)
+                .map_err(contract_error),
+            Self::RuntimeFailure { failure } => {
+                failure.validate().map_err(contract_error)?;
+                if failure.span.is_some()
+                    || failure.call_frames.iter().any(|frame| {
+                        frame.program_source_id.is_some()
+                            || frame.span.is_some()
+                            || frame.detached_diagnostic.is_some()
+                    })
+                {
+                    return Err(ArtifactError::Invalid(
+                        "owned builtin failure has an unselected source".into(),
+                    ));
+                }
+                Ok(())
+            }
+            Self::Failure { message } if !message.is_empty() && message.len() <= 1024 * 1024 => {
+                Ok(())
+            }
+            _ => Err(ArtifactError::Invalid(
+                "response form is not admitted for owned builtin work".into(),
+            )),
+        }
+    }
+
     pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
         let artifact = request.validate_context()?;
         let source_map = artifact.source_map.as_ref();
@@ -555,6 +592,7 @@ mod tests {
             entrypoint: "7".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: crate::ProgramTarget::portable("portable-test"),
@@ -625,6 +663,7 @@ mod tests {
             entrypoint: identity.entrypoint.clone(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: crate::ProgramTarget::portable("portable-executable-unit-test"),

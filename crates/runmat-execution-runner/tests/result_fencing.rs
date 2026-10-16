@@ -3,7 +3,9 @@ mod common;
 use runmat_execution::identity::{NodeLeaseId, ValueId, WorkerId};
 use runmat_execution::state::TaskState;
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::{ResidentFence, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::value::{
+    DenseValue, ElementType, InlineValue, ResidentFence, ValuePayload, ValueRef, ValueRefKind,
+};
 use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverEventKind};
 use runmat_execution_runner::port::BackendReport;
 
@@ -116,4 +118,42 @@ fn portable_scheduler_rejects_resident_results_instead_of_committing_them() {
         fixture.driver.snapshot().tasks[&task_id].state,
         TaskState::Failed
     );
+}
+
+#[test]
+fn owned_builtin_result_uses_its_selected_inline_limit_without_widening_direct() {
+    let elements = 1024 * 1024 + 1;
+    let payload = ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+        element_type: ElementType::Logical,
+        shape: vec![1, elements as u64],
+        little_endian_data: vec![0; elements],
+    })));
+    let result = runmat_execution_runner::AttemptSuccess::Values {
+        outputs: vec![payload],
+        result_objects: Vec::new(),
+    };
+    let fixture = common::fixture(1, 1);
+    let mut task = common::task(
+        "owned-result",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    )
+    .request;
+    assert!(result.validate_for_portable_transport(&task).is_err());
+    task.executable = runmat_execution::TaskExecutableIdentity::OwnedBuiltin(
+        runmat_execution::Digest::sha256(b"qz-binding"),
+    );
+    task.callable = runmat_execution::task::Callable::for_program(
+        "owned-canonical-builtin",
+        &runmat_execution::ProgramCallable::builtin("qz").unwrap(),
+    );
+    task.outputs.owned_work = Some(runmat_execution::OwnedBuiltinResponseContract {
+        dense: vec![runmat_execution::OwnedBuiltinDenseOutputContract {
+            shape: vec![1, elements as u64],
+            allowed_element_types: vec![ElementType::Logical],
+        }],
+        max_wire_bytes: runmat_execution::OWNED_BUILTIN_FAILURE_WIRE_BYTES,
+    });
+    result.validate_for_portable_transport(&task).unwrap();
 }

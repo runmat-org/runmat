@@ -50,6 +50,18 @@ pub fn effective_rank(shape: &[usize]) -> usize {
         .map_or(2, |index| (index + 1).max(2))
 }
 
+/// Compare array dimensions, ignoring stored singleton axes beyond the
+/// two-dimensional language minimum. Internal rank-zero/rank-one carriers
+/// retain their exact shape rather than becoming public matrix arrays.
+pub fn array_shapes_equal(left: &[usize], right: &[usize]) -> bool {
+    if left.len() < 2 || right.len() < 2 {
+        return left == right;
+    }
+    let left_rank = effective_rank(left);
+    let right_rank = effective_rank(right);
+    left_rank == right_rank && left[..left_rank] == right[..right_rank]
+}
+
 /// Return the MATLAB-visible dimension vector for a runtime value.
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
@@ -244,5 +256,11 @@ pub(crate) mod tests {
         assert_eq!(effective_rank(&[2, 3, 1, 1]), 2);
         assert_eq!(effective_rank(&[1, 1, 4, 1]), 3);
         assert_eq!(effective_rank(&[1, 1, 1]), 2);
+        assert!(array_shapes_equal(&[2, 1, 1], &[2, 1]));
+        assert!(array_shapes_equal(&[0, 3, 1], &[0, 3]));
+        assert!(!array_shapes_equal(&[2, 1, 2], &[2, 1]));
+        assert!(!array_shapes_equal(&[1, 2], &[2, 1]));
+        assert!(!array_shapes_equal(&[], &[1, 1]));
+        assert!(!array_shapes_equal(&[1], &[1, 1]));
     }
 }

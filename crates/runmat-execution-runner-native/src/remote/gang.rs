@@ -101,13 +101,17 @@ impl RemotePoolDriver {
                     id: task_id,
                     scope_id: program.gang.scope_id,
                     pool_id: program.gang.pool.id,
-                    program_artifact_id: artifact_id,
+                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                    executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                        artifact_id,
+                    ),
                     callable: Callable::for_program("remote-spmd", &callable),
                     host,
                     invocation_context: context,
                     inputs: program.captures.clone(),
                     outputs: OutputContract {
                         requested_outputs: program.requested_outputs,
+                        owned_work: None,
                     },
                     resources: program.resources.clone(),
                     retry: RetryPolicy::Never,

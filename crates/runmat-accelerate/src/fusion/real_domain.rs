@@ -296,6 +296,7 @@ async fn leaf_range(
     internal_error: &'static runmat_builtins::BuiltinErrorDescriptor,
     provider_precision: ProviderPrecision,
     work: &mut FusionAdmissionWork,
+    provider_probe_observed: &mut bool,
 ) -> std::result::Result<Option<RealRange>, FusionResolveFailure> {
     match value {
         Value::Num(number) => {
@@ -358,6 +359,7 @@ async fn leaf_range(
                 internal_error,
             };
             let mut observe = |stage: RealProbeStage| {
+                *provider_probe_observed = true;
                 let stage = match stage {
                     RealProbeStage::Provider { operation, input } => {
                         FusionProofStage::Provider { operation, input }
@@ -499,12 +501,13 @@ pub(super) struct RealDomainProofContext<'a> {
     pub provider_precision: ProviderPrecision,
 }
 
-pub(super) async fn prove(
+pub(super) async fn prove_observed(
     context: RealDomainProofContext<'_>,
     resolver: &mut RealRangeResolver<'_>,
     operand_id: ValueId,
     predicate: RealUnaryPredicate,
     work: &mut FusionAdmissionWork,
+    provider_probe_observed: &mut bool,
 ) -> std::result::Result<Option<FusionOperandDomainEvidence>, FusionResolveFailure> {
     let RealDomainProofContext {
         plan,
@@ -538,6 +541,7 @@ pub(super) async fn prove(
                         internal_error,
                         provider_precision,
                         work,
+                        provider_probe_observed,
                     )
                     .await?
                 }
@@ -589,6 +593,26 @@ pub(super) async fn prove(
         },
         sign: None,
     }))
+}
+
+#[cfg(test)]
+pub(super) async fn prove(
+    context: RealDomainProofContext<'_>,
+    resolver: &mut RealRangeResolver<'_>,
+    operand_id: ValueId,
+    predicate: RealUnaryPredicate,
+    work: &mut FusionAdmissionWork,
+) -> std::result::Result<Option<FusionOperandDomainEvidence>, FusionResolveFailure> {
+    let mut provider_probe_observed = false;
+    prove_observed(
+        context,
+        resolver,
+        operand_id,
+        predicate,
+        work,
+        &mut provider_probe_observed,
+    )
+    .await
 }
 
 #[cfg(test)]

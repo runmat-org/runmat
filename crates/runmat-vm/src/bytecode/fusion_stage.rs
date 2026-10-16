@@ -30,7 +30,7 @@ pub(crate) struct CompiledPrivateTemporarySlot {
     pub slot: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FusionStageProjection {
     pub revision: AnalysisRevision,
@@ -47,6 +47,11 @@ pub struct FusionStageProjection {
     /// Missing in legacy artifacts means no private bridge authority.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) private_temporary_slots: Vec<CompiledPrivateTemporarySlot>,
+    /// The compiler's exact function-local slot/layout owner. Entrypoint
+    /// streams retain their existing assembly layout instead. This is not a
+    /// provider or arithmetic certificate and cannot be supplied by a caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selected_function_layout: Option<crate::layout::VmFunctionLayout>,
     /// Binds the selected facts to the exact serialized executable stream.
     pub source_fingerprint: String,
 }
@@ -198,6 +203,11 @@ impl FusionStageProjection {
             mir_local_count: body.locals.len(),
             statements,
             private_temporary_slots,
+            selected_function_layout: matches!(
+                selection_origin,
+                FusionStageSelectionOrigin::FunctionBody
+            )
+            .then(|| layout.clone()),
             source_fingerprint: String::new(),
         };
         if !result.structurally_valid(&stream) {
@@ -311,6 +321,16 @@ impl FusionStageProjection {
         if self.statements.is_empty() || stream.catch_scopes.len() != stream.instructions.len() {
             return false;
         }
+        if self
+            .selected_function_layout
+            .as_ref()
+            .is_some_and(|layout| {
+                layout.resume_points != *stream.resume_points
+                    || layout.local_count != stream.var_count
+            })
+        {
+            return false;
+        }
         if self.private_temporary_slots.iter().any(|pair| {
             usize::try_from(pair.local).map_or(true, |local| local >= self.mir_local_count)
                 || pair.slot >= stream.var_count
@@ -420,6 +440,16 @@ impl super::FunctionBytecode {
             projection.selection_origin,
             None | Some(FusionStageSelectionOrigin::FunctionBody)
         ) && projection.portable_origin == self.portable_function
+            && (projection.selection_origin != Some(FusionStageSelectionOrigin::FunctionBody)
+                || projection.selected_function_layout.is_some())
+            && projection
+                .selected_function_layout
+                .as_ref()
+                .is_none_or(|layout| {
+                    layout.function == self.function
+                        && layout.resume_points == self.resume_points
+                        && layout.local_count == self.var_count
+                })
             && projection.validate(FusionStageStream {
                 instructions: &self.instructions,
                 catch_scopes: &self.catch_scopes,

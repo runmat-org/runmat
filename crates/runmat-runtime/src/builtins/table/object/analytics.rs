@@ -1,7 +1,9 @@
 use super::selectors::parse_variable_selector;
 use super::*;
 
+#[cfg(feature = "plot-core")]
 mod heatmap;
+#[cfg(feature = "plot-core")]
 pub(crate) use heatmap::{aggregate_heatmap_table, HeatmapAggregation};
 use runmat_value::IntValue;
 

@@ -31,6 +31,7 @@ pub use self::display::{table_display_text, table_summary_text};
 use self::facade::*;
 pub use self::metadata::*;
 pub(crate) use self::object::table_replace_variables_like_owned;
+#[cfg(feature = "plot-core")]
 pub(crate) use self::object::{aggregate_heatmap_table, HeatmapAggregation};
 pub use self::object::{
     is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,

@@ -3,16 +3,23 @@
 
 use super::*;
 use crate::fusion::image_reduction::{ImageSelectedRealCall, ImageSelectedRealCalls};
+#[cfg(test)]
+use runmat_accelerate_api::ProviderRealElementwiseObserved;
 use runmat_accelerate_api::{
     scalar_program::ScalarLiteral, ProviderElementType, ProviderImageOutputCall,
-    ProviderImageOutputOperand, ProviderRealElementwiseObserved,
-    ProviderRealElementwiseOperation as Operation, ProviderRealElementwiseOutputRoute,
-    ProviderRealElementwiseRecipe, ProviderRealElementwiseRequest, ProviderRepresentation,
+    ProviderImageOutputOperand, ProviderRealElementwiseOperation as Operation,
+    ProviderRealElementwiseOutputRoute, ProviderRealElementwiseRecipe,
+    ProviderRealElementwiseRequest, ProviderRepresentation,
 };
+#[cfg(test)]
 use runmat_builtins::BuiltinBindingIdentity;
+#[cfg(test)]
 use runmat_execution::Digest;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 
+#[cfg(test)]
 #[derive(Clone)]
 pub(super) struct SelectedRealReceipt {
     pub selected_identity: Digest,
@@ -27,14 +34,33 @@ pub(super) struct SelectedRealReceipt {
 struct PlannedCall {
     source: ImageSelectedRealCall,
     recipe: ProviderRealElementwiseRecipe,
+    #[cfg(test)]
     identity: Digest,
 }
 
 pub(super) struct SelectedRealPlans {
+    #[cfg(test)]
     semantic_identity: Digest,
-    calls: [PlannedCall; 5],
+    calls: Vec<PlannedCall>,
     next: Cell<usize>,
+    #[cfg(test)]
     observed: RefCell<Vec<SelectedRealReceipt>>,
+}
+
+impl SelectedRealPlans {
+    pub(super) fn physical_upper_bound(
+        &self,
+    ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
+        for call in &self.calls {
+            let physical = call.recipe.physical();
+            bound.add(
+                physical.requested_incremental_peak_bytes()?,
+                physical.dispatches,
+            )?;
+        }
+        Some(bound)
+    }
 }
 
 pub(super) struct SelectedRealOutput {
@@ -59,6 +85,7 @@ pub(super) fn plan(
     provider: &'static dyn AccelProvider,
     source: &ImageSelectedRealCalls,
     binary: &selected_binary::SelectedBinaryPlans,
+    powers: &power::ImagePowerPlans,
     program: &ProviderImageStageWorkload,
 ) -> ProviderExecutionResult<Option<SelectedRealPlans>> {
     if source.semantic_identity() != binary.semantic_identity() {
@@ -67,10 +94,67 @@ pub(super) fn plan(
     let Some(output_program) = program.output_program.as_ref() else {
         return Ok(None);
     };
+    let Some((sub, rest)) = output_program.calls.split_first() else {
+        return Ok(None);
+    };
+    let Some((div, suffix)) = rest.split_first() else {
+        return Ok(None);
+    };
+    let Some(selected_powers) = program.selected_powers.as_ref() else {
+        return Ok(None);
+    };
+    if !program.validate()
+        || !binary.matches_output(selected_binary::BinaryStage::OutputSub, sub)
+        || !binary.matches_output(selected_binary::BinaryStage::OutputDiv, div)
+        || sub.checkpoint
+        || div.checkpoint
+    {
+        return Ok(None);
+    }
     let (mut representation, mut bytes) = binary.output_div_carrier();
+    let mut current_source = div.source_output;
     let mut planned = Vec::with_capacity(source.calls().len());
-    for call in source.calls() {
-        if !matches_fact(&representation, call) {
+    let mut power_seen = false;
+    for wire in suffix {
+        if wire.hook == runmat_accelerate_api::ProviderImageOutputHook::ElemPow {
+            let expected_class = match selected_powers.final_power.output_class {
+                runmat_types::NumericClass::Single => ProviderPrecision::F32,
+                runmat_types::NumericClass::Double => ProviderPrecision::F64,
+                _ => return Ok(None),
+            };
+            let Some(physical) = powers.final_power.exact_physical_proposal() else {
+                return Ok(None);
+            };
+            if power_seen
+                || wire.source_output != u64::from(selected_powers.final_power.output)
+                || wire.operands.first().copied()
+                    != Some(ProviderImageOutputOperand::Produced(current_source))
+                || wire.output_precision != expected_class
+            {
+                return Ok(None);
+            }
+            representation = ProviderRepresentation {
+                element_type: element(wire.output_precision),
+                storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                shape: wire.output_shape.to_vec(),
+                residency: runmat_accelerate_api::ProviderResidency::Device,
+            };
+            if representation
+                .checked_byte_len()
+                .is_none_or(|minimum| minimum > physical.output_buffer_bytes)
+            {
+                return Ok(None);
+            }
+            bytes = physical.output_buffer_bytes;
+            current_source = wire.source_output;
+            power_seen = true;
+            continue;
+        }
+        let Some(call) = source.calls().get(planned.len()) else {
+            return Ok(None);
+        };
+        if call.input() != current_source || !matches_fact(&representation, call) {
             return Ok(None);
         }
         let Some(recipe) = ProviderRealElementwiseRecipe::plan(
@@ -91,48 +175,32 @@ pub(super) fn plan(
         }
         representation = recipe.output().clone();
         bytes = recipe.physical().output_buffer_bytes;
+        current_source = call.output();
+        #[cfg(test)]
         let identity = recipe.identity().map_err(ProviderExecutionError::from)?;
         planned.push(PlannedCall {
             source: call.clone(),
             recipe,
+            #[cfg(test)]
             identity,
         });
     }
-    let Ok(calls) = planned.try_into() else {
+    if !power_seen || planned.len() != source.calls().len() {
         return Ok(None);
-    };
+    }
     let selected = SelectedRealPlans {
+        #[cfg(test)]
         semantic_identity: source.semantic_identity(),
-        calls,
+        calls: planned,
         next: Cell::new(0),
+        #[cfg(test)]
         observed: RefCell::new(Vec::new()),
     };
-    // A selected session may execute no unplanned legacy hook. The complete
-    // source-ordered program is exactly two binary calls, five scalar/cast
-    // calls, and the final POWER. Filtering by hook family would allow an
-    // interleaved ElemMul/ElemAdd after earlier stage effects.
-    let [sub, div, mul, add, preclamp, max, cast, power] = output_program.calls.as_slice() else {
-        return Ok(None);
-    };
-    let Some(powers) = program.selected_powers.as_ref() else {
-        return Ok(None);
-    };
-    let real = [mul, add, preclamp, max, cast];
-    if !program.validate()
-        || !binary.matches_output(selected_binary::BinaryStage::OutputSub, sub)
-        || !binary.matches_output(selected_binary::BinaryStage::OutputDiv, div)
-        || real
-            .iter()
-            .enumerate()
-            .any(|(index, call)| !selected.matches_output(index, call))
-        || power.hook != runmat_accelerate_api::ProviderImageOutputHook::ElemPow
-        || power.source_output != u64::from(powers.final_power.output)
-        || [sub, div, mul, add, cast]
-            .iter()
-            .any(|call| call.checkpoint)
-        || !preclamp.checkpoint
-        || !max.checkpoint
-        || !power.checkpoint
+    if suffix
+        .iter()
+        .filter(|call| call.hook != runmat_accelerate_api::ProviderImageOutputHook::ElemPow)
+        .enumerate()
+        .any(|(index, call)| !selected.matches_output(index, call))
     {
         return Ok(None);
     }
@@ -187,6 +255,7 @@ impl SelectedRealPlans {
             .execute_protected(source, protected)
             .await
             .map_err(ProviderExecutionError::after_effect)?;
+        #[cfg(test)]
         self.observed.borrow_mut().push(SelectedRealReceipt {
             selected_identity: self.semantic_identity,
             source_input: planned.source.input(),
@@ -209,6 +278,11 @@ impl SelectedRealPlans {
 
     #[cfg(test)]
     pub(super) fn recipe_identities(&self) -> [Digest; 5] {
-        self.calls.each_ref().map(|call| call.identity)
+        self.calls
+            .iter()
+            .map(|call| call.identity)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("five-call selected source fixture")
     }
 }

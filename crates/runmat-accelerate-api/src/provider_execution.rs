@@ -111,6 +111,7 @@ impl ProviderExecutionError {
             source: ExecutionSource::Local(Box::new(error)),
             disposition: FallbackDisposition::PreEffect,
         }
+        .inherit_nested_disposition()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -119,6 +120,7 @@ impl ProviderExecutionError {
             source: ExecutionSource::Local(Box::new(error)),
             disposition: FallbackDisposition::PreEffect,
         }
+        .inherit_nested_disposition()
     }
 
     /// Keep the original error chain while disabling numerical replay after
@@ -142,6 +144,29 @@ impl ProviderExecutionError {
         if self.disposition == FallbackDisposition::PreEffect {
             self.disposition = FallbackDisposition::Unproven;
         }
+        self
+    }
+
+    /// Preserve a stronger retained provider disposition through a semantic
+    /// RuntimeError wrapper without replacing its public diagnostic or cause.
+    fn inherit_nested_disposition(mut self) -> Self {
+        let mut inherited = self.disposition;
+        let mut source: &(dyn Error + 'static) = self.source.as_error();
+        loop {
+            if let Some(provider) = source.downcast_ref::<Self>() {
+                inherited = match (inherited, provider.disposition) {
+                    (FallbackDisposition::AfterEffect, _)
+                    | (_, FallbackDisposition::AfterEffect) => FallbackDisposition::AfterEffect,
+                    (FallbackDisposition::Unproven, _) | (_, FallbackDisposition::Unproven) => {
+                        FallbackDisposition::Unproven
+                    }
+                    _ => FallbackDisposition::PreEffect,
+                };
+            }
+            let Some(next) = source.source() else { break };
+            source = next;
+        }
+        self.disposition = inherited;
         self
     }
 
@@ -178,6 +203,7 @@ impl From<anyhow::Error> for ProviderExecutionError {
             source: ExecutionSource::Shared(error),
             disposition: FallbackDisposition::PreEffect,
         }
+        .inherit_nested_disposition()
     }
 }
 

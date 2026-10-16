@@ -59,7 +59,7 @@ pub fn decode_inline_value_owned(
     decode_inline_value_owned_with_limits(payload, ValueLimits::default())
 }
 
-pub(super) fn decode_inline_value_owned_with_limits(
+pub fn decode_inline_value_owned_with_limits(
     payload: &ValuePayload,
     limits: ValueLimits,
 ) -> Result<crate::execution::RootedValue, CooperativeValueCodecError> {

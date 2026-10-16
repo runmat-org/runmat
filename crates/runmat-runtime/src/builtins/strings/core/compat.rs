@@ -8,7 +8,6 @@ use runmat_builtins::{
     STR2NUM_ERROR_TOO_MANY_OUTPUTS, STRTOK_DESCRIPTOR, STRTOK_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericStorage;
 use runmat_value::{
     CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
 };
@@ -19,9 +18,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
-use crate::builtins::strings::core::numeric_length::{
-    nonnegative_platform_usize, parse_nonnegative_usize,
-};
+use crate::builtins::strings::core::numeric_length::parse_nonnegative_usize;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 pub(crate) fn compat_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
@@ -357,7 +354,7 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             vec![
                 scan.value,
                 Value::Num(scan.count as f64),
-                Value::String(scan.errmsg),
+                Value::CharArray(CharArray::new_row(&scan.errmsg)),
                 Value::Num(scan.next_index as f64),
             ],
         )),
@@ -849,521 +846,8 @@ fn byte_vector_shape(value: &Value, fn_name: &str) -> BuiltinResult<Vec<usize>> 
     })
 }
 
-struct SscanfResult {
-    value: Value,
-    count: usize,
-    errmsg: String,
-    next_index: usize,
-}
-
-#[derive(Clone, Copy)]
-enum ScanKind {
-    Float,
-    SignedInteger {
-        radix: IntegerRadix,
-        exact_i64: bool,
-    },
-    UnsignedInteger {
-        radix: IntegerRadix,
-        exact_u64: bool,
-    },
-    String,
-    Char,
-}
-
-#[derive(Clone, Copy)]
-enum IntegerRadix {
-    Decimal,
-    Auto,
-    Octal,
-    Hex,
-}
-
-#[derive(Clone, Copy)]
-enum ScanValue {
-    F64(f64),
-    I64(i64),
-    U64(u64),
-}
-
-#[derive(Clone, Copy)]
-enum ScanOutputClass {
-    F64,
-    I64,
-    U64,
-}
-
-#[derive(Clone)]
-enum ScanToken {
-    Whitespace,
-    Literal(char),
-    Spec {
-        kind: ScanKind,
-        width: Option<usize>,
-        suppress: bool,
-    },
-}
-
-fn sscanf_scan(text: &str, format: &str, size: Option<Vec<usize>>) -> BuiltinResult<SscanfResult> {
-    let tokens = parse_scan_format(format)?;
-    if tokens.is_empty() {
-        return Err(compat_error("sscanf", "sscanf: format must not be empty"));
-    }
-
-    let mut values = Vec::new();
-    let mut pos = 0usize;
-    let mut last_success = 0usize;
-    loop {
-        let start_pos = pos;
-        let start_len = values.len();
-        let mut matched_all = true;
-        for token in &tokens {
-            match token {
-                ScanToken::Whitespace => {
-                    pos = skip_whitespace(text, pos);
-                }
-                ScanToken::Literal(ch) => {
-                    let Some(next) = text[pos..].chars().next() else {
-                        matched_all = false;
-                        break;
-                    };
-                    if next != *ch {
-                        matched_all = false;
-                        break;
-                    }
-                    pos += next.len_utf8();
-                }
-                ScanToken::Spec {
-                    kind,
-                    width,
-                    suppress,
-                } => {
-                    if !matches!(kind, ScanKind::Char) {
-                        pos = skip_whitespace(text, pos);
-                    }
-                    let Some((parsed, next_pos)) = scan_one(text, pos, *kind, *width) else {
-                        matched_all = false;
-                        break;
-                    };
-                    pos = next_pos;
-                    if !*suppress {
-                        values.extend(parsed);
-                    }
-                }
-            }
-        }
-        if !matched_all {
-            break;
-        }
-        if pos == start_pos || values.len() == start_len && pos >= text.len() {
-            break;
-        }
-        last_success = pos;
-        if pos >= text.len() {
-            break;
-        }
-    }
-
-    let count = values.len();
-    let mut shape = size.unwrap_or_else(|| vec![count, 1]);
-    let limit = shape.iter().product::<usize>();
-    if limit > 0 && values.len() > limit {
-        values.truncate(limit);
-    }
-    if shape.iter().product::<usize>() != values.len() {
-        shape = vec![values.len(), 1];
-    }
-    let storage = scan_values_into_storage(values, scan_output_class(&tokens))?;
-    let value = Tensor::from_numeric_storage(storage, shape)
-        .map(Value::Tensor)
-        .map_err(|e| compat_error("sscanf", e))?;
-    Ok(SscanfResult {
-        value,
-        count,
-        errmsg: String::new(),
-        next_index: last_success.saturating_add(1),
-    })
-}
-
-fn parse_scan_format(format: &str) -> BuiltinResult<Vec<ScanToken>> {
-    let mut chars = format.chars().peekable();
-    let mut tokens = Vec::new();
-    while let Some(ch) = chars.next() {
-        if ch.is_whitespace() {
-            while chars.peek().is_some_and(|next| next.is_whitespace()) {
-                chars.next();
-            }
-            tokens.push(ScanToken::Whitespace);
-            continue;
-        }
-        if ch != '%' {
-            tokens.push(ScanToken::Literal(ch));
-            continue;
-        }
-        if chars.peek() == Some(&'%') {
-            chars.next();
-            tokens.push(ScanToken::Literal('%'));
-            continue;
-        }
-        let suppress = if chars.peek() == Some(&'*') {
-            chars.next();
-            true
-        } else {
-            false
-        };
-        let mut width = String::new();
-        while chars.peek().is_some_and(|next| next.is_ascii_digit()) {
-            width.push(chars.next().unwrap());
-        }
-        let width = if width.is_empty() {
-            None
-        } else {
-            Some(
-                width
-                    .parse::<usize>()
-                    .map_err(|_| compat_error("sscanf", "sscanf: invalid field width"))?,
-            )
-        };
-        let long = if chars.peek() == Some(&'l') {
-            chars.next();
-            true
-        } else {
-            false
-        };
-        let Some(specifier) = chars.next() else {
-            return Err(compat_error(
-                "sscanf",
-                "sscanf: incomplete format specifier",
-            ));
-        };
-        let kind = match specifier {
-            'f' | 'e' | 'E' | 'g' | 'G' => ScanKind::Float,
-            'd' => ScanKind::SignedInteger {
-                radix: IntegerRadix::Decimal,
-                exact_i64: long,
-            },
-            'i' => ScanKind::SignedInteger {
-                radix: IntegerRadix::Auto,
-                exact_i64: long,
-            },
-            'u' => ScanKind::UnsignedInteger {
-                radix: IntegerRadix::Decimal,
-                exact_u64: long,
-            },
-            'o' => ScanKind::UnsignedInteger {
-                radix: IntegerRadix::Octal,
-                exact_u64: long,
-            },
-            'x' | 'X' => ScanKind::UnsignedInteger {
-                radix: IntegerRadix::Hex,
-                exact_u64: long,
-            },
-            's' => ScanKind::String,
-            'c' => ScanKind::Char,
-            other => {
-                return Err(compat_error(
-                    "sscanf",
-                    format!("sscanf: unsupported format specifier %{other}"),
-                ))
-            }
-        };
-        tokens.push(ScanToken::Spec {
-            kind,
-            width,
-            suppress,
-        });
-    }
-    Ok(tokens)
-}
-
-fn scan_one(
-    text: &str,
-    pos: usize,
-    kind: ScanKind,
-    width: Option<usize>,
-) -> Option<(Vec<ScanValue>, usize)> {
-    if pos > text.len() {
-        return None;
-    }
-    let end_limit = width
-        .and_then(|w| byte_index_after_n_chars(&text[pos..], w).map(|idx| pos + idx))
-        .unwrap_or(text.len());
-    match kind {
-        ScanKind::Float => {
-            let fragment = &text[pos..end_limit];
-            let len = numeric_prefix_len(fragment, false)?;
-            let token = &fragment[..len];
-            Some((vec![ScanValue::F64(token.parse::<f64>().ok()?)], pos + len))
-        }
-        ScanKind::SignedInteger { radix, exact_i64 } => {
-            let fragment = &text[pos..end_limit];
-            let (value, len) = scan_signed_integer(fragment, radix)?;
-            let value = if exact_i64 {
-                ScanValue::I64(value)
-            } else {
-                ScanValue::F64(value as f64)
-            };
-            Some((vec![value], pos + len))
-        }
-        ScanKind::UnsignedInteger { radix, exact_u64 } => {
-            let fragment = &text[pos..end_limit];
-            let (value, len) = scan_unsigned_integer(fragment, radix)?;
-            let value = if exact_u64 {
-                ScanValue::U64(value)
-            } else {
-                ScanValue::F64(value as f64)
-            };
-            Some((vec![value], pos + len))
-        }
-        ScanKind::String => {
-            let fragment = &text[pos..end_limit];
-            let len = fragment
-                .char_indices()
-                .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
-                .unwrap_or(fragment.len());
-            if len == 0 {
-                None
-            } else {
-                Some((
-                    fragment[..len]
-                        .chars()
-                        .map(|ch| ScanValue::F64(ch as u32 as f64))
-                        .collect(),
-                    pos + len,
-                ))
-            }
-        }
-        ScanKind::Char => {
-            let count = width.unwrap_or(1);
-            let len = byte_index_after_n_chars(&text[pos..], count)?;
-            Some((
-                text[pos..pos + len]
-                    .chars()
-                    .map(|ch| ScanValue::F64(ch as u32 as f64))
-                    .collect(),
-                pos + len,
-            ))
-        }
-    }
-}
-
-fn scan_output_class(tokens: &[ScanToken]) -> ScanOutputClass {
-    let mut class = None;
-    for token in tokens {
-        let ScanToken::Spec {
-            kind,
-            suppress: false,
-            ..
-        } = token
-        else {
-            continue;
-        };
-        let next = match kind {
-            ScanKind::SignedInteger {
-                exact_i64: true, ..
-            } => ScanOutputClass::I64,
-            ScanKind::UnsignedInteger {
-                exact_u64: true, ..
-            } => ScanOutputClass::U64,
-            _ => return ScanOutputClass::F64,
-        };
-        match (class, next) {
-            (None, next) => class = Some(next),
-            (Some(ScanOutputClass::I64), ScanOutputClass::I64)
-            | (Some(ScanOutputClass::U64), ScanOutputClass::U64) => {}
-            _ => return ScanOutputClass::F64,
-        }
-    }
-    class.unwrap_or(ScanOutputClass::F64)
-}
-
-fn scan_values_into_storage(
-    values: Vec<ScanValue>,
-    class: ScanOutputClass,
-) -> BuiltinResult<NumericStorage> {
-    match class {
-        ScanOutputClass::F64 => Ok(NumericStorage::F64(
-            values
-                .into_iter()
-                .map(|value| match value {
-                    ScanValue::F64(value) => value,
-                    ScanValue::I64(value) => value as f64,
-                    ScanValue::U64(value) => value as f64,
-                })
-                .collect(),
-        )),
-        ScanOutputClass::I64 => values
-            .into_iter()
-            .map(|value| match value {
-                ScanValue::I64(value) => Ok(value),
-                _ => Err(compat_error(
-                    "sscanf",
-                    "sscanf: incompatible conversions in int64 scan format",
-                )),
-            })
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(NumericStorage::I64),
-        ScanOutputClass::U64 => values
-            .into_iter()
-            .map(|value| match value {
-                ScanValue::U64(value) => Ok(value),
-                _ => Err(compat_error(
-                    "sscanf",
-                    "sscanf: incompatible conversions in uint64 scan format",
-                )),
-            })
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(NumericStorage::U64),
-    }
-}
-
-fn scan_signed_integer(text: &str, radix: IntegerRadix) -> Option<(i64, usize)> {
-    let (negative, digits, base, len) = integer_token_parts(text, radix, true)?;
-    let magnitude = u64::from_str_radix(digits, base).ok()?;
-    let value = if negative {
-        if magnitude == (1_u64 << 63) {
-            i64::MIN
-        } else {
-            -i64::try_from(magnitude).ok()?
-        }
-    } else {
-        i64::try_from(magnitude).ok()?
-    };
-    Some((value, len))
-}
-
-fn scan_unsigned_integer(text: &str, radix: IntegerRadix) -> Option<(u64, usize)> {
-    let (negative, digits, base, len) = integer_token_parts(text, radix, false)?;
-    if negative {
-        return None;
-    }
-    Some((u64::from_str_radix(digits, base).ok()?, len))
-}
-
-fn integer_token_parts(
-    text: &str,
-    radix: IntegerRadix,
-    allow_negative: bool,
-) -> Option<(bool, &str, u32, usize)> {
-    let bytes = text.as_bytes();
-    let mut start = 0usize;
-    let mut negative = false;
-    if let Some(sign) = bytes.first() {
-        if *sign == b'+' {
-            start = 1;
-        } else if *sign == b'-' && allow_negative {
-            start = 1;
-            negative = true;
-        }
-    }
-    let remaining = &text[start..];
-    let (base, prefix_len) = match radix {
-        IntegerRadix::Decimal => (10, 0),
-        IntegerRadix::Octal => (8, 0),
-        IntegerRadix::Hex => (
-            16,
-            usize::from(remaining.starts_with("0x") || remaining.starts_with("0X")) * 2,
-        ),
-        IntegerRadix::Auto if remaining.starts_with("0x") || remaining.starts_with("0X") => (16, 2),
-        IntegerRadix::Auto if remaining.starts_with('0') => (8, 0),
-        IntegerRadix::Auto => (10, 0),
-    };
-    let digit_start = start + prefix_len;
-    let digit_len = text[digit_start..]
-        .char_indices()
-        .take_while(|(_, ch)| ch.is_digit(base))
-        .map(|(idx, ch)| idx + ch.len_utf8())
-        .last()?;
-    let end = digit_start + digit_len;
-    Some((negative, &text[digit_start..end], base, end))
-}
-
-fn numeric_prefix_len(text: &str, integer: bool) -> Option<usize> {
-    let mut end = 0usize;
-    for (idx, ch) in text.char_indices() {
-        let allowed = if integer {
-            ch.is_ascii_digit() || ((ch == '+' || ch == '-') && idx == 0)
-        } else {
-            ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E')
-        };
-        if !allowed {
-            break;
-        }
-        end = idx + ch.len_utf8();
-    }
-    (end > 0).then_some(end)
-}
-
-fn skip_whitespace(text: &str, mut pos: usize) -> usize {
-    while pos < text.len() {
-        let Some(ch) = text[pos..].chars().next() else {
-            break;
-        };
-        if !ch.is_whitespace() {
-            break;
-        }
-        pos += ch.len_utf8();
-    }
-    pos
-}
-
-fn byte_index_after_n_chars(text: &str, count: usize) -> Option<usize> {
-    if count == 0 {
-        return Some(0);
-    }
-    text.char_indices()
-        .nth(count)
-        .map(|(idx, _)| idx)
-        .or_else(|| (text.chars().count() == count).then_some(text.len()))
-}
-
-fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
-    match value {
-        Value::Num(n) => Ok(vec![scan_size_dim(*n)?, 1]),
-        Value::Int(value) => Ok(vec![value.try_to_usize().ok_or_else(scan_size_error)?, 1]),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            Ok(vec![scan_tensor_size_dim(tensor, 0)?, 1])
-        }
-        Value::Tensor(tensor) if tensor_element_len(tensor) == 2 => Ok(vec![
-            scan_tensor_size_dim(tensor, 0)?,
-            scan_tensor_size_dim(tensor, 1)?,
-        ]),
-        other => Err(compat_error(
-            "sscanf",
-            format!("sscanf: invalid size argument {other:?}"),
-        )),
-    }
-}
-
-fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor.len()
-}
-
-fn scan_tensor_size_dim(tensor: &Tensor, index: usize) -> BuiltinResult<usize> {
-    match tensor.numeric_value_at(index).ok_or_else(scan_size_error)? {
-        NumericScalar::F64(value) => scan_size_dim(value),
-        NumericScalar::F32(value) => scan_size_dim(f64::from(value)),
-        integer => integer
-            .into_int_value()
-            .expect("non-floating numeric scalar is integer")
-            .try_to_usize()
-            .ok_or_else(scan_size_error),
-    }
-}
-
-fn scan_size_error() -> crate::RuntimeError {
-    compat_error(
-        "sscanf",
-        "sscanf: size dimensions must be nonnegative integers",
-    )
-}
-
-fn scan_size_dim(value: f64) -> BuiltinResult<usize> {
-    if value.is_infinite() && value.is_sign_positive() {
-        return Ok(usize::MAX / 2);
-    }
-    nonnegative_platform_usize(value).ok_or_else(scan_size_error)
-}
+mod scan;
+use self::scan::{scan_size_from_value, sscanf_scan};
 
 #[cfg(test)]
 mod tests {
@@ -1520,14 +1004,131 @@ mod tests {
             scan_size_from_value(&Value::Num(f64::INFINITY)).unwrap(),
             vec![usize::MAX / 2, 1]
         );
+        let open_columns = Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).unwrap();
+        assert_eq!(
+            scan_size_from_value(&Value::Tensor(open_columns)).unwrap(),
+            vec![2, usize::MAX / 2]
+        );
+        let open_rows = Tensor::new(vec![f64::INFINITY, 2.0], vec![1, 2]).unwrap();
+        assert!(scan_size_from_value(&Value::Tensor(open_rows)).is_err());
 
         for value in [
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
             Value::Int(IntValue::I16(-1)),
+            Value::Num(0.0),
+            Value::Int(IntValue::U8(0)),
         ] {
             assert!(scan_size_from_value(&value).is_err());
         }
+    }
+
+    #[test]
+    fn sscanf_size_stops_scanning_and_pads_only_the_last_column() {
+        for (size, expected, expected_count, expected_next) in [
+            (vec![2, 1], vec![2.0, 3.0], 2, 4),
+            (vec![2, 2], vec![2.0, 3.0, 4.0, 5.0], 4, 8),
+        ] {
+            let scan = sscanf_scan("2 3 4 5 bad", "%f", Some(size.clone())).unwrap();
+            assert_eq!(scan.count, expected_count);
+            assert_eq!(scan.next_index, expected_next);
+            assert!(scan.errmsg.is_empty(), "unread input must not diagnose");
+            assert_eq!(
+                scan.value,
+                Value::Tensor(Tensor::new(expected, size).unwrap())
+            );
+        }
+
+        let partial = sscanf_scan("2 3 4", "%f", Some(vec![2, 2])).unwrap();
+        assert_eq!(partial.count, 3);
+        assert_eq!(partial.next_index, 6);
+        assert!(partial.errmsg.is_empty());
+        assert_eq!(
+            partial.value,
+            Value::Tensor(Tensor::new(vec![2.0, 3.0, 4.0, 0.0], vec![2, 2]).unwrap())
+        );
+        let short = sscanf_scan("2", "%f", Some(vec![2, 2])).unwrap();
+        assert_eq!(
+            short.value,
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap())
+        );
+        let failed_before_limit = sscanf_scan("2 x", "%f", Some(vec![2, 2])).unwrap();
+        assert_eq!(failed_before_limit.count, 1);
+        assert_eq!(failed_before_limit.next_index, 3);
+        assert!(!failed_before_limit.errmsg.is_empty());
+
+        let typed = sscanf_scan("7 8 9", "%ld", Some(vec![2, 2])).unwrap();
+        assert_eq!(typed.count, 3);
+        let Value::Tensor(typed) = typed.value else {
+            panic!("expected typed tensor");
+        };
+        assert_eq!(typed.shape(), &[2, 2]);
+        assert_eq!(
+            typed.integer_storage(),
+            Some(&IntegerStorage::I64(vec![7, 8, 9, 0]))
+        );
+
+        for (input, format) in [("skip 42", "%*s %f"), ("abc42", "%*3c%f")] {
+            let scan = sscanf_scan(input, format, Some(vec![1, 1])).unwrap();
+            assert_eq!(scan.count, 1);
+            assert_eq!(scan.next_index, input.chars().count() + 1);
+            assert!(scan.errmsg.is_empty());
+            assert_eq!(
+                scan.value,
+                Value::Tensor(Tensor::new(vec![42.0], vec![1, 1]).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn sscanf_character_fields_keep_character_class_and_field_limit() {
+        for (input, format, expected, next_index) in [
+            ("hello world", "%s", "hello", 6),
+            ("abcde", "%3c", "abc", 4),
+            ("abc", "%5c", "abc", 4),
+            ("skip done", "%*s %s", "done", 10),
+        ] {
+            let scan = sscanf_scan(input, format, Some(vec![1, 1])).unwrap();
+            assert_eq!(scan.value, Value::CharArray(CharArray::new_row(expected)));
+            assert_eq!(scan.count, expected.chars().count());
+            assert_eq!(scan.next_index, next_index);
+            assert!(scan.errmsg.is_empty());
+        }
+
+        for (text, format) in [("abcdef efgh", "%s"), ("abcdef", "%6c")] {
+            let matrix = sscanf_scan(text, format, Some(vec![2, 2])).unwrap();
+            assert_eq!(matrix.count, 4);
+            assert_eq!(matrix.next_index, 5, "{format}");
+            assert!(matrix.errmsg.is_empty());
+            assert_eq!(
+                matrix.value,
+                Value::CharArray(
+                    CharArray::from_column_major(vec!['a', 'b', 'c', 'd'], vec![2, 2]).unwrap()
+                )
+            );
+        }
+
+        let partial = sscanf_scan("abc", "%s", Some(vec![2, 2])).unwrap();
+        assert_eq!(partial.count, 3);
+        assert_eq!(
+            partial.value,
+            Value::CharArray(
+                CharArray::from_column_major(vec!['a', 'b', 'c', '\0'], vec![2, 2]).unwrap()
+            )
+        );
+
+        let mixed = sscanf_scan("7 ABZ", "%*d %s", Some(vec![2, 1])).unwrap();
+        assert_eq!(mixed.count, 2);
+        assert_eq!(mixed.next_index, 5);
+        assert_eq!(
+            mixed.value,
+            Value::Tensor(Tensor::new(vec![65.0, 66.0], vec![2, 1]).unwrap())
+        );
+        let mixed_direct = sscanf_scan("7 Z", "%d %c", None).unwrap();
+        assert_eq!(
+            mixed_direct.value,
+            Value::Tensor(Tensor::new(vec![7.0, 90.0], vec![2, 1]).unwrap())
+        );
     }
 
     #[test]
@@ -2312,6 +1913,23 @@ mod tests {
             .unwrap(),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap())
         );
+    }
+
+    #[test]
+    fn scanning_next_index_includes_consumed_prefix_on_partial_match() {
+        for (text, format, expected_count, expected_next) in [
+            ("1 2 x", "%f", 2, 5),
+            ("1 x", "%f %f", 1, 3),
+            ("é 7 x", "é %d %d", 1, 5),
+        ] {
+            let scan = sscanf_scan(text, format, None).unwrap();
+            assert_eq!(scan.count, expected_count, "{text}");
+            assert_eq!(scan.next_index, expected_next, "{text}");
+            assert!(!scan.errmsg.is_empty(), "{text}");
+        }
+        let complete = sscanf_scan("1 2 ", "%f", None).unwrap();
+        assert_eq!(complete.next_index, 5);
+        assert!(complete.errmsg.is_empty());
     }
 
     #[test]

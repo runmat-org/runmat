@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 8;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 9;
 
 /// Whether a callable is part of public builtin discovery or is an executable
 /// runtime fixture. Both audiences share one catalog and one binding registry.
@@ -79,16 +79,34 @@ pub enum BuiltinBindingAvailability {
     TargetConditional,
 }
 
+/// Whether an exact canonical binding may execute as invocation-owned work
+/// on a separate browser worker. This is executable catalog authority, not a
+/// promise inferred from purity, name, or a source-level call spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOwnedWorkerPolicy {
+    Forbidden,
+    PortableHostCpu,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinBindingDeclaration {
     pub variant: &'static str,
     pub availability: BuiltinBindingAvailability,
+    pub owned_worker: BuiltinOwnedWorkerPolicy,
 }
 
 pub const REQUIRED_DEFAULT_BINDING: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
     variant: "default",
     availability: BuiltinBindingAvailability::Required,
+    owned_worker: BuiltinOwnedWorkerPolicy::Forbidden,
 }];
+
+pub const REQUIRED_OWNED_HOST_CPU_BINDING: [BuiltinBindingDeclaration; 1] =
+    [BuiltinBindingDeclaration {
+        variant: "default",
+        availability: BuiltinBindingAvailability::Required,
+        owned_worker: BuiltinOwnedWorkerPolicy::PortableHostCpu,
+    }];
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltinCatalogEntry {

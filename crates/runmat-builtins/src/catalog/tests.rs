@@ -50,6 +50,7 @@ const PILOT_ID: BuiltinCatalogIdentity = BuiltinCatalogIdentity { name: "pilot" 
 const PILOT_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
     variant: "default",
     availability: BuiltinBindingAvailability::Required,
+    owned_worker: BuiltinOwnedWorkerPolicy::Forbidden,
 }];
 const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: crate::BuiltinCatalogAudience::Public,
@@ -85,6 +86,7 @@ const SECOND_ID: BuiltinCatalogIdentity = BuiltinCatalogIdentity { name: "second
 const SECOND_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
     variant: "default",
     availability: BuiltinBindingAvailability::Required,
+    owned_worker: BuiltinOwnedWorkerPolicy::Forbidden,
 }];
 const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: crate::BuiltinCatalogAudience::Public,
@@ -93,6 +95,23 @@ const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &SECOND_BINDINGS,
     ..PILOT
 };
+
+#[test]
+fn owned_host_cpu_admission_is_only_on_the_declared_qz_family() {
+    for name in ["qz", "ordqz", "ordeig"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("QZ canonical entry");
+        assert_eq!(
+            entry.bindings[0].owned_worker,
+            BuiltinOwnedWorkerPolicy::PortableHostCpu,
+            "{name}"
+        );
+    }
+    let schur = builtin_catalog_entry_by_name("schur").expect("ordinary Schur entry");
+    assert_eq!(
+        schur.bindings[0].owned_worker,
+        BuiltinOwnedWorkerPolicy::Forbidden
+    );
+}
 
 const FIXTURE_PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Fixture,

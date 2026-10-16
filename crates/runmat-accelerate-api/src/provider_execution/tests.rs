@@ -78,7 +78,9 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     .after_effect();
     assert!(!staged.is_unsupported());
     assert!(staged.source().unwrap().source().is_some());
-    assert!(!ProviderExecutionError::from_source(staged).is_unsupported());
+    let wrapped_staged = ProviderExecutionError::from_source(staged);
+    assert!(wrapped_staged.is_after_effect());
+    assert!(!wrapped_staged.is_unsupported());
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -93,6 +95,7 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
         assert!(wrapped
             .chain()
             .any(|source| source.is::<crate::UnsupportedProviderOperation>()));
+        assert!(ProviderExecutionError::from(wrapped).is_after_effect());
     }
 }
 
@@ -109,6 +112,10 @@ fn legacy_unknown_effect_does_not_replay_or_erase_actual_post_effect() {
     assert!(unknown
         .source()
         .is_some_and(|cause| cause.is::<crate::UnsupportedProviderOperation>()));
+    assert_eq!(
+        ProviderExecutionError::from_source(unknown).disposition,
+        FallbackDisposition::Unproven
+    );
 
     let actual = ProviderExecutionError::from(crate::unsupported_provider_operation(
         "failure after provider effect",

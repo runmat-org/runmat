@@ -3,7 +3,7 @@ use serde::Serialize;
 use crate::bytecode::fusion_stage::FusionStageStream;
 use crate::bytecode::{BytecodeSourceRef, FusionStageProjection};
 
-use super::fusion_stage_source_fingerprint;
+use super::{fusion_stage_source_fingerprint, SelectedFunctionLayoutIdentity};
 
 // Keep the pre-origin eight-argument algorithm spelled independently of the
 // production helper. In particular, do not serialize the projection as a
@@ -67,6 +67,16 @@ fn assert_history_and_extensions(
     let old_payload = historical_payload(projection, stream);
     let old_digest = digest(&old_payload);
     let mut expected_modern_payload = old_payload;
+    if let Some(layout) = &projection.selected_function_layout {
+        append_json(
+            &mut expected_modern_payload,
+            &"selected-mir-function-layout-v1",
+        );
+        append_json(
+            &mut expected_modern_payload,
+            &SelectedFunctionLayoutIdentity::from_layout(layout),
+        );
+    }
     append_json(
         &mut expected_modern_payload,
         &"selected-mir-fusion-stage-origin-v1",
@@ -94,11 +104,13 @@ fn assert_history_and_extensions(
     let mut legacy = projection.clone();
     legacy.selection_origin = None;
     legacy.private_temporary_slots.clear();
+    legacy.selected_function_layout = None;
     let expected_legacy = digest(&historical_payload(&legacy, stream));
     legacy.source_fingerprint = expected_legacy.clone();
     let wire = serde_json::to_value(&legacy).expect("legacy projection wire");
     assert!(wire.get("selection_origin").is_none());
     assert!(wire.get("private_temporary_slots").is_none());
+    assert!(wire.get("selected_function_layout").is_none());
     assert_eq!(expected_legacy, old_digest);
     assert_eq!(
         fusion_stage_source_fingerprint(&legacy, stream).unwrap(),
@@ -160,6 +172,7 @@ fn authentic_function_preserves_historical_payload_and_seals_private_inventory()
         .fusion_stage_projection
         .as_ref()
         .expect("selected function projection");
+    assert!(projection.selected_function_layout.is_some());
     assert_eq!(
         projection.selection_origin,
         Some(crate::bytecode::FusionStageSelectionOrigin::FunctionBody)
@@ -174,4 +187,28 @@ fn authentic_function_preserves_historical_payload_and_seals_private_inventory()
             var_count: body.var_count,
         },
     );
+    let mut reordered = (**projection).clone();
+    let layout = reordered
+        .selected_function_layout
+        .as_mut()
+        .expect("selected function layout");
+    let mut bindings = layout.binding_slots.drain().collect::<Vec<_>>();
+    bindings.sort_by_key(|(id, _)| *id);
+    layout.binding_slots.extend(bindings.into_iter().rev());
+    let mut locals = layout.mir_local_slots.drain().collect::<Vec<_>>();
+    locals.sort_by_key(|(id, _)| *id);
+    layout.mir_local_slots.extend(locals.into_iter().rev());
+    let stream = FusionStageStream {
+        instructions: &body.instructions,
+        catch_scopes: &body.catch_scopes,
+        resume_points: &body.resume_points,
+        source_id: body.source_id,
+        var_count: body.var_count,
+    };
+    assert_eq!(
+        fusion_stage_source_fingerprint(&reordered, &stream).unwrap(),
+        projection.source_fingerprint,
+        "equivalent hydrated map order must preserve the selected source seal"
+    );
+    assert!(reordered.validate(stream));
 }

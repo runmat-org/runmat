@@ -320,6 +320,8 @@ export type BrowserExecutionTopology = "coordinator" | "flat" | "serial";
 export interface BrowserExecutionHostCapabilities {
   topology: BrowserExecutionTopology;
   maxWorkers: number;
+  /** Exact owned builtin route; successful launch responses and cancelOwned acknowledgments certify task settlement. */
+  ownedBuiltinWork?: boolean;
 }
 
 export interface BrowserProgramLaunchRequest {
@@ -331,7 +333,12 @@ export interface BrowserProgramLaunchRequest {
 export interface RunMatExecutionHost {
   capabilities: BrowserExecutionHostCapabilities;
   launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
-  cancel(taskId: string): void;
+  cancel(taskId: string): void | Promise<void>;
+  /** Required when ownedBuiltinWork is true. Only this task-bound physical-exit acknowledgment releases retained work. */
+  cancelOwned?(taskId: string): Promise<{
+    taskId: string;
+    state: "terminated" | "notRunning";
+  }>;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -1288,6 +1295,9 @@ interface RunMatNativeModule {
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  executeWorkerProgram?: (
+    request: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1502,6 +1512,18 @@ export async function executeProgramArtifact(
     throw new Error("The loaded RunMat module does not support portable program execution.");
   }
   return native.executeProgramArtifact(request);
+}
+
+/** Execute a previously admitted worker request inside the worker realm. */
+export async function executeWorkerProgram(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<Record<string, unknown>> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.executeWorkerProgram !== "function") {
+    throw new Error("The loaded RunMat module does not support worker program execution.");
+  }
+  return native.executeWorkerProgram(request);
 }
 
 export async function fetchGitSnapshot(

@@ -76,10 +76,28 @@ impl Driver {
             self.transition_task(report.task_id, TaskState::Indeterminate)?;
             return Ok(());
         }
+        if let Some(contract) = &attempt.request.task.outputs.owned_work {
+            let invalid_failure = matches!(
+                &report.report,
+                AttemptReport::RuntimeFailed { failure } if failure.validate().is_err()
+            );
+            if invalid_failure || contract.validate_json_wire(&report.report).is_err() {
+                self.fail_attempt(
+                    &attempt,
+                    report.task_id,
+                    report.attempt_id,
+                    AttemptFailureKind::Rejected,
+                )?;
+                return Ok(());
+            }
+        }
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
-                if result.validate_for_portable_transport().is_err() {
+                if result
+                    .validate_for_portable_transport(&attempt.request.task)
+                    .is_err()
+                {
                     self.fail_attempt(
                         &attempt,
                         report.task_id,

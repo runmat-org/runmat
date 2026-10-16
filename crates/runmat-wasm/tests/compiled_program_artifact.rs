@@ -61,6 +61,7 @@ async fn request_for_source(
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("portable-executable-unit-v3"),

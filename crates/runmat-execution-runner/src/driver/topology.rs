@@ -164,16 +164,27 @@ impl Driver {
     }
 
     pub(super) fn submit(&mut self, submission: TaskSubmission) -> RunnerResult<()> {
+        submission.request.validate_executable().map_err(|error| {
+            RunnerError::Invalid(format!("task executable identity is invalid: {error}"))
+        })?;
         submission.request.resources.validate().map_err(|error| {
             RunnerError::Invalid(format!("task resource request is invalid: {error}"))
         })?;
         submission.request.host.validate().map_err(|error| {
             RunnerError::Invalid(format!("task host requirement is invalid: {error}"))
         })?;
+        let value_limits = match &submission.request.executable {
+            runmat_execution::TaskExecutableIdentity::ProgramArtifact(_) => {
+                runmat_execution::value::ValueLimits::default()
+            }
+            runmat_execution::TaskExecutableIdentity::OwnedBuiltin(_) => {
+                runmat_execution::OWNED_BUILTIN_VALUE_LIMITS
+            }
+        };
         for input in &submission.request.inputs {
             input
                 .validate_for_transport(
-                    runmat_execution::value::ValueLimits::default(),
+                    value_limits,
                     runmat_execution::value::ValueTransportContext::Portable,
                 )
                 .map_err(|error| {

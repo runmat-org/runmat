@@ -19,15 +19,12 @@ use super::ImageSourceInvocation;
 
 pub(super) struct ProjectedOutputProgram {
     pub program: ProviderImageOutputProgram,
-    #[cfg(test)]
     pub binary_steps: Vec<SelectedBinaryStep>,
-    #[cfg(test)]
     pub real_steps: Vec<SelectedRealStep>,
 }
 
 /// A nonserializable companion minted in the same source walk as the public
 /// hook request. The public Input/Mean/Sigma categories do not carry ValueIds.
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SelectedBinaryStep {
     pub output: ValueId,
@@ -40,7 +37,6 @@ pub(super) struct SelectedBinaryStep {
 /// The same graph walk also seals each scalar or cast's exact producer,
 /// control source, and catalog revision. Wire hook kinds alone have none of
 /// this authority.
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SelectedRealStep {
     pub output: ValueId,
@@ -114,9 +110,7 @@ impl ImageSourceInvocation {
         }
         let mut produced = HashSet::new();
         let mut calls = Vec::new();
-        #[cfg(test)]
         let mut binary_steps = Vec::new();
-        #[cfg(test)]
         let mut real_steps = Vec::new();
         let facts = self
             .facts
@@ -216,7 +210,6 @@ impl ImageSourceInvocation {
                 u64::try_from(*height).ok()?,
                 u64::try_from(*width).ok()?,
             ];
-            #[cfg(test)]
             if matches!(
                 hook,
                 ProviderImageOutputHook::ElemSub | ProviderImageOutputHook::ElemDiv
@@ -230,7 +223,6 @@ impl ImageSourceInvocation {
                     output_precision,
                 });
             }
-            #[cfg(test)]
             if matches!(
                 hook,
                 ProviderImageOutputHook::ScalarMul
@@ -259,12 +251,16 @@ impl ImageSourceInvocation {
             });
             produced.insert(step.output);
         }
+        // A typed output program needs a terminal checkpoint to validate,
+        // but the graph alone cannot name the selected VM store. This final
+        // marker is only a pre-publication projection: bind_publications
+        // replaces every marker with exact PC-ordered source stores before a
+        // production arithmetic proof or physical route can be minted.
+        calls.last_mut()?.checkpoint = true;
         let program = ProviderImageOutputProgram { calls };
         program.validate().then_some(ProjectedOutputProgram {
             program,
-            #[cfg(test)]
             binary_steps,
-            #[cfg(test)]
             real_steps,
         })
     }

@@ -386,6 +386,7 @@ mod tests {
             entrypoint: "helper".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable"),
@@ -643,6 +644,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             entrypoint: "fixture".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "compiled".into(),
             target: runmat_execution_artifact::ProgramTarget::native("host", native_target),

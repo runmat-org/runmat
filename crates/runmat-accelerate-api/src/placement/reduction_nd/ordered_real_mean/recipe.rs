@@ -37,6 +37,10 @@ pub struct ProviderOrderedRealMeanResources {
     pub limits: ProviderOrderedRealMeanLimits,
     pub steps: Vec<ProviderOrderedRealMeanStep>,
     pub incremental_peak_bytes: u64,
+    /// Exact submissions issued by this provider route. The current WGPU
+    /// implementation submits one encoder per ordered step; consumers must
+    /// use this issued count rather than infer a generic dispatch ratio.
+    pub queue_submissions: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,6 +86,9 @@ impl ProviderOrderedRealMeanRecipe {
     }
     pub fn requested_incremental_peak_bytes(&self) -> u64 {
         self.resources.incremental_peak_bytes
+    }
+    pub fn queue_submissions(&self) -> u32 {
+        self.resources.queue_submissions
     }
     pub fn source_facts(&self) -> &ProviderOrderedRealMeanSource {
         &self.source

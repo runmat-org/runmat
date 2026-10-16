@@ -177,6 +177,12 @@ impl WgpuProvider {
                     error.with_unproven_effects()
                 }
             })?;
+        if usize::try_from(plan.queue_submissions()).ok() != Some(completed_dispatches) {
+            return Err(ProviderExecutionError::from(anyhow::anyhow!(
+                "ordered mean submitted work differs from selected physical route"
+            ))
+            .after_effect());
+        }
         let observed_incremental_peak_bytes = outputs
             .iter()
             .map(|buffer| buffer.size())

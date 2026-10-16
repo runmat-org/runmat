@@ -18,7 +18,7 @@ paragraphs: &["Single output `d = eig(A)` returns the eigenvalues as an `n × 1`
 "Logical and typed-integer coefficient matrices are a named RunMat-only extension. Strict modes reject them before provider access; RunMat mode promotes them to double only after every integer coefficient passes an exact binary64-representability check.",
 "Single host and gpuArray inputs retain single output storage. Complex inputs remain complex throughout the factorisation.",
 "Empty and scalar matrices follow MATLAB’s shape conventions (`eig([])` returns `[]`, `eig(5)` returns `5`).",
-"When the BLAS/LAPACK feature is unavailable and `B` is singular, RunMat detects that the fallback path would need full QZ support and raises a clear error instead of returning a partial factorization.",
+"When the BLAS/LAPACK feature is unavailable and `B` is singular, the `eig(A,B)` fallback is not yet wired to the separate `qz(A,B)` implementation and raises an explicit error instead of returning a partial factorization.",
 "Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing defaults to on; true balancing remains an explicit numerical-compatibility gap in the current implementation.",
 "Explicit generalized `'chol'` and `'qz'` selectors and MATLAB's limited real-symmetric sparse eig form remain explicit implementation gaps rather than advertised completed behavior."] },
     BuiltinDocumentationSection { heading: "Acceleration and residency",

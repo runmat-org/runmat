@@ -11,7 +11,7 @@ use super::super::Bytecode;
 /// Fingerprint one already-reconciled executable group exactly once per VM
 /// installation. Per-group identities add the exact source-plan digest and
 /// ordinal to the executable-wide owner projection.
-pub(super) fn vm_fusion_semantic_identity(
+pub(crate) fn vm_fusion_semantic_identity(
     executable: Digest,
     group: &runmat_accelerate::FusionGroupPlan,
 ) -> Option<VmFusionSemanticIdentity> {
@@ -30,7 +30,7 @@ pub(super) fn vm_fusion_semantic_identity(
 /// `Instr` has a typed serde representation whose floating payloads use the
 /// canonical bit-preserving adapters; runtime `Value` payloads are not part of
 /// this stream.
-pub(super) fn vm_fusion_executable_identity(bytecode: &Bytecode) -> Option<Digest> {
+pub(crate) fn vm_fusion_executable_identity(bytecode: &Bytecode) -> Option<Digest> {
     let resume_points = bytecode.resume_points.iter().collect::<Vec<_>>();
     let stage_source = bytecode
         .fusion_metadata

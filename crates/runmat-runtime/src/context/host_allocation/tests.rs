@@ -96,6 +96,24 @@ fn ordinary_numeric_call_shares_one_ledger_and_transfers_retained_output() {
 }
 
 #[test]
+fn owned_cpu_work_retains_scratch_after_cancelled_caller_retires_receipt() {
+    let scratch = HostAllocationPlan::numeric_workspace_bytes(NumericDType::F64, 4).unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(scratch, 13);
+    let runtime = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let receipt =
+        HostAllocationReceipt::admit(Some(&runtime), HostAllocationPlan::new(scratch, 0).unwrap())
+            .unwrap()
+            .unwrap();
+    let retained = receipt.retain_scratch_for_cpu_work();
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, scratch);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn output_allocation_restores_control_cause_and_drops_unpublished_claim() {
     let output = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 2).unwrap();
     let plan = HostAllocationPlan::new(0, u64::try_from(output).unwrap()).unwrap();

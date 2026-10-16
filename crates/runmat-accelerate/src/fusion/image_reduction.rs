@@ -82,6 +82,7 @@ pub struct ImageMeanRoute {
 
 mod provider_plan;
 mod source_invocation;
+mod source_extension;
 mod source_moment_publications;
 mod source_output_hooks;
 mod source_program;
@@ -89,14 +90,14 @@ pub use provider_plan::{
     ImageMeanAndPowerSource, ImageMeanProviderCall, ImageMeanProviderHook, ImageMeanProviderPlan,
     ImageSourcePower,
 };
-#[cfg(test)]
+pub use source_extension::selected_group_with_publications;
 pub(crate) use source_invocation::{
     ImageSelectedBinaryCall, ImageSelectedBinaryCalls, ImageSelectedMomentBindings,
     ImageSelectedMomentConversion, ImageSelectedRealCall, ImageSelectedRealCalls,
     ImageSelectedSigmaOperations, ImageSelectedSigmaRaw,
 };
 pub use source_invocation::{
-    ImageSelectedPower, ImageSourceAdmissionFailure, ImageSourceInvocation,
+    ImageSelectedPower, ImageSourceAdmissionFailure, ImageSourceInvocation, ImageSourcePublication,
 };
 pub use source_program::{ImageSourceLeaf, ImageSourceStep, ImageSourceTranscript};
 

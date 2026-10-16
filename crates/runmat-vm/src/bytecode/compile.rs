@@ -82,6 +82,8 @@ fn compile_with_bound_analysis(
         stage_analysis,
     )?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
+    #[cfg(feature = "native-accel")]
+    function_registry.finalize_selected_image_views();
     let (mut var_names, initially_unassigned_slots) = c
         .layout
         .as_ref()
@@ -212,7 +214,7 @@ fn compile_with_bound_analysis(
             .map(std::sync::Arc::new);
     }
 
-    Ok(Bytecode {
+    let bytecode = Bytecode {
         active_function: entrypoint_target,
         active_class_method_owner: None,
         instructions: c.instructions,
@@ -231,6 +233,8 @@ fn compile_with_bound_analysis(
         layout: c.layout,
         #[cfg(feature = "native-accel")]
         function_private_layout: None,
+        #[cfg(feature = "native-accel")]
+        sealed_function_image: super::program::SealedFunctionImage::Unsealed,
         async_metadata,
         regions: Vec::new(),
         parfor_regions: Vec::new(),
@@ -243,7 +247,10 @@ fn compile_with_bound_analysis(
         fusion_groups,
         #[cfg(feature = "native-accel")]
         fusion_metadata,
-    })
+    };
+    #[cfg(feature = "native-accel")]
+    let _ = bytecode.sealed_selected_image_regions();
+    Ok(bytecode)
 }
 
 fn derive_semantic_async_metadata(
@@ -315,6 +322,7 @@ fn derive_semantic_fusion_metadata(
         instruction_window_count: 0,
         instruction_windows: Vec::new(),
         stage_projection: None,
+        selected_image: Default::default(),
     }
 }
 
@@ -798,9 +806,16 @@ fn compile_semantic_functions(
         compiler.compile()?;
         crate::bytecode::validate_sequence_register_flow(&compiler.instructions)
             .map_err(CompileError::new)?;
-        let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
-            CompileError::new(format!("missing VM layout for function {:?}", function.id))
-        })?;
+        // Compilation seals statement PCs and resume points into its own
+        // layout. The initial assembly layout predates those updates and
+        // cannot authenticate the emitted function stream.
+        let function_layout = compiler
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.functions.get(&function.id))
+            .ok_or_else(|| {
+                CompileError::new(format!("missing VM layout for function {:?}", function.id))
+            })?;
         let retained_callable_parent = mir
             .retained_callable_parent(function.id)
             .map_err(CompileError::new)?;

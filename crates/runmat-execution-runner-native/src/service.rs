@@ -406,11 +406,16 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     call.program.clone().into(),
                 ),
             };
-            let (callable, invocation_context, recipe, artifact, inputs) =
-                match materialize_call(&invocation, OutputContract { requested_outputs }) {
-                    Ok(parts) => parts,
-                    Err(error) => return Box::pin(async move { Err(error) }),
-                };
+            let (callable, invocation_context, recipe, artifact, inputs) = match materialize_call(
+                &invocation,
+                OutputContract {
+                    requested_outputs,
+                    owned_work: None,
+                },
+            ) {
+                Ok(parts) => parts,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
             let task_id = {
                 let mut state = self.state.lock().expect("native service poisoned");
                 let sequence = state.next_task;
@@ -424,7 +429,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 recipe,
                 artifact,
                 inputs,
-                outputs: OutputContract { requested_outputs },
+                outputs: OutputContract {
+                    requested_outputs,
+                    owned_work: None,
+                },
                 retry: runmat_execution::RetryPolicy::Never,
             }) {
                 Ok(completion) => completion,
@@ -563,7 +571,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
-            outputs: OutputContract { requested_outputs },
+            outputs: OutputContract {
+                requested_outputs,
+                owned_work: None,
+            },
         })
     }
 
@@ -700,7 +711,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let _ = self.prune_expired_graph_receipts();
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
-        let outputs = OutputContract { requested_outputs };
+        let outputs = OutputContract {
+            requested_outputs,
+            owned_work: None,
+        };
         if matches!(
             &call.program,
             runmat_runtime::execution::DeferredProgram::SelectedGraph(_)

@@ -96,6 +96,7 @@ fn fixture() -> (ImageSourceInvocation, ImageMeanAndPowerSource) {
                 RealPowerArithmeticMode::NativeSingle,
             ),
         ],
+        publications_bound: false,
     };
     (invocation, source)
 }

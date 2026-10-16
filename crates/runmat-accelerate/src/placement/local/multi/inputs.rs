@@ -53,9 +53,17 @@ pub(super) fn validate_set(
         ).with_identifier("RunMat:Placement:InvalidRequest").build()));
     }
     if physical.iter().any(|candidate| {
-        candidate.compound.is_some_and(|plan| {
-            candidate.physical_identity != Some(plan.identity())
-                || !plan.matches(provider, candidate.data_inputs)
+        candidate.authority.is_some_and(|authority| match authority {
+            super::PreparedPhysicalAuthority::Compound(plan) => {
+                candidate.physical_identity != Some(plan.identity())
+                    || !plan.matches(provider, candidate.data_inputs)
+            }
+            super::PreparedPhysicalAuthority::ImageStages(plan) => {
+                candidate.physical_identity != Some(plan.semantic_identity())
+                    || candidate.data_inputs.len() != 1
+                    || !matches!(candidate.data_inputs[0], Value::GpuTensor(handle) if handle.view_identity() == plan.input_view_identity())
+                    || !matches!(plan.matches_pre_effect_snapshot(provider), Ok(true))
+            }
         })
     }) {
         return Err(Box::new(

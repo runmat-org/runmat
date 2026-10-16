@@ -66,3 +66,11 @@ pub(super) const fn host_factor_entry(spec: FactorEntrySpec) -> BuiltinCatalogEn
     entry.placement.distributed = BuiltinDistributedPolicy::Unsupported;
     entry
 }
+
+/// Host-only factors whose exact, pure numeric implementation is admitted for
+/// an owned browser worker. No other factor inherits this capability.
+pub(super) const fn owned_host_cpu_factor_entry(spec: FactorEntrySpec) -> BuiltinCatalogEntry {
+    let mut entry = host_factor_entry(spec);
+    entry.bindings = &REQUIRED_OWNED_HOST_CPU_BINDING;
+    entry
+}

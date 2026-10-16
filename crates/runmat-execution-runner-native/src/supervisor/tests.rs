@@ -191,6 +191,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         entrypoint: "7".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v2"),
@@ -301,6 +302,7 @@ fn persisted_graph_failure_keeps_its_typed_workload_identity() {
         entrypoint: identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-graph-test"),

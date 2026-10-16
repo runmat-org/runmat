@@ -538,6 +538,7 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("source-projection-worker"),

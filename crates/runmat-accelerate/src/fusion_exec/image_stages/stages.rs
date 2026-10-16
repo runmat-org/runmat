@@ -296,6 +296,7 @@ impl ImageNormalizeStageSession {
 
     /// Stage three produces only the final resident [B,H,W] image. The live
     /// moment handles are protected from aliasing and never retired here.
+    #[cfg(test)]
     pub(crate) async fn output(&mut self) -> ProviderExecutionResult<ImageResult> {
         if self.program.output_program.is_some() || self.program.selected_powers.is_some() {
             return Err(anyhow!("selected outputs require checkpoint acknowledgement").into());

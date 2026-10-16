@@ -70,14 +70,13 @@ fn assert_selected_publication_identities(
         assert_eq!(entry.slot, actual.slot);
         assert_eq!(entry.mir_defs, actual.defs);
         assert_eq!(entry.statement, actual.stage.contract.point);
-        if !matches!(
-            entry.destination,
-            ImageStoreDestination::Checkpoint(ImageCheckpoint::Mu | ImageCheckpoint::Sigma)
-        ) {
+        if matches!(entry.destination, ImageStoreDestination::Intermediate) {
             assert_eq!(
                 entry.raw_stage_dependency, None,
-                "only moment checkpoints carry raw moment dependencies"
+                "compiler intermediates have no source-visible checkpoint dependency"
             );
+        } else {
+            assert!(entry.raw_stage_dependency.is_some());
         }
     }
 
@@ -180,6 +179,27 @@ fn assert_selected_publication_identities(
             region.pcs.clone()
         ));
     }
+    let final_public = checkpoints
+        .last()
+        .expect("selected final store")
+        .1
+        .public_output;
+    let selected_regions = bytecode
+        .selected_image_regions()
+        .expect("selected image region and output-cast source plan");
+    let selected_region = selected_regions
+        .regions
+        .iter()
+        .find(|selected| selected.publication.pcs() == joined.pcs())
+        .expect("same selected source publication region");
+    let selected_source =
+        ImageSourceTranscript::from_graph(&selected_regions.graph, &selected_region.plan.group)
+            .expect("exact extended image transcript");
+    assert_eq!(
+        selected_source.steps.last().map(|step| step.output),
+        Some(final_public),
+        "the physical plan ends at the actual final source cast, not raw POWER"
+    );
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

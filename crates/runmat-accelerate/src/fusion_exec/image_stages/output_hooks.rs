@@ -1,6 +1,5 @@
 //! Held checkpoint-at-a-time output execution. The VM must acknowledge each
-//! successful source store before another hook can run. No production proof
-//! currently opens this session.
+//! successful source store before another hook can run.
 
 use super::*;
 use runmat_accelerate_api::{ProviderImageOutputHook, ProviderImageOutputOperand};

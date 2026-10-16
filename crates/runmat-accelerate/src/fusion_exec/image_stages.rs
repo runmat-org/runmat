@@ -1,9 +1,6 @@
-//! Inactive resident stages for an image-normalization candidate with live moments.
-//!
-//! The selected MIR program, numerical equivalence, ordered VM stores, and
-//! staged cost are not certified here. No production constructor mints the
-//! arithmetic proof, so the existing final-only route remains the sole active
-//! image-normalization execution path.
+//! Resident image stages selected from an exact source transcript. The VM
+//! joins ordered stores; the physical owner admits the move-owned recipes.
+//! Whole-program cost remains unpriced until genuine observation exists.
 use crate::fusion::image_reduction::{
     ImageMeanAndPowerSource, ImageSelectedBinaryCalls, ImageSelectedMomentBindings,
     ImageSelectedRealCalls, ImageSelectedSigmaOperations, ImageSourceInvocation,
@@ -22,15 +19,32 @@ use runmat_runtime::builtins::common::gpu_helpers::{
 use runmat_value::Value;
 use std::collections::HashMap;
 
-/// A future selected-MIR and numerical owner must mint this only after proving
-/// the staged hook sequence equivalent for the exact request. Merely having
-/// the provider hooks or a pattern name is not such a proof.
-pub(crate) struct ImageArithmeticProof(());
+/// Request-local source arithmetic authority. The canonical resolver has
+/// bound every external leaf, the output programs retain the selected
+/// operator/control/binding identities, and coverage enumerates every graph
+/// operation in source order. Physical feasibility remains a separate gate.
+#[derive(Clone, Copy)]
+pub(crate) enum ImageArithmeticProof {
+    Selected {
+        semantic_identity: runmat_execution::Digest,
+    },
+    #[cfg(test)]
+    Fixture,
+}
+
+impl ImageArithmeticProof {
+    pub(crate) fn for_selected(invocation: &ImageSourceInvocation) -> Option<Self> {
+        (invocation.selected_publications_bound() && invocation.selected_stage_covers_source())
+            .then_some(Self::Selected {
+                semantic_identity: invocation.semantic_identity(),
+            })
+    }
+}
 
 #[cfg(test)]
 impl ImageArithmeticProof {
     fn fixture() -> Self {
-        Self(())
+        Self::Fixture
     }
 }
 
@@ -38,6 +52,7 @@ impl ImageArithmeticProof {
 pub(crate) struct ImageMean(pub GpuTensorHandle);
 #[derive(Debug)]
 pub(crate) struct ImageSigma(pub GpuTensorHandle);
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct ImageResult(pub GpuTensorHandle);
 
@@ -77,11 +92,17 @@ mod moment_publications;
 mod nd_resources;
 mod ordered_mean;
 mod output_hooks;
+mod placement;
 mod power;
+mod prepared;
+mod resources;
 mod selected_binary;
 mod selected_real_output;
 mod sigma_operations;
 mod stages;
+mod vm;
+pub(crate) use prepared::PreparedImageStages;
+pub use vm::{ImageVmCheckpoint, ImageVmPreparation, ImageVmStages};
 
 /// Owns only its own references. A VM-published moment is a separate retained
 /// handle and remains live if this session is abandoned at a later checkpoint.
@@ -111,6 +132,23 @@ struct ImageStageBeginRequest {
 }
 
 impl ImageNormalizeStageSession {
+    /// Physical requests from every selected provider recipe. No estimate is
+    /// returned for a legacy hook or a missing proposal. Existing input and
+    /// provider cache allocations are not falsely charged as fresh outputs.
+    fn selected_physical_upper_bound(&self) -> Option<resources::ImageStagePhysicalUpperBound> {
+        let mut bound = resources::ImageStagePhysicalUpperBound::default();
+        bound.combine(self.selected_mean_plans.as_ref()?.physical_upper_bound()?)?;
+        bound.combine(
+            self.selected_binary_plans
+                .as_ref()?
+                .physical_upper_bound()?,
+        )?;
+        bound.combine(self.selected_real_plans.as_ref()?.physical_upper_bound()?)?;
+        bound.combine(self.selected_power_plans.as_ref()?.physical_upper_bound()?)?;
+        Some(bound)
+    }
+
+    #[cfg(test)]
     pub(crate) fn begin(
         provider: &'static dyn AccelProvider,
         input: &GpuTensorHandle,
@@ -135,14 +173,27 @@ impl ImageNormalizeStageSession {
         )
     }
 
-    /// The selected output request remains held behind an arithmetic proof;
-    /// no production owner currently mints one or admits physical resources.
+    /// A selected source-bound output request enters only with its matching
+    /// arithmetic proof. The physical candidate is admitted separately.
     pub(crate) fn begin_selected(
         provider: &'static dyn AccelProvider,
         input: &GpuTensorHandle,
         invocation: &ImageSourceInvocation,
         proof: ImageArithmeticProof,
     ) -> ProviderExecutionResult<Option<Self>> {
+        let authorized = match proof {
+            ImageArithmeticProof::Selected { semantic_identity } => {
+                semantic_identity == invocation.semantic_identity()
+            }
+            #[cfg(test)]
+            ImageArithmeticProof::Fixture => true,
+        };
+        if !authorized {
+            return Ok(None);
+        }
+        if !invocation.selected_stage_covers_source() {
+            return Ok(None);
+        }
         let Some((desc, source)) = invocation.selected_staged_mean_power(input) else {
             return Ok(None);
         };
@@ -359,11 +410,12 @@ impl ImageNormalizeStageSession {
             program.selected_powers.as_ref(),
             selected_binary_plans.as_ref(),
             real_calls.as_ref(),
+            selected_power_plans.as_ref(),
         ) {
-            (Some(_), Some(binary), Some(calls)) => {
-                selected_real_output::plan(provider, calls, binary, &program)?
+            (Some(_), Some(binary), Some(calls), Some(powers)) => {
+                selected_real_output::plan(provider, calls, binary, powers, &program)?
             }
-            (None, _, None) => None,
+            (None, _, None, None) => None,
             _ => return Ok(None),
         };
         if program.selected_powers.is_some() && selected_real_plans.is_none() {

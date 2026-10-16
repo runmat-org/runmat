@@ -57,6 +57,10 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
     bytecode
         .validate_fusion_stage_projection()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    // A decoded artifact never transports a process-local selected descriptor.
+    // Rebuild it only after the canonical stream/projection validators pass.
+    #[cfg(feature = "native-accel")]
+    let _ = bytecode.sealed_selected_image_regions();
     Ok(bytecode)
 }
 
@@ -134,5 +138,7 @@ pub fn decode_interpreter_program_v2(
     registry
         .validate_fusion_scaffolds_for_artifact()
         .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+    #[cfg(feature = "native-accel")]
+    registry.finalize_selected_image_views();
     Ok(registry)
 }

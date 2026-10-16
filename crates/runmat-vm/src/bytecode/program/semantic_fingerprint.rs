@@ -4,6 +4,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(feature = "native-accel")]
+#[derive(serde::Serialize)]
+struct SelectedFunctionLayoutIdentity<'a> {
+    function: &'a runmat_hir::FunctionId,
+    parent: &'a Option<runmat_hir::FunctionId>,
+    display_name: &'a str,
+    source_role: &'a runmat_types::FunctionSourceRole,
+    private_owner_scope: &'a str,
+    frame_abi: &'a crate::layout::VmFrameAbi,
+    binding_slots: Vec<(&'a runmat_hir::BindingId, &'a crate::layout::VmSlotId)>,
+    mir_local_slots: Vec<(&'a runmat_mir::MirLocalId, &'a crate::layout::VmSlotId)>,
+    captures: &'a [crate::layout::VmCaptureSlot],
+    local_count: usize,
+    resume_points: Vec<(&'a runmat_types::ProgramPointId, &'a usize)>,
+}
+
+#[cfg(feature = "native-accel")]
+impl<'a> SelectedFunctionLayoutIdentity<'a> {
+    fn from_layout(layout: &'a crate::layout::VmFunctionLayout) -> Self {
+        let mut binding_slots = layout.binding_slots.iter().collect::<Vec<_>>();
+        binding_slots.sort_unstable_by_key(|(id, _)| **id);
+        let mut mir_local_slots = layout.mir_local_slots.iter().collect::<Vec<_>>();
+        mir_local_slots.sort_unstable_by_key(|(id, _)| **id);
+        Self {
+            function: &layout.function,
+            parent: &layout.parent,
+            display_name: &layout.display_name,
+            source_role: &layout.source_role,
+            private_owner_scope: &layout.private_owner_scope,
+            frame_abi: &layout.frame_abi,
+            binding_slots,
+            mir_local_slots,
+            captures: &layout.captures,
+            local_count: layout.local_count,
+            resume_points: layout.resume_points.iter().collect(),
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
 pub(crate) fn fusion_stage_source_fingerprint(
     projection: &crate::bytecode::FusionStageProjection,
     stream: &crate::bytecode::fusion_stage::FusionStageStream<'_>,
@@ -16,6 +55,7 @@ pub(crate) fn fusion_stage_source_fingerprint(
         mir_local_count,
         statements,
         private_temporary_slots,
+        selected_function_layout,
         source_fingerprint: _,
     } = projection;
     let mut payload = Vec::new();
@@ -37,6 +77,12 @@ pub(crate) fn fusion_stage_source_fingerprint(
     append!(&stream.resume_points.iter().collect::<Vec<_>>());
     append!(&stream.var_count);
     append!(&semantic_source_revision(stream.source_id));
+    // Entry streams retain their historical payload. Function layout maps
+    // cannot use HashMap iteration order as executable source identity.
+    if let Some(layout) = selected_function_layout {
+        append!("selected-mir-function-layout-v1");
+        append!(&SelectedFunctionLayoutIdentity::from_layout(layout));
+    }
     // Absence retains the exact pre-origin fingerprint for legacy artifacts;
     // only a compiler-minted origin can authorize new image proposals.
     if let Some(origin) = selection_origin {
@@ -235,6 +281,9 @@ pub(crate) fn local_bytecode_semantic_fingerprint(
         layout: _,
         #[cfg(feature = "native-accel")]
             function_private_layout: _,
+        // Derived process-local acceleration is not source identity.
+        #[cfg(feature = "native-accel")]
+            sealed_function_image: _,
         async_metadata,
         regions,
         parfor_regions,

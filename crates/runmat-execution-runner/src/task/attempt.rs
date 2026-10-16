@@ -28,6 +28,9 @@ impl AttemptRequest {
             ));
         }
         self.task
+            .validate_executable()
+            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        self.task
             .resources
             .validate()
             .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
@@ -63,20 +66,66 @@ pub enum AttemptSuccess {
 }
 
 impl AttemptSuccess {
-    pub fn validate_for_portable_transport(&self) -> crate::RunnerResult<()> {
+    pub fn validate_for_portable_transport(&self, task: &TaskRequest) -> crate::RunnerResult<()> {
         use runmat_execution::value::{ValueLimits, ValuePayload, ValueTransportContext};
+
+        let owned = matches!(
+            &task.executable,
+            runmat_execution::TaskExecutableIdentity::OwnedBuiltin(_)
+        );
+        let limits = if owned {
+            runmat_execution::OWNED_BUILTIN_VALUE_LIMITS
+        } else {
+            ValueLimits::default()
+        };
 
         match self {
             Self::Values {
                 outputs,
                 result_objects,
             } => {
+                if owned
+                    && (outputs.len() != usize::from(task.outputs.requested_outputs)
+                        || !result_objects.is_empty()
+                        || outputs
+                            .iter()
+                            .any(|value| !matches!(value, ValuePayload::Inline(_))))
+                {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin result differs from its self-contained output contract"
+                            .into(),
+                    ));
+                }
+                if owned {
+                    let contract = task.outputs.owned_work.as_ref().ok_or_else(|| {
+                        crate::RunnerError::Invalid(
+                            "owned builtin task lost its dense output contract".into(),
+                        )
+                    })?;
+                    contract
+                        .validate(task.outputs.requested_outputs)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    ValuePayload::validate_all(
+                        outputs,
+                        runmat_execution::OWNED_BUILTIN_VALUE_LIMITS,
+                    )
+                    .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    if !outputs
+                        .iter()
+                        .zip(&contract.dense)
+                        .all(|(output, contract)| contract.accepts(output))
+                    {
+                        return Err(crate::RunnerError::Invalid(
+                            "owned builtin result differs from its dense output contract".into(),
+                        ));
+                    }
+                    contract
+                        .validate_json_wire(self)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                }
                 for output in outputs {
                     output
-                        .validate_for_transport(
-                            ValueLimits::default(),
-                            ValueTransportContext::Portable,
-                        )
+                        .validate_for_transport(limits, ValueTransportContext::Portable)
                         .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
                 }
                 for reference in result_objects {
@@ -94,6 +143,11 @@ impl AttemptSuccess {
                 }
             }
             Self::Spmd { outputs } => {
+                if owned {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin cannot return an SPMD result".into(),
+                    ));
+                }
                 for output in outputs.iter().flatten() {
                     output
                         .validate_for_transport(ValueTransportContext::Portable)
@@ -101,6 +155,11 @@ impl AttemptSuccess {
                 }
             }
             Self::Graph { graph } => {
+                if owned {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin cannot return a graph result".into(),
+                    ));
+                }
                 let limits = ValueLimits::default();
                 if graph.nodes.len() as u64 > limits.max_nodes
                     || graph

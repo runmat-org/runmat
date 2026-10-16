@@ -183,7 +183,10 @@ pub async fn execute_deferred_program_in_context(
 ) -> Result<runmat_value::ValueSequence, ExecutionServiceError> {
     let requested_outputs = u16::try_from(call.invocation.requested_outputs())
         .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
-    let output_contract = OutputContract { requested_outputs };
+    let output_contract = OutputContract {
+        requested_outputs,
+        owned_work: None,
+    };
     let (callable, invocation_context, recipe, artifact, arguments) = materialize_deferred_call(
         &call,
         output_contract,
@@ -1021,6 +1024,7 @@ mod tests {
             entrypoint: "script".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable-script-test"),
@@ -1055,6 +1059,7 @@ mod tests {
             entrypoint: envelope.manifest.identity.entrypoint.clone(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("frozen-unit-test"),
@@ -1116,6 +1121,7 @@ mod tests {
             entrypoint: "script".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable-script-test"),
@@ -1270,6 +1276,7 @@ mod tests {
             entrypoint: "meshing_workload".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "meshing".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable-meshing-host-v2"),
@@ -1328,6 +1335,7 @@ mod tests {
             entrypoint: "accelerated".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("capability-test"),

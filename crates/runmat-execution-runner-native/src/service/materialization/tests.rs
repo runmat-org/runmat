@@ -99,6 +99,7 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
             scope_id,
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
         },
     )

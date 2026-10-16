@@ -22,7 +22,7 @@ use runmat_execution::{
 use runmat_value::Value;
 
 pub(crate) struct LocalPhysicalCandidate<'a> {
-    pub(crate) compound: Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
+    pub(crate) authority: Option<PreparedPhysicalAuthority<'a>>,
     /// Selection.identity() for a typed strategy. None preserves legacy
     /// single-candidate naming and feedback identity.
     pub(crate) physical_identity: Option<Digest>,
@@ -47,6 +47,54 @@ pub(crate) struct LocalPhysicalCandidate<'a> {
     pub(crate) required_upload_bytes: Option<u64>,
     pub(crate) required_download_bytes: u64,
     pub(crate) downstream_materialization: bool,
+}
+
+/// Resource and route facts are borrowed from the same prepared body that
+/// will execute. Neither kind can be reconstructed from a detached byte sum.
+#[derive(Clone, Copy)]
+pub(crate) enum PreparedPhysicalAuthority<'a> {
+    Compound(&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound),
+    ImageStages(&'a crate::fusion_exec::image_stages::PreparedImageStages),
+}
+
+impl PreparedPhysicalAuthority<'_> {
+    fn resources(self) -> CandidateResourceDemand {
+        match self {
+            Self::Compound(plan) => plan.resources(),
+            Self::ImageStages(plan) => plan.resource_demand(),
+        }
+    }
+
+    fn output_residency(self, device_id: u32) -> CandidateOutputResidency {
+        match self {
+            Self::Compound(plan) => plan.output_residency(),
+            Self::ImageStages(_) => CandidateOutputResidency::Provider { device_id },
+        }
+    }
+
+    fn resources_with_observation(
+        self,
+        observation: Option<runmat_accelerate_api::observation::ProviderObservationOverhead>,
+    ) -> Result<CandidateResourceDemand, Box<runmat_runtime::RuntimeError>> {
+        match self {
+            Self::Compound(plan) => plan
+                .resources_with_observation(observation)
+                .map_err(Box::new),
+            Self::ImageStages(plan) => Ok(plan.resource_demand()),
+        }
+    }
+
+    fn observation_capability(
+        self,
+        provider: &dyn AccelProvider,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        match self {
+            Self::Compound(plan) => plan.observation_capability(provider),
+            Self::ImageStages(_) => {
+                runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
+            }
+        }
+    }
 }
 
 pub(crate) enum LocalCpuAdmission {
@@ -248,8 +296,11 @@ pub(super) fn plan_local_multi_with_provider(
                     "selected_shader_requirements_unavailable",
                 )
             }
-            _ if candidate.compound.is_some() => {
-                let resources = candidate.compound.unwrap().resources();
+            _ if candidate.authority.is_some() => {
+                let resources = candidate
+                    .authority
+                    .expect("checked prepared authority")
+                    .resources();
                 ProviderFeasibility::Supported {
                     estimate: runmat_accelerate_api::ProviderResourceEstimate {
                         transient_bytes: resources.peak_live.map(|peak| peak.peak_bytes),
@@ -289,9 +340,9 @@ pub(super) fn plan_local_multi_with_provider(
             observation: candidate.preparation_program.filter(|_| compare_profitability)
                 .and(runtime)
                 .and_then(|runtime| runtime.service_ports().placement())
-                .and_then(|_| match candidate.compound.map_or_else(
+                .and_then(|_| match candidate.authority.map_or_else(
                     || provider.operation_observation_capability(&query),
-                    |plan| plan.observation_capability(provider)) {
+                    |authority| authority.observation_capability(provider)) {
                     runmat_accelerate_api::observation::ProviderObservationCapability::Supported(overhead) =>
                         Some(overhead),
                     runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => None,
@@ -322,7 +373,7 @@ pub(super) fn plan_local_multi_with_provider(
         // that complete scoped quote, whole-work policy receives true absence
         // and may use only its existing exact-route observations/learning.
         let cost = candidate
-            .compound
+            .authority
             .is_none()
             .then(|| provider.estimate_cost(&cost_query))
             .flatten()
@@ -351,8 +402,8 @@ pub(super) fn plan_local_multi_with_provider(
             preparation,
             cost,
             output_residency: candidate
-                .compound
-                .map(|plan| plan.output_residency())
+                .authority
+                .map(|authority| authority.output_residency(provider.device_id()))
                 .unwrap_or(CandidateOutputResidency::Provider {
                     device_id: provider.device_id(),
                 }),
@@ -419,11 +470,14 @@ pub(super) fn plan_local_multi_with_provider(
             .transpose()?;
         admitted.push(Admitted {
             exact_resources: candidate
-                .compound
-                .map(|plan| plan.resources_with_observation(cost_query.context.observation))
-                .transpose()
-                .map_err(Box::new)?,
-            exact_residency: candidate.compound.map(|plan| plan.output_residency()),
+                .authority
+                .map(|authority| {
+                    authority.resources_with_observation(cost_query.context.observation)
+                })
+                .transpose()?,
+            exact_residency: candidate
+                .authority
+                .map(|authority| authority.output_residency(provider.device_id())),
             original_index,
             descriptor,
             identity,
@@ -437,7 +491,7 @@ pub(super) fn plan_local_multi_with_provider(
         });
     }
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
-    if admitted.is_empty() && cpu.route.cost.estimate().is_some() {
+    if admitted.is_empty() {
         if cpu_resources.is_none() {
             // A VM-owned fusion window can decline this optimization and run
             // its original instructions. That is not a host candidate for
@@ -457,6 +511,15 @@ pub(super) fn plan_local_multi_with_provider(
             return Err(Box::new(
                 runmat_runtime::build_runtime_error(
                     "typed provider candidates rejected and no executable host route exists",
+                )
+                .with_identifier("RunMat:Placement:NoLegalCandidate")
+                .build(),
+            ));
+        }
+        if cpu.route.cost.estimate().is_none() {
+            return Err(Box::new(
+                runmat_runtime::build_runtime_error(
+                    "provider candidates rejected and the host route has no cost evidence",
                 )
                 .with_identifier("RunMat:Placement:NoLegalCandidate")
                 .build(),
@@ -522,6 +585,7 @@ pub(super) fn plan_local_multi_with_provider(
         observation_contract,
         prepared_authority,
         vm_right,
+        vm_decline,
         cpu,
         cpu_resources,
         cpu_cost,

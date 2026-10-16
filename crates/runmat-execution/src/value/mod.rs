@@ -234,7 +234,7 @@ pub struct SparseValue {
     pub little_endian_data: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum ElementType {
@@ -262,7 +262,7 @@ pub enum ElementType {
 }
 
 impl ElementType {
-    const fn byte_width(self) -> u64 {
+    pub const fn byte_width(self) -> u64 {
         match self {
             Self::Logical | Self::I8 | Self::U8 => 1,
             Self::I16 | Self::U16 => 2,

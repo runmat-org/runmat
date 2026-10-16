@@ -175,9 +175,7 @@ impl WgpuProvider {
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?
             .buffer
             .size();
-        let selected_submissions = u32::try_from(plan.steps().len()).map_err(|error| {
-            ProviderExecutionError::from(anyhow::Error::from(error)).after_effect()
-        })?;
+        let selected_submissions = plan.queue_submissions();
         Ok(ProviderExecutedOrderedRealMean {
             output: result,
             requested_incremental_peak_bytes: plan.requested_incremental_peak_bytes(),

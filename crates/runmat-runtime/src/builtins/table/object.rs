@@ -8,6 +8,7 @@ mod selectors;
 mod structure;
 
 pub use analytics::sortrows_table;
+#[cfg(feature = "plot-core")]
 pub(crate) use analytics::{aggregate_heatmap_table, HeatmapAggregation};
 pub(crate) use structure::table_replace_variables_like_owned;
 pub use structure::{

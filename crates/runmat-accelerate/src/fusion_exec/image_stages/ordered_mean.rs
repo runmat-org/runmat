@@ -31,6 +31,46 @@ pub(super) struct ImageOrderedMeanPlans {
 }
 
 impl ImageOrderedMeanPlans {
+    pub(super) fn physical_upper_bound(
+        &self,
+    ) -> Option<super::resources::ImageStagePhysicalUpperBound> {
+        let mut bound = super::resources::ImageStagePhysicalUpperBound::default();
+        for call in self.mu.iter().chain(&self.variance) {
+            bound.add(
+                call.recipe.requested_incremental_peak_bytes(),
+                u32::try_from(call.recipe.steps().len()).ok()?,
+            )?;
+            for cast in &call.casts {
+                // The cast feasibility peak includes its already-live input.
+                // This aggregate charges only the additional allocation and
+                // uniforms; the selected source remains live throughout.
+                bound.add(
+                    cast.resources
+                        .transient_bytes?
+                        .checked_sub(cast.source_bytes)?,
+                    cast.resources.dispatches?,
+                )?;
+            }
+        }
+        let sigma = self.sigma.as_ref()?;
+        let (add, sqrt) = sigma.operations.as_ref()?.proposals();
+        for proposal in [add, sqrt] {
+            bound.add(
+                proposal.requested_incremental_peak_bytes()?,
+                proposal.dispatches,
+            )?;
+        }
+        for cast in &sigma.casts {
+            bound.add(
+                cast.resources
+                    .transient_bytes?
+                    .checked_sub(cast.source_bytes)?,
+                cast.resources.dispatches?,
+            )?;
+        }
+        Some(bound)
+    }
+
     pub(super) fn public_mean_carrier(&self) -> Option<(ProviderRepresentation, u64)> {
         self.mu.last().and_then(sigma::final_representation)
     }

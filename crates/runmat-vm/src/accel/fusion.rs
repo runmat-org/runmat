@@ -514,7 +514,9 @@ pub fn write_elementwise_materialized_stores(
     Ok(())
 }
 
-fn fusion_execution_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+pub(crate) fn fusion_execution_error(
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> RuntimeError {
     let fallback = mex("FusionExecutionFailed", &error.to_string());
     runmat_runtime::runtime_error::with_provider_execution_source(fallback, error)
 }

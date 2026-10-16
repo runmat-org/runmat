@@ -174,6 +174,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             )
         })?;
     session.install_execution_services(execution_service.clone());
+    if execution_service.has_owned_cpu_worker() {
+        session.install_owned_builtin_work_service(execution_service.clone());
+    }
 
     let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
         #[cfg(target_arch = "wasm32")]

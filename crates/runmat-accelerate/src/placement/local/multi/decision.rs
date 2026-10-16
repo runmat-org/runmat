@@ -13,6 +13,7 @@ pub(super) struct DecisionRequest<'a> {
     pub(super) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(super) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
+    pub(super) vm_decline: Option<&'a runmat_runtime::context::VmFusionDeclineRight>,
     pub(super) cpu: LocalCpuCandidate,
     pub(super) cpu_resources: Option<CandidateResourceDemand>,
     pub(super) cpu_cost: runmat_execution::CandidateCostEvidence,
@@ -54,6 +55,7 @@ pub(super) fn select_decision(
         observation_contract,
         prepared_authority,
         vm_right,
+        vm_decline: _,
         cpu,
         cpu_resources,
         cpu_cost,

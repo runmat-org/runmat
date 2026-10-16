@@ -183,7 +183,7 @@ impl BytecodeCollectiveOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EmitLabel {
     Ans,
     Var(usize),
@@ -236,7 +236,7 @@ pub struct BytecodeClassMethod {
     pub access: runmat_types::MemberAccess,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(#[serde(with = "runmat_types::serde_f64")] f64),

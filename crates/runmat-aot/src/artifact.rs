@@ -346,6 +346,7 @@ mod tests {
             entrypoint: function.0.to_string(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "native".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("unbound"),

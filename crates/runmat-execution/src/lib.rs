@@ -73,8 +73,12 @@ pub use placement::{
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};
 pub use task::{
-    ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
-    ParallelTaskGraph, ProgramCallFrame, ProgramCallable, ProgramDetachedDiagnosticSource,
-    ProgramExecutionAssignment, ProgramInvocationContext, ProgramRuntimeFailure, ProgramSourceSpan,
-    RetryPolicy,
+    OwnedBuiltinBinding, OwnedBuiltinDenseOutputContract, OwnedBuiltinResponseContract,
+    OwnedBuiltinWorkRequest, OwnedBuiltinWorkResponse, ParallelChunk, ParallelRandomStream,
+    ParallelRandomnessContext, ParallelTaskContext, ParallelTaskGraph, ProgramCallFrame,
+    ProgramCallable, ProgramDetachedDiagnosticSource, ProgramExecutionAssignment,
+    ProgramInvocationContext, ProgramRuntimeFailure, ProgramSourceSpan, RetryPolicy,
+    TaskExecutableIdentity, OWNED_BUILTIN_FAILURE_WIRE_BYTES,
+    OWNED_BUILTIN_MAX_RESPONSE_WIRE_BYTES, OWNED_BUILTIN_VALUE_LIMITS,
+    OWNED_BUILTIN_WORK_SCHEMA_VERSION,
 };

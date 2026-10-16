@@ -57,8 +57,8 @@ mod outputs;
 mod elementwise;
 mod explained_input;
 mod explained_output;
-#[cfg(test)]
-mod image_stages;
+pub(crate) mod image_stages;
+pub use image_stages::{ImageVmCheckpoint, ImageVmPreparation, ImageVmStages};
 #[cfg(test)]
 mod ownership_tests;
 pub use elementwise::{

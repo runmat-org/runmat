@@ -31,6 +31,66 @@ pub struct CpuCooperationBudget {
 }
 
 impl CpuCooperationBudget {
+    /// The host-composed native driver retains `retained` until an indivisible
+    /// CPU kernel physically completes. Cancellation stops this await, not
+    /// the library kernel or its managed reservation.
+    pub async fn run_owned_blocking<T, G, F>(
+        &self,
+        service: Option<&dyn super::blocking_cpu::RuntimeBlockingCpuService>,
+        retained: G,
+        work: F,
+    ) -> Result<T, ExecutionServiceError>
+    where
+        T: Send + 'static,
+        G: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let service = service.ok_or_else(|| {
+                ExecutionServiceError::Infrastructure(
+                    "owned blocking CPU service was not installed by this host".into(),
+                )
+            })?;
+            if self.cancellation.is_cancelled() {
+                return Err(ExecutionServiceError::Cancelled);
+            }
+            let (send, receive) = futures::channel::oneshot::channel();
+            let cancellation = self.cancellation.clone();
+            let job = Box::new(move || {
+                let _retained = retained;
+                let result = if cancellation.is_cancelled() {
+                    Err(ExecutionServiceError::Cancelled)
+                } else {
+                    Ok(work())
+                };
+                let _ = send.send(result);
+            });
+            self.await_cancellable(service.submit(job)).await??;
+            return self.await_cancellable(receive).await?.map_err(|_| {
+                ExecutionServiceError::WorkerLost(
+                    "owned blocking CPU worker ended before publication".into(),
+                )
+            })?;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Portable same-thread math remains available, but this is not
+            // a claim of mid-kernel yielding until browser worker transport
+            // can retain the same invocation resource owner.
+            let _ = service;
+            if self.cancellation.is_cancelled() {
+                return Err(ExecutionServiceError::Cancelled);
+            }
+            let _retained = retained;
+            let result = work();
+            if self.cancellation.is_cancelled() {
+                return Err(ExecutionServiceError::Cancelled);
+            }
+            Ok(result)
+        }
+    }
+
     /// Await an invocation-owned operation, dropping it when cancellation
     /// wins. This is an execution boundary, not a second scheduling policy.
     pub async fn await_cancellable<F: std::future::Future>(

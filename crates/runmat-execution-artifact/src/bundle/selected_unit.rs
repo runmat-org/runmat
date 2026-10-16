@@ -89,6 +89,7 @@ impl ExecutionBundle {
             entrypoint: unit.manifest.identity.entrypoint.clone(),
             outputs: OutputContract {
                 requested_outputs: 0,
+                owned_work: None,
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("selected-unit-foreign-receipt"),

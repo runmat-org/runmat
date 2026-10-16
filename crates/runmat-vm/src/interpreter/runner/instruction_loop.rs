@@ -15,6 +15,9 @@ mod fusion_publish;
 use fusion_publish::{after_global_store, after_local_fallback_store, after_local_store};
 #[cfg(feature = "native-accel")]
 use fusion_publish::{publish_fusion_stores, FusionPublicationFrame};
+#[cfg(feature = "native-accel")]
+#[path = "instruction_loop/image_stages.rs"]
+mod image_stages;
 
 pub(super) type InstructionLoopResult = Result<(), RuntimeError>;
 
@@ -49,6 +52,8 @@ pub(super) struct InstructionLoopContext<'a> {
     pub(super) fusion_plan: &'a Option<runmat_accelerate::FusionPlanRef>,
     #[cfg(feature = "native-accel")]
     pub(super) fusion_installation: &'a Option<crate::bytecode::program::VmFusionPlanInstallation>,
+    #[cfg(feature = "native-accel")]
+    pub(super) image_installation: &'a Option<crate::bytecode::program::VmImagePlanInstallation>,
     #[cfg(feature = "native-accel")]
     pub(super) fusion_observations:
         &'a mut crate::interpreter::fusion_observation::FusionRegionObservations,
@@ -190,6 +195,8 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         #[cfg(feature = "native-accel")]
         fusion_installation,
         #[cfg(feature = "native-accel")]
+        image_installation,
+        #[cfg(feature = "native-accel")]
         fusion_observations,
         #[cfg(all(
             test,
@@ -232,6 +239,46 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             .copied()
             .flatten()
             .and_then(|scope| catch_exceptions.get(&scope).cloned());
+        #[cfg(feature = "native-accel")]
+        if let Some(installation) = image_installation.as_ref() {
+            let image_result = image_stages::execute(
+                installation,
+                *pc,
+                image_stages::ImageStageFrame {
+                    vars: &mut *vars,
+                    context: &mut *context,
+                    var_names: &bytecode.var_names,
+                    completion_assigned_slots,
+                    global_aliases,
+                    persistent_aliases: &*persistent_aliases,
+                    current_function_name,
+                    missing_input_slots,
+                },
+            )
+            .await;
+            match image_result {
+                Ok(image_stages::ImageStageOutcome::Declined) => {}
+                Ok(image_stages::ImageStageOutcome::Executed { next_pc }) => {
+                    *pc = next_pc;
+                    continue;
+                }
+                Err(error) => {
+                    fusion_observations.abort();
+                    sequence_register.clear(&mut *stack);
+                    match interp_dispatch::redirect_exception_to_catch(
+                        error,
+                        &mut *try_stack,
+                        &mut *vars,
+                        &mut *last_exception,
+                        &mut *pc,
+                        refresh_workspace_state,
+                    ) {
+                        interp_dispatch::ExceptionHandling::Caught => continue,
+                        interp_dispatch::ExceptionHandling::Uncaught(error) => return Err(*error),
+                    }
+                }
+            }
+        }
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) = (
             fusion_plan

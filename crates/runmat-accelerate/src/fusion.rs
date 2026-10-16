@@ -1258,8 +1258,14 @@ impl FusionGroupPlan {
                             continue;
                         }
                     }
-                    // Do not short-circuit on the reduction_data itself; expand through its producers first.
-                    if original_inputs.contains(&cur) && cur != data_vid {
+                    // An external reduction-data value was computed before
+                    // this group's entry. Its source operands may already
+                    // have been consumed by the VM; only the materialized
+                    // value has an entry-stack certificate. Traverse a data
+                    // producer only when it is retained inside this group.
+                    if original_inputs.contains(&cur)
+                        && (cur != data_vid || !prod.contains_key(&cur))
+                    {
                         if !deps.contains(&cur) {
                             deps.push(cur);
                         }
@@ -3924,6 +3930,9 @@ mod tests {
     use runmat_builtins::Type;
     use runmat_value::{IntValue, Value};
     use std::collections::HashMap as StdHashMap;
+
+    #[path = "reduction_entry_leaves.rs"]
+    mod reduction_entry_leaves;
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

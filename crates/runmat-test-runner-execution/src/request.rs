@@ -22,7 +22,10 @@ pub(crate) fn task<S>(
             id: session.task_id(request.test_id.as_str(), request.attempt),
             scope_id: session.scope_id,
             pool_id: session.pool_id,
-            program_artifact_id: ArtifactId::derive(&[b"runmat-test-plan-v1", &revision]),
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                ArtifactId::derive(&[b"runmat-test-plan-v1", &revision]),
+            ),
             callable: Callable::for_program(
                 "runmat.test",
                 &runmat_execution::ProgramCallable::semantic(
@@ -35,6 +38,7 @@ pub(crate) fn task<S>(
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: config.attempt_resources.clone(),
             retry: RetryPolicy::Never,

@@ -446,7 +446,10 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
-            outputs: OutputContract { requested_outputs },
+            outputs: OutputContract {
+                requested_outputs,
+                owned_work: None,
+            },
         })
     }
 

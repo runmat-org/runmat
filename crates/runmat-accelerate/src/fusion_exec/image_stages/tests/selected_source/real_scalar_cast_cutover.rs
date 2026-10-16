@@ -28,6 +28,7 @@ async fn selected_program_rejects_interleaved_unplanned_binary_before_effects() 
         provider,
         &source,
         session.selected_binary_plans.as_ref().unwrap(),
+        session.selected_power_plans.as_ref().unwrap(),
         &changed,
     )
     .unwrap()

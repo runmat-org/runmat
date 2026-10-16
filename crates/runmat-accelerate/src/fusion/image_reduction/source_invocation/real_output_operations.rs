@@ -5,7 +5,9 @@ use super::*;
 use runmat_accelerate_api::{
     scalar_program::ScalarLiteral, ProviderImageOutputHook, ProviderRealElementwiseOperation,
 };
-use runmat_builtins::{BuiltinBindingIdentity, MAX_CATALOG_ENTRY};
+#[cfg(test)]
+use runmat_builtins::BuiltinBindingIdentity;
+use runmat_builtins::MAX_CATALOG_ENTRY;
 
 use super::binary_operations::CanonicalRealValue;
 
@@ -13,7 +15,9 @@ use super::binary_operations::CanonicalRealValue;
 pub(crate) struct ImageSelectedRealCall {
     output: u64,
     input: u64,
+    #[cfg(test)]
     control_source: Option<u64>,
+    #[cfg(test)]
     binding: Option<BuiltinBindingIdentity>,
     hook: ProviderImageOutputHook,
     operation: ProviderRealElementwiseOperation,
@@ -25,7 +29,7 @@ pub(crate) struct ImageSelectedRealCall {
 #[derive(Clone, Debug)]
 pub(crate) struct ImageSelectedRealCalls {
     semantic_identity: Digest,
-    calls: [ImageSelectedRealCall; 5],
+    calls: Vec<ImageSelectedRealCall>,
 }
 
 fn typed_scalar(operand: ProviderImageOutputOperand) -> Option<ScalarLiteral> {
@@ -162,7 +166,9 @@ fn source_call(
     Some(ImageSelectedRealCall {
         output: u64::from(step.output),
         input: u64::from(input),
+        #[cfg(test)]
         control_source,
+        #[cfg(test)]
         binding: step.binding,
         hook: step.hook,
         operation,
@@ -177,27 +183,26 @@ impl ImageSourceInvocation {
         let stage = self.selected_stage.as_ref()?;
         let binary = self.selected_binary_calls()?;
         let program = self.output_program.as_ref()?;
-        let calls: [ImageSelectedRealCall; 5] = stage
+        let calls: Vec<ImageSelectedRealCall> = stage
             .output_real
             .iter()
             .map(|step| source_call(self, step))
-            .collect::<Option<Vec<_>>>()?
-            .try_into()
-            .ok()?;
-        if calls.each_ref().map(ImageSelectedRealCall::hook)
-            != [
-                ProviderImageOutputHook::ScalarMul,
-                ProviderImageOutputHook::ScalarAdd,
-                ProviderImageOutputHook::CastSingle,
-                ProviderImageOutputHook::ScalarMax,
-                ProviderImageOutputHook::CastSingle,
-            ]
-            || calls[0].input != binary.output_div().output()
-            || calls[1..]
-                .iter()
-                .zip(&calls[..4])
-                .any(|(current, previous)| current.input != previous.output)
-        {
+            .collect::<Option<Vec<_>>>()?;
+        let final_power = self
+            .requested_staged_workload()?
+            .selected_powers
+            .as_ref()?
+            .final_power
+            .clone();
+        if calls.first().is_some_and(|first| {
+            first.input != binary.output_div().output()
+                && !(u64::from(final_power.base) == binary.output_div().output()
+                    && first.input == u64::from(final_power.output))
+        }) || calls.windows(2).any(|pair| {
+            pair[1].input != pair[0].output
+                && !(pair[0].output == u64::from(final_power.base)
+                    && pair[1].input == u64::from(final_power.output))
+        }) {
             return None;
         }
         let wire = program
@@ -253,6 +258,7 @@ impl ImageSourceInvocation {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn with_real_source_input_for_test(
         &self,
         output: ValueId,
@@ -269,6 +275,7 @@ impl ImageSourceInvocation {
         changed
     }
 
+    #[cfg(test)]
     pub(crate) fn with_real_source_binding_for_test(
         &self,
         output: ValueId,
@@ -285,6 +292,7 @@ impl ImageSourceInvocation {
         changed
     }
 
+    #[cfg(test)]
     pub(crate) fn with_real_wire_control_for_test(
         &self,
         output: u64,
@@ -311,9 +319,11 @@ impl ImageSelectedRealCall {
     pub(crate) fn input(&self) -> u64 {
         self.input
     }
+    #[cfg(test)]
     pub(crate) fn control_source(&self) -> Option<u64> {
         self.control_source
     }
+    #[cfg(test)]
     pub(crate) fn binding(&self) -> Option<BuiltinBindingIdentity> {
         self.binding
     }
@@ -338,7 +348,7 @@ impl ImageSelectedRealCalls {
     pub(crate) fn semantic_identity(&self) -> Digest {
         self.semantic_identity
     }
-    pub(crate) fn calls(&self) -> &[ImageSelectedRealCall; 5] {
+    pub(crate) fn calls(&self) -> &[ImageSelectedRealCall] {
         &self.calls
     }
 }
