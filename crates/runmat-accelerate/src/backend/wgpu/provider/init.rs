@@ -527,6 +527,7 @@ impl WgpuProvider {
             element_size,
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             validated_fusion_cache: Mutex::new(HashMap::new()),
+            warmed_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
             bind_group_layout_tags: Mutex::new(HashMap::new()),
             bind_group_cache,

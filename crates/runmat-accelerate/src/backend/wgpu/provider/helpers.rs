@@ -341,43 +341,71 @@ impl WgpuProvider {
             self.precision,
             self.access.enabled_features(),
             |bytes, tag, wg| self.compute_pipeline_hash_bytes(bytes, tag, wg),
-            |key, tag, src, _bytes, _wg| {
+            |key, tag, src, _bytes, workgroup| {
                 // Build under the device's exclusive validation scopes, but
                 // resolve their detached receipt only after releasing access.
                 // Never publish an invalid driver object into the shared cache.
                 let receipt =
                     self.access
                         .with_profiled_scoped(&self.emission_authority, |emission| {
-                            let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-                                emission, tag,
-                            )?;
+                            let bgl =
+                                Arc::new(crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
+                                    emission, tag,
+                                )?);
                             let pl =
                                 crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
                                     emission,
                                     "warmup-pipeline-layout",
-                                    &bgl,
+                                    bgl.as_ref(),
                                 );
                             let module = crate::backend::wgpu::pipelines::create_shader_module(
                                 emission,
                                 "warmup-shader-module",
                                 src,
                             );
-                            Some(
+                            Some((
+                                bgl,
                                 crate::backend::wgpu::cache::factory::create_compute_pipeline(
                                     emission,
                                     "warmup-precompiled-pipeline",
                                     &pl,
                                     &module,
                                 ),
-                            )
+                            ))
                         })?;
-                let Some(pipeline) = pollster::block_on(receipt.resolve())? else {
+                let Some((layout, pipeline)) = pollster::block_on(receipt.resolve())? else {
                     return Ok(false);
                 };
-                self.fused_pipeline_cache
+                let pipeline = Arc::new(pipeline);
+                let warmed = if let Some(workgroup) = workgroup {
+                    let recipe = super::pipeline_recipe::PipelineRecipe {
+                        shader: src.to_owned(),
+                        layout: tag.to_owned(),
+                        workgroup,
+                    };
+                    anyhow::ensure!(recipe.key() == key, "warmup recipe key changed");
+                    Some(Arc::new(super::validated_fusion::WarmedPipelineReceipt {
+                        recipe,
+                        layout,
+                        pipeline: pipeline.clone(),
+                    }))
+                } else {
+                    None
+                };
+                // Both locks are acquired only after the scoped receipt has
+                // resolved; a poisoned cache publishes neither half.
+                let mut raw_cache = self
+                    .fused_pipeline_cache
                     .lock()
-                    .map_err(|_| anyhow::anyhow!("warmup pipeline cache is poisoned"))?
-                    .insert(key, Arc::new(pipeline));
+                    .map_err(|_| anyhow::anyhow!("warmup pipeline cache is poisoned"))?;
+                let mut warmed_cache = self
+                    .warmed_pipeline_cache
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("warmed pipeline cache is poisoned"))?;
+                if let Some(warmed) = warmed {
+                    warmed_cache.entry(key).or_insert(warmed);
+                }
+                raw_cache.entry(key).or_insert(pipeline);
                 Ok(true)
             },
         );

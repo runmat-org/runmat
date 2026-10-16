@@ -26,6 +26,7 @@ pub(super) const DIMENSION_N_SUM_F64_LAYOUT_TAG: &str = "runmat-nd-sum-f64-bgl";
 pub(super) const INTEGER_CAST_LAYOUT_TAG: &str = "runmat-integer-cast-bgl";
 pub(super) const FLOATING_CAST_LAYOUT_TAG: &str = "runmat-floating-cast-bgl";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PipelineRecipe {
     pub shader: String,
     pub layout: String,

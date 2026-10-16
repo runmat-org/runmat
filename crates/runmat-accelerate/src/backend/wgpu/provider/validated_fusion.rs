@@ -8,6 +8,15 @@ use std::sync::Arc;
 pub(super) struct ValidatedFusionPipeline {
     pub(super) key: u64,
     kind: ValidatedPipelineKind,
+    recipe: super::pipeline_recipe::PipelineRecipe,
+    pub(super) layout: Arc<wgpu::BindGroupLayout>,
+    pub(super) pipeline: Arc<wgpu::ComputePipeline>,
+}
+
+/// A successful scoped driver receipt is not yet a semantic runtime pipeline.
+/// The disk label never supplies `ValidatedPipelineKind`; runtime admission does.
+pub(super) struct WarmedPipelineReceipt {
+    pub(super) recipe: super::pipeline_recipe::PipelineRecipe,
     pub(super) layout: Arc<wgpu::BindGroupLayout>,
     pub(super) pipeline: Arc<wgpu::ComputePipeline>,
 }
@@ -237,10 +246,14 @@ impl IndexingPipelineKind {
 }
 
 impl ValidatedFusionPipeline {
-    fn require_kind(&self, key: u64, kind: ValidatedPipelineKind) -> Result<()> {
+    fn require_kind(
+        &self,
+        recipe: &super::pipeline_recipe::PipelineRecipe,
+        kind: ValidatedPipelineKind,
+    ) -> Result<()> {
         ensure!(
-            self.key == key && self.kind == kind,
-            "validated pipeline route does not match its cache key"
+            self.key == recipe.key() && self.recipe == *recipe && self.kind == kind,
+            "validated pipeline route does not match its physical recipe"
         );
         Ok(())
     }
@@ -253,6 +266,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && self.kind
                     == ValidatedPipelineKind::Fusion {
                         inputs,
@@ -269,6 +283,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == crate::backend::wgpu::bindings::MODULATION_LAYOUT_TAG
                 && self.kind == ValidatedPipelineKind::Modulation,
             "validated modulation pipeline does not match physical recipe"
@@ -282,6 +297,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == crate::backend::wgpu::bindings::SOFTMAX_ROWS_LAYOUT_TAG
                 && self.kind == ValidatedPipelineKind::SoftmaxRows,
             "validated softmax rows pipeline does not match physical recipe"
@@ -295,6 +311,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == crate::backend::wgpu::bindings::TRIANGULAR_SOLVE_LAYOUT_TAG
                 && self.kind == ValidatedPipelineKind::TriangularSolve,
             "validated triangular solve pipeline does not match physical recipe"
@@ -310,7 +327,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == crate::backend::wgpu::bindings::INTEGER_COMPARE_LAYOUT_TAG,
             "integer comparison physical binding recipe changed"
         );
-        self.require_kind(recipe.key(), ValidatedPipelineKind::IntegerComparison)
+        self.require_kind(recipe, ValidatedPipelineKind::IntegerComparison)
     }
 
     pub(super) fn require_integer_binary(
@@ -322,7 +339,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == kind.layout_tag() && recipe.shader == kind.shader(recipe.workgroup),
             "integer binary physical shader or layout changed"
         );
-        self.require_kind(recipe.key(), ValidatedPipelineKind::IntegerBinary(kind))
+        self.require_kind(recipe, ValidatedPipelineKind::IntegerBinary(kind))
     }
 
     pub(super) fn require_reduction_extrema(
@@ -334,7 +351,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == kind.layout_tag(),
             "reduction extrema physical layout changed"
         );
-        self.require_kind(recipe.key(), ValidatedPipelineKind::ReductionExtrema(kind))
+        self.require_kind(recipe, ValidatedPipelineKind::ReductionExtrema(kind))
     }
 
     pub(super) fn require_std_primitive(
@@ -346,7 +363,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == kind.layout_tag(),
             "std primitive layout changed"
         );
-        self.require_kind(recipe.key(), ValidatedPipelineKind::StdPrimitive(kind))
+        self.require_kind(recipe, ValidatedPipelineKind::StdPrimitive(kind))
     }
 
     pub(super) fn require_integer_cast(
@@ -360,7 +377,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == canonical.layout && recipe.shader == canonical.shader,
             "integer cast recipe differs from selected source"
         );
-        self.require_kind(recipe.key(), ValidatedPipelineKind::IntegerCast { source })
+        self.require_kind(recipe, ValidatedPipelineKind::IntegerCast { source })
     }
 
     pub(super) fn require_floating_cast(
@@ -376,7 +393,7 @@ impl ValidatedFusionPipeline {
             "floating cast recipe differs from selected source and target"
         );
         self.require_kind(
-            recipe.key(),
+            recipe,
             ValidatedPipelineKind::FloatingCast { source, target },
         )
     }
@@ -387,6 +404,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == super::pipeline_recipe::INTEGER_SUM_CAST_LAYOUT_TAG
                 && recipe.shader
                     == super::pipeline_recipe::PipelineRecipe::integer_sum_cast(recipe.workgroup)
@@ -403,6 +421,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == super::pipeline_recipe::DIMENSION_N_SUM_F64_LAYOUT_TAG
                 && recipe.shader
                     == super::pipeline_recipe::PipelineRecipe::dimension_n_sum_f64(
@@ -421,6 +440,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && recipe.layout == crate::backend::wgpu::bindings::MATMUL_EPILOGUE_LAYOUT_TAG
                 && self.kind == ValidatedPipelineKind::MatmulEpilogue,
             "validated matmul epilogue pipeline does not match physical recipe"
@@ -435,6 +455,7 @@ impl ValidatedFusionPipeline {
     ) -> Result<()> {
         ensure!(
             self.key == recipe.key()
+                && self.recipe == *recipe
                 && self.kind == ValidatedPipelineKind::Indexing(indexing)
                 && recipe.layout == indexing.layout_tag(),
             "validated indexing pipeline does not match physical recipe"
@@ -456,10 +477,7 @@ impl ValidatedFusionPipeline {
             recipe.layout == layout,
             "round digits physical binding recipe changed"
         );
-        self.require_kind(
-            recipe.key(),
-            ValidatedPipelineKind::RoundDigits { significant },
-        )
+        self.require_kind(recipe, ValidatedPipelineKind::RoundDigits { significant })
     }
 }
 
@@ -786,11 +804,42 @@ impl WgpuProvider {
             .cloned();
         if let Some(cached) = cached {
             cached
-                .require_kind(key, kind)
+                .require_kind(recipe, kind)
                 .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
             self.metrics.inc_hit();
             observation.finish(runmat_execution::CandidatePreparationState::Warm);
             return Ok(cached);
+        }
+        let warmed = self
+            .warmed_pipeline_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("warmed pipeline cache poisoned"))?
+            .get(&key)
+            .cloned();
+        if let Some(warmed) = warmed.filter(|receipt| receipt.recipe == *recipe) {
+            // The disk record supplied only a physical recipe and a scoped
+            // driver receipt. This typed route has now admitted its kind and
+            // exact source/layout/workgroup before the pair can be published.
+            let candidate = Arc::new(ValidatedFusionPipeline {
+                key,
+                kind,
+                recipe: recipe.clone(),
+                layout: warmed.layout.clone(),
+                pipeline: warmed.pipeline.clone(),
+            });
+            let (selected, _) =
+                select_validated_winner(&self.validated_fusion_cache, key, candidate)
+                    .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+            selected
+                .require_kind(recipe, kind)
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+            if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
+                let ptr = selected.layout.as_ref() as *const wgpu::BindGroupLayout as usize;
+                tags.entry(ptr).or_insert_with(|| recipe.layout.clone());
+            }
+            self.metrics.inc_hit();
+            observation.finish(runmat_execution::CandidatePreparationState::Warm);
+            return Ok(selected);
         }
         let receipt = self
             .access
@@ -911,7 +960,13 @@ impl WgpuProvider {
                         label: Some(label), layout: Some(&pipeline_layout), module: &module, entry_point: "main",
                     },
                 ));
-                Ok(ValidatedFusionPipeline { key, kind, layout, pipeline })
+                Ok(ValidatedFusionPipeline {
+                    key,
+                    kind,
+                    recipe: recipe.clone(),
+                    layout,
+                    pipeline,
+                })
             })
             .map_err(|error| ProviderExecutionError::from_source(error).with_unproven_effects())?;
         let candidate = Arc::new(
@@ -929,7 +984,7 @@ impl WgpuProvider {
             select_validated_winner(&self.validated_fusion_cache, key, candidate)
                 .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
         selected
-            .require_kind(key, kind)
+            .require_kind(recipe, kind)
             .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
         if cold {
             self.metrics.inc_miss();

@@ -1,5 +1,8 @@
 use wgpu::{BindGroupLayoutEntry, BindingType, BufferBindingType, ShaderStages};
 
+mod dynamic_layout;
+mod validated_layout;
+
 /// Serialized cache tag for the typed modulation binding recipe.
 pub(crate) const MODULATION_LAYOUT_TAG: &str = "runmat-modulate-constellation-layout";
 pub(crate) const SOFTMAX_ROWS_LAYOUT_TAG: &str = "runmat-softmax-rows-layout";
@@ -157,37 +160,16 @@ pub fn build_bgl_for_layout_tag(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     tag: &str,
 ) -> Option<wgpu::BindGroupLayout> {
+    if let Some(layout) = validated_layout::reconstruct(emission, tag) {
+        return Some(layout);
+    }
     if let Some(rest) = tag.strip_prefix("runmat-fusion-layout-") {
-        if let Ok(n_inputs) = rest.parse::<usize>() {
-            let mut entries = Vec::with_capacity(n_inputs + 2);
-            for i in 0..n_inputs {
-                entries.push(storage_read_entry(i as u32));
-            }
-            entries.push(storage_read_write_entry(n_inputs as u32));
-            entries.push(uniform_entry((n_inputs + 1) as u32));
-            return Some(emission.device().create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("warmup-fusion-bgl"),
-                    entries: &entries,
-                },
-            ));
-        }
+        let inputs = dynamic_layout::admitted_count(emission, rest, 1)?;
+        return Some(build_fusion_bgl(emission, inputs));
     }
     if let Some(rest) = tag.strip_prefix("runmat-reduction-layout-") {
-        if let Ok(n_inputs) = rest.parse::<usize>() {
-            let mut entries = Vec::with_capacity(n_inputs + 2);
-            for i in 0..n_inputs {
-                entries.push(storage_read_entry(i as u32));
-            }
-            entries.push(storage_read_write_entry(n_inputs as u32));
-            entries.push(uniform_entry((n_inputs + 1) as u32));
-            return Some(emission.device().create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-reduction-dyn-bgl"),
-                    entries: &entries,
-                },
-            ));
-        }
+        let inputs = dynamic_layout::admitted_count(emission, rest, 1)?;
+        return Some(dynamic_layout::build_reduction_bgl(emission, inputs));
     }
     match tag {
         "runmat-eye-layout" => {

@@ -83,6 +83,10 @@ pub struct WgpuProvider {
     /// to emission; legacy shared-cache writers cannot substitute it.
     pub(super) validated_fusion_cache:
         Mutex<HashMap<u64, Arc<super::validated_fusion::ValidatedFusionPipeline>>>,
+    /// Driver-validated disk receipts retain their exact source, layout and
+    /// workgroup. A typed runtime route must admit them before promotion.
+    pub(super) warmed_pipeline_cache:
+        Mutex<HashMap<u64, Arc<super::validated_fusion::WarmedPipelineReceipt>>>,
     pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
     pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
     pub(super) bind_group_cache: Arc<BindGroupCache>,
