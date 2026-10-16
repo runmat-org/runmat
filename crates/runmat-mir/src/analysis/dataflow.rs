@@ -1,7 +1,7 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCallArg, MirDiagnostic,
-    MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand,
-    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    BasicBlock, MirAggregateKind, MirAssembly, MirBody, MirCallArg, MirDiagnostic,
+    MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirOperand, MirPlace,
+    MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::Span;
 use runmat_types::{
@@ -12,9 +12,10 @@ use runmat_types::{
     LayoutFact, LiteralValue, MutationContract, MutationFact, NumericClass, RangeStepFact,
     ResidencyFact, ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
-use std::collections::{HashMap, VecDeque};
 
+mod initialization;
 mod subscript_chain;
+use initialization::compute_init_dataflow;
 pub(crate) use subscript_chain::{SubscriptChainInference, SubscriptPathDisposition};
 
 use super::{
@@ -25,11 +26,6 @@ use super::{
 #[cfg(test)]
 #[path = "dataflow/workspace_binding_tests.rs"]
 mod workspace_binding_tests;
-
-#[derive(Debug, Clone)]
-struct InitDataflowResult {
-    in_states: Vec<Option<Vec<InitFact>>>,
-}
 
 pub(crate) fn assign_place_fact(
     place: &MirPlace,
@@ -673,120 +669,6 @@ fn hir_diagnostic(
         .with_category(category)
 }
 
-fn compute_init_dataflow(
-    body: &MirBody,
-    constructor_instance: Option<MirLocalId>,
-) -> InitDataflowResult {
-    let local_count = body.locals.len();
-    if body.blocks.is_empty() {
-        return InitDataflowResult {
-            in_states: Vec::new(),
-        };
-    }
-
-    let block_index: HashMap<BasicBlockId, usize> = body
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(idx, block)| (block.id, idx))
-        .collect();
-
-    let mut initial = vec![InitFact::Unassigned; local_count];
-    for local in &body.locals {
-        if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) {
-            initial[local.id.0] = InitFact::DefinitelyAssigned;
-        }
-    }
-    if let Some(local) = constructor_instance {
-        initial[local.0] = InitFact::DefinitelyAssigned;
-    }
-
-    let mut in_states: Vec<Option<Vec<InitFact>>> = vec![None; body.blocks.len()];
-    let mut out_states: Vec<Vec<InitFact>> =
-        vec![vec![InitFact::Unassigned; local_count]; body.blocks.len()];
-    in_states[0] = Some(initial);
-
-    let mut worklist = VecDeque::from([0usize]);
-    while let Some(block_idx) = worklist.pop_front() {
-        let Some(input) = in_states[block_idx].clone() else {
-            continue;
-        };
-        let block = &body.blocks[block_idx];
-        let output = transfer_block(block, input);
-        out_states[block_idx] = output.clone();
-
-        for successor in successors(&block.terminator.kind) {
-            let Some(&successor_idx) = block_index.get(&successor) else {
-                continue;
-            };
-            let changed = match &mut in_states[successor_idx] {
-                Some(existing) => join_into(existing, &output),
-                slot @ None => {
-                    *slot = Some(output.clone());
-                    true
-                }
-            };
-            if changed {
-                worklist.push_back(successor_idx);
-            }
-        }
-    }
-
-    InitDataflowResult { in_states }
-}
-
-fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<InitFact> {
-    for stmt in &block.statements {
-        match &stmt.kind {
-            MirStmtKind::Assign { place, .. } => mark_place_assigned(place, &mut state),
-            MirStmtKind::MultiAssign { targets, .. } => {
-                for target in &targets.targets {
-                    match target {
-                        crate::MirOutputTarget::Place(place) => {
-                            mark_place_assigned(place, &mut state)
-                        }
-                        crate::MirOutputTarget::Sequence(target) => {
-                            mark_place_assigned(target.base(), &mut state)
-                        }
-                        crate::MirOutputTarget::Discard => {}
-                    }
-                }
-            }
-            MirStmtKind::SequenceAssign { target, .. } => {
-                let base = match target {
-                    crate::MirSequenceTarget::Member { base, .. }
-                    | crate::MirSequenceTarget::DynamicMember { base, .. }
-                    | crate::MirSequenceTarget::CellContents { base, .. } => base,
-                };
-                mark_place_assigned(base, &mut state);
-            }
-            MirStmtKind::WorkspaceEffect { effect, bindings } => {
-                mark_declared_storage(effect, bindings, &mut state);
-            }
-            MirStmtKind::CaptureSequence { .. } => {}
-            MirStmtKind::Expr(_)
-            | MirStmtKind::StatementOutput(_)
-            | MirStmtKind::PlaceMutation(_)
-            | MirStmtKind::EnvironmentEffect(_) => {}
-        }
-    }
-
-    match &block.terminator.kind {
-        MirTerminatorKind::For { binding, .. } | MirTerminatorKind::ParFor { binding, .. } => {
-            state[binding.0] = InitFact::DefinitelyAssigned;
-        }
-        MirTerminatorKind::Await {
-            result: Some(place),
-            ..
-        } => {
-            mark_place_assigned(place, &mut state);
-        }
-        MirTerminatorKind::Await { result: None, .. } => {}
-        _ => {}
-    }
-    state
-}
-
 fn diagnose_block(
     block: &BasicBlock,
     state: &mut [InitFact],
@@ -1186,67 +1068,5 @@ fn place_root(place: &MirPlace) -> Option<MirLocalId> {
             place_root(base)
         }
         MirPlace::Binding(_) => None,
-    }
-}
-
-fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
-    match kind {
-        MirTerminatorKind::Goto(target) => vec![*target],
-        MirTerminatorKind::Branch {
-            then_block,
-            else_block,
-            ..
-        } => vec![*then_block, *else_block],
-        MirTerminatorKind::Switch {
-            cases, otherwise, ..
-        } => cases
-            .iter()
-            .map(|(_, block)| *block)
-            .chain(std::iter::once(*otherwise))
-            .collect(),
-        MirTerminatorKind::For {
-            body_block,
-            exit_block,
-            ..
-        } => vec![*body_block, *exit_block],
-        MirTerminatorKind::ParFor {
-            body_block,
-            exit_block,
-            ..
-        }
-        | MirTerminatorKind::Spmd {
-            body_block,
-            exit_block,
-            ..
-        } => vec![*body_block, *exit_block],
-        MirTerminatorKind::TryCatch {
-            try_block,
-            catch_block,
-            ..
-        } => vec![*try_block, *catch_block],
-        MirTerminatorKind::Await { resume, .. } => vec![*resume],
-        MirTerminatorKind::Return(_) | MirTerminatorKind::Unreachable => Vec::new(),
-    }
-}
-
-fn join_into(existing: &mut [InitFact], incoming: &[InitFact]) -> bool {
-    let mut changed = false;
-    for (slot, incoming) in existing.iter_mut().zip(incoming) {
-        let joined = join_init(*slot, *incoming);
-        if *slot != joined {
-            *slot = joined;
-            changed = true;
-        }
-    }
-    changed
-}
-
-fn join_init(left: InitFact, right: InitFact) -> InitFact {
-    match (left, right) {
-        (InitFact::Unassigned, InitFact::Unassigned) => InitFact::Unassigned,
-        (InitFact::DefinitelyAssigned, InitFact::DefinitelyAssigned) => {
-            InitFact::DefinitelyAssigned
-        }
-        _ => InitFact::MaybeAssigned,
     }
 }

@@ -1131,6 +1131,54 @@ fn diagnostics_report_maybe_assigned_local_read_after_branch() {
 }
 
 #[test]
+fn definite_assignment_uses_proven_nonempty_for_backedge_only() {
+    let cases = [
+        (
+            "function y = f(); for k = 1:3; g(k) = k^2; end; y = g; end",
+            false,
+        ),
+        (
+            "function y = f(); for k = 3:1; g(k) = k^2; end; y = g; end",
+            true,
+        ),
+        (
+            "function y = f(n); for k = 1:n; g(k) = k^2; end; y = g; end",
+            true,
+        ),
+        (
+            "function y = f(c); for k = 1:3; if c; break; end; g(k) = k; end; y = g; end",
+            true,
+        ),
+        (
+            "function y = f(c); for k = 1:3; if c; continue; end; g(k) = k; end; y = g; end",
+            true,
+        ),
+        (
+            "function y = f(c); for k = 1:3; if c; g(k) = k; end; end; y = g; end",
+            true,
+        ),
+        (
+            "function y = f(); for j = 1:2; for k = 1:3; g(j,k) = j+k; end; end; y = g; end",
+            false,
+        ),
+        (
+            "function y = f(n); for j = 1:2; for k = 1:n; g(j,k) = j+k; end; end; y = g; end",
+            true,
+        ),
+    ];
+    for (source, expect_unassigned) in cases {
+        let diagnostics = analyze_assembly(&lower_mir(source)).diagnostics;
+        let has_unassigned = diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002"));
+        assert_eq!(
+            has_unassigned, expect_unassigned,
+            "{source}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn diagnostics_do_not_report_assigned_locals_in_short_circuit_temps() {
     let mir = lower_mir(
         "frameSkip = 4; nSteps = 10; for n = 1:nSteps; if mod(n, frameSkip) == 0 || n == nSteps; x = n; end; end",

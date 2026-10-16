@@ -80,10 +80,10 @@ pub const TOC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         environment_effect: None,
         effects: &[
             EffectKind::EnvironmentRead,
-            EffectKind::Clock,
-            EffectKind::MayThrow,
             EffectKind::UserInterface,
+            EffectKind::Clock,
             EffectKind::HostCallback,
+            EffectKind::MayThrow,
         ],
         capabilities: &[runmat_types::CapabilityRequirement::UserInterface],
     },
