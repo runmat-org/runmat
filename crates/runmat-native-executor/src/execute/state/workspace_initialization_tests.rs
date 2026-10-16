@@ -1,6 +1,7 @@
 use super::*;
 use crate::execute::state::HostStateInput;
 use runmat_native_codegen::*;
+use runmat_types::AssignmentCreationPolicy;
 use runmat_types::{BindingId, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
 use std::{rc::Rc, sync::Arc};
 
@@ -42,7 +43,12 @@ fn declared_global_reads_follow_nested_session_writes() {
         )
         .unwrap();
         assert_eq!(value, Value::Num(7.0));
-        assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(7.0));
+        assert_eq!(
+            state
+                .assignment_root(0, AssignmentCreationPolicy::ExistingOnly)
+                .unwrap(),
+            Value::Num(7.0)
+        );
 
         let reference = state.arena.insert(Value::Num(9.0));
         state.set_local(0, reference).unwrap();
@@ -208,6 +214,14 @@ fn omitted_input_state_with(
     runtime: RuntimeContext,
     workspace: Option<crate::execute::workspace::NativeWorkspaceInput>,
 ) -> HostState {
+    local_state_with(runtime, workspace, vec![NativeLocalId(0)])
+}
+
+fn local_state_with(
+    runtime: RuntimeContext,
+    workspace: Option<crate::execute::workspace::NativeWorkspaceInput>,
+    fixed_inputs: Vec<NativeLocalId>,
+) -> HostState {
     let point = ProgramPointId {
         function: ProgramFunctionId(0),
         block: 0,
@@ -229,7 +243,7 @@ fn omitted_input_state_with(
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {
-            fixed_inputs: vec![NativeLocalId(0)],
+            fixed_inputs,
             varargin: None,
             fixed_outputs: vec![],
             varargout: None,
@@ -309,8 +323,50 @@ fn native_function_frame_owns_exact_arity_even_when_fixed_input_is_omitted() {
 
 fn missing_error(state: &mut HostState) {
     assert!(
-        matches!(state.assignment_root(0, true), Err(NativeExecutorError::Runtime(error)) if error.identifier() == Some("RunMat:NotEnoughInputs"))
+        matches!(state.assignment_root(0, AssignmentCreationPolicy::CreateStructFieldPath), Err(NativeExecutorError::Runtime(error)) if error.identifier() == Some("RunMat:NotEnoughInputs"))
     );
+}
+
+#[test]
+fn indexed_root_creation_initializes_only_absent_non_input_numeric_bindings() {
+    runmat_gc::gc_test_context(|| {
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let mut state = local_state_with(runtime, None, Vec::new());
+        assert!(state
+            .assignment_root(0, AssignmentCreationPolicy::ExistingOnly)
+            .is_err());
+        let Value::Tensor(empty) = state
+            .assignment_root(0, AssignmentCreationPolicy::CreateArrayByIndex)
+            .expect("absent indexed root starts as an empty numeric array")
+        else {
+            panic!("indexed creation must use the numeric array carrier")
+        };
+        assert_eq!(empty.shape(), &[0, 0]);
+        assert_eq!(empty.numeric_dtype(), runmat_value::NumericDType::F64);
+        assert!(
+            state.locals[0].is_null(),
+            "planning does not publish a binding"
+        );
+
+        let existing = state.arena.insert(Value::Num(7.0));
+        state.set_local(0, existing).unwrap();
+        assert_eq!(
+            state
+                .assignment_root(0, AssignmentCreationPolicy::CreateArrayByIndex)
+                .unwrap(),
+            Value::Num(7.0),
+            "creation policy cannot replace an existing binding"
+        );
+
+        let mut omitted = omitted_input_state();
+        assert!(matches!(
+            omitted.assignment_root(0, AssignmentCreationPolicy::CreateArrayByIndex),
+            Err(NativeExecutorError::Runtime(error))
+                if error.identifier() == Some("RunMat:NotEnoughInputs")
+        ));
+    });
 }
 
 #[test]
@@ -325,7 +381,9 @@ fn non_null_write_initializes_an_omitted_input_and_deopt_metadata() {
             .insert(Value::Struct(runmat_value::StructValue::new()));
         state.set_local(0, reference).unwrap();
         assert!(matches!(
-            state.assignment_root(0, true).unwrap(),
+            state
+                .assignment_root(0, AssignmentCreationPolicy::CreateStructFieldPath)
+                .unwrap(),
             Value::Struct(_)
         ));
         let terminator = state.function.blocks[0].terminator.clone();
@@ -354,7 +412,9 @@ fn workspace_reconciliation_records_initialization_but_not_absence() {
             .unwrap();
         state.reconcile_workspace().unwrap();
         assert!(matches!(
-            state.assignment_root(0, true).unwrap(),
+            state
+                .assignment_root(0, AssignmentCreationPolicy::CreateStructFieldPath)
+                .unwrap(),
             Value::Struct(_)
         ));
         assert!(state.missing_input_locals.is_empty());
@@ -408,7 +468,12 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
             } else {
                 assert_eq!(result.unwrap(), request);
             }
-            assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(42.0));
+            assert_eq!(
+                state
+                    .assignment_root(0, AssignmentCreationPolicy::ExistingOnly)
+                    .unwrap(),
+                Value::Num(42.0)
+            );
             assert!(state.missing_input_locals.is_empty());
             assert!(!state.workspace.as_ref().unwrap().needs_reconciliation());
         }
@@ -514,7 +579,12 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
             } else {
                 assert_eq!(result.unwrap(), request);
             }
-            assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(42.0));
+            assert_eq!(
+                state
+                    .assignment_root(0, AssignmentCreationPolicy::ExistingOnly)
+                    .unwrap(),
+                Value::Num(42.0)
+            );
             assert!(!state.workspace.as_ref().unwrap().needs_reconciliation());
         }
     });

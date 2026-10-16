@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 4;
+pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,6 +117,16 @@ mod tests {
             future_store.validate_current(),
             Err(AnalysisRevisionMismatch::StoreSchema { .. })
         ));
+
+        let mut pre_source_diagnostics = current.clone();
+        pre_source_diagnostics.schema_version = 4;
+        assert_eq!(
+            pre_source_diagnostics.validate_current(),
+            Err(AnalysisRevisionMismatch::StoreSchema {
+                expected: ANALYSIS_STORE_SCHEMA_VERSION,
+                actual: 4,
+            })
+        );
 
         let mut future_facts = current.clone();
         future_facts.fact_schema_minor += 1;

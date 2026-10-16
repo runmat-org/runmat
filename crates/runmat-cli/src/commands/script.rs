@@ -216,9 +216,11 @@ async fn execute_script_request(
                     provider: capture_provider_snapshot(),
                 });
             }
-            if let Some(diag) = source_context.source_text().and_then(|source| {
-                format_frontend_error(&err, source_context.source_name(), source)
-            }) {
+            if let Some(diag) = format_frontend_error(
+                &err,
+                source_context.source_name(),
+                source_context.source_text(),
+            ) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("{}: {err}", presentation::stderr().error("Execution error"));

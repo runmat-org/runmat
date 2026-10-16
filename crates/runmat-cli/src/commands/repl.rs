@@ -486,9 +486,11 @@ async fn process_repl_line(
             }
         }
         Err(e) => {
-            if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                format_frontend_error(&e, response.source_context.source_name(), source)
-            }) {
+            if let Some(diag) = format_frontend_error(
+                &e,
+                response.source_context.source_name(),
+                response.source_context.source_text(),
+            ) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("{}: {e}", presentation::stderr().error("Execution error"));

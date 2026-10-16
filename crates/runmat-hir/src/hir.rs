@@ -804,6 +804,8 @@ pub struct CallResolution {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub span: Span,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -811,6 +813,8 @@ pub struct FunctionHandleResolution {
     pub name: QualifiedName,
     pub target: FunctionHandleTarget,
     pub span: Span,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]

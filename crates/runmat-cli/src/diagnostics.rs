@@ -25,10 +25,15 @@ pub fn resolved_error_namespace(cfg: &RunMatRuntimeConfig) -> String {
     }
 }
 
-pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Option<String> {
+pub fn format_frontend_error(
+    err: &RunError,
+    source_name: &str,
+    source: Option<&str>,
+) -> Option<String> {
     let styles = presentation::stderr();
     match err {
         RunError::Syntax(err) => {
+            let source = source?;
             let mut message = err.message.clone();
             if let Some(expected) = &err.expected {
                 message = format!("{message} (expected {expected})");
@@ -47,6 +52,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
             ))
         }
         RunError::Semantic(err) => {
+            let source = source?;
             let span = err.span.map(|span| {
                 SourceSpan::new(
                     SourceOffset::from(span.start),
@@ -64,6 +70,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
             ))
         }
         RunError::Compile(err) => {
+            let source = source?;
             let span = err.span.map(|span| {
                 SourceSpan::new(
                     SourceOffset::from(span.start),
@@ -80,11 +87,28 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
                 &styles,
             ))
         }
+        RunError::SourceCompile(bound) => {
+            let err = &bound.error;
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            Some(format_diagnostic_with_styles(
+                &err.message,
+                err.identifier.as_deref().or(Some("RunMat:CompileError")),
+                span,
+                &bound.source.display_name,
+                &bound.source.text,
+                &styles,
+            ))
+        }
         RunError::Runtime(err) => Some(render_runtime_error(
             err,
             DiagnosticSeverity::Error,
             Some(source_name),
-            Some(source),
+            Some(source?),
             &styles,
         )),
     }

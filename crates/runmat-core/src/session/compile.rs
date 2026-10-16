@@ -1,5 +1,6 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,15 +11,52 @@ use program_sources::identity::{executable_primary_access_path, executable_sourc
 
 fn fatal_frontend_diagnostic(
     diagnostics: &[runmat_hir::HirDiagnostic],
-) -> Option<runmat_vm::CompileError> {
+) -> Option<&runmat_hir::HirDiagnostic> {
     diagnostics
         .iter()
         .find(|diagnostic| diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error)
-        .map(|diagnostic| {
-            runmat_vm::CompileError::new(diagnostic.message.clone())
-                .with_identifier(diagnostic.code.clone())
-                .with_span(diagnostic.primary.span)
+}
+
+fn bind_frontend_diagnostic(
+    diagnostic: &runmat_hir::HirDiagnostic,
+    source_table: &program_sources::ProgramSourceTable,
+) -> RunError {
+    let mut error = runmat_vm::CompileError::new(diagnostic.message.clone())
+        .with_identifier(diagnostic.code.clone())
+        .with_span(diagnostic.primary.span);
+    if let Some(source) = diagnostic.primary.source {
+        error = error.with_source(source);
+    }
+    bind_compile_error(error, source_table)
+}
+
+fn bind_compile_error(
+    error: runmat_vm::CompileError,
+    source_table: &program_sources::ProgramSourceTable,
+) -> RunError {
+    let Some(source_id) = error.source else {
+        return RunError::Compile(error);
+    };
+    let Some(source) = source_table
+        .source_map
+        .entries()
+        .iter()
+        .find(|entry| entry.source_id == source_id)
+    else {
+        return RunError::Runtime(
+            build_runtime_error("frontend diagnostic refers to an unadmitted program source")
+                .with_identifier("RunMat:ExecutableSourceIdentity")
+                .build(),
+        );
+    };
+    if source_id == source_table.primary_source() {
+        RunError::Compile(error)
+    } else {
+        RunError::SourceCompile(crate::SourceCompileError {
+            error,
+            source: source.clone(),
         })
+    }
 }
 
 fn entrypoint_target_function(
@@ -834,11 +872,12 @@ pub(super) async fn companion_source_statements_from_handoff_async(
 impl RunMatSession {
     /// Compile one immutable source/revision product without executing it or
     /// publishing its functions into the interactive session.
-    pub async fn compile_executable_unit(
+    pub async fn compile_executable_unit<'a>(
         &mut self,
-        source: crate::ExecutableSource,
+        source: impl Into<Cow<'a, crate::ExecutableSource>>,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        let source = source.into();
         self.ensure_user_path_hydrated().await?;
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
@@ -929,7 +968,12 @@ impl RunMatSession {
             ..
         } = prepared;
         let mut draft = crate::executable::ExecutableUnitDraft::prepare(
-            source, revision, source_map, mir, analysis, bytecode,
+            source.into_owned(),
+            revision,
+            source_map,
+            mir,
+            analysis,
+            bytecode,
         )
         .map_err(|error| {
             RunError::Runtime(
@@ -1227,10 +1271,10 @@ impl RunMatSession {
                 return Err(error.into());
             }
             if let Some(error) = frontend.compile_failure {
-                return Err(error.into());
+                return Err(bind_compile_error(error, &source_table));
             }
-            if let Some(error) = fatal_frontend_diagnostic(&frontend.diagnostics) {
-                return Err(error.into());
+            if let Some(diagnostic) = fatal_frontend_diagnostic(&frontend.diagnostics) {
+                return Err(bind_frontend_diagnostic(diagnostic, &source_table));
             }
             (
                 frontend

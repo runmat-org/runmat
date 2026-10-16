@@ -4,6 +4,7 @@ import {
   __internals,
   executeProgramArtifact,
   initRunMat,
+  RunMatExecutionError,
   renderFigureImage,
   exportFigureScene,
   importFigureScene,
@@ -850,6 +851,43 @@ describe("ExecuteResult passthroughs", () => {
       source: { kind: "text", name: "<test>", text: "clc;" }
     });
     expect(result.stdout).toEqual([{ stream: "clear", text: "", timestampMs: 123 }]);
+  });
+
+  it("retains structured companion source identity on compile errors", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          executeRequest: () => {
+            throw {
+              kind: "compile",
+              message: "companion compile failure",
+              diagnostic: "companion.m:2:1: companion compile failure",
+              span: { start: 7, end: 10, line: 2, column: 1 },
+              sourceId: 1,
+              sourceName: "companion.m",
+              sourcePath: "companion.m"
+            };
+          }
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+    const session = await initRunMat({ enableGpu: false });
+    let caught: unknown;
+    try {
+      await session.executeRequest({
+        source: { kind: "text", name: "primary.m", text: "x = 1;" }
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(RunMatExecutionError);
+    expect(caught).toMatchObject({
+      sourceId: 1,
+      sourceName: "companion.m",
+      sourcePath: "companion.m",
+      span: { start: 7, end: 10, line: 2, column: 1 }
+    });
   });
 });
 

@@ -1,4 +1,5 @@
 use super::*;
+use runmat_types::AssignmentCreationPolicy;
 use runmat_value::Value;
 
 #[cfg(test)]
@@ -131,7 +132,7 @@ impl HostState {
     pub(in crate::execute) fn assignment_root(
         &mut self,
         slot: usize,
-        create_struct: bool,
+        creation: AssignmentCreationPolicy,
     ) -> NativeExecutorResult<Value> {
         if self
             .missing_input_locals
@@ -145,8 +146,26 @@ impl HostState {
             .into());
         }
         let reference = self.local_reference(slot)?;
-        if reference.is_null() && create_struct {
-            return Ok(Value::Struct(runmat_value::StructValue::new()));
+        if reference.is_null() {
+            match creation {
+                AssignmentCreationPolicy::CreateStructFieldPath => {
+                    return Ok(Value::Struct(runmat_value::StructValue::new()));
+                }
+                AssignmentCreationPolicy::CreateArrayByIndex => {
+                    return runmat_value::Tensor::new(Vec::new(), vec![0, 0])
+                        .map(Value::Tensor)
+                        .map_err(|error| {
+                            runmat_runtime::runtime_error::semantic_error(
+                                "IndexAssignmentBaseInit",
+                                format!("failed to initialize indexed-assignment base: {error}"),
+                            )
+                            .into()
+                        });
+                }
+                AssignmentCreationPolicy::ExistingOnly
+                | AssignmentCreationPolicy::CreateBinding
+                | AssignmentCreationPolicy::Overloaded => {}
+            }
         }
         self.arena.get(reference).cloned()
     }

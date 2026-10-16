@@ -11,7 +11,7 @@ pub(super) fn word_geometry(handle: &GpuTensorHandle) -> Result<(usize, usize)> 
         .ok_or_else(|| anyhow!("functional scatter logical extent overflow"))?;
     let bytes = handle.physical().payload_bytes();
     ensure!(
-        logical > 0 && bytes > 0 && bytes % 4 == 0,
+        logical > 0 && bytes > 0 && bytes.is_multiple_of(4),
         "functional scatter requires a nonempty word-aligned payload"
     );
     let words = usize::try_from(bytes / 4)?;

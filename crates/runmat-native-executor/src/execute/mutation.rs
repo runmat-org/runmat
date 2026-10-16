@@ -111,21 +111,19 @@ pub(super) fn execute(
         MirStmtKind::Assign { place, .. } => {
             let source = input_value(state, instruction, 0)?;
             let mutation = state.pending_place_mutation.as_ref();
-            let (delete, allow_init) = if let Some(mutation) = mutation {
+            let (delete, creation) = if let Some(mutation) = mutation {
                 if mutation.place != *place {
                     return Err(NativeExecutorError::Host(
                         "native place-mutation target does not match assignment".into(),
                     ));
                 }
-                (
-                    mutation.kind == runmat_types::PlaceMutationKind::Delete,
-                    mutation.creation_policy
-                        != runmat_types::AssignmentCreationPolicy::ExistingOnly,
-                )
+                let delete = mutation.kind == runmat_types::PlaceMutationKind::Delete;
+                continuation::validate_creation_policy(place, delete, mutation.creation_policy)?;
+                (delete, mutation.creation_policy)
             } else {
-                (false, true)
+                (false, place.assignment_creation_policy(false))
             };
-            continuation::assign(state, place, source, delete, allow_init)?;
+            continuation::assign(state, place, source, delete, creation)?;
             state.pending_place_mutation = None;
             publish_roots(state, instruction, std::slice::from_ref(place))?;
             Ok(true)
@@ -191,7 +189,13 @@ pub(super) fn execute(
                     continue;
                 }
                 let source = input_value(state, instruction, index)?;
-                match continuation::assign(state, place, source, false, true) {
+                match continuation::assign(
+                    state,
+                    place,
+                    source,
+                    false,
+                    place.assignment_creation_policy(false),
+                ) {
                     Ok(()) => {}
                     Err(NativeExecutorError::CallSuspended) => {
                         state.pending_plain_multi = Some(PendingPlainMulti {

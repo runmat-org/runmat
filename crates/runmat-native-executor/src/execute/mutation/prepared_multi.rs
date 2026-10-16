@@ -6,7 +6,7 @@ use runmat_runtime::sequence::{DestinationLayout, PreparedSequenceDestination};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::{continuation, root_local_value};
+use super::continuation;
 use crate::execute::state::HostState;
 
 mod roots;
@@ -125,12 +125,15 @@ impl PreparedMultiAssignment {
                         MirPlace::Local(local) => (*local, state.arena.insert(rhs)),
                         _ => {
                             let local = target::root_local(&place)?;
+                            let creation = place.assignment_creation_policy(false);
                             let root = match self.roots.get(&local) {
                                 Some(reference) => state.arena.get(*reference)?.clone(),
-                                None => root_local_value(state, &place)?,
+                                None => continuation::assignment_root_for_place(
+                                    state, &place, creation,
+                                )?,
                             };
                             let (local, updated) = continuation::assign_to_root(
-                                state, &place, root, rhs, false, true,
+                                state, &place, root, rhs, false, creation,
                             )?;
                             (local, state.arena.insert(updated))
                         }

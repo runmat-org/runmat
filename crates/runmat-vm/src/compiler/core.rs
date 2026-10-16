@@ -73,6 +73,7 @@ pub struct Compiler {
     pub var_types: Vec<Type>,
     pub layout: Option<VmAssemblyLayout>,
     pub function: Option<FunctionId>,
+    source: Option<runmat_types::ProgramSourceId>,
     pub body: Option<MirBody>,
     aggregate_proof: Option<aggregate_construction::ProofIndex>,
     pub class_registrations: Vec<ClassRegistration>,
@@ -532,6 +533,7 @@ impl Compiler {
             var_types,
             layout: Some(layout),
             function: Some(function),
+            source: mir.functions.get(&function).map(|metadata| metadata.source),
             body: Some(body),
             aggregate_proof: None,
             class_registrations: hir_class_registrations(hir, mir),
@@ -580,6 +582,7 @@ impl Compiler {
             var_types,
             layout: Some(layout),
             function: Some(function),
+            source: mir.functions.get(&function).map(|metadata| metadata.source),
             body: Some(body),
             aggregate_proof: None,
             class_registrations: hir_class_registrations(hir, mir),
@@ -4543,6 +4546,9 @@ impl Compiler {
         if let Some(span) = self.current_span {
             err = err.with_span(span);
         }
+        if let Some(source) = self.source {
+            err = err.with_source(source);
+        }
         err
     }
 }
@@ -4682,6 +4688,7 @@ mod tests {
                 storage_bindings: HashMap::<BindingId, VmStorageBinding>::new(),
             }),
             function: Some(function),
+            source: None,
             body: Some(MirBody {
                 catch_scopes: Default::default(),
                 function,
@@ -4705,6 +4712,16 @@ mod tests {
             contextual_index_component: None,
             subscript_end_component: None,
         }
+    }
+
+    #[test]
+    fn active_mir_compile_error_keeps_function_source_owner() {
+        let mut compiler = compiler_with_local_assignments(Vec::new());
+        compiler.source = Some(runmat_types::ProgramSourceId(7));
+        compiler.current_span = Some(runmat_hir::Span { start: 4, end: 9 });
+        let error = compiler.compile_error("source-owned failure");
+        assert_eq!(error.source, Some(runmat_types::ProgramSourceId(7)));
+        assert_eq!(error.span, compiler.current_span);
     }
 
     #[test]

@@ -398,6 +398,9 @@ fn error_payload_from_diagnostic(
         identifier: Some(diagnostic.code.clone()),
         diagnostic: diagnostic_text,
         span,
+        source_id: None,
+        source_name: Some(source_context.source_name().to_string()),
+        source_path: None,
         callstack: diagnostic.callstack.clone(),
         callstack_elided: diagnostic.callstack_elided,
     }
@@ -950,5 +953,33 @@ mod tests {
         assert!(error.diagnostic.contains("--> path-source.m:2:1"));
         assert_eq!(error.span.expect("span").line, 2);
         assert_eq!(error.callstack, vec!["<main> @ path-source.m:2:5"]);
+    }
+
+    #[test]
+    fn companion_compile_payload_exposes_exact_source_identity_and_span() {
+        let companion = "x = 1;\ny = bad;\n";
+        let source_id = runmat_types::ProgramSourceId(1);
+        let error = runmat_core::RunError::SourceCompile(runmat_core::SourceCompileError {
+            error: runmat_vm::CompileError::new("companion compile failure")
+                .with_identifier("RunMat:CompanionCompileFixture")
+                .with_span(runmat_hir::Span { start: 7, end: 10 })
+                .with_source(source_id),
+            source: runmat_core::SourceMapEntry {
+                source_id,
+                owner_identity: "fixture".into(),
+                relative_path: "companion.m".into(),
+                content_revision: runmat_execution::Digest::sha256(companion.as_bytes()),
+                display_name: "companion.m".into(),
+                full_path: None,
+                text: companion.into(),
+            },
+        });
+        let payload =
+            crate::wire::errors::run_error_payload(&error, Some("primary.m"), Some("primary = 1;"));
+        assert_eq!(payload.source_id, Some(source_id));
+        assert_eq!(payload.source_name.as_deref(), Some("companion.m"));
+        assert_eq!(payload.source_path.as_deref(), Some("companion.m"));
+        assert_eq!(payload.span.expect("companion span").line, 2);
+        assert!(payload.diagnostic.contains("companion.m"));
     }
 }

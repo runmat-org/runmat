@@ -294,6 +294,7 @@ pub fn analyze_program_with_catalog(
 
     diagnostics.sort_by_key(|diagnostic| {
         (
+            diagnostic.primary.source,
             diagnostic.primary.span.start,
             diagnostic.primary.span.end,
             diagnostic.code.clone(),
@@ -301,6 +302,7 @@ pub fn analyze_program_with_catalog(
     });
     diagnostics.dedup_by(|left, right| {
         left.code == right.code
+            && left.primary.source == right.primary.source
             && left.primary.span == right.primary.span
             && left.message == right.message
     });
@@ -380,23 +382,26 @@ fn source_position_span(source: &str, position: usize) -> Span {
 struct EnvironmentEffect {
     span: Span,
     effect: HirEnvironmentEffect,
+    source: Option<runmat_types::ProgramSourceId>,
 }
 
 fn environment_effects(mir: &MirAssembly) -> Vec<EnvironmentEffect> {
     let mut effects = Vec::new();
-    for body in mir.bodies.values() {
+    for (function, body) in &mir.bodies {
+        let source = mir.functions.get(function).map(|metadata| metadata.source);
         for block in &body.blocks {
             for statement in &block.statements {
                 if let MirStmtKind::EnvironmentEffect(effect) = &statement.kind {
                     effects.push(EnvironmentEffect {
                         span: statement.span,
                         effect: effect.clone(),
+                        source,
                     });
                 }
             }
         }
     }
-    effects.sort_by_key(|effect| effect.span.start);
+    effects.sort_by_key(|effect| (effect.source, effect.span.start));
     effects
 }
 
@@ -415,6 +420,7 @@ fn call_resolution_diagnostics(
     let mut evidence = Vec::new();
     let mut runtime_dependent = false;
     for call in &lowering.hir_index.calls {
+        let diagnostic_start = diagnostics.len();
         let name = call
             .name
             .display_name()
@@ -458,12 +464,13 @@ fn call_resolution_diagnostics(
                 )
                 .with_category("call-resolution"),
             );
+            attach_diagnostic_source(&mut diagnostics[diagnostic_start..], call.source);
             continue;
         }
         let causal_effect = environment_effects
             .iter()
             .rev()
-            .find(|effect| effect.span.start < call.span.start);
+            .find(|effect| effect.source == call.source && effect.span.start < call.span.start);
         if let Some(effect) = causal_effect {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
@@ -530,8 +537,10 @@ fn call_resolution_diagnostics(
                 .with_category("call-resolution"),
             );
         }
+        attach_diagnostic_source(&mut diagnostics[diagnostic_start..], call.source);
     }
     for handle in &lowering.hir_index.function_handles {
+        let diagnostic_start = diagnostics.len();
         let FunctionHandleTarget::DynamicName(_) = &handle.target else {
             continue;
         };
@@ -542,7 +551,7 @@ fn call_resolution_diagnostics(
         if let Some(effect) = environment_effects
             .iter()
             .rev()
-            .find(|effect| effect.span.start < handle.span.start)
+            .find(|effect| effect.source == handle.source && effect.span.start < handle.span.start)
         {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
@@ -595,11 +604,23 @@ fn call_resolution_diagnostics(
                 .with_category("call-resolution"),
             );
         }
+        attach_diagnostic_source(&mut diagnostics[diagnostic_start..], handle.source);
     }
     ResolutionDiagnostics {
         diagnostics,
         evidence,
         runtime_dependent,
+    }
+}
+
+fn attach_diagnostic_source(
+    diagnostics: &mut [HirDiagnostic],
+    source: Option<runmat_types::ProgramSourceId>,
+) {
+    if let Some(source) = source {
+        for diagnostic in diagnostics {
+            diagnostic.set_source(source);
+        }
     }
 }
 

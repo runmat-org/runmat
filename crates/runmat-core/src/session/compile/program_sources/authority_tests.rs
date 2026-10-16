@@ -102,6 +102,81 @@ fn admitted_function_source_must_match_its_hir_module_not_merely_any_map_entry()
 }
 
 #[test]
+fn overlapping_companion_diagnostics_keep_exact_source_owner() {
+    let primary = "function C = entry_a(); A=rand(3,4); B=rand(3,4); C=A*B; end";
+    let companion = "function C = entry_b(); A=rand(3,4); B=rand(3,4); C=A*B; end";
+    let mut ast = runmat_parser::parse(primary).expect("primary source");
+    ast.body.extend(
+        runmat_parser::parse(companion)
+            .expect("companion source")
+            .body,
+    );
+    let sources = [ProgramSourceId(0), ProgramSourceId(1)];
+    let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
+        &ast,
+        &runmat_hir::LoweringContext::empty()
+            .with_primary_source(sources[0])
+            .with_top_level_sources(&sources),
+        None,
+    );
+    let diagnostics = frontend
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diagnostics.len(),
+        2,
+        "same local offsets must not deduplicate distinct sources"
+    );
+    assert_eq!(diagnostics[0].primary.span, diagnostics[1].primary.span);
+    assert_eq!(diagnostics[0].primary.source, Some(sources[0]));
+    assert_eq!(diagnostics[1].primary.source, Some(sources[1]));
+    let record = |source_id, name: &str, text: &str| crate::SourceMapEntry {
+        source_id,
+        owner_identity: "fixture".into(),
+        relative_path: name.into(),
+        content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+        display_name: name.into(),
+        full_path: None,
+        text: text.into(),
+    };
+    let table = ProgramSourceTable {
+        primary_source: sources[0],
+        source_map: crate::ExecutableSourceMap::new(vec![
+            record(sources[0], "entry_a.m", primary),
+            record(sources[1], "entry_b.m", companion),
+        ]),
+        statement_sources: sources.to_vec(),
+        function_sources: HashMap::new(),
+        retained_runtime_sources: HashMap::new(),
+    };
+    let error = super::super::bind_frontend_diagnostic(diagnostics[1], &table);
+    let crate::RunError::SourceCompile(bound) = error else {
+        panic!("companion diagnostic must retain its source context");
+    };
+    assert_eq!(bound.source.source_id, sources[1]);
+    assert_eq!(bound.source.display_name, "entry_b.m");
+    assert_eq!(bound.source.text, companion);
+    assert_eq!(bound.error.identifier.as_deref(), Some("RM-TYPE-MATMUL"));
+
+    let vm_error = runmat_vm::CompileError::new("companion VM compilation failed")
+        .with_identifier("RunMat:VmCompileFixture")
+        .with_span(diagnostics[1].primary.span)
+        .with_source(sources[1]);
+    let crate::RunError::SourceCompile(bound) = super::super::bind_compile_error(vm_error, &table)
+    else {
+        panic!("early VM compile failures must bind their exact source");
+    };
+    assert_eq!(bound.source.source_id, sources[1]);
+    assert_eq!(
+        bound.error.identifier.as_deref(),
+        Some("RunMat:VmCompileFixture")
+    );
+    assert_eq!(bound.error.span, Some(diagnostics[1].primary.span));
+}
+
+#[test]
 fn reverse_projection_uses_issued_authority_not_pool_integer() {
     let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),

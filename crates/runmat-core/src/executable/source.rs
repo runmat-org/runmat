@@ -1,8 +1,22 @@
+use std::borrow::Cow;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutableSource {
     pub owner_identity: String,
     pub relative_path: String,
     pub text: String,
+}
+
+impl<'a> From<ExecutableSource> for Cow<'a, ExecutableSource> {
+    fn from(source: ExecutableSource) -> Self {
+        Self::Owned(source)
+    }
+}
+
+impl<'a> From<&'a ExecutableSource> for Cow<'a, ExecutableSource> {
+    fn from(source: &'a ExecutableSource) -> Self {
+        Self::Borrowed(source)
+    }
 }
 
 impl ExecutableSource {

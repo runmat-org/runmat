@@ -31,22 +31,28 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut liveness_by_function = std::collections::BTreeMap::new();
 
     for (function, body) in &assembly.bodies {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
         let Ok(function_ordinal) = u32::try_from(function.0) else {
             let span = assembly
                 .functions
                 .get(function)
                 .map_or_else(runmat_hir::Span::default, |metadata| metadata.span);
-            store.diagnostics.push(
-                crate::MirDiagnostic::new(
-                    "RM-MIR0010",
-                    crate::MirDiagnosticSeverity::Error,
-                    "function identity exceeds the portable analysis schema",
-                    span,
-                )
-                .with_primary_label("this function cannot receive a stable program identity")
-                .with_help("split the executable unit before analysis")
-                .with_category("analysis-schema"),
-            );
+            let diagnostic = crate::MirDiagnostic::new(
+                "RM-MIR0010",
+                crate::MirDiagnosticSeverity::Error,
+                "function identity exceeds the portable analysis schema",
+                span,
+            )
+            .with_primary_label("this function cannot receive a stable program identity")
+            .with_help("split the executable unit before analysis")
+            .with_category("analysis-schema");
+            store.diagnostics.push(match source {
+                Some(source) => diagnostic.with_source(source),
+                None => diagnostic,
+            });
             continue;
         };
         let program_function = ProgramFunctionId(function_ordinal);
@@ -66,7 +72,15 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             FunctionConvergence::Exact
         };
         let liveness = super::regions::analyze_liveness(body);
-        store.diagnostics.extend(flow.diagnostics.clone());
+        store.diagnostics.extend(
+            flow.diagnostics
+                .iter()
+                .cloned()
+                .map(|diagnostic| match source {
+                    Some(source) => diagnostic.with_source(source),
+                    None => diagnostic,
+                }),
+        );
         store
             .fusion_stage_contracts
             .extend(super::fusion_stage::certify_body(
@@ -88,17 +102,19 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
                 .functions
                 .get(function)
                 .map_or_else(runmat_hir::Span::default, |metadata| metadata.span);
-            store.diagnostics.push(
-                crate::MirDiagnostic::new(
-                    "RM-MIR0011",
-                    crate::MirDiagnosticSeverity::Warning,
-                    "static analysis reached its convergence bound",
-                    span,
-                )
-                .with_primary_label("facts in this function were conservatively widened")
-                .with_help("simplify recursive or cyclic value flow to recover exact facts")
-                .with_category("analysis-convergence"),
-            );
+            let diagnostic = crate::MirDiagnostic::new(
+                "RM-MIR0011",
+                crate::MirDiagnosticSeverity::Warning,
+                "static analysis reached its convergence bound",
+                span,
+            )
+            .with_primary_label("facts in this function were conservatively widened")
+            .with_help("simplify recursive or cyclic value flow to recover exact facts")
+            .with_category("analysis-convergence");
+            store.diagnostics.push(match source {
+                Some(source) => diagnostic.with_source(source),
+                None => diagnostic,
+            });
         }
         store.functions.push(FunctionAnalysis {
             function: program_function,

@@ -97,3 +97,70 @@ end
         });
     }
 }
+
+#[test]
+fn undefined_indexed_root_completes_in_forced_generic_native_with_vm_parity() {
+    let source = ExecutableSource::new(
+        "native-undefined-index-root@1",
+        "nativeUndefinedIndexRoot.m",
+        "function output = nativeUndefinedIndexRoot()\nfor k = 1:3\n    g(k) = k^2;\nend\noutput = g;\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeUndefinedIndexRoot".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let vm = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("VM indexed-root execution");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("forced generic-native indexed-root execution");
+    let expected = Value::Tensor(
+        runmat_value::Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).expect("expected row vector"),
+    );
+    assert_eq!(vm.as_slice(), &[expected.clone()]);
+    assert_eq!(native.as_slice(), &[expected]);
+}
+
+#[test]
+fn prepared_multi_output_initializes_undefined_indexed_root_with_vm_parity() {
+    let source = ExecutableSource::new(
+        "native-prepared-index-root@1",
+        "nativePreparedIndexRoot.m",
+        "function [output, y] = nativePreparedIndexRoot()\n[g(1), y] = deal(2, 3);\noutput = g;\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativePreparedIndexRoot".into()),
+        arguments: Vec::new(),
+        requested_outputs: 2,
+    };
+    let vm = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("VM prepared indexed-root execution");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("forced generic-native prepared indexed-root execution");
+    let expected = [
+        Value::Tensor(runmat_value::Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+        Value::Num(3.0),
+    ];
+    assert_eq!(vm.as_slice(), &expected);
+    assert_eq!(native.as_slice(), &expected);
+}

@@ -482,18 +482,48 @@ fn dynamic_value() -> ValueFact {
 
 pub(crate) fn diagnostics_for_assembly(assembly: &MirAssembly) -> Vec<MirDiagnostic> {
     let mut diagnostics = Vec::new();
-    for body in assembly.bodies.values() {
-        diagnostics.extend(diagnose_uninitialized_reads(
-            body,
-            super::constructor_entry::instance_output_local(assembly, body),
-        ));
-        diagnostics.extend(diagnose_semantic_misuse(body));
+    for (function, body) in &assembly.bodies {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
+        diagnostics.extend(
+            diagnose_uninitialized_reads(
+                body,
+                super::constructor_entry::instance_output_local(assembly, body),
+            )
+            .into_iter()
+            .map(|diagnostic| attach_source(diagnostic, source)),
+        );
+        diagnostics.extend(
+            diagnose_semantic_misuse(body)
+                .into_iter()
+                .map(|diagnostic| attach_source(diagnostic, source)),
+        );
     }
     let boundaries = analyze_assembly_spawn_boundaries(assembly);
-    for boundaries in boundaries.values() {
-        diagnostics.extend(diagnose_spawn_safety(boundaries));
+    for (function, boundaries) in &boundaries {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
+        diagnostics.extend(
+            diagnose_spawn_safety(boundaries)
+                .into_iter()
+                .map(|diagnostic| attach_source(diagnostic, source)),
+        );
     }
     diagnostics
+}
+
+fn attach_source(
+    diagnostic: MirDiagnostic,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> MirDiagnostic {
+    match source {
+        Some(source) => diagnostic.with_source(source),
+        None => diagnostic,
+    }
 }
 
 pub(super) fn diagnose_uninitialized_reads(

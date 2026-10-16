@@ -3,9 +3,9 @@ use crate::{
     MirStatementOutput, MirStatementOutputLabel, MirStatementOutputSource, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr,
-    HirExprKind, HirSequenceTarget, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind,
-    RequestedOutputCount, Span, WorkspaceEffect,
+    AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr, HirExprKind,
+    HirSequenceTarget, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount,
+    Span, WorkspaceEffect,
 };
 use std::collections::HashMap;
 
@@ -352,7 +352,7 @@ fn environment_effect_from_builtin(
 fn place_mutation(place: crate::MirPlace, deletion: bool) -> MirPlaceMutation {
     MirPlaceMutation {
         kind: mutation_kind_for_place(&place, deletion),
-        creation_policy: creation_policy_for_place(&place, deletion),
+        creation_policy: place.assignment_creation_policy(deletion),
         shape_policy: AssignmentShapePolicy::MatlabCompatible,
         place,
     }
@@ -367,21 +367,6 @@ fn mutation_kind_for_place(place: &crate::MirPlace, deletion: bool) -> PlaceMuta
         crate::MirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
         crate::MirPlace::Member(_, _) | crate::MirPlace::DynamicMember(_, _) => {
             PlaceMutationKind::MemberAssign
-        }
-    }
-}
-
-fn creation_policy_for_place(place: &crate::MirPlace, deletion: bool) -> AssignmentCreationPolicy {
-    if deletion {
-        return AssignmentCreationPolicy::ExistingOnly;
-    }
-    match place {
-        crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => {
-            AssignmentCreationPolicy::CreateBinding
-        }
-        crate::MirPlace::Index(_, _) => AssignmentCreationPolicy::CreateArrayByIndex,
-        crate::MirPlace::Member(_, _) | crate::MirPlace::DynamicMember(_, _) => {
-            AssignmentCreationPolicy::CreateStructFieldPath
         }
     }
 }

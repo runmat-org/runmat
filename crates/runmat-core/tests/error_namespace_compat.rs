@@ -11,6 +11,7 @@ fn extract_identifier_and_message(error: RunError) -> (Option<String>, String) {
     match error {
         RunError::Semantic(err) => (err.identifier, err.message),
         RunError::Compile(err) => (err.identifier, err.message),
+        RunError::SourceCompile(bound) => (bound.error.identifier, bound.error.message),
         RunError::Runtime(err) => (
             err.identifier().map(ToString::to_string),
             err.message().to_string(),

@@ -380,7 +380,8 @@ fn indexed_mutation_invalidates_only_unproved_growth_and_physical_facts() {
     let unknown = IndexSelectorFact::Numeric(ValueFact::unknown(
         runmat_types::DynamicReason::RuntimeValue,
     ));
-    let uncertain = infer_index_mutation(&base, &[unknown.clone()], &assigned, contract).fact;
+    let uncertain =
+        infer_index_mutation(&base, std::slice::from_ref(&unknown), &assigned, contract).fact;
     assert_eq!(uncertain.shape, ShapeFact::Unknown);
     assert_eq!(uncertain.kind, base.kind);
     assert_eq!(uncertain.storage, runmat_types::StorageFact::Dense);

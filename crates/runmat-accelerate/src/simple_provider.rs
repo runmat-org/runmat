@@ -579,7 +579,7 @@ fn scatter_floating_data<T: Copy>(
         .checked_mul(lane_factor)
         .ok_or_else(|| anyhow!("functional scatter: RHS length overflow"))?;
     ensure!(
-        values.len() == expected_values && target.len() % lane_factor == 0,
+        values.len() == expected_values && target.len().is_multiple_of(lane_factor),
         "functional scatter: physical lane geometry mismatch"
     );
     let target_len = target.len() / lane_factor;

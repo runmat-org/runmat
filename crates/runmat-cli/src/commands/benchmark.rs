@@ -110,9 +110,11 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                    format_frontend_error(&err, response.source_context.source_name(), source)
-                }) {
+                if let Some(diag) = format_frontend_error(
+                    &err,
+                    response.source_context.source_name(),
+                    response.source_context.source_text(),
+                ) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));
@@ -162,9 +164,11 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                    format_frontend_error(&err, response.source_context.source_name(), source)
-                }) {
+                if let Some(diag) = format_frontend_error(
+                    &err,
+                    response.source_context.source_name(),
+                    response.source_context.source_text(),
+                ) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));

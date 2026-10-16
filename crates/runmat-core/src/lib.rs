@@ -24,7 +24,7 @@ pub mod testing;
 mod value_metadata;
 mod workspace;
 
-pub use error::{runtime_error_telemetry_failure_info, RunError};
+pub use error::{runtime_error_telemetry_failure_info, RunError, SourceCompileError};
 pub use executable::*;
 pub use execution::*;
 #[cfg(not(target_arch = "wasm32"))]

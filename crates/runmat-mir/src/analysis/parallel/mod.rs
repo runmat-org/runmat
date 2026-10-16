@@ -44,9 +44,14 @@ pub(super) fn analyze_parallel_contracts(
         .collect();
 
     for (function, body) in &assembly.bodies {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
         let Ok(function) = u32::try_from(function.0).map(runmat_types::ProgramFunctionId) else {
             continue;
         };
+        let diagnostic_start = diagnostics.len();
         spmd::classify_distributed_body(body, function, store, &mut manifest);
         classify::classify_body(
             body,
@@ -64,6 +69,11 @@ pub(super) fn analyze_parallel_contracts(
             &mut manifest,
             &mut diagnostics,
         );
+        if let Some(source) = source {
+            for diagnostic in &mut diagnostics[diagnostic_start..] {
+                diagnostic.set_source(source);
+            }
+        }
     }
 
     manifest.parfor_regions.sort_by_key(|contract| contract.id);

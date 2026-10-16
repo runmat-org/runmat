@@ -2,6 +2,7 @@ use runmat_mir::{MirLocalId, MirPlace};
 use runmat_runtime::execution::{RootedValue, RootedValueSequence};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
 use runmat_runtime::RuntimeError;
+use runmat_types::{AssignmentCreationPolicy, IndexKind};
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -16,7 +17,50 @@ enum Phase {
 
 struct AssignmentPolicy {
     delete: bool,
-    allow_init: bool,
+    creation: AssignmentCreationPolicy,
+}
+
+pub(super) fn validate_creation_policy(
+    place: &MirPlace,
+    delete: bool,
+    creation: AssignmentCreationPolicy,
+) -> NativeExecutorResult<()> {
+    let canonical = place.assignment_creation_policy(delete);
+    if creation != canonical && (delete || creation != AssignmentCreationPolicy::ExistingOnly) {
+        return Err(NativeExecutorError::Host(
+            "native assignment creation policy does not match its place".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn root_creation_policy(
+    outer: AssignmentCreationPolicy,
+    segments: &[PlaceSegment],
+) -> AssignmentCreationPolicy {
+    if outer == AssignmentCreationPolicy::ExistingOnly {
+        return AssignmentCreationPolicy::ExistingOnly;
+    }
+    match segments.first() {
+        Some(PlaceSegment::Member(_) | PlaceSegment::DynamicMember(_)) => {
+            AssignmentCreationPolicy::CreateStructFieldPath
+        }
+        Some(PlaceSegment::Index(indexing)) if indexing.kind == IndexKind::Paren => {
+            AssignmentCreationPolicy::CreateArrayByIndex
+        }
+        _ => AssignmentCreationPolicy::ExistingOnly,
+    }
+}
+
+pub(super) fn assignment_root_for_place(
+    state: &mut HostState,
+    place: &MirPlace,
+    creation: AssignmentCreationPolicy,
+) -> NativeExecutorResult<Value> {
+    validate_creation_policy(place, false, creation)?;
+    let mut segments = Vec::new();
+    let root = flatten_place(place, &mut segments)?;
+    state.assignment_root(root.0, root_creation_policy(creation, &segments))
 }
 
 mod sequence;
@@ -39,7 +83,7 @@ pub(in crate::execute) struct PendingAssign {
     step: usize,
     region: usize,
     delete: bool,
-    allow_init: bool,
+    creation: AssignmentCreationPolicy,
 }
 
 pub(in crate::execute) struct PendingPlacePrepare {
@@ -166,17 +210,16 @@ impl PendingAssign {
         rhs: Value,
         policy: AssignmentPolicy,
     ) -> NativeExecutorResult<Self> {
-        let AssignmentPolicy { delete, allow_init } = policy;
+        let AssignmentPolicy { delete, creation } = policy;
+        validate_creation_policy(place, delete, creation)?;
         let mut segments = Vec::new();
         let root = flatten_place(place, &mut segments)?;
-        let create_struct = allow_init
-            && matches!(
-                segments.first(),
-                Some(PlaceSegment::Member(_) | PlaceSegment::DynamicMember(_))
-            );
+        // MIR describes the outer place; the first segment alone selects the
+        // absent root carrier, after that outer policy has been admitted.
+        let root_creation = root_creation_policy(creation, &segments);
         let current = match explicit_root {
             Some(root_value) => root_value,
-            None => state.assignment_root(root.0, create_struct)?,
+            None => state.assignment_root(root.0, root_creation)?,
         };
         let current = state.arena.insert(current);
         let rhs = state.arena.insert(rhs);
@@ -192,16 +235,17 @@ impl PendingAssign {
             step: 0,
             region,
             delete,
-            allow_init,
+            creation,
         })
     }
 
     fn advance(&mut self, state: &mut HostState) -> NativeExecutorResult<bool> {
         let current = state.arena.get(self.current)?.clone();
+        let allow_init = self.creation != AssignmentCreationPolicy::ExistingOnly;
         let (updated, next) = match self.phase {
             Phase::ReadPrefix(index) if index + 1 < self.segments.len() => {
                 let segment = self.segments[index].clone();
-                let child = read_step(state, current, &segment, self.allow_init)?;
+                let child = read_step(state, current, &segment, allow_init)?;
                 let parent = self.current;
                 let child = state.arena.insert(child);
                 self.parents.push((parent, segment));
@@ -212,7 +256,7 @@ impl PendingAssign {
                 let segment = self.segments.last().ok_or_else(|| {
                     NativeExecutorError::Host("nonlocal assignment has no place segment".into())
                 })?;
-                let value = write_step(state, current, segment, rhs, self.delete, self.allow_init)?;
+                let value = write_step(state, current, segment, rhs, self.delete, allow_init)?;
                 (state.arena.insert(value), Phase::Writeback)
             }
             Phase::Writeback => {
@@ -376,13 +420,9 @@ pub(super) fn assign(
     place: &MirPlace,
     rhs: Value,
     delete: bool,
-    allow_init: bool,
+    creation: AssignmentCreationPolicy,
 ) -> NativeExecutorResult<()> {
-    if let MirPlace::Local(local) = place {
-        let reference = state.arena.insert(rhs);
-        return state.set_local(local.0, reference);
-    }
-    let (root, reference) = drive(state, place, None, rhs, delete, allow_init)?;
+    let (root, reference) = drive(state, place, None, rhs, delete, creation)?;
     state.set_local(root.0, reference)
 }
 
@@ -392,9 +432,9 @@ pub(super) fn assign_to_root(
     root_value: Value,
     rhs: Value,
     delete: bool,
-    allow_init: bool,
+    creation: AssignmentCreationPolicy,
 ) -> NativeExecutorResult<(MirLocalId, Value)> {
-    let (root, reference) = drive(state, place, Some(root_value), rhs, delete, allow_init)?;
+    let (root, reference) = drive(state, place, Some(root_value), rhs, delete, creation)?;
     Ok((root, state.arena.get(reference)?.clone()))
 }
 
@@ -404,9 +444,13 @@ fn drive(
     explicit_root: Option<Value>,
     rhs: Value,
     delete: bool,
-    allow_init: bool,
+    creation: AssignmentCreationPolicy,
 ) -> NativeExecutorResult<(MirLocalId, NativeValueRef)> {
+    validate_creation_policy(place, delete, creation)?;
     if let MirPlace::Local(local) = place {
+        if creation == AssignmentCreationPolicy::ExistingOnly && explicit_root.is_none() {
+            state.assignment_root(local.0, creation)?;
+        }
         return Ok((*local, state.arena.insert(rhs)));
     }
     let request = state.current_request.ok_or_else(|| {
@@ -420,7 +464,7 @@ fn drive(
                 && cursor.region == region
                 && cursor.step == next_step
                 && cursor.delete == delete
-                && cursor.allow_init == allow_init =>
+                && cursor.creation == creation =>
         {
             cursor
         }
@@ -436,7 +480,7 @@ fn drive(
             place,
             explicit_root,
             rhs,
-            AssignmentPolicy { delete, allow_init },
+            AssignmentPolicy { delete, creation },
         )?,
     };
     loop {
@@ -458,5 +502,96 @@ fn drive(
             }
             Err(error) => return Err(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod creation_policy_tests {
+    use super::*;
+    use runmat_hir::{IndexResultContext, MemberName};
+    use runmat_mir::{MirIndexComponent, MirIndexPlan, MirIndexing};
+
+    #[test]
+    fn typed_outer_policy_rejects_malformed_creation_and_deletion() {
+        let indexed = MirPlace::Index(
+            Box::new(MirPlace::Local(MirLocalId(0))),
+            MirIndexing {
+                kind: IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: Vec::<MirIndexComponent>::new(),
+                result_context: IndexResultContext::AssignmentTarget,
+                cell_expand_all: false,
+            },
+        );
+        assert!(validate_creation_policy(
+            &indexed,
+            false,
+            AssignmentCreationPolicy::CreateArrayByIndex
+        )
+        .is_ok());
+        assert!(
+            validate_creation_policy(&indexed, false, AssignmentCreationPolicy::ExistingOnly)
+                .is_ok(),
+            "an existing indexed root may use the stricter no-creation contract"
+        );
+        assert!(validate_creation_policy(
+            &indexed,
+            false,
+            AssignmentCreationPolicy::CreateStructFieldPath
+        )
+        .is_err());
+        assert!(validate_creation_policy(
+            &indexed,
+            true,
+            AssignmentCreationPolicy::CreateArrayByIndex
+        )
+        .is_err());
+        assert!(
+            validate_creation_policy(&indexed, true, AssignmentCreationPolicy::ExistingOnly)
+                .is_ok()
+        );
+        let MirPlace::Index(_, indexing) = &indexed else {
+            unreachable!()
+        };
+        assert_eq!(
+            root_creation_policy(
+                AssignmentCreationPolicy::CreateStructFieldPath,
+                &[PlaceSegment::Index(indexing.clone())],
+            ),
+            AssignmentCreationPolicy::CreateArrayByIndex,
+            "a nested member's outer policy does not change an indexed root carrier"
+        );
+        let mut brace = indexing.clone();
+        brace.kind = IndexKind::Brace;
+        assert_eq!(
+            root_creation_policy(
+                AssignmentCreationPolicy::CreateArrayByIndex,
+                &[PlaceSegment::Index(brace)],
+            ),
+            AssignmentCreationPolicy::ExistingOnly,
+            "brace indexing cannot synthesize an ordinary numeric root"
+        );
+        assert_eq!(
+            root_creation_policy(
+                AssignmentCreationPolicy::ExistingOnly,
+                &[PlaceSegment::Index(indexing.clone())],
+            ),
+            AssignmentCreationPolicy::ExistingOnly,
+            "deletion and existing-only writes cannot synthesize a root"
+        );
+
+        let nested = MirPlace::Member(Box::new(indexed), MemberName("field".into()));
+        assert!(validate_creation_policy(
+            &nested,
+            false,
+            AssignmentCreationPolicy::CreateStructFieldPath
+        )
+        .is_ok());
+        assert!(validate_creation_policy(
+            &nested,
+            false,
+            AssignmentCreationPolicy::CreateArrayByIndex
+        )
+        .is_err());
     }
 }

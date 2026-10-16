@@ -2936,6 +2936,7 @@ impl LoweringCtx {
                         ),
                         target: target.clone(),
                         span,
+                        source: Some(self.assembly.modules[self.module.0].source_id),
                     });
                 HirExprKind::FunctionHandle(target)
             }
@@ -3479,6 +3480,7 @@ impl LoweringCtx {
             syntax: syntax.clone(),
             requested_outputs,
             span,
+            source: Some(self.assembly.modules[self.module.0].source_id),
         });
         Ok(HirCall {
             callee,

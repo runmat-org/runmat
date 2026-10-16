@@ -89,7 +89,11 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
             );
             for observation in &result.calls {
                 if let Some(expected) = declared_parameters.get(&observation.callee) {
-                    collect_argument_diagnostics(observation, expected, &mut diagnostics);
+                    let source = assembly
+                        .functions
+                        .get(function)
+                        .map(|metadata| metadata.source);
+                    collect_argument_diagnostics(observation, expected, source, &mut diagnostics);
                 }
                 let Some(target) = parameters.get_mut(&observation.callee) else {
                     continue;
@@ -158,7 +162,11 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
 fn collect_argument_diagnostics(
     observation: &flow::CallObservation,
     expected: &[ValueFact],
-    diagnostics: &mut BTreeMap<(usize, usize, usize), crate::MirDiagnostic>,
+    source: Option<runmat_types::ProgramSourceId>,
+    diagnostics: &mut BTreeMap<
+        (Option<runmat_types::ProgramSourceId>, usize, usize, usize),
+        crate::MirDiagnostic,
+    >,
 ) {
     for (index, (argument, expected)) in observation.arguments.iter().zip(expected).enumerate() {
         let kind_mismatch = match (&argument.kind, &expected.kind) {
@@ -182,9 +190,9 @@ fn collect_argument_diagnostics(
             .copied()
             .unwrap_or(observation.span);
         diagnostics
-            .entry((span.start, span.end, index))
+            .entry((source, span.start, span.end, index))
             .or_insert_with(|| {
-                crate::MirDiagnostic::new(
+                let diagnostic = crate::MirDiagnostic::new(
                     "RM-MIR0012",
                     crate::MirDiagnosticSeverity::Error,
                     "argument is incompatible with the callee's arguments block",
@@ -195,7 +203,11 @@ fn collect_argument_diagnostics(
                     index + 1
                 ))
                 .with_help("pass a value with the declared class and shape")
-                .with_category("argument-validation")
+                .with_category("argument-validation");
+                match source {
+                    Some(source) => diagnostic.with_source(source),
+                    None => diagnostic,
+                }
             });
     }
 }

@@ -69,9 +69,19 @@ pub async fn execute(
         source_text,
     )?;
     let unit = session
-        .compile_executable_unit(source, None)
+        .compile_executable_unit(&source, None)
         .await
-        .map_err(|error| anyhow::anyhow!(error))?;
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "{}",
+                crate::diagnostics::format_frontend_error(
+                    &error,
+                    &source.relative_path,
+                    Some(&source.text),
+                )
+                .unwrap_or_else(|| error.to_string())
+            )
+        })?;
     let report = unit.reachability_report();
     let inferred = unit.inferred_interop_manifest();
     let mut selected = inferred

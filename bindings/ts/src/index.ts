@@ -707,6 +707,9 @@ export interface RunMatErrorDetails {
   identifier?: string;
   diagnostic: string;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack: string[];
   callstackElided?: number;
 }
@@ -716,6 +719,9 @@ export class RunMatExecutionError extends Error {
   readonly identifier?: string;
   readonly diagnostic: string;
   readonly span?: RunMatErrorSpan;
+  readonly sourceId?: number;
+  readonly sourceName?: string;
+  readonly sourcePath?: string;
   readonly callstack: string[];
   readonly callstackElided?: number;
 
@@ -726,6 +732,9 @@ export class RunMatExecutionError extends Error {
     this.identifier = details.identifier;
     this.diagnostic = details.diagnostic;
     this.span = details.span;
+    this.sourceId = details.sourceId;
+    this.sourceName = details.sourceName;
+    this.sourcePath = details.sourcePath;
     this.callstack = details.callstack;
     this.callstackElided = details.callstackElided;
   }
@@ -2531,6 +2540,9 @@ type RunMatErrorPayload = {
   identifier?: string;
   diagnostic: string;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack?: string[];
   callstackElided?: number;
 };
@@ -2555,6 +2567,9 @@ function coerceRunMatError(value: unknown): RunMatExecutionError {
       identifier: value.identifier,
       diagnostic: value.diagnostic,
       span: value.span,
+      sourceId: value.sourceId,
+      sourceName: value.sourceName,
+      sourcePath: value.sourcePath,
       callstack: value.callstack ?? [],
       callstackElided: value.callstackElided
     });
